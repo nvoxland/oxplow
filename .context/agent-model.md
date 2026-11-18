@@ -1038,24 +1038,31 @@ by `the_context_basket_reaches_the_next_prompt_once` and
 `an_attached_basket_rides_one_prompt_and_empties`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
-from `setSelectedThread`): every add goes through one note prompt
-(`components/Context/ContextNotePrompt.tsx`, mounted once in `App`):
+and its stream from `setSelectedThread`): every add goes through one
+prompt (`components/Context/ContextNotePrompt.tsx`, mounted once in `App`):
 `addToContext` opens it where the person last pressed, with an optional
-multiline note; Ctrl/Cmd+Enter or Add adds (with no note too), Escape or
-Cancel adds nothing. There are no separate "with note" items: the existing
-ones always offer it. **Add to Context** is on every page's ☰
-(`menu-item-page-add-to-context`, beside Ask; `oxplow.context.add` with the
-page's canonical ref and title; disabled with a reason when no thread is
-selected) and on selections: an editor's and a diff's right-side selection
+multiline note and **To**, the basket: This Thread (disabled with no thread
+selected), each named basket, or **New basket…**, which swaps in a name
+field (Enter adds; Escape goes back to the picker). To starts at the basket
+last added to (the app preference `context.lastBasket`), else This Thread, else
+the first named basket, else New basket…. Ctrl/Cmd+Enter or Add adds (with
+no note too) and names the window's stream; Escape or Cancel adds nothing.
+**Add to Context** is on every page's ☰ (`menu-item-page-add-to-context`,
+beside Ask; the page's canonical ref and title; offered with no thread
+too) and on selections: an editor's and a diff's right-side selection
 (**Add Selection to Context**, text plus the `#lines=` URI), a page row's
 menu (**Add to Context**: the row's first linked page, else the row as
-text) and the floating toolbar over a selection on any page.
-Each toasts with Undo. The **Context** dock panel (`@`, badge = waiting
-items) lists what waits with × per item (`oxplow.context.remove`), each
-item's note under it, edited in place (`oxplow.context.note`), Clear
-(`oxplow.context.clear`) and a link to the **Context** page (foundation page
-`context`: Waiting and Delivered (last 20) over `v_thread_context` with
-their notes, row actions Edit Note… and Remove, Clear in the nav bar).
+text), the terminal's menu and a page's menu over its selected text. Each
+toasts with Undo. The **Context** dock panel (`@`, badge = what this
+thread's next prompt carries, `nextPrompt`) shows **This Thread** (its
+items, × per item, each note edited in place, Clear) and under it each
+basket attached here (marked Attached, Detach); then **Baskets**, every
+other named basket collapsed to its name and count with **Attach**
+(disabled with a reason with no thread or nothing in it). A basket's
+header right-click: Attach to This Thread / Detach, Rename… (in place),
+Clear, Delete; an item's: **Move to ▸** (This Thread, each other basket),
+Remove. The **Context** page (foundation page `context`) lists Next
+prompt, Baskets and In other baskets, with the same actions.
 
 **Building takes nothing; delivery commits.** `build_context` returns a
 `PendingContext` and changes no state: no baseline moves, no handoff or
@@ -1648,9 +1655,9 @@ person's prompt is read. An `@path` is linked only when the file exists in
 the thread's worktree (`@types/node` is no file). What the prompt's
 **context** carried is linked too: the context basket's pages and sources
 and the handoffs delivered with it (`AgentContext::commit`,
-`thread_context_store::link_delivered_tx`) name the turn that was open when
-the prompt was delivered (`thread_context_item.delivered_turn_id`,
-`handoff.delivered_turn_id`) and are `prompt_mention` links from it.
+`context_store::take_delivered_tx`) are `prompt_mention` links from the
+turn that was open when the prompt was delivered (and a handoff records it,
+`handoff.delivered_turn_id`; a delivered context item is deleted).
 
 **`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,

@@ -72,25 +72,26 @@ conversation is gone when oxplow restarts.
 
 ## Collect context for the agents
 
-Add to Context puts things in a thread's context basket:
+Add to Context puts things in a context basket: the thread's own (**This
+Thread**) or a named basket you keep for a topic.
 
 - A page's ☰ menu → **Add to Context** adds the page. A right-click
   anywhere on a page with nothing selected opens the same menu.
-- A selection in an editor, a diff or a terminal, a page row's right-click
-  menu, and the **Add to Context** button over selected text on any
-  page add that text (or row). Each add opens a prompt for an optional note
-  that goes with the item. In the editor with nothing
-  selected, **Add File to Context** adds the file.
+- A selection in an editor, a diff, a terminal or on any page, and a page
+  row's right-click menu, add that text (or row). Each add opens a prompt
+  for an optional note that goes with the item, and the basket it goes in.
+  In the editor with nothing selected, **Add File to Context** adds the
+  file.
 
 Every entry carries the @ icon, the same as the **Context** icon in the
-bottom bar, which shows how many items wait. Open it to see them, take
-one out with its ×, or **Clear** them all. The arrow in the panel's
-header opens the Context page, the full list with what was already
-delivered.
+bottom bar, which shows how many items the thread's next prompt carries.
+Open it to see the baskets, take an item out with its ×, attach a named
+basket to the thread, or **Clear** This Thread. The arrow in the panel's
+header opens the Context page.
 
-The next prompt to any agent in the thread carries the basket. Then it is
-empty. An item you removed is not sent. Add to Context needs a selected
-thread. See [Collecting context](context.md).
+The next prompt to any agent in the thread carries This Thread's items and
+every basket attached to it. Then they are empty. An item you removed is
+not sent. See [Collecting context](context.md).
 
 ## Input
 

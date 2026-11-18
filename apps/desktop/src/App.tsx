@@ -699,8 +699,8 @@ export function App() {
     setOpErrorContext({ thread: selectedThreadId, stream: stream?.id ?? null });
   }, [selectedThreadId, stream?.id]);
   useEffect(() => {
-    setSelectedThread(selectedThreadId);
-  }, [selectedThreadId]);
+    setSelectedThread(selectedThreadId, stream?.id ?? null);
+  }, [selectedThreadId, stream?.id]);
   useEffect(() => {
     setAssistantScope({ stream: stream?.id ?? null, thread: selectedThreadId });
   }, [stream?.id, selectedThreadId]);

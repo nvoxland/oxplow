@@ -153,12 +153,13 @@ selectors; screenshot when looks matter, and read the image.
 Drive these like a user would, not just the agent terminal:
 
 - **The context basket is the human's voice.** Add a page (its ☰ →
-  **Add to Context**) or select text and press the floating **Add to
-  Context** button. Each add opens a note prompt: write what the agent
-  should do about it. Edit the note in the **Context** panel (the @ icon),
-  then prompt the agent: its next prompt carries the item with the note
+  **Add to Context**) or right-click selected text → **Add Selection to
+  Context**. Each add opens a prompt: write what the agent should do about
+  it, and pick the basket (This Thread, a named one, or New basket…). Edit
+  the note in the **Context** panel (the @ icon), attach a named basket,
+  then prompt the agent: its next prompt carries the items with their notes
   (the `<context-basket>` block), the agent answers by item number, and the
-  basket empties. Check the Context page lists it as Delivered.
+  baskets empty.
 - **Query/investigation threads + wiki.** Point a second thread at a
   question ("trace subsystem X end to end") and have it write a wiki
   page; verify it saved (`.oxplow/wiki/<slug>.md`) and that **⌘K BM25

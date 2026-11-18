@@ -1,28 +1,36 @@
 /**
- * The context basket in the app: what the person collected for the
- * selected thread's agents (a page from its ☰, text from a selection),
- * read from `v_thread_context` and written through the
- * `oxplow.context.*` commands. The next prompt to an agent in the thread
- * carries what waits there. `.context/agent-model.md` → "The context basket".
+ * The context baskets in the app: what the person collected for agents (a
+ * page from its ☰, text from a selection), in the selected thread's own
+ * basket ("This Thread") or in a named basket of the project, read from
+ * `v_context_item` and `v_context_basket` and written through the
+ * `oxplow.context.*` commands. The next prompt to an agent in a thread
+ * carries its own basket and every basket attached to it.
+ * `.context/agent-model.md` → "The context basket".
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import { querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
-import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
+import { NO_READS, unionReads, useRerunOnChange } from "./viz/rerun.js";
 import { threadRowId } from "./modelIds.js";
 import { personCommands } from "./personCommands.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
-// ---- the thread the window shows --------------------------------------
+/** What the thread's own basket is called. */
+export const THREAD_BASKET = "This Thread";
+
+// ---- the thread and stream the window shows ----------------------------
 
 let selected: string | null = null;
+let selectedStream: string | null = null;
 const listeners = new Set<() => void>();
 
-/** The thread on screen (`App` sets it as the selection changes). */
-export function setSelectedThread(threadId: string | null): void {
-  if (selected === threadId) return;
+/** The thread on screen and its stream (`App` sets them as the selection
+ *  changes). */
+export function setSelectedThread(threadId: string | null, streamId: string | null = null): void {
+  if (selected === threadId && selectedStream === streamId) return;
   selected = threadId;
+  selectedStream = streamId;
   for (const l of [...listeners]) l();
 }
 
@@ -53,18 +61,46 @@ export interface BasketItem {
   text: string | null;
   /** The person's note on it: what they want done about it. */
   note: string | null;
-  delivered: boolean;
+  /** The named basket it is in; null: a thread's own. */
+  basket: string | null;
 }
 
-export const BASKET_SQL = `
-  SELECT id, kind, source_uri, label, text, note, delivered_at
-  FROM v_thread_context
-  WHERE thread_id = ?1
-  ORDER BY id`;
+/** A named basket and what is in it. */
+export interface NamedBasket {
+  id: number;
+  name: string;
+  /** The thread whose next prompt carries it (`thr<n>`), or null. */
+  attachedTo: string | null;
+  items: BasketItem[];
+}
 
-export function basketFromResult(result: SqlQueryResult): BasketItem[] {
+/** The selected thread's own basket and every named basket. */
+export interface Baskets {
+  own: BasketItem[];
+  named: NamedBasket[];
+}
+
+export const NO_BASKETS: Baskets = { own: [], named: [] };
+
+export const ITEMS_SQL = `
+  SELECT id, kind, source_uri, label, text, note, basket
+  FROM v_context_item
+  WHERE thread_id = ?1 OR basket_id IS NOT NULL
+  ORDER BY added_at, id`;
+
+export const BASKETS_SQL = `
+  SELECT id, name, attached_thread_id
+  FROM v_context_basket
+  ORDER BY name COLLATE NOCASE`;
+
+function cells(result: SqlQueryResult) {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
   const str = (v: SqlCell) => (v == null ? null : String(v));
+  return { at, str };
+}
+
+export function itemsFromResult(result: SqlQueryResult): BasketItem[] {
+  const { at, str } = cells(result);
   return result.rows.map((row) => ({
     id: Number(at(row, "id")),
     kind: at(row, "kind") === "text" ? "text" : "page",
@@ -72,32 +108,48 @@ export function basketFromResult(result: SqlQueryResult): BasketItem[] {
     label: str(at(row, "label")),
     text: str(at(row, "text")),
     note: str(at(row, "note")),
-    delivered: at(row, "delivered_at") != null,
+    basket: str(at(row, "basket")),
   }));
 }
 
-/** What still waits for the thread's next prompt. */
-export function waiting(items: readonly BasketItem[]): BasketItem[] {
-  return items.filter((i) => !i.delivered);
+/** The baskets, from what `ITEMS_SQL` and `BASKETS_SQL` read. */
+export function basketsFrom(items: readonly BasketItem[], baskets: SqlQueryResult): Baskets {
+  const { at, str } = cells(baskets);
+  return {
+    own: items.filter((i) => i.basket == null),
+    named: baskets.rows.map((row) => {
+      const name = String(at(row, "name"));
+      const attached = at(row, "attached_thread_id");
+      return {
+        id: Number(at(row, "id")),
+        name,
+        attachedTo: attached == null ? null : `thr${str(attached)}`,
+        items: items.filter((i) => i.basket === name),
+      };
+    }),
+  };
 }
 
-/** The thread's basket (delivered items too), re-read as it changes. */
-export function useBasket(threadId: string | null): BasketItem[] {
-  const [items, setItems] = useState<BasketItem[]>([]);
+/** What `thread`'s next prompt will carry: its own items and those of every
+ *  basket attached to it. */
+export function nextPrompt(baskets: Baskets, thread: string | null): BasketItem[] {
+  return [...baskets.own, ...baskets.named.filter((b) => thread != null && b.attachedTo === thread).flatMap((b) => b.items)];
+}
+
+/** The thread's own basket and every named basket, re-read as they change. */
+export function useBaskets(threadId: string | null): Baskets {
+  const [baskets, setBaskets] = useState<Baskets>(NO_BASKETS);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const load = useCallback(() => {
-    if (!threadId) {
-      setItems([]);
-      return undefined;
-    }
     let cancelled = false;
-    void querySql(BASKET_SQL, [threadRowId(threadId)], 1_000).then(
-      (res) => {
+    const thread = threadId ? threadRowId(threadId) : 0;
+    void Promise.all([querySql(ITEMS_SQL, [thread], 2_000), querySql(BASKETS_SQL, [], 500)]).then(
+      ([items, named]) => {
         if (cancelled) return;
-        setItems(basketFromResult(res));
-        setReads(res.reads);
+        setBaskets(basketsFrom(itemsFromResult(items), named));
+        setReads(unionReads([items.reads, named.reads]));
       },
-      (e: unknown) => recordOpError({ label: "Read the context basket", message: e instanceof Error ? e.message : String(e) }),
+      (e: unknown) => recordOpError({ label: "Read the context baskets", message: e instanceof Error ? e.message : String(e) }),
     );
     return () => {
       cancelled = true;
@@ -105,17 +157,38 @@ export function useBasket(threadId: string | null): BasketItem[] {
   }, [threadId]);
   useEffect(() => load(), [load]);
   useRerunOnChange(reads, () => void load());
-  return items;
+  return baskets;
+}
+
+// ---- where an add goes ------------------------------------------------------
+
+/** Where an add goes: the thread's own basket, or a named basket. */
+export type Destination = { thread: string } | { basket: string };
+
+/** The app preference that keeps the basket last added to: its name, or
+ *  `THREAD_MARK` for This Thread. */
+export const LAST_BASKET_PREF = "context.lastBasket";
+export const THREAD_MARK = "@thread";
+
+/** How `to` is remembered as the last basket. */
+export function rememberedAs(to: Destination): string {
+  return "basket" in to ? to.basket : THREAD_MARK;
+}
+
+/** The picker's first choice: the last basket added to while it is still
+ *  there (This Thread only with a thread), else This Thread, else the first
+ *  named basket; null: none, so a new one. */
+export function defaultDestination(thread: string | null, names: readonly string[], last: string | null): Destination | null {
+  if (last === THREAD_MARK && thread) return { thread };
+  const kept = last == null ? undefined : names.find((n) => n.toLowerCase() === last.toLowerCase());
+  if (kept) return { basket: kept };
+  if (thread) return { thread };
+  return names[0] ? { basket: names[0] } : null;
 }
 
 // ---- writes ---------------------------------------------------------------
 
-/** Why Add to Context isn't offered now, or null when it is. */
-export function addDisabledReason(threadId: string | null): string | null {
-  return threadId ? null : "Select a thread first";
-}
-
-/** What goes in the basket: a page (`uri`), or a piece of text from one. */
+/** What goes in a basket: a page (`uri`), or a piece of text from one. */
 export interface ContextWhat {
   uri?: string | null;
   label?: string | null;
@@ -125,11 +198,12 @@ export interface ContextWhat {
 }
 
 /** What `oxplow.context.add` takes for a page, or for text (from a page),
- *  with the person's note when they wrote one. */
-export function addInput(threadId: string, what: ContextWhat, note?: string | null) {
+ *  to `to`, collected in `stream`, with the person's note when they wrote one. */
+export function addInput(to: Destination, stream: string | null, what: ContextWhat, note?: string | null) {
   const trimmed = note?.trim();
   return {
-    thread: threadId,
+    ...to,
+    ...(stream ? { stream } : {}),
     ...(what.uri ? { uri: what.uri } : {}),
     ...(what.label ? { label: what.label } : {}),
     ...(what.text ? { text: what.text } : {}),
@@ -138,15 +212,18 @@ export function addInput(threadId: string, what: ContextWhat, note?: string | nu
   };
 }
 
-// ---- the note prompt --------------------------------------------------------
+// ---- the add prompt ---------------------------------------------------------
 //
-// Every Add to Context offers a note before it adds: `addToContext` opens the
-// one app-level `ContextNotePrompt` with what is being added, and that prompt
-// adds it (`submitToContext`) or drops it.
+// Every Add to Context offers a note and a basket before it adds:
+// `addToContext` opens the one app-level `ContextNotePrompt` with what is
+// being added, and that prompt adds it (`submitToContext`) or drops it.
 
-/** An add waiting on the person's note. */
+/** An add waiting on the person's note and basket. */
 export interface PendingAdd {
-  thread: string;
+  /** The thread on screen when it was asked for, if any. */
+  thread: string | null;
+  /** The stream it is collected in. */
+  stream: string | null;
   what: ContextWhat;
 }
 
@@ -158,7 +235,7 @@ function setPending(next: PendingAdd | null): void {
   for (const l of pendingListeners) l();
 }
 
-/** The add the note prompt is open for, or null. */
+/** The add the prompt is open for, or null. */
 export function usePendingAdd(): PendingAdd | null {
   return useSyncExternalStore(
     (cb) => {
@@ -171,26 +248,23 @@ export function usePendingAdd(): PendingAdd | null {
   );
 }
 
-/** Offer a note, then put a page (`uri`) or a piece of text in the selected
- *  thread's basket. Does nothing without a thread. */
+/** Offer a note and a basket, then put a page (`uri`) or a piece of text in it. */
 export async function addToContext(what: ContextWhat): Promise<void> {
-  const thread = selected;
-  if (!thread) return;
-  setPending({ thread, what });
+  setPending({ thread: selected, stream: selectedStream, what });
 }
 
-/** Add the pending item with `note` (none when blank); the toast offers Undo. */
-export async function submitToContext(add: PendingAdd, note: string): Promise<void> {
+/** Add the pending item to `to` with `note` (none when blank); the toast offers Undo. */
+export async function submitToContext(add: PendingAdd, to: Destination, note: string): Promise<void> {
   setPending(null);
-  await personCommands.run("Add to Context", "oxplow.context.add", addInput(add.thread, add.what, note));
+  await personCommands.run("Add to Context", "oxplow.context.add", addInput(to, add.stream, add.what, note));
 }
 
-/** Close the note prompt without adding. */
+/** Close the prompt without adding. */
 export function cancelAddToContext(): void {
   setPending(null);
 }
 
-/** Set (or, blank, clear) the note of an item still waiting. */
+/** Set (or, blank, clear) an item's note. */
 export async function setContextNote(item: number, note: string): Promise<void> {
   const trimmed = note.trim();
   await personCommands.run("Change Context Note", "oxplow.context.note", trimmed ? { item, note: trimmed } : { item });
@@ -200,6 +274,26 @@ export async function removeFromContext(item: number): Promise<void> {
   await personCommands.run("Remove from Context", "oxplow.context.remove", { item });
 }
 
-export async function clearContext(threadId: string): Promise<void> {
-  await personCommands.run("Clear Context", "oxplow.context.clear", { thread: threadId });
+export async function moveContextItem(item: number, to: Destination): Promise<void> {
+  await personCommands.run("Move to Basket", "oxplow.context.move", { item, ...to });
+}
+
+export async function clearContext(which: Destination): Promise<void> {
+  await personCommands.run("Clear Context", "oxplow.context.clear", which);
+}
+
+export async function attachBasket(basket: string, thread: string): Promise<void> {
+  await personCommands.run("Attach Basket", "oxplow.context.attach", { basket, thread });
+}
+
+export async function detachBasket(basket: string): Promise<void> {
+  await personCommands.run("Detach Basket", "oxplow.context.detach", { basket });
+}
+
+export async function renameBasket(basket: string, name: string): Promise<void> {
+  await personCommands.run("Rename Basket", "oxplow.context.rename_basket", { basket, name });
+}
+
+export async function deleteBasket(basket: string): Promise<void> {
+  await personCommands.run("Delete Basket", "oxplow.context.delete_basket", { basket });
 }

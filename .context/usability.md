@@ -1277,7 +1277,7 @@ caller may bypass the bus to write to the terminal.
   a permission card waiting (Allow / Decline), an error.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
-  disabled with "Select a thread first" when none is selected), a
+  offered with no thread selected too), a
   right-click on the page's body that no row, editor or selection takes
   (it opens the same ☰ at the pointer, `Page.tsx` → `PageMenu.openAtRef`),
   the editor's menu (**Add Selection to Context** with a selection, else
@@ -1288,9 +1288,11 @@ caller may bypass the bus to write to the terminal.
   and a page's menu over its selected text (**Add Selection to
   Context**, with Copy). Every entry wears the basket's `at-sign`
   icon (`MenuItem.icon`), the dock's Context icon, so it reads the same
-  everywhere. It puts the page or text in the selected thread's
-  basket (`oxplow.context.add`, toast with Undo); the next prompt to any
-  agent in the thread carries it. The Context dock panel and page list it.
+  everywhere. Its prompt takes a note and **To**, the basket: This
+  Thread (the selected thread's own) or a named basket, New basket… for
+  one more (`oxplow.context.add`, toast with Undo). The next prompt to any
+  agent in a thread carries its own basket and every basket attached to
+  it. The Context dock panel and page list them.
 - **Repair with the Agent** (on Extension problems, on a disabled
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow uri <item>]

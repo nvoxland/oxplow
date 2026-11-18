@@ -7,7 +7,7 @@ import { useRef, useState } from "react";
 import { Menu } from "lucide-react";
 
 import { askAssistant } from "../components/Assistant/assistantSession.js";
-import { addDisabledReason, addToContext, useSelectedThreadId } from "../contextBasket.js";
+import { addToContext } from "../contextBasket.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { PagePinMenu, type PagePin } from "../pages/PagePinMenu.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
@@ -49,12 +49,11 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
   const button = useRef<HTMLButtonElement | null>(null);
   const boxRef = usePopoverDismiss<HTMLDivElement>(panel !== null, () => setPanel(null));
 
-  const thread = useSelectedThreadId();
   const items = pageMenuItems({
     actions,
     ask: ask ? { askAssistant: () => void askAssistant({ kind: "page", uri: ask.ref, label: label ?? null }) } : undefined,
     context: ask
-      ? { add: () => void addToContext({ uri: ask.ref, label }), disabledReason: addDisabledReason(thread) }
+      ? { add: () => void addToContext({ uri: ask.ref, label }) }
       : undefined,
     commands: ask ? offers : undefined,
     openWith,

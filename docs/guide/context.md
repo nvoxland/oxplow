@@ -1,7 +1,8 @@
 # Collecting context for an agent
 
-The context basket holds what you collect for a thread's agents. Pages, selected
-text and rows go in. Everything that waits goes with the thread's next prompt.
+A context basket holds what you collect for an agent: pages, selected text and
+rows. Each thread has its own basket, **This Thread**. You can also keep named
+baskets, one per topic, and send one to a thread when you are ready.
 
 ## Adding things
 
@@ -13,29 +14,55 @@ text and rows go in. Everything that waits goes with the thread's next prompt.
   while you drag to select.
 - **A row.** Right-click it and choose **Add to Context**.
 
-Add to Context needs a selected thread.
+## The note and the basket
 
-## The note
+Every add opens a small prompt:
 
-Every add opens a small prompt with an optional note. Write what you want done
-about the item, or leave it empty. Press Ctrl/Cmd+Enter or **Add** to add it.
-Escape or **Cancel** adds nothing.
+- **Note** (optional). Write what you want done about the item. The agent gets
+  the note with the item and acts on it. Because it goes with the item, it
+  stays right even when the code moves.
+- **To.** The basket it goes in: **This Thread**, one of your named baskets, or
+  **New basket…**, which asks for a name. To starts at the basket you used
+  last, so you can add several things to one basket in a row.
 
-The agent gets the note with the item and acts on it. Because it goes with the
-item, it stays right even when the code moves.
+Press Ctrl/Cmd+Enter or **Add** to add it. Escape or **Cancel** adds nothing.
 
-## Changing a note
+This Thread needs a selected thread. A named basket does not: you can collect
+first and pick a thread later.
 
-Open the **Context** panel (the @ icon in the bottom bar) and edit the note
-under the item. Or open the **Context** page from the panel's header and choose
-**Edit Note…** on a row. You can change a note only while the item waits.
+## Named baskets
 
-Take an item out with its ×. **Clear** removes them all.
+Named baskets belong to the project, not to one stream or thread. Collect into
+one while you read in one stream, then send it to a thread in another.
+
+To send a named basket, **attach** it to a thread. Open the **Context** panel
+(the @ icon in the bottom bar) and choose **Attach** on the basket. The
+thread's next prompt carries This Thread's items and the attached basket's.
+After that the basket is empty and no longer attached. The basket itself stays
+until you delete it.
+
+Each item remembers the stream you collected it in. When it goes to a thread in
+another stream, the agent is told where it came from, so it reads the file from
+the right worktree.
+
+## Managing baskets
+
+In the **Context** panel:
+
+- Take an item out with its ×. Edit its note under it.
+- Right-click an item for **Move to**, to put it in another basket.
+- Right-click a basket for **Attach to This Thread** or **Detach**,
+  **Rename…**, **Clear** and **Delete**.
+- **Clear** under This Thread takes out all of its items.
+
+The **Context** page (open it from the panel's header) shows the same baskets
+as tables.
 
 ## What the agent gets
 
-The next prompt to any agent in the thread carries the basket, with each note.
-Then the basket is empty. The Context page keeps a record of what was
-delivered.
+The next prompt to any agent in the thread carries This Thread's items and
+every basket attached to the thread, each with its note. Items from a named
+basket are listed under its name. Then those items are gone: the agent's
+transcript is the record of what it got.
 
 See [Agents](agents.md) for the rest of what oxplow tells an agent.

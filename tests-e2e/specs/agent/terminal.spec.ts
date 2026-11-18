@@ -158,7 +158,7 @@ test("a terminal selection goes in the basket with the lines around it", async (
   await page.getByTestId("context-note-add").click();
   await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
   const item = async () =>
-    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text, around FROM v_thread_context" })).rows;
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text, around FROM v_context_item" })).rows;
   await until("the item", 15_000, async () => (await item()).length === 1);
   const [text, around] = (await item())[0] as [string, string];
   expect(text).toBe("select-42-here");
@@ -197,7 +197,7 @@ test("a right-click adds the whole dragged selection, not the word under it", as
   await page.getByTestId("menu-item-add-to-context").click();
   await page.getByTestId("context-note-add").click();
   const item = async () =>
-    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text FROM v_thread_context" })).rows;
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text FROM v_context_item" })).rows;
   await until("the item", 15_000, async () => (await item()).length === 1);
   expect(((await item())[0] as [string])[0]).toBe("drag-42-across-these-words");
 });
@@ -245,7 +245,7 @@ test("with the mouse a program's, Option+drag selects and the menu adds it", asy
   await add.click();
   await page.getByTestId("context-note-add").click();
   const item = async () =>
-    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text FROM v_thread_context" })).rows;
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text FROM v_context_item" })).rows;
   await until("the item", 15_000, async () => (await item()).length === 1);
   expect(((await item())[0] as [string])[0]).toBe("held-42-by-a-program");
 });
