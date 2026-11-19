@@ -10,8 +10,8 @@ mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
     ({
-      columns: sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
-      rows: sql.includes("v_context_basket") ? basketRows : [],
+      columns: sql.includes("v_context_sent") ? ["basket", "items"] : sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
+      rows: sql.includes("v_context_sent") ? [] : sql.includes("v_context_basket") ? basketRows : [],
       truncated: false,
       reads: { datasets: [], tables: [], measures: [] },
       freshness: {},

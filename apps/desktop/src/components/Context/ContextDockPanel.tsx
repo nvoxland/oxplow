@@ -6,20 +6,20 @@
 /// on the left: the **Send Next** switch (the same paper plane, icon only, its
 /// tooltip saying what happens; on for the basket that goes), then This
 /// Thread's Clear, or a named basket's Rename (in place), Clear and Delete —
-/// also on the tab's right-click. A send carries one basket and then sets the
+/// also on the tab's right-click; at the bar's right, what the thread's last
+/// send carried and **Put Back**. A send carries one basket and then sets the
 /// thread back to This Thread. Its items are one row each: the name, a note
-/// mark (filled when it has one), its text on one line (cut to fit) and a ×
-/// at the far right. A row's click (or its note mark) opens the item alone:
-/// its name (opening its source), its whole text, its note edited in place,
-/// Move to ▸ and Remove; Back (or Escape) returns to the list. A row's
-/// right-click has Move to ▸ and Remove. While an add waits, its card
+/// mark (white when it has one, grey when not), its text on one line (cut to fit) and a ×
+/// at the far right. A row's click expands it in place (animated): its whole
+/// text, its note edited in place, and Open / Move to…; another
+/// click (or Escape) folds it. A row's right-click has Move to ▸ and Remove. While an add waits, its card
 /// (`ContextAddCard`) is all the panel shows, and the add opens the tab it
 /// went to. The open tab is remembered (an app preference). The icon's badge
 /// is how many items the thread's next prompt carries. The Context page is
 /// the panel header's arrow.
 
-import { ArrowLeft, FileText, Quote, Send, StickyNote, X } from "lucide-react";
-import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { ChevronRight, FileText, Quote, Send, StickyNote, X } from "lucide-react";
+import { useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
 import { InlineEdit } from "../InlineEdit.js";
 import {
@@ -29,6 +29,7 @@ import {
   deleteBasket,
   moveContextItem,
   nextPrompt,
+  putBack,
   removeFromContext,
   renameBasket,
   sendNext,
@@ -48,7 +49,6 @@ import { useContextMenu } from "../useRowContextMenu.js";
 import { ContextAddCard } from "./ContextAddCard.js";
 import { plainTitle, useContextTitle } from "./contextTitle.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
-import { dockButtonStyle } from "../Dock/dockStyle.js";
 
 /** The app preference that keeps the open tab: a basket's name, or `THREAD_MARK`. */
 export const OPEN_TAB_PREF = "context.openTab";
@@ -88,13 +88,13 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
   const menu = useContextMenu();
   const [wanted, setWanted] = useAppPreference<string | null>(OPEN_TAB_PREF, null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [focused, setFocused] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
   const names = baskets.named.map((b) => b.name);
   const tab = openTab(wanted, thread, names);
   const named = baskets.named.find((b) => b.name === tab) ?? null;
   const sending = sendingNext(baskets, thread);
   const pick = (id: string) => {
-    setFocused(null);
+    setExpanded(null);
     setWanted(id);
   };
   const rename = (name: string) => {
@@ -127,7 +127,6 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
   }
 
   const items = tab === THREAD_MARK ? baskets.own : (named?.items ?? []);
-  const item = focused == null ? null : (items.find((i) => i.id === focused) ?? null);
   return (
     <div data-testid="context-panel" style={bodyStyle}>
       <div role="tablist" aria-label="Baskets" style={tabStrip}>
@@ -144,29 +143,7 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
       </div>
 
       <div data-testid="context-tab-bar" style={barStyle}>
-        {item ? (
-          <>
-            <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-item-back" onClick={() => setFocused(null)}>
-              <ArrowLeft size={12} aria-hidden style={{ marginRight: 4, verticalAlign: -2 }} />
-              {tab === THREAD_MARK ? THREAD_BASKET : tab}
-            </button>
-            <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-item-move" onClick={(e) => menu.open(e, moveTargets(baskets, thread, item))}>
-              Move to…
-            </button>
-            <button
-              type="button"
-              className="ox-button"
-              style={dockButtonStyle}
-              data-testid="context-item-remove"
-              onClick={() => {
-                setFocused(null);
-                void removeFromContext(item.id);
-              }}
-            >
-              Remove
-            </button>
-          </>
-        ) : tab === THREAD_MARK ? (
+        {tab === THREAD_MARK ? (
           <>
             <SendToggle
               on={sending === THREAD_MARK}
@@ -178,9 +155,9 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
               }
               onPress={() => (thread && sending !== THREAD_MARK ? void sendNext(thread, null) : undefined)}
             />
-            <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-panel-clear" disabled={baskets.own.length === 0 || !thread} title="Take everything out of This Thread" onClick={() => thread && void clearContext({ thread })}>
+            <BarButton data-testid="context-panel-clear" disabled={baskets.own.length === 0 || !thread} title="Take everything out of This Thread" onClick={() => thread && void clearContext({ thread })}>
               Clear
-            </button>
+            </BarButton>
           </>
         ) : named && renaming === named.name ? (
           <span style={{ flex: 1, minWidth: 0, maxWidth: 320 }}>
@@ -203,19 +180,33 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
         ) : named ? (
           <BasketBar basket={named} thread={thread} onRename={() => rename(named.name)} />
         ) : null}
+        {baskets.lastSend && thread ? (
+          <span data-testid="context-last-send" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, color: "var(--text-muted)" }}>
+            Sent {baskets.lastSend.items} {baskets.lastSend.items === 1 ? "item" : "items"} from {baskets.lastSend.basket ?? THREAD_BASKET}
+            <BarButton data-testid="context-put-back" title="Put them back in their basket, as they were before the send" onClick={() => void putBack(thread)}>
+              Put Back
+            </BarButton>
+          </span>
+        ) : null}
       </div>
 
       <div style={{ padding: "0 12px 8px" }}>
-        {item ? (
-          <ItemView item={item} onOpenPage={onOpenPage} onBack={() => setFocused(null)} />
-        ) : items.length === 0 ? (
+        {items.length === 0 ? (
           <div data-testid="context-tab-empty" style={{ color: "var(--text-muted)", padding: "8px 0" }}>
             {tab === THREAD_MARK ? "Nothing yet. Add a page from its ☰, or right-click a selection." : "Nothing in this basket yet. Pick it in To when you add to context."}
           </div>
         ) : (
           <div data-testid="context-tab-items" role="list">
             {items.map((i) => (
-              <ItemRow key={i.id} item={i} onOpen={() => setFocused(i.id)} onContextMenu={(e) => menu.open(e, itemActions(i))} />
+              <ItemRow
+                key={i.id}
+                item={i}
+                expanded={expanded === i.id}
+                onToggle={() => setExpanded((now) => (now === i.id ? null : i.id))}
+                onOpenPage={onOpenPage}
+                onMove={(e) => menu.open(e, moveTargets(baskets, thread, i))}
+                onContextMenu={(e) => menu.open(e, itemActions(i))}
+              />
             ))}
           </div>
         )}
@@ -272,11 +263,11 @@ function Tab({
         cursor: "pointer",
       }}
     >
-      {sending ? <Send size={12} aria-label="Sends next" data-testid="context-tab-sending" /> : null}
       {children}
       <span data-testid="context-tab-count" style={{ color: "var(--text-muted)", fontWeight: 400 }}>
         {count}
       </span>
+      {sending ? <Send size={10} aria-label="Sends next" data-testid="context-tab-sending" style={{ color: "var(--text-muted)" }} /> : null}
     </button>
   );
 }
@@ -295,9 +286,38 @@ function basketActions(basket: NamedBasket, thread: string | null, rename: () =>
   ];
 }
 
+/** The look of the bar's buttons: the page nav bar's quiet ones — no face
+ *  or border at rest, the secondary text; a soft tint and the primary text
+ *  under the pointer. */
+function barButtonStyle(hover: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "3px 8px",
+    border: "none",
+    borderRadius: 4,
+    background: hover ? "rgba(255, 255, 255, 0.07)" : "transparent",
+    color: hover ? "var(--text-primary)" : "var(--text-secondary)",
+    font: "inherit",
+    fontSize: "var(--text-xs)",
+    cursor: "pointer",
+  };
+}
+
+function BarButton({ children, disabled, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { "data-testid"?: string }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button type="button" {...rest} disabled={disabled} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={barButtonStyle(hover && !disabled)}>
+      {children}
+    </button>
+  );
+}
+
 /** The Send Next switch: the tab marker's paper plane, icon only; its
  *  tooltip says what pressing it does. On for the basket that goes. */
 function SendToggle({ on, disabledReason, tip, onPress }: { on: boolean; disabledReason: string | null; tip: string; onPress(): void }) {
+  const [hover, setHover] = useState(false);
   return (
     <button
       type="button"
@@ -308,17 +328,14 @@ function SendToggle({ on, disabledReason, tip, onPress }: { on: boolean; disable
       disabled={disabledReason != null}
       title={disabledReason ?? tip}
       onClick={onPress}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
-        ...dockButtonStyle,
-        display: "inline-flex",
-        alignItems: "center",
+        ...barButtonStyle(hover && disabledReason == null),
+        minWidth: 26,
         justifyContent: "center",
-        minWidth: 28,
-        border: `1px solid ${on ? "var(--accent)" : "var(--border-subtle)"}`,
-        background: on ? "var(--accent-soft-bg)" : "transparent",
-        color: disabledReason ? "var(--text-muted)" : on ? "var(--accent)" : "var(--text-secondary)",
-        borderRadius: 4,
-        cursor: disabledReason ? "default" : "pointer",
+        // On, it wears the accent, as the tab that goes does.
+        ...(on ? { background: "var(--accent-soft-bg)", color: "var(--accent)", boxShadow: "inset 0 0 0 1px var(--accent)" } : {}),
       }}
     >
       <Send size={13} aria-hidden />
@@ -344,15 +361,15 @@ function BasketBar({ basket, thread, onRename }: { basket: NamedBasket; thread: 
         }
         onPress={() => (thread ? void sendNext(thread, here ? null : basket.name) : undefined)}
       />
-      <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-basket-rename-button" onClick={onRename}>
+      <BarButton data-testid="context-basket-rename-button" onClick={onRename}>
         Rename
-      </button>
-      <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-basket-clear" disabled={basket.items.length === 0} onClick={() => void clearContext({ basket: basket.name })}>
+      </BarButton>
+      <BarButton data-testid="context-basket-clear" disabled={basket.items.length === 0} onClick={() => void clearContext({ basket: basket.name })}>
         Clear
-      </button>
-      <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-basket-delete" onClick={() => void deleteBasket(basket.name)}>
+      </BarButton>
+      <BarButton data-testid="context-basket-delete" onClick={() => void deleteBasket(basket.name)}>
         Delete
-      </button>
+      </BarButton>
       {basket.nextFor && !here ? (
         <span data-testid="context-basket-status" style={{ color: "var(--text-muted)", marginLeft: 6 }}>
           Sent next by another thread
@@ -362,121 +379,142 @@ function BasketBar({ basket, thread, onRename }: { basket: NamedBasket; thread: 
   );
 }
 
-function ItemRow({ item, onOpen, onContextMenu }: { item: BasketItem; onOpen(): void; onContextMenu(e: MouseEvent): void }) {
+/** One item: a row — a chevron, its name, a note mark, its text on one line
+ *  and a × at the far right — that expands in place (the details grow open,
+ *  `grid-template-rows` 0fr → 1fr) to its whole text, its note edited in
+ *  place, and Open / Move to…. Its click or Enter toggles it; Escape
+ *  (outside the note's field) folds it. Folded, the details are `inert`. */
+function ItemRow({
+  item,
+  expanded,
+  onToggle,
+  onOpenPage,
+  onMove,
+  onContextMenu,
+}: {
+  item: BasketItem;
+  expanded: boolean;
+  onToggle(): void;
+  onOpenPage: DockBodyProps["onOpenPage"];
+  onMove(e: MouseEvent): void;
+  onContextMenu(e: MouseEvent): void;
+}) {
   const [hover, setHover] = useState(false);
   const title = useContextTitle({ label: item.label, uri: item.sourceUri, text: item.text });
   const Icon = item.kind === "text" ? Quote : FileText;
-  const open = (e: KeyboardEvent) => {
+  const keys = (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onOpen();
+      onToggle();
     }
   };
   return (
     <div
       role="listitem"
-      tabIndex={0}
-      data-testid="context-panel-item"
-      onClick={onOpen}
-      onKeyDown={open}
-      onContextMenu={onContextMenu}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "5px 6px",
-        margin: "0 -6px",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: hover ? "var(--surface-hover, rgba(255, 255, 255, 0.04))" : "transparent",
-        cursor: "pointer",
-        minWidth: 0,
-      }}
-    >
-      <Icon size={13} aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-      <span data-testid="context-panel-title" style={{ ...ellipsis, flex: "0 1 30%", fontWeight: 600 }}>
-        {title}
-      </span>
-      <span
-        data-testid="context-panel-note-mark"
-        aria-label={item.note ? `Note: ${item.note}` : "No note"}
-        title={item.note ?? "Open to add a note"}
-        style={{ display: "inline-flex", flexShrink: 0, color: item.note ? "var(--accent)" : "var(--text-muted)", opacity: item.note || hover ? 1 : 0.35 }}
-      >
-        <StickyNote size={13} aria-hidden />
-      </span>
-      <span data-testid="context-panel-preview" style={{ ...ellipsis, flex: "1 1 0", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}>
-        {item.text ? item.text.replace(/\s+/g, " ").trim() : ""}
-      </span>
-      <button
-        type="button"
-        data-testid="context-panel-remove"
-        aria-label="Remove from context"
-        title="Remove"
-        onClick={(e) => {
-          e.stopPropagation();
-          void removeFromContext(item.id);
-        }}
-        style={iconButton}
-      >
-        <X size={14} aria-hidden />
-      </button>
-    </div>
-  );
-}
-
-/** One item alone: its name (opening its source), its whole text, and its
- *  note edited in place. Escape (outside the note's field) goes back. */
-function ItemView({ item, onOpenPage, onBack }: { item: BasketItem; onOpenPage: DockBodyProps["onOpenPage"]; onBack(): void }) {
-  const title = useContextTitle({ label: item.label, uri: item.sourceUri, text: item.text });
-  const Icon = item.kind === "text" ? Quote : FileText;
-  return (
-    <div
-      data-testid="context-item-view"
       onKeyDown={(e) => {
         const field = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
-        if (e.key === "Escape" && !field) {
+        if (e.key === "Escape" && expanded && !field) {
           e.preventDefault();
           e.stopPropagation();
-          onBack();
+          onToggle();
         }
       }}
-      style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 8 }}
+      style={{ margin: "0 -6px", borderBottom: "1px solid var(--border-subtle)", background: expanded ? "rgba(255, 255, 255, 0.025)" : "transparent" }}
     >
-      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-        <Icon size={14} aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-        {item.sourceUri ? (
-          <button type="button" data-testid="context-item-title" title={`Open ${item.sourceUri}`} onClick={() => onOpenPage({ id: item.sourceUri! })} style={{ ...linkButton, ...ellipsis, fontWeight: 600, fontSize: "var(--text-sm)" }}>
-            {title}
-          </button>
-        ) : (
-          <span data-testid="context-item-title" style={{ ...ellipsis, fontWeight: 600, fontSize: "var(--text-sm)" }}>
-            {title}
-          </span>
-        )}
-      </span>
-      {item.text ? (
-        <div data-testid="context-item-text" style={quoteStyle}>
-          {item.text}
-        </div>
-      ) : null}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-        <StickyNote size={13} aria-hidden style={{ flexShrink: 0, marginTop: 2, color: "var(--text-muted)" }} />
-        <span style={{ flex: 1, minWidth: 0 }}>
-          <InlineEdit
-            value={item.note ?? ""}
-            multiline
-            allowEmpty
-            placeholder="Add a note for the agent…"
-            ariaLabel="Note"
-            testId="context-panel-note"
-            displayStyle={{ color: item.note ? "var(--text-primary)" : "var(--text-muted)", whiteSpace: "pre-wrap", cursor: "text" }}
-            onCommit={(next) => {
-              if (next.trim() !== (item.note ?? "")) void setContextNote(item.id, next);
-            }}
-          />
+      <div
+        tabIndex={0}
+        aria-expanded={expanded}
+        data-testid="context-panel-item"
+        onClick={onToggle}
+        onKeyDown={keys}
+        onContextMenu={onContextMenu}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "5px 6px",
+          background: hover ? "var(--surface-hover, rgba(255, 255, 255, 0.04))" : "transparent",
+          cursor: "pointer",
+          minWidth: 0,
+        }}
+      >
+        <ChevronRight
+          size={12}
+          aria-hidden
+          style={{ flexShrink: 0, color: "var(--text-muted)", transform: expanded ? "rotate(90deg)" : "none", transition: "transform 150ms ease" }}
+        />
+        <Icon size={13} aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+        <span data-testid="context-panel-title" style={{ ...ellipsis, flex: "0 1 30%", fontWeight: 600 }}>
+          {title}
         </span>
+        <span
+          data-testid="context-panel-note-mark"
+          aria-label={item.note ? `Note: ${item.note}` : "No note"}
+          title={item.note ?? "Open to add a note"}
+          style={{ display: "inline-flex", flexShrink: 0, color: item.note ? "var(--text-primary)" : "var(--text-muted)" }}
+        >
+          <StickyNote size={13} aria-hidden />
+        </span>
+        <span
+          data-testid="context-panel-preview"
+          style={{ ...ellipsis, flex: "1 1 0", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}
+        >
+          {item.text ? item.text.replace(/\s+/g, " ").trim() : ""}
+        </span>
+        <button
+          type="button"
+          data-testid="context-panel-remove"
+          aria-label="Remove from context"
+          title="Remove"
+          onClick={(e) => {
+            e.stopPropagation();
+            void removeFromContext(item.id);
+          }}
+          style={iconButton}
+        >
+          <X size={14} aria-hidden />
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateRows: expanded ? "1fr" : "0fr", transition: "grid-template-rows 180ms ease" }}>
+        <div data-testid="context-item-details" inert={!expanded} aria-hidden={!expanded} style={{ overflow: "hidden", minHeight: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 6px 10px 26px" }}>
+            {item.text ? (
+              <div data-testid="context-item-text" style={quoteStyle}>
+                {item.text}
+              </div>
+            ) : null}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+              <StickyNote size={13} aria-hidden style={{ flexShrink: 0, marginTop: 2, color: "var(--text-muted)" }} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <InlineEdit
+                  value={item.note ?? ""}
+                  multiline
+                  allowEmpty
+                  placeholder="Add a note for the agent…"
+                  ariaLabel="Note"
+                  testId="context-panel-note"
+                  displayStyle={{ color: item.note ? "var(--text-primary)" : "var(--text-muted)", whiteSpace: "pre-wrap", cursor: "text" }}
+                  onCommit={(next) => {
+                    if (next.trim() !== (item.note ?? "")) void setContextNote(item.id, next);
+                  }}
+                />
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 14 }}>
+              {item.sourceUri ? (
+                <button type="button" data-testid="context-item-open" title={item.sourceUri} onClick={() => onOpenPage({ id: item.sourceUri! })} style={linkButton}>
+                  Open
+                </button>
+              ) : null}
+              <button type="button" data-testid="context-item-move" onClick={onMove} style={linkButton}>
+                Move to…
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

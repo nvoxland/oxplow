@@ -599,6 +599,19 @@
     - { unique: id }
     - { unique: name }
     - { relationships: { column: next_thread_id, to: thread, field: id } }
+- name: context_sent
+  version: 1
+  description: "Each thread's last send of a context basket, kept so the person can put it back (`oxplow.context.put_back`): one row per thread, the next send replacing it, gone once put back. Not a history."
+  fields:
+    - { name: "thread_id", type: "INTEGER", doc: "The thread whose prompt carried it." }
+    - { name: "thread_uri", type: "TEXT", doc: "That thread's URI." }
+    - { name: "basket", type: "TEXT", doc: "The named basket it came from; NULL for the thread's own." }
+    - { name: "items", type: "INT", doc: "How many items it carried." }
+    - { name: "sent_at", type: "TEXT", doc: "When it went (RFC 3339)." }
+  tests:
+    - { not_null: thread_id }
+    - { unique: thread_id }
+    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: diagnostic
   version: 1
   description: "Errors and warnings the language servers have published for open or indexed files, right now (cleared when a server restarts)."

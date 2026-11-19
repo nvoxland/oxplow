@@ -1,5 +1,6 @@
 /// The dock's icon row, at the right of the bottom bar: one button per
-/// panel, the open one highlighted, a count pill when the panel has a badge.
+/// panel, the open one highlighted, a count pill on the icon's top-right
+/// corner when the panel has a badge.
 
 import { ICONS, iconFor } from "../../icons.js";
 import { dockStore, useDockState } from "./dockStore.js";
@@ -49,8 +50,12 @@ function DockButton({ panel, active }: { panel: DockPanelDef; active: boolean })
         <span
           data-testid={`dock-${panel.id}-badge`}
           data-tone={badge.tone ?? "accent"}
+          // On the icon's top-right corner, overlapping it, ringed in the
+          // bar's color so it reads as the icon's count.
           style={{
-            marginLeft: 4,
+            position: "absolute",
+            top: -4,
+            right: -5,
             minWidth: 14,
             padding: "0 4px",
             borderRadius: 7,
@@ -58,6 +63,8 @@ function DockButton({ panel, active }: { panel: DockPanelDef; active: boolean })
             lineHeight: "14px",
             fontWeight: 600,
             textAlign: "center",
+            boxShadow: "0 0 0 2px var(--bg-2)",
+            pointerEvents: "none",
             color: "var(--bg-1)",
             background: badge.tone === "danger" ? "var(--severity-critical)" : "var(--accent)",
           }}

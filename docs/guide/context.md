@@ -52,13 +52,13 @@ the right worktree.
 
 The **Context** panel has a tab for each basket: **This Thread** and each named
 basket, with how many items it holds. The basket the thread's next prompt will
-send has a paper plane on its tab.
+send has a small paper plane after its count.
 
-- Each item is one row: its name, a note mark (blue when it has a note), the
+- Each item is one row: its name, a note mark (white when it has a note, grey when not), the
   start of its text, and a × at the right to take it out.
-- Click a row to see the item alone: its whole text and its note. Click the
-  note to add or change it, and click the name to open where it came from.
-  **Back** returns to the list.
+- Click a row to open it in place: its whole text, its note, and **Open** and
+  **Move to…**. Click the note to add or change it. Click the row
+  again to close it.
 - Right-click an item for **Move to**, to put it in another basket.
 - Each tab's bar starts with **Send Next**, the paper-plane button. Hover over it
   to see what it does. On a named basket that is sending next, press it again
@@ -70,6 +70,15 @@ send has a paper plane on its tab.
 After you add something, the panel opens the tab of the basket it went to. The
 **Context** page (open it from the panel's header) shows the same baskets as
 tables.
+
+## Sent by mistake?
+
+If a message carried a basket you did not mean to send, press **Put Back** on
+the right of the Context panel's bar ("Sent 2 items from basket 1 · Put Back").
+The items return to the basket they came from, with their notes. Put Back
+doesn't choose that basket to send next, so your next message won't carry it
+unless you press Send Next. You can also just tell the agent "put that back". Only the last send can be put back: the next
+message replaces it.
 
 ## What the agent gets
 

@@ -3079,6 +3079,8 @@ mod tests {
             // V47 — the context baskets.
             "context_basket",
             "context_item",
+            // V49 — each thread's last send, to put back.
+            "context_sent_item",
         ];
         // `effort_observation` was dropped in V39; the V38
         // `metric_*` cluster was dropped in V49 (T-E3) — assert gone.

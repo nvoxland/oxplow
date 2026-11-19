@@ -77,12 +77,33 @@ export interface NamedBasket {
 }
 
 /** The selected thread's own basket and every named basket. */
+/** What the thread's last send carried, while it can be put back. */
+export interface LastSend {
+  /** The named basket it came from; null: This Thread. */
+  basket: string | null;
+  items: number;
+}
+
 export interface Baskets {
   own: BasketItem[];
   named: NamedBasket[];
+  /** The selected thread's last send, or null. */
+  lastSend: LastSend | null;
 }
 
-export const NO_BASKETS: Baskets = { own: [], named: [] };
+export const NO_BASKETS: Baskets = { own: [], named: [], lastSend: null };
+
+export const SENT_SQL = `
+  SELECT basket, items
+  FROM v_context_sent
+  WHERE thread_id = ?1`;
+
+/** The last send `SENT_SQL` read, or null. */
+export function lastSendFrom(result: SqlQueryResult): LastSend | null {
+  const { at, str } = cells(result);
+  const row = result.rows[0];
+  return row ? { basket: str(at(row, "basket")), items: Number(at(row, "items")) } : null;
+}
 
 export const ITEMS_SQL = `
   SELECT id, kind, source_uri, label, text, note, basket
@@ -115,9 +136,10 @@ export function itemsFromResult(result: SqlQueryResult): BasketItem[] {
 }
 
 /** The baskets, from what `ITEMS_SQL` and `BASKETS_SQL` read. */
-export function basketsFrom(items: readonly BasketItem[], baskets: SqlQueryResult): Baskets {
+export function basketsFrom(items: readonly BasketItem[], baskets: SqlQueryResult, lastSend: LastSend | null = null): Baskets {
   const { at, str } = cells(baskets);
   return {
+    lastSend,
     own: items.filter((i) => i.basket == null),
     named: baskets.rows.map((row) => {
       const name = String(at(row, "name"));
@@ -156,11 +178,11 @@ export function useBaskets(threadId: string | null): Baskets {
   const load = useCallback(() => {
     let cancelled = false;
     const thread = threadId ? threadRowId(threadId) : 0;
-    void Promise.all([querySql(ITEMS_SQL, [thread], 2_000), querySql(BASKETS_SQL, [], 500)]).then(
-      ([items, named]) => {
+    void Promise.all([querySql(ITEMS_SQL, [thread], 2_000), querySql(BASKETS_SQL, [], 500), querySql(SENT_SQL, [thread], 1)]).then(
+      ([items, named, sent]) => {
         if (cancelled) return;
-        setBaskets(basketsFrom(itemsFromResult(items), named));
-        setReads(unionReads([items.reads, named.reads]));
+        setBaskets(basketsFrom(itemsFromResult(items), named, lastSendFrom(sent)));
+        setReads(unionReads([items.reads, named.reads, sent.reads]));
       },
       (e: unknown) => recordOpError({ label: "Read the context baskets", message: e instanceof Error ? e.message : String(e) }),
     );
@@ -315,6 +337,11 @@ export async function moveContextItem(item: number, to: Destination): Promise<vo
 
 export async function clearContext(which: Destination): Promise<void> {
   await personCommands.run("Clear Context", "oxplow.context.clear", which);
+}
+
+/** Put `thread`'s last send back where it came from. */
+export async function putBack(thread: string): Promise<void> {
+  await personCommands.run("Put Back", "oxplow.context.put_back", { thread });
 }
 
 /** Send `basket` with `thread`'s next prompt instead of its own; null:

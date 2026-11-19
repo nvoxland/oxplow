@@ -1870,8 +1870,12 @@ set next while it holds something, else the thread's own
 items (`prompt_mention`), **deletes** them and clears `next_thread_id`, so
 the thread sends its own again
 (`agent-model.md` "The context basket"): there is no delivered history.
-Read through `v_context_item` and `v_context_basket`; every write is an
-`oxplow.context.*` command (commands.md).
+`context_sent_item` (V49) is each thread's **last send**: a copy of what it
+carried (`basket_name`, NULL for the thread's own, and the item's fields),
+replaced by the next send, gone once put back (`put_back_tx`; read through
+`v_context_sent`, one row per thread). Read through `v_context_item` and
+`v_context_basket`; every write is an `oxplow.context.*` command
+(commands.md).
 
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
 

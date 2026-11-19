@@ -521,8 +521,10 @@ pub fn waiting_for_thread_tx(
 /// the turn they landed in — the thread's open turn (of `session` when
 /// known), which the prompt opened or went into — on the handoffs, link
 /// that turn to what it was given (`prompt_mention`: each item's page or
-/// source, each handoff), then delete the items; a named basket they came
-/// from stops being next, so the thread sends its own again. With no turn open nothing is linked; the items still go.
+/// source, each handoff), keep a copy of them as the thread's last send
+/// (its earlier one replaced; [`put_back_tx`]), then delete the items; a
+/// named basket they came from stops being next, so the thread sends its own
+/// again. With no turn open nothing is linked; the items still go.
 pub fn take_delivered_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -575,7 +577,38 @@ pub fn take_delivered_tx(
             }
         }
     }
+    if !taken.is_empty() {
+        conn.execute(
+            "DELETE FROM context_sent_item WHERE thread_id = ?1",
+            params![thread.value()],
+        )
+        .map_err(map_sql_err)?;
+    }
+    let sent_at = ts_to_string(Timestamp::now());
     for item in &taken {
+        let basket_name = match item.basket_id {
+            Some(id) => get_basket_tx(conn, id)?.map(|b| b.name),
+            None => None,
+        };
+        conn.execute(
+            "INSERT INTO context_sent_item
+               (thread_id, basket_name, stream_id, kind, source_uri, label, text, around, note, added_at, sent_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                thread.value(),
+                basket_name,
+                item.stream_id,
+                item.kind.as_str(),
+                item.source_uri,
+                item.label,
+                item.text,
+                item.around,
+                item.note,
+                item.added_at,
+                sent_at
+            ],
+        )
+        .map_err(map_sql_err)?;
         conn.execute("DELETE FROM context_item WHERE id = ?1", params![item.id])
             .map_err(map_sql_err)?;
         if let Some(basket) = item.basket_id {
@@ -588,6 +621,64 @@ pub fn take_delivered_tx(
         }
     }
     Ok(())
+}
+
+/// One item of a thread's last send, as it went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentItem {
+    pub id: i64,
+    /// The named basket it came from; none: the thread's own.
+    pub basket_name: Option<String>,
+    pub item: NewItem,
+    pub sent_at: String,
+}
+
+/// `thread`'s last send, in the order it went; empty when there is none (or
+/// it was put back).
+pub fn sent_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<SentItem>, DomainError> {
+    conn.prepare("SELECT * FROM context_sent_item WHERE thread_id = ?1 ORDER BY id")
+        .and_then(|mut stmt| {
+            stmt.query_map(params![thread.value()], |row| {
+                Ok(SentItem {
+                    id: row.get("id")?,
+                    basket_name: row.get("basket_name")?,
+                    item: NewItem {
+                        stream_id: row.get("stream_id")?,
+                        source_uri: row.get("source_uri")?,
+                        label: row.get("label")?,
+                        text: row.get("text")?,
+                        around: row.get("around")?,
+                        note: row.get("note")?,
+                    },
+                    sent_at: row.get("sent_at")?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(map_sql_err)
+}
+
+/// Put `thread`'s last send back: each item to the basket it came from (a
+/// named basket by name, made again when it was deleted), with its note. It
+/// does not choose what goes next: the thread still sends its own until the
+/// person picks again. The copy is gone after. The
+/// new items' ids, in order; empty when there was nothing to put back.
+pub fn put_back_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<i64>, DomainError> {
+    let sent = sent_tx(conn, thread)?;
+    let mut ids = Vec::new();
+    for s in &sent {
+        let basket = match &s.basket_name {
+            Some(name) => Basket::Named(ensure_basket_tx(conn, name)?.0.id),
+            None => Basket::Thread(thread),
+        };
+        ids.push(add_tx(conn, basket, &s.item)?);
+    }
+    conn.execute(
+        "DELETE FROM context_sent_item WHERE thread_id = ?1",
+        params![thread.value()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(ids)
 }
 
 #[cfg(test)]
@@ -958,6 +1049,103 @@ mod tests {
             .await
             .unwrap();
         assert!(db.read(move |c| get_tx(c, next)).await.unwrap().is_none());
+    }
+
+    /// A send keeps a copy as the thread's last send, the next send replacing
+    /// it; Put Back returns the items, notes kept, to the basket they came
+    /// from — made again when it was deleted — without choosing it to go
+    /// next.
+    #[tokio::test]
+    async fn the_last_send_is_put_back_where_it_came_from() {
+        let (db, thread, _) = with_threads().await;
+        let (basket, first) = db
+            .transaction(move |tx| {
+                let basket = create_basket_tx(tx, "Auth")?.id;
+                let first = add_tx(
+                    tx,
+                    Basket::Named(basket),
+                    &NewItem {
+                        note: Some("look".into()),
+                        stream_id: Some(2),
+                        ..page("oxplow:oxplow/commit?sha=a")
+                    },
+                )?;
+                set_next_tx(tx, thread, Some(basket))?;
+                take_delivered_tx(tx, thread, None, &[], &[first])?;
+                Ok((basket, first))
+            })
+            .await
+            .unwrap();
+        let sent = db.read(move |c| sent_tx(c, thread)).await.unwrap();
+        assert_eq!(
+            sent.iter()
+                .map(|s| (s.basket_name.clone(), s.item.note.clone()))
+                .collect::<Vec<_>>(),
+            [(Some("Auth".to_string()), Some("look".to_string()))]
+        );
+        assert!(db.read(move |c| get_tx(c, first)).await.unwrap().is_none());
+
+        // Deleted since: Put Back makes it again, sent next.
+        let back = db
+            .transaction(move |tx| {
+                delete_basket_tx(tx, basket)?;
+                put_back_tx(tx, thread)
+            })
+            .await
+            .unwrap();
+        assert_eq!(back.len(), 1);
+        let (restored, next) = db
+            .read(move |c| {
+                let b = basket_by_name_tx(c, "Auth")?.unwrap();
+                Ok((
+                    items_tx(c, Basket::Named(b.id))?,
+                    next_basket_tx(c, thread)?.map(|n| n.name),
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            restored
+                .iter()
+                .map(|i| (i.source_uri.clone(), i.note.clone(), i.stream_id))
+                .collect::<Vec<_>>(),
+            [(
+                Some("oxplow:oxplow/commit?sha=a".to_string()),
+                Some("look".to_string()),
+                Some(2)
+            )]
+        );
+        assert_eq!(next, None, "putting back doesn't send it next");
+        assert!(db
+            .read(move |c| sent_tx(c, thread))
+            .await
+            .unwrap()
+            .is_empty());
+
+        // The next send replaces the copy.
+        db.transaction(move |tx| {
+            let own = add_tx(
+                tx,
+                Basket::Thread(thread),
+                &page("oxplow:oxplow/commit?sha=b"),
+            )?;
+            let mine = add_tx(
+                tx,
+                Basket::Thread(thread),
+                &page("oxplow:oxplow/commit?sha=c"),
+            )?;
+            take_delivered_tx(tx, thread, None, &[], &[own])?;
+            take_delivered_tx(tx, thread, None, &[], &[mine])
+        })
+        .await
+        .unwrap();
+        let sent = db.read(move |c| sent_tx(c, thread)).await.unwrap();
+        assert_eq!(
+            sent.iter()
+                .map(|s| (s.basket_name.clone(), s.item.source_uri.clone()))
+                .collect::<Vec<_>>(),
+            [(None, Some("oxplow:oxplow/commit?sha=c".to_string()))]
+        );
     }
 
     /// A thread's own items go with it; a basket set next for it stays, set for none.

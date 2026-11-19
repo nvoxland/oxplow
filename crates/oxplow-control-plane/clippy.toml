@@ -94,6 +94,7 @@ disallowed-methods = [
   { path = "oxplow_db::context_store::delete_basket_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::context_store::ensure_basket_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::context_store::move_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::context_store::put_back_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::context_store::remove_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::context_store::rename_basket_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::context_store::set_next_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

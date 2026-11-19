@@ -25,6 +25,7 @@ const CHANGING_COMMANDS: &[&str] = &[
     crate::commands::context_basket::ADD,
     crate::commands::context_basket::MOVE,
     crate::commands::context_basket::SEND_NEXT,
+    crate::commands::context_basket::PUT_BACK,
 ];
 
 /// The event types whose facts the context reads: the handoffs and their

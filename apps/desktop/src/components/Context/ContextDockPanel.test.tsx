@@ -6,13 +6,14 @@ import type { SqlQueryResult } from "../../tauri-bridge/generated/bindings.js";
 const ran: Array<[string, unknown]> = [];
 let items: unknown[][] = [];
 let baskets: unknown[][] = [];
+let sent: unknown[][] = [];
 const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
     ({
-      columns: sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
-      rows: sql.includes("v_context_basket") ? baskets : items,
+      columns: sql.includes("v_context_sent") ? ["basket", "items"] : sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
+      rows: sql.includes("v_context_sent") ? sent : sql.includes("v_context_basket") ? baskets : items,
       truncated: false,
       reads: { datasets: [], tables: [], measures: [] },
       freshness: {},
@@ -35,6 +36,7 @@ afterEach(() => {
   ran.length = 0;
   items = [];
   baskets = [];
+  sent = [];
   setSelectedThread(null);
 });
 
@@ -49,11 +51,9 @@ test("it lists This Thread's items, takes one out and clears the lot", async () 
   await waitFor(() => expect(view.getAllByTestId("context-panel-item").length).toBe(2));
   expect(view.getAllByTestId("context-tab")[0]!.textContent).toBe("This Thread2");
   expect(view.getByText("abc1234")).toBeTruthy();
-  expect(view.getByText("fn main() {}")).toBeTruthy();
+  expect(view.getAllByTestId("context-panel-preview")[1]!.textContent).toBe("fn main() {}");
   fireEvent.click(view.getAllByTestId("context-panel-remove")[0]!);
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.remove", { item: 1 }]));
-  // Clear is a button, as the Alerts panel's.
-  expect(view.getByTestId("context-panel-clear").className).toContain("ox-button");
   fireEvent.click(view.getByTestId("context-panel-clear"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.clear", { thread: "thr7" }]));
   // The Context page opens from the panel's header, not a link here.
@@ -73,11 +73,11 @@ test("a row's note mark leads its text and its × is at the right", async () => 
   expect(ids).toEqual(["context-panel-title", "context-panel-note-mark", "context-panel-preview", "context-panel-remove"]);
 });
 
-// A row is the item's name, its text on one line and a note mark; its
-// click opens the item alone, where the whole text shows, the name opens its
-// source and the note is edited in place (`oxplow.context.note`). Back
-// returns to the list.
-test("a row opens the item alone, with its whole text and its note", async () => {
+// A row is the item's name, a note mark and its text on one line; its click
+// expands it in place to the whole text, the note edited in place
+// (`oxplow.context.note`) and Open; another click folds it. Folded, the
+// details are inert.
+test("a row expands in place to its whole text and its note", async () => {
   setSelectedThread("thr7");
   items = [
     [1, "text", "oxplow:oxplow/file?path=a.rs#lines=3-4", null, "fn main() {\n  run();\n}", "Handle the empty case.", null],
@@ -88,14 +88,20 @@ test("a row opens the item alone, with its whole text and its note", async () =>
   await waitFor(() => expect(view.getAllByTestId("context-panel-item").length).toBe(2));
   expect(view.getAllByTestId("context-panel-preview")[0]!.textContent).toBe("fn main() { run(); }");
   expect(view.getAllByTestId("context-panel-note-mark").map((m) => m.getAttribute("aria-label"))).toEqual(["Note: Handle the empty case.", "No note"]);
-  fireEvent.click(view.getAllByTestId("context-panel-item")[0]!);
-  expect(view.getByTestId("context-item-text").textContent).toBe("fn main() {\n  run();\n}");
-  expect(view.getByTestId("context-panel-note").textContent).toBe("Handle the empty case.");
-  fireEvent.click(view.getByTestId("context-item-title"));
+  const rows = view.getAllByTestId("context-panel-item");
+  const details = view.getAllByTestId("context-item-details");
+  expect(details.map((d) => d.hasAttribute("inert"))).toEqual([true, true]);
+  fireEvent.click(rows[0]!);
+  expect(rows[0]!.getAttribute("aria-expanded")).toBe("true");
+  expect(details[0]!.hasAttribute("inert")).toBe(false);
+  expect(view.getAllByTestId("context-item-text")[0]!.textContent).toBe("fn main() {\n  run();\n}");
+  expect(view.getAllByTestId("context-panel-note")[0]!.textContent).toBe("Handle the empty case.");
+  fireEvent.click(view.getAllByTestId("context-item-open")[0]!);
   expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs#lines=3-4"]);
-  fireEvent.click(view.getByTestId("context-item-back"));
-  fireEvent.click(view.getAllByTestId("context-panel-item")[1]!);
-  const note = view.getByTestId("context-panel-note");
+  // One open at a time: the second row's click folds the first.
+  fireEvent.click(rows[1]!);
+  expect(rows[0]!.getAttribute("aria-expanded")).toBe("false");
+  const note = view.getAllByTestId("context-panel-note")[1]!;
   expect(note.textContent).toBe("Add a note for the agent…");
   fireEvent.click(note);
   const field = await waitFor(() => {
@@ -190,6 +196,18 @@ test("an add hides the tabs, then opens the tab it went to", async () => {
   fireEvent.click(view.getAllByTestId("context-add-to").find((c) => c.dataset.value === "Auth")!);
   fireEvent.click(view.getByTestId("context-note-add"));
   await waitFor(() => expect(view.getAllByTestId("context-tab").find((t) => t.dataset.basket === "Auth")!.getAttribute("aria-selected")).toBe("true"));
+});
+
+// The bar says what the thread's last send carried, and Put Back returns it.
+test("the last send is named on the bar and put back from it", async () => {
+  setSelectedThread("thr7");
+  baskets = [[1, "Auth", null]];
+  sent = [["Auth", 2]];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  const last = await waitFor(() => view.getByTestId("context-last-send"));
+  expect(last.textContent).toContain("Sent 2 items from Auth");
+  fireEvent.click(view.getByTestId("context-put-back"));
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.put_back", { thread: "thr7" }]));
 });
 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.

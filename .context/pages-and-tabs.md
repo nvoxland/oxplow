@@ -1271,7 +1271,9 @@ is the Alerts panel's icon.
   minus 80px.
 - **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, page? }`.
   `icon` is a name from `ICONS`. `useBadge` is a hook that returns a count
-  and an optional `danger` tone, or null. `Body` is mounted only while the
+  and an optional `danger` tone, or null; the bar draws it as a count pill
+  on the icon's top-right corner, overlapping it and ringed in the bar's
+  color (Context's counts what the thread's next prompt sends). `Body` is mounted only while the
   panel is open. `page` is the page the panel's things are on (Alerts,
   Context, an extension panel's `open` else its body page): the header
   draws the open arrow (`OpenPageLink`, "Open <title> page") after the

@@ -1013,6 +1013,11 @@ commands:
     scope: context.write
     op: send_next
     example: {"basket": "Auth rework", "thread": "thr1"}
+  - name: context.put_back
+    summary: "Put a `thread`'s last send back: each item it carried returns, with its note, to the basket it came from (a named basket made again if it was deleted); nothing is chosen to go next. Each thread keeps only its last send; the next send replaces it. An agent may run it for its own thread (when the person says something went by mistake); every other basket command is the person's."
+    scope: context.write
+    op: put_back
+    example: {"thread": "thr1"}
   - name: context.create_basket
     summary: "Make an empty named context basket (`name`: up to 60 characters, not \"This Thread\", unique in any case). Named baskets belong to the project, across all its streams."
     scope: context.write

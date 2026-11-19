@@ -35380,5 +35380,37 @@
       ],
       "key": []
     }
+  },
+  "context_sent": {
+    "1": {
+      "columns": [
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread whose prompt carried it."
+        },
+        {
+          "name": "thread_uri",
+          "type": "TEXT",
+          "doc": "That thread's URI."
+        },
+        {
+          "name": "basket",
+          "type": "TEXT",
+          "doc": "The named basket it came from; NULL for the thread's own."
+        },
+        {
+          "name": "items",
+          "type": "INT",
+          "doc": "How many items it carried."
+        },
+        {
+          "name": "sent_at",
+          "type": "TEXT",
+          "doc": "When it went (RFC 3339)."
+        }
+      ],
+      "key": []
+    }
   }
 }

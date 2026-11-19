@@ -34,16 +34,15 @@ finish.
   (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =
   t.stream_id`); they are already in your system prompt.
 - **Waiting on the person.** When you need their answer, end your reply
-  with the question: oxplow shows your thread as waiting on them. Nothing
-  else is needed.
+  with the question: oxplow shows your thread as waiting on them.
 - **Handoffs.** Work another thread hands you arrives at the start of a
   prompt in a `<handoffs>` block. Take it on or decline it with
   `oxplow.handoff.resolve`; to hand work to another thread, see
   `references/commands.md`. A handoff may be `about` any record (a task, a
   page), by its URI. Nothing wakes the other agent.
 - **Context basket.** A `<context-basket>` block is what the person
-  collected for you; read each `[oxplow uri …]` with `oxplow_read`. What
-  waits: `v_context_item`, `v_context_basket`.
+  collected for you; read each `[oxplow uri …]` with `oxplow_read`. Sent
+  by mistake? The context `put_back { thread }` command returns it.
 - **Hints.** oxplow may add short advisory guidance to your next prompt or
   tool result.
 

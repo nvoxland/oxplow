@@ -30,6 +30,7 @@ pub const NOTE: &str = "oxplow.context.note";
 pub const MOVE: &str = "oxplow.context.move";
 pub const CLEAR: &str = "oxplow.context.clear";
 pub const SEND_NEXT: &str = "oxplow.context.send_next";
+pub const PUT_BACK: &str = "oxplow.context.put_back";
 pub const CREATE_BASKET: &str = "oxplow.context.create_basket";
 pub const RENAME_BASKET: &str = "oxplow.context.rename_basket";
 pub const DELETE_BASKET: &str = "oxplow.context.delete_basket";
@@ -104,6 +105,13 @@ pub struct WhichInput {
     /// the named basket, by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub basket: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PutBackInput {
+    /// The thread whose last send goes back (`thr1`).
+    pub thread: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -468,6 +476,50 @@ pub fn send_next_op() -> Op {
     )
 }
 
+/// `put_back { thread }`: the thread's last send back where it came from —
+/// each item to its basket, notes kept; nothing is chosen to go next
+/// (`context_store::put_back_tx`). Undoing takes the items out
+/// again (the copy of the send is gone once it is put back). The one
+/// basket command an agent may run, and only for its own thread: it only
+/// returns what the person collected, as they collected it ("that wasn't
+/// meant to go, put it back").
+pub fn put_back_op() -> Op {
+    op(
+        "put_back",
+        schema::<PutBackInput>(),
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: PutBackInput = parse(input)?;
+            let thread = thread_of(&input.thread, "/thread")?;
+            if ctx.actor().is_agent_driven() && ctx.actor().gated_thread() != Some(Some(thread)) {
+                return Err(invalid(
+                    "/thread",
+                    "an agent puts back only its own thread's last send",
+                ));
+            }
+            let ids = store::put_back_tx(ctx.conn, thread)?;
+            if ids.is_empty() {
+                return Err(invalid(
+                    "/thread",
+                    "nothing was sent from this thread to put back",
+                ));
+            }
+            let inverse = sequence(
+                ids.iter()
+                    .map(|id| CommandCall {
+                        name: REMOVE.into(),
+                        input: json!({ "item": id }),
+                    })
+                    .collect(),
+            );
+            Ok(HandlerOutput {
+                result: json!({ "items": ids }),
+                inverse,
+                ..HandlerOutput::default()
+            })
+        })),
+    )
+}
+
 /// `create_basket { name }`.
 pub fn create_basket_op() -> Op {
     op(
@@ -557,6 +609,7 @@ pub fn ops() -> Vec<Op> {
         move_op(),
         clear_op(),
         send_next_op(),
+        put_back_op(),
         create_basket_op(),
         rename_basket_op(),
         delete_basket_op(),
@@ -858,6 +911,107 @@ mod tests {
             (in_it[0].stream_id, in_it[0].note.as_deref()),
             (Some(1), Some("look"))
         );
+    }
+
+    /// Put Back returns the last send to its basket, not sent next; with
+    /// nothing sent it is refused; undo takes the items out again.
+    #[tokio::test]
+    async fn put_back_and_undo() {
+        let fx = services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let added = run(
+            &fx,
+            ADD,
+            json!({ "basket": "Auth", "uri": "oxplow:oxplow/commit?sha=a", "note": "look" }),
+        )
+        .await;
+        run(
+            &fx,
+            SEND_NEXT,
+            json!({ "basket": "Auth", "thread": thread }),
+        )
+        .await;
+        let item = added.result["item"].as_i64().unwrap();
+        let t = fx.thread;
+        fx.svc
+            .db
+            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[], &[item]))
+            .await
+            .unwrap();
+        assert!(items(&fx, Some("Auth")).await.is_empty());
+        let back = run(&fx, PUT_BACK, json!({ "thread": thread })).await;
+        let restored = items(&fx, Some("Auth")).await;
+        assert_eq!(restored[0].note.as_deref(), Some("look"));
+        assert_eq!(next(&fx, "Auth").await, None);
+        let again = fx
+            .svc
+            .commands
+            .run(&Actor::Human, PUT_BACK, json!({ "thread": thread }), false)
+            .await
+            .unwrap_err();
+        assert!(again.to_string().contains("nothing was sent"), "{again}");
+        undo(&fx, &back).await;
+        assert!(items(&fx, Some("Auth")).await.is_empty());
+    }
+
+    /// An agent may put back its own thread's last send, not another's.
+    #[tokio::test]
+    async fn an_agent_puts_back_its_own_threads_send_only() {
+        let fx = services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let added = run(
+            &fx,
+            ADD,
+            json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=a" }),
+        )
+        .await;
+        let item = added.result["item"].as_i64().unwrap();
+        let t = fx.thread;
+        fx.svc
+            .db
+            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[], &[item]))
+            .await
+            .unwrap();
+        let agent = |thread_id| Actor::Agent {
+            session_id: None,
+            thread_id: Some(thread_id),
+            stream_id: None,
+        };
+        let other = fx
+            .svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO threads (stream_id, title, created_at, updated_at)
+                     SELECT stream_id, 'Other', created_at, updated_at FROM threads WHERE id = ?1",
+                    [t.value()],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(ThreadId::new(tx.last_insert_rowid()))
+            })
+            .await
+            .unwrap();
+        let elsewhere = fx
+            .svc
+            .commands
+            .run(&agent(other), PUT_BACK, json!({ "thread": thread }), false)
+            .await
+            .unwrap_err();
+        assert!(
+            elsewhere.to_string().contains("its own thread"),
+            "{elsewhere}"
+        );
+        fx.svc
+            .commands
+            .run(
+                &agent(fx.thread),
+                PUT_BACK,
+                json!({ "thread": thread }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(items(&fx, None).await.len(), 1);
     }
 
     /// The baskets are the person's: an agent's add is refused.
