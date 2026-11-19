@@ -77,3 +77,121 @@ export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; 
   for (const h of items.hints) add(`hint:${h.id}`, h.message);
   return out;
 }
+
+// ---- the dock panel's rows ---------------------------------------------------
+
+/** What an alert is: a decision waiting on the person, something that
+ *  failed, or a notice. The panel lists them in that order. */
+export type AlertKind = "decision" | "failure" | "notice";
+
+/** What the panel's rows are built from: the sources `useAlerts` reads. */
+export interface AlertSources {
+  proposals: { uri: string; createdAt: string; command: string; threadTitle: string | null; preview: { summary: string; details?: string[]; destructive: boolean } }[];
+  opErrors: { id: string; at: number; label: string; command: string | null; message: string | null }[];
+  undelivered: number;
+  failedReactions: number;
+  extensionProblems: { name: string; message: string }[];
+  badges: { id: string; title: string; message: string; open: string }[];
+  hints: { id: number; message: string; threadTitle: string | null }[];
+}
+
+/** One row of the Alerts dock panel. Failed operations that say the same
+ *  thing (label and message) are one row, `count` of them. */
+export interface AlertRow {
+  key: string;
+  kind: AlertKind;
+  /** Where it comes from, which says what can be done about it. */
+  source: "proposal" | "op" | "delivery" | "reactions" | "extension" | "hint" | "badge";
+  title: string;
+  /** What it says beyond the title: an error, a summary. */
+  detail: string | null;
+  /** The newest of it, epoch ms; null when it has no time. */
+  at: number | null;
+  count: number;
+  /** The command that failed or is proposed. */
+  command: string | null;
+  /** The page it opens: its own, else the Alerts page (none here). */
+  open?: string;
+  /** The failed operations it stands for, to dismiss. */
+  opErrorIds?: string[];
+  /** The hint it is, to dismiss. */
+  hintId?: number;
+  /** The proposal it is, to decide. */
+  proposal?: string;
+  /** The extension whose problem it is, to repair. */
+  extension?: string;
+}
+
+const KIND_ORDER: Record<AlertKind, number> = { decision: 0, failure: 1, notice: 2 };
+
+/** The panel's rows: decisions, then failures, then notices, each newest
+ *  first; repeats of one failure merged. */
+export function alertRows(src: AlertSources): AlertRow[] {
+  const rows: AlertRow[] = [];
+  for (const p of src.proposals) {
+    rows.push({
+      key: p.uri,
+      kind: "decision",
+      source: "proposal",
+      title: `${p.threadTitle ? `“${p.threadTitle}”` : "An agent"} wants to run ${p.command}`,
+      detail: [p.preview.summary, ...(p.preview.details ?? [])].filter(Boolean).join("\n") || null,
+      at: Date.parse(p.createdAt) || null,
+      count: 1,
+      command: p.command,
+      open: p.uri,
+      proposal: p.uri,
+    });
+  }
+  const failed = new Map<string, AlertRow>();
+  for (const e of src.opErrors) {
+    const key = `op:${e.label}\u0000${e.message ?? ""}`;
+    const row = failed.get(key);
+    if (row) {
+      row.count += 1;
+      row.at = Math.max(row.at ?? 0, e.at);
+      row.opErrorIds!.push(e.id);
+    } else {
+      failed.set(key, { key, kind: "failure", source: "op", title: e.label, detail: e.message, at: e.at, count: 1, command: e.command, opErrorIds: [e.id] });
+    }
+  }
+  rows.push(...failed.values());
+  if (src.undelivered > 0) {
+    rows.push({ key: "delivery", kind: "failure", source: "delivery", title: src.undelivered === 1 ? "1 event couldn't be delivered" : `${src.undelivered} events couldn't be delivered`, detail: "A consumer couldn't take them. Retry them once the cause is fixed, or discard them.", at: null, count: 1, command: null });
+  }
+  if (src.failedReactions > 0) {
+    rows.push({ key: "reactions", kind: "failure", source: "reactions", title: src.failedReactions === 1 ? "An effect failed to react" : `${src.failedReactions} effects failed to react`, detail: "An extension's effect failed to react to an event. Retry runs it again now.", at: null, count: 1, command: null });
+  }
+  for (const x of src.extensionProblems) {
+    rows.push({ key: `ext-problem:${x.name}`, kind: "failure", source: "extension", extension: x.name, title: `${x.name} isn't running as it should`, detail: x.message, at: null, count: 1, command: null });
+  }
+  for (const h of src.hints) {
+    rows.push({ key: `hint:${h.id}`, kind: "notice", source: "hint", title: h.message, detail: h.threadTitle ? `From “${h.threadTitle}”` : null, at: null, count: 1, command: null, hintId: h.id });
+  }
+  for (const b of src.badges) {
+    rows.push({ key: `badge:${b.id}`, kind: "notice", source: "badge", title: b.title, detail: b.message, at: null, count: 1, command: null, open: b.open });
+  }
+  return rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => KIND_ORDER[a.row.kind] - KIND_ORDER[b.row.kind] || (b.row.at ?? -1) - (a.row.at ?? -1) || a.i - b.i)
+    .map(({ row }) => row);
+}
+
+/** How many of each kind, for the toolbar. */
+export function alertCounts(rows: readonly AlertRow[]): Record<AlertKind, number> {
+  const counts: Record<AlertKind, number> = { decision: 0, failure: 0, notice: 0 };
+  for (const r of rows) counts[r.kind] += r.count;
+  return counts;
+}
+
+/** A short age: `now`, `5m`, `3h`, `2d`, `4w`. */
+export function shortAge(at: number, now: number = Date.now()): string {
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 60) return "now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.round(h / 24);
+  if (d < 14) return `${d}d`;
+  return `${Math.round(d / 7)}w`;
+}

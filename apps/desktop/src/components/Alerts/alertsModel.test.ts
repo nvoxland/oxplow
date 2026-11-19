@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { alertsSummary, alertKeys, newAlerts, type AlertItems } from "./alertsModel.js";
+import { alertCounts, alertRows, alertsSummary, alertKeys, newAlerts, shortAge, type AlertItems, type AlertSources } from "./alertsModel.js";
 
 const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
 
@@ -65,4 +65,36 @@ test("an extension with problems counts red and toasts once", () => {
   expect(alertKeys({ ...none, extensionProblems: [ext] }).has("ext-problem:oxplow-foundation")).toBe(true);
   expect(newAlerts(alertKeys(none), { ...none, extensionProblems: [ext] }).map((a) => a.message)).toEqual([ext.message]);
   expect(newAlerts(alertKeys({ ...none, extensionProblems: [ext] }), { ...none, extensionProblems: [ext] })).toEqual([]);
+});
+
+const noSources: AlertSources = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
+
+test("the panel's rows: decisions, failures, notices, newest first, repeats merged", () => {
+  const rows = alertRows({
+    ...noSources,
+    hints: [{ id: 4, message: "Still in progress", threadTitle: "Main" }],
+    opErrors: [
+      { id: "a", at: 1_000, label: "Close codex", command: "oxplow.agent_session.close", message: "payload invalid" },
+      { id: "b", at: 3_000, label: "Close codex", command: "oxplow.agent_session.close", message: "payload invalid" },
+      { id: "c", at: 2_000, label: "New Dashboard…", command: "oxplow.extension.new_dashboard", message: "title is required" },
+    ],
+    proposals: [{ uri: "oxplow:oxplow/proposal?id=1", createdAt: "1970-01-01T00:00:00.500Z", command: "oxplow.git.push", threadTitle: "T", preview: { summary: "Push main", destructive: false } }],
+  });
+  expect(rows.map((r) => [r.kind, r.title, r.count])).toEqual([
+    ["decision", "“T” wants to run oxplow.git.push", 1],
+    ["failure", "Close codex", 2],
+    ["failure", "New Dashboard…", 1],
+    ["notice", "Still in progress", 1],
+  ]);
+  expect(rows[1]).toMatchObject({ at: 3_000, detail: "payload invalid", opErrorIds: ["a", "b"] });
+  expect(alertCounts(rows)).toEqual({ decision: 1, failure: 3, notice: 1 });
+});
+
+test("an age is short", () => {
+  const now = 100 * 24 * 3600_000;
+  expect(shortAge(now - 10_000, now)).toBe("now");
+  expect(shortAge(now - 5 * 60_000, now)).toBe("5m");
+  expect(shortAge(now - 3 * 3600_000, now)).toBe("3h");
+  expect(shortAge(now - 5 * 24 * 3600_000, now)).toBe("5d");
+  expect(shortAge(now - 30 * 24 * 3600_000, now)).toBe("4w");
 });

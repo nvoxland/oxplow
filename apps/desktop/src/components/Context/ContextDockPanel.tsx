@@ -19,7 +19,7 @@
 /// the panel header's arrow.
 
 import { ChevronRight, FileText, Quote, Send, StickyNote, X } from "lucide-react";
-import { useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
 import { InlineEdit } from "../InlineEdit.js";
 import {
@@ -46,6 +46,7 @@ import {
 import type { MenuItem } from "../../menu.js";
 import { useAppPreference } from "../../prefs/remembered.js";
 import { useContextMenu } from "../useRowContextMenu.js";
+import { BarButton, barButtonStyle, dockToolbarStyle } from "../Dock/DockToolbar.js";
 import { ContextAddCard } from "./ContextAddCard.js";
 import { plainTitle, useContextTitle } from "./contextTitle.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
@@ -142,7 +143,7 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
         ))}
       </div>
 
-      <div data-testid="context-tab-bar" style={barStyle}>
+      <div data-testid="context-tab-bar" style={dockToolbarStyle}>
         {tab === THREAD_MARK ? (
           <>
             <SendToggle
@@ -284,34 +285,6 @@ function basketActions(basket: NamedBasket, thread: string | null, rename: () =>
     { id: "clear", label: "Clear", enabled: basket.items.length > 0, run: () => clearContext({ basket: basket.name }) },
     { id: "delete", label: "Delete", enabled: true, run: () => deleteBasket(basket.name) },
   ];
-}
-
-/** The look of the bar's buttons: the page nav bar's quiet ones — no face
- *  or border at rest, the secondary text; a soft tint and the primary text
- *  under the pointer. */
-function barButtonStyle(hover: boolean): CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
-    padding: "3px 8px",
-    border: "none",
-    borderRadius: 4,
-    background: hover ? "rgba(255, 255, 255, 0.07)" : "transparent",
-    color: hover ? "var(--text-primary)" : "var(--text-secondary)",
-    font: "inherit",
-    fontSize: "var(--text-xs)",
-    cursor: "pointer",
-  };
-}
-
-function BarButton({ children, disabled, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { "data-testid"?: string }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button type="button" {...rest} disabled={disabled} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={barButtonStyle(hover && !disabled)}>
-      {children}
-    </button>
-  );
 }
 
 /** The Send Next switch: the tab marker's paper plane, icon only; its
@@ -545,17 +518,6 @@ const tabStrip: CSSProperties = {
   background: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)",
 };
 
-// The page nav bar's colors: the actions of the open tab, on the left.
-const barStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  flexShrink: 0,
-  minHeight: 32,
-  padding: "4px 12px",
-  borderBottom: "1px solid var(--border-strong, var(--border-subtle))",
-  background: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)",
-};
 
 const ellipsis = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 } as const;
 

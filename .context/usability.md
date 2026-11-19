@@ -1249,7 +1249,8 @@ a drag action runs (`VIZ_ROW_DRAG_MIME`).
 
 The agent's input is filled directly only by `insertIntoAgent`
 (`apps/desktop/src/agent-input-bus.ts`), for the `agent_input.write`
-command (a page action's draft) and Repair with the Agent. It fills the
+command (a page action's draft) and Repair with the Agent (an Extension
+problems row, and an extension problem in the Alerts dock panel). It fills the
 input of the terminal on screen and never sends it; xterm turns every line
 break into Enter, so it collapses line breaks to spaces (`oneLine`), and no
 caller may bypass the bus to write to the terminal.

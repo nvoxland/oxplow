@@ -116,6 +116,7 @@ export function ProposalCard({
           <span style={{ color: "var(--text-primary)" }}>{s.change.after}</span>
         </div>
       ) : null}
+      {s.details.length > 0 ? <div style={mutedStyle}>It asks for:</div> : null}
       {s.details.length > 0 ? (
         <ul data-testid={`proposal-details-${id}`} style={{ margin: "2px 0 0 18px", padding: 0 }}>
           {s.details.map((line) => (

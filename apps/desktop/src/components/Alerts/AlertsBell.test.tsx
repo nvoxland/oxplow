@@ -122,22 +122,48 @@ test("the dock's Alerts icon counts everything, red for a problem, and opens the
   expect(opened).toEqual([alertsRef()]);
 });
 
-// Each row leads with the open arrow (the icon that opens a thing's page,
-// here the item's), named Review; the message follows it.
-test("a row's Review is the open arrow at its left and opens the item's page", async () => {
-  const opened: unknown[] = [];
-  const view = render(withRuns(<Dock streamId={null} onOpenPage={(r) => opened.push(r)} />));
+// A row is its kind's icon, its title, what it says on one line and its age;
+// its click opens it in place to the whole message and the command; a
+// failure's × dismisses it, and a decision has no ×.
+test("a row opens in place to the whole message, and a failure's × dismisses it", async () => {
+  opErrorRows = [pushFailed];
+  const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
   fireEvent.click(view.getByTestId("dock-alerts"));
-  const row = await waitFor(() => view.getAllByTestId("alerts-panel-item")[0]!);
-  const review = row.firstElementChild!;
-  expect(review.getAttribute("data-testid")).toBe("alerts-panel-review");
-  expect(review.getAttribute("aria-label")).toBe("Review");
-  expect(review.querySelector("svg")).not.toBeNull();
-  fireEvent.click(review);
-  expect(opened).toEqual([alertsRef()]);
+  await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBe(4));
+  const rows = view.getAllByTestId("alerts-panel-item");
+  // A decision, the failed push (newest failure first), the undelivered events, a hint.
+  expect(rows.map((r) => r.dataset.kind)).toEqual(["decision", "failure", "failure", "notice"]);
+  const failure = rows[1]!;
+  expect(failure.querySelector('[data-testid="alerts-panel-title"]')!.textContent).toBe("Push to origin");
+  expect(failure.lastElementChild!.getAttribute("data-testid")).toBe("alerts-panel-dismiss");
+  expect(rows[0]!.querySelector('[data-testid="alerts-panel-dismiss"]')).toBeNull();
+  const details = view.getAllByTestId("alerts-item-details")[1]!;
+  expect(details.hasAttribute("inert")).toBe(true);
+  fireEvent.click(failure);
+  expect(failure.getAttribute("aria-expanded")).toBe("true");
+  expect(details.hasAttribute("inert")).toBe(false);
+  expect(details.textContent).toContain("git push");
+  fireEvent.click(failure.querySelector('[data-testid="alerts-panel-dismiss"]')!);
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.op_error.dismiss", { event: "e-push" }]));
 });
 
-// Clear is a button at the panel's foot. It puts away what a person can put
+// What can be done about an alert is in its row: undelivered events are
+// retried from it, and a failure asks the Assistant about itself.
+test("undelivered events retry from their row, and a failure asks the Assistant", async () => {
+  opErrorRows = [pushFailed];
+  const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBe(4));
+  const delivery = view.getAllByTestId("alerts-panel-item")[2]!;
+  fireEvent.click(delivery);
+  fireEvent.click(view.getAllByTestId("alerts-item-retry")[0]!);
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.delivery.retry_all", {}]));
+  fireEvent.click(view.getAllByTestId("alerts-panel-item")[1]!);
+  fireEvent.click(view.getByTestId("alerts-item-ask"));
+  await waitFor(() => expect(dockStore.get().open).toBe("assistant"));
+});
+
+// Clear All is on the toolbar. It puts away what a person can put
 // away: the hints and the failed operations. A decision is made, not
 // cleared, and an undelivered event is retried or discarded on the page.
 test("Clear dismisses the hints and failed operations and leaves the decisions", async () => {
@@ -145,19 +171,18 @@ test("Clear dismisses the hints and failed operations and leaves the decisions",
   const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
   fireEvent.click(view.getByTestId("dock-alerts"));
   const clear = await waitFor(() => view.getByTestId("alerts-panel-clear"));
-  expect(clear.className).toContain("ox-button");
   fireEvent.click(clear);
   await waitFor(() => expect(ran).toContainEqual(["oxplow.op_error.dismiss_all", {}]));
   expect(ran).toContainEqual(["oxplow.hint.dismiss_all", {}]);
   expect(ran.map(([name]) => name).sort()).toEqual(["oxplow.hint.dismiss_all", "oxplow.op_error.dismiss_all"]);
 });
 
-test("Clear is absent while only decisions and deliveries wait", async () => {
+test("Clear All is off while only decisions and deliveries wait", async () => {
   hintRows = [];
   const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
   fireEvent.click(view.getByTestId("dock-alerts"));
   await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBe(2));
-  expect(view.queryByTestId("alerts-panel-clear")).toBeNull();
+  expect((view.getByTestId("alerts-panel-clear") as HTMLButtonElement).disabled).toBe(true);
 });
 
 test("a toast once per new item, after the start-up settle, offering only Review", () => {

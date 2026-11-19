@@ -1285,25 +1285,38 @@ is the Alerts panel's icon.
   center column. The page does not reflow. Undo toasts sit above an open
   panel. It is a popover, so it wears the elevated tier
   (`--surface-elevated`), a strong top edge and a deep shadow: it stands
-  off a page of any darkness, a terminal's black included. A button in a
-  panel wears `dockButtonStyle` (`Dock/dockStyle.ts`, the card tier and the
-  primary text) over `ox-button`, since a transparent face would vanish
-  on the elevated tier.
-- **Alerts rows:** each row leads with Review, the open arrow (the same
-  icon as a heading's, `SquareArrowRightEnter`): it opens the item's own
-  page, else the Alerts page. The message follows it, as a context item's
-  title follows its ×.
+  off a page of any darkness, a terminal's black included. A panel's actions sit on its toolbar (`Dock/DockToolbar.tsx`:
+  `DockToolbar`, the page nav bar's tint under the header, and `BarButton`,
+  the nav bar's quiet buttons — no face at rest, a soft tint under the
+  pointer); the Context and Alerts panels both use them.
+- **Alerts rows** (`alertRows` in `alertsModel.ts`): decisions, then
+  failures, then notices, each newest first; failed operations that say the
+  same thing (label and message) are one row with ×N. A row is a chevron,
+  the kind's icon (decision `CircleHelp` accent, failure `CircleAlert` red,
+  notice `Info` grey), the title, what it says on one line, ×N, its short
+  age and, when it can be put away (a failed operation, a notice), a × at
+  the far right. Its click opens it in place, as a Context row does: the
+  whole message, the command and time, a failed operation's captured
+  output (read when it opens), and what can be done about it: a decision's
+  Approve / Decline (`InlineConfirm` for a destructive one), a failed
+  operation's Ask the Assistant (`askAssistant` with the error as a
+  selection and a "why did this fail" draft), undelivered events' Retry All /
+  Discard All (`delivery.retry_all` / `discard_all`, which asks first),
+  failed reactions' Retry All (`effect.retry_all`, which asks first), an
+  extension problem's Repair with the Agent (`insertIntoAgent`, then the
+  dock closes); Open (only an item with a page of its own) and Copy. The toolbar holds **Clear All** and the counts per kind.
 - **Rail:** a panel with `dock: true` is not in the rail.
 - **Test ids:** `dock-bar`, `dock-<id>`, `dock-<id>-badge`, `dock-panel`,
   `dock-panel-<id>`, `dock-panel-icon`, `dock-panel-title`,
   `dock-panel-open-page` (holding the `open-page-link`), `dock-panel-resize`,
-  `dock-panel-close`. The Alerts body has `alerts-panel`, `alerts-panel-item`,
-  `alerts-panel-review`, `alerts-panel-empty` and `alerts-panel-clear`. The
-  Context body's rows (`context-panel-item`) lead with their
-  `context-panel-remove` ×, and `context-panel-clear` is its Clear.
-- **Clear:** both core panels end in a Clear button (`ox-button`, never a
-  link) while there is something to clear. The Context panel's empties This
-  Thread's basket (`oxplow.context.clear`). The Alerts panel's puts away
+  `dock-panel-close`. The Alerts body has `alerts-panel`, `alerts-toolbar`,
+  `alerts-panel-item` (with `alerts-panel-dismiss`, `alerts-item-details`,
+  `alerts-item-open`, `alerts-item-approve`), `alerts-panel-empty` and
+  `alerts-panel-clear`. The Context body's rows (`context-panel-item`) end
+  with their `context-panel-remove` ×, and `context-panel-clear` is its Clear.
+- **Clear:** both core panels have Clear on their toolbar (a `BarButton`,
+  off while there is nothing to clear). The Context panel's empties This
+  Thread's basket (`oxplow.context.clear`). The Alerts panel's (Clear All) puts away
   what a person can put away: the notices (`oxplow.hint.dismiss_all`) and
   the failed operations (`oxplow.op_error.dismiss_all`); `clearable` in
   `alertsModel.ts` says when it shows. A decision is made, not cleared; an

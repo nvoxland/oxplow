@@ -77,17 +77,20 @@ fn domain(e: oxplow_domain::DomainError) -> CommandError {
     }
 }
 
-/// What a person is asked: to turn an extension on, or to take a version of
-/// one that adds to what it runs with (`details` lists only what it adds).
+/// What a person is asked to approve: to turn an extension on, or to take a
+/// version of one that adds to what it runs with (`details` lists only what
+/// it adds; the card leads that list with "It asks for:"). A statement, not
+/// a question: it is also the name of the approval, the label of a run that
+/// fails ("Approve: Deploy the new version of `acme`").
 fn approval_summary(command: &str, name: &str, turns_on: bool) -> String {
     if turns_on {
-        format!("`{name}` is turned off. Deploy it and turn it on, with:")
+        format!("Deploy `{name}` and turn it on (it is turned off)")
     } else if command.ends_with(".rollback") {
-        format!("Roll `{name}` back? That version asks for:")
+        format!("Roll `{name}` back to its earlier version")
     } else if command.ends_with(".enable") {
-        format!("Turn on `{name}`, with:")
+        format!("Turn on `{name}`")
     } else {
-        format!("Deploy the new version of `{name}`? It asks for:")
+        format!("Deploy the new version of `{name}`")
     }
 }
 
@@ -521,5 +524,9 @@ mod approval_tests {
         assert!(back.contains("Roll"), "{back}");
         let on = approval_summary("oxplow.extension.enable", "acme", false);
         assert!(on.contains("Turn on"), "{on}");
+        // A name, not a question with a lead-in: it labels the approval.
+        for s in [&new, &off, &back, &on] {
+            assert!(!s.ends_with(':') && !s.contains('?'), "{s}");
+        }
     }
 }
