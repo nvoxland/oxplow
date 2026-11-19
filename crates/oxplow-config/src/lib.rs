@@ -865,7 +865,7 @@ fn sources_here(
 /// The built-in role names `ai.roles` accepts beside extension AI
 /// profiles (`<extension>/<profile>`). Must match
 /// `oxplow_ai::config::BuiltinRole` (a test in oxplow-app checks).
-pub const AI_ROLE_NAMES: [&str; 4] = ["main", "summarize", "decide", "assistant"];
+pub const AI_ROLE_NAMES: [&str; 4] = ["default", "summarize", "decide", "assistant"];
 
 /// Roles oxplow dropped because nothing asked them (`oxplow_ai`'s
 /// `DROPPED_ROLES`): naming one fails saying so.
@@ -3174,6 +3174,23 @@ dimensions:
         );
     }
 
+    /// The `main` AI role is now `default`: a setting still naming it says so.
+    #[test]
+    fn the_main_ai_role_is_retired_for_default() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.ai.roles.main: { provider: p, model: m }\n",
+        )
+        .unwrap();
+        let error = load_project_config(dir.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("is retired") && error.contains("oxplow.ai.roles.default"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn rejects_unknown_keys() {
         let dir = tempdir().unwrap();
@@ -3437,15 +3454,15 @@ oxplow.lsp.servers:
                 "thinker",
             ),
             (
-                "oxplow.ai.roles.main: { provider: p, model: \"\" }\n",
-                "main",
+                "oxplow.ai.roles.default: { provider: p, model: \"\" }\n",
+                "default",
             ),
             (
                 "oxplow.ai.roles.acme.Review: { provider: p, model: m }\n",
                 "acme/Review",
             ),
             (
-                "oxplow.ai.roles.main: { provider: p, model: m, restrict: [network] }\n",
+                "oxplow.ai.roles.default: { provider: p, model: m, restrict: [network] }\n",
                 "oxplow.ai.roles",
             ),
             // A role nothing asked is gone: naming one says so.
@@ -4253,7 +4270,7 @@ metrics:
         std::fs::create_dir(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
             global.path().join("global.yaml"),
-            "oxplow.testing.command: 42\noxplow.ai.roles.main: { provider: local, model: 42 }\noxplow.agents.acme.coder.enabled: \"yes\"\n",
+            "oxplow.testing.command: 42\noxplow.ai.roles.default: { provider: local, model: 42 }\noxplow.agents.acme.coder.enabled: \"yes\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -4263,14 +4280,14 @@ metrics:
         .unwrap();
         std::fs::write(
             dir.path().join(".oxplow/local.yaml"),
-            "oxplow.testing.command: make test\noxplow.ai.roles.main: { provider: local, model: m }\noxplow.ai.roles.acme.review: { provider: local, model: r }\noxplow.agents.acme.coder.enabled: false\n",
+            "oxplow.testing.command: make test\noxplow.ai.roles.default: { provider: local, model: m }\noxplow.ai.roles.acme.review: { provider: local, model: r }\noxplow.agents.acme.coder.enabled: false\n",
         )
         .unwrap();
         let config = load_project_config_with_global(dir.path(), Some(global.path()))
             .expect("shadowed overrides are not validated");
         let yaml = serde_json::to_value(&config).unwrap();
         assert_eq!(yaml["testing"]["command"], "make test", "{yaml}");
-        assert_eq!(yaml["aiRoles"]["main"]["model"], "m", "{yaml}");
+        assert_eq!(yaml["aiRoles"]["default"]["model"], "m", "{yaml}");
         assert_eq!(yaml["aiRoles"]["acme/review"]["model"], "r", "{yaml}");
         assert_eq!(yaml["agentEnabled"]["acme/coder"], false, "{yaml}");
 

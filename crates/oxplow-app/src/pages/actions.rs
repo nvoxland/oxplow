@@ -324,29 +324,46 @@ async fn page_rows(
     .map_err(|e| invalid("/source", e.to_string()))
 }
 
+/// What a form's sources read: each choice field's choices (and which of
+/// them are suggestions only), each object field's children, and what they
+/// read.
+struct FormSources {
+    choices: BTreeMap<String, Vec<crate::viz_actions::Choice>>,
+    open_choices: Vec<String>,
+    subfields: BTreeMap<String, Vec<crate::viz_actions::Subfield>>,
+    reads: oxplow_db::Reads,
+}
+
 /// Each choice field's choices and each object field's children, from the
-/// pages they name.
+/// pages they name. A choice source's own `params` are bound over the
+/// form's params and, for a row form, its `row`.
 async fn form_sources(
     svc: &crate::Services,
-    choices: &BTreeMap<String, String>,
+    choices: &BTreeMap<String, crate::pages::spec::ChoiceSource>,
     fields: &[crate::pages::spec::FormField],
     params: &BTreeMap<String, SqlCell>,
+    row: Option<&BTreeMap<String, SqlCell>>,
     viewer: &Actor,
-) -> Result<
-    (
-        BTreeMap<String, Vec<crate::viz_actions::Choice>>,
-        BTreeMap<String, Vec<crate::viz_actions::Subfield>>,
-        oxplow_db::Reads,
-    ),
-    CommandError,
-> {
+) -> Result<FormSources, CommandError> {
     let mut out_choices = BTreeMap::new();
+    let mut open_choices = Vec::new();
     for (field, source) in choices {
-        let rows = page_rows(svc, source, params, viewer).await?;
+        let mut bound = params.clone();
+        if let Some(own) = source.params() {
+            let own = serde_json::Value::Object(own.clone().into_iter().collect());
+            let own = crate::viz_actions::bind_input(&own, params, row, None, None)?;
+            for (name, value) in own.as_object().into_iter().flatten() {
+                bound.insert(name.clone(), json_cell(value));
+            }
+        }
+        let rows = page_rows(svc, source.from(), &bound, viewer).await?;
         out_choices.insert(
             field.clone(),
-            crate::viz_actions::choices_from(&rows, field, source)?,
+            crate::viz_actions::choices_from(&rows, field, source.from())?,
         );
+        if source.open() {
+            open_choices.push(field.clone());
+        }
     }
     let mut subfields = BTreeMap::new();
     let mut reads = Vec::new();
@@ -359,7 +376,27 @@ async fn form_sources(
             crate::viz_actions::subfields_from(&rows, field.name(), source)?,
         );
     }
-    Ok((out_choices, subfields, oxplow_db::Reads::union(&reads)))
+    Ok(FormSources {
+        choices: out_choices,
+        open_choices,
+        subfields,
+        reads: oxplow_db::Reads::union(&reads),
+    })
+}
+
+/// A bound param's JSON as the cell a loader reads.
+fn json_cell(value: &serde_json::Value) -> SqlCell {
+    match value {
+        serde_json::Value::Null => SqlCell::Null(()),
+        serde_json::Value::Bool(b) => SqlCell::Int(i64::from(*b)),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(SqlCell::Int)
+            .or_else(|| n.as_f64().map(SqlCell::Real))
+            .unwrap_or_else(|| SqlCell::Text(n.to_string())),
+        serde_json::Value::String(t) => SqlCell::Text(t.clone()),
+        other => SqlCell::Text(other.to_string()),
+    }
 }
 
 /// The form node `node` of open run `run_id` (a `form` viz): its command,
@@ -430,11 +467,12 @@ pub async fn page_form(
         }
         values.remove(field.name());
     }
-    let (choices, subfields, reads) = form_sources(
+    let sources = form_sources(
         svc,
         &form.choices,
         form.fields.as_deref().unwrap_or_default(),
         &holder.params,
+        None,
         &Actor::Human,
     )
     .await?;
@@ -443,9 +481,10 @@ pub async fn page_form(
         values: Value::Object(values),
         fixed: form.fixed,
         fields: form.fields,
-        choices,
-        subfields,
-        reads,
+        choices: sources.choices,
+        open_choices: sources.open_choices,
+        subfields: sources.subfields,
+        reads: sources.reads,
     })
 }
 
@@ -614,7 +653,7 @@ async fn form_start(
     row: Option<&BTreeMap<String, SqlCell>>,
 ) -> Result<crate::viz_actions::FormStart, CommandError> {
     let values = crate::viz_actions::bind_input(&action.input, params, row, None, None)?;
-    let (choices, _, _) = form_sources(svc, &action.choices, &[], params, &Actor::Human).await?;
+    let sources = form_sources(svc, &action.choices, &[], params, row, &Actor::Human).await?;
     let name = action
         .command
         .clone()
@@ -628,7 +667,8 @@ async fn form_start(
         values,
         fixed: action.fixed,
         fields: (!action.fields.is_empty()).then_some(action.fields),
-        choices,
+        choices: sources.choices,
+        open_choices: sources.open_choices,
         subfields: BTreeMap::new(),
         reads: oxplow_db::Reads::default(),
     })

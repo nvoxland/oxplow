@@ -68,8 +68,8 @@
     ]
   },
   {
-    "key": "oxplow.ai.roles.main",
-    "title": "AI role main",
+    "key": "oxplow.ai.roles.default",
+    "title": "AI role default",
     "description": "Provider and model used for this role. Remove the override to inherit.",
     "category": "ai",
     "default": null,

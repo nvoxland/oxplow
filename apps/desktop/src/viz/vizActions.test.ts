@@ -4,7 +4,7 @@ import { createFailureStore, createInlineClaims } from "../commands/actionFailur
 import { createRunner } from "../commands/runForPerson.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
-import { skipSummary, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
+import { skipSummary, actionHelp, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: false };
@@ -223,10 +223,10 @@ test("an `open` action opens the URI the press answered, with no toast, undo or 
   expect(await performVizAction(open, run, null, null, false, none)).toBe("failed");
 });
 
-test("actionDoes says what an action does in words, never its command's id", () => {
-  expect(actionDoes({ ...action, does: "Pull the stream's branch." })).toBe("Pull the stream's branch.");
-  expect(actionDoes({ ...action, does: null })).toBe("");
-  expect(actionDoes({ ...action, command: null, open: "current_uri" })).toBe("");
+test("actionHelp is the page's help, else nothing", () => {
+  expect(actionHelp({ ...action, help: "Pull the stream's branch." })).toBe("Pull the stream's branch.");
+  expect(actionHelp({ ...action, help: null })).toBe("");
+  expect(actionHelp({ ...action, command: null, open: "current_uri" })).toBe("");
 });
 
 test("an action whose result names a thing offers an Open link to it", async () => {

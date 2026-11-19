@@ -5288,6 +5288,85 @@ mod tests {
         assert!(err.contains("`primary` is for a row action"), "{err}");
     }
 
+    /// `also` puts other actions of the viz in a form action's form, as
+    /// buttons beside its own (a Remove in an Edit form): they run on the
+    /// form's row, and are shown only there (`in_form`). Each must be an
+    /// action of the viz that runs at once, a row action when the form is
+    /// one, and in one form only.
+    #[test]
+    fn also_puts_actions_in_a_forms_footer_and_only_there() {
+        let parse = |actions: &[&str]| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                false,
+                false,
+            )
+        };
+        let edit =
+            "{ id: edit, label: Edit…, command: x.y.set, row: true, form: true, also: [remove] }";
+        let remove = "{ id: remove, label: Remove, command: x.y.remove, row: true }";
+        let ok = parse(&[edit, remove]).unwrap();
+        assert_eq!(ok[0].also, vec!["remove".to_string()]);
+        assert_eq!(ok[0].in_form, None);
+        assert_eq!(ok[1].in_form.as_deref(), Some("edit"));
+        for (actions, why) in [
+            (vec![edit], "names `remove`, which isn't an action of this viz"),
+            (vec!["{ id: edit, label: Edit, command: x.y.set, row: true, also: [remove] }", remove], "`also` is for a form action"),
+            (vec![edit, "{ id: remove, label: Remove, command: x.y.remove }"], "a row action's form shows row actions"),
+            (vec![edit, "{ id: remove, label: Remove…, command: x.y.remove, row: true, form: true }"], "runs at once"),
+            (vec!["{ id: edit, label: Edit…, command: x.y.set, row: true, form: true, also: [edit] }"], "names itself"),
+            (vec![edit, "{ id: other, label: Other…, command: x.y.set, row: true, form: true, also: [remove] }", remove], "already in `edit`'s form"),
+        ] {
+            let err = parse(&actions).unwrap_err();
+            assert!(err.contains(why), "{actions:?}: {err}");
+        }
+    }
+
+    /// `submit` names a form's button when the action's label is the wrong
+    /// verb for it (an Edit… saves): only on a form action, never blank.
+    #[test]
+    fn submit_names_a_forms_button_only_on_a_form_action() {
+        let parse =
+            |a: &str| parse_actions(vec![serde_yaml::from_str(a).unwrap()], &[], false, false);
+        let ok =
+            parse("{ id: e, label: Edit…, command: x.y.z, row: true, form: true, submit: Save }")
+                .unwrap();
+        assert_eq!(ok[0].submit.as_deref(), Some("Save"));
+        for (action, why) in [
+            (
+                "{ id: e, label: Edit, command: x.y.z, row: true, submit: Save }",
+                "`submit` is for a form action",
+            ),
+            (
+                "{ id: e, label: Edit…, command: x.y.z, row: true, form: true, submit: ' ' }",
+                "`submit` is blank",
+            ),
+        ] {
+            let err = parse(action).unwrap_err();
+            assert!(err.contains(why), "{action}: {err}");
+        }
+    }
+
+    /// A choice source's `params` bind like the form's input: `{{row.*}}`
+    /// only on an action that has a row; a page action's form binds
+    /// `{{param.*}}`.
+    #[test]
+    fn a_choice_sources_params_bind_the_row_only_on_a_row_action() {
+        let parse =
+            |a: &str| parse_actions(vec![serde_yaml::from_str(a).unwrap()], &[], false, false);
+        let ok = parse("{ id: a, label: A…, command: x.y.z, row: true, form: true, choices: { m: { from: e/p#m, params: { p: '{{row.id}}' }, open: true } } }").unwrap();
+        assert!(ok[0].choices["m"].open());
+        let err = parse("{ id: a, label: A…, command: x.y.z, form: true, choices: { m: { from: e/p#m, params: { p: '{{row.id}}' } } } }").unwrap_err();
+        assert!(
+            err.contains("bind `{{row.id}}`, but the action has no row"),
+            "{err}"
+        );
+    }
+
     /// `prominent` keeps a page action a button in the page's nav bar
     /// instead of its ☰ menu; several may be. A row, group or edit action
     /// isn't in the nav bar, so it can't be.
@@ -6802,7 +6881,7 @@ commands:
         assert!(
             ext.errors
                 .iter()
-                .any(|e| e.contains("extension.yaml:7:") && e.contains("`fallback` is `main`")),
+                .any(|e| e.contains("extension.yaml:7:") && e.contains("`fallback` is `default`")),
             "{:?}",
             ext.errors
         );

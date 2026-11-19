@@ -312,7 +312,10 @@ validates authorized complete reads against the declaration. Reset uses
 `config.unset` at an explicit level, exposing the next inherited value.
 
 Annotations supply registry metadata: `x-category`, `x-ui`, `x-order`,
-`x-secret` and `x-atomic`; any other `x-` key is refused. A category that `x-category` names (the
+`x-secret`, `x-mask` and `x-atomic`; any other `x-` key is refused. `x-mask:
+{ prefix: 8, suffix: 4 }` on a secret says how many characters of each end an
+agent reading it sees (`sk_live_••••WXYZ`; each end 0–8, both required; the
+ends show only when they are at most a third of the value; default the last 4). A category that `x-category` names (the
 namespace when none) can be declared beside the schema:
 `categories: { review: { title: Review, description: …, order: 85 } }`; core's
 category ids are core's. `x-ui` has one hint, `{ editor: multiline }`

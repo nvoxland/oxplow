@@ -2,11 +2,14 @@
 
 Oxplow can call models itself, separately from your coding agents: to
 summarize something, or to answer a quick typed question like "is this diff
-risky?". You pick which model does which job in **Settings → AI**.
+risky?", and the Assistant in the bottom bar's ✦ panel is one of them. You
+set up providers and pick which model does which job on the **AI Settings**
+page (also **Settings → AI**).
 
 ## Providers
 
-Enable the declared service you want to use. Each provider has one connection:
+**Add a Provider…** sets one up. A provider's pencil (or a click on its
+row) edits its URL or key, or removes it. Each provider has one connection:
 
 | Kind | What you need |
 |---|---|
@@ -28,8 +31,11 @@ Each provider has independent `oxplow.ai.<provider>.enabled`, `.baseUrl` and
 secret `.apiKey` settings. Changing the endpoint requires saving a key for the
 new destination.
 
-**Test** makes one small call with the model you name, so you can check
-the key, URL and model name before using them.
+**Test…** makes one small call with the model you name, so you can check
+the key, URL and model name before using them. As you type a model, oxplow
+suggests the provider's models: a hosted service's from the catalog oxplow
+ships, a local server's (Ollama, llama.cpp, any OpenAI-compatible one) from
+the server itself. You can always type a model id it doesn't list.
 
 ### Provider permissions
 
@@ -49,12 +55,17 @@ Oxplow and extensions ask for a role, not a model:
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning |
+| `default` | every role without a model of its own, and general reasoning |
 | `summarize` | summaries of sessions, requests and changes |
 | `decide` | typed yes/no, choice and score questions (Jev fits well) |
+| `assistant` | the Assistant; it needs a model that can call tools and stream |
 
-A role with no model assigned just isn't available. Anything that needs it
-says so.
+Set **Default** first: every other role without a model of its own uses
+Default's, so one model makes everything work. Give a role its own model
+only to make it different, such as a cheaper one for `summarize`. Under
+**Models**, a role's pencil (or a click on its row) chooses its model, and
+**Use the Fallback Model** goes back to Default's. With no model on
+Default either, a role isn't available, and anything that needs it says so.
 
 A project can set roles for everyone working on it in `.oxplow/project.yaml`:
 
@@ -63,13 +74,14 @@ oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
 ```
 
 The provider id names a declared service, so each person enables that service
-and supplies their own credential. Settings → AI marks these roles "Set by this project".
+and supplies their own credential. AI Settings shows these roles as "Set in
+project.yaml", and you change them there.
 
 ### Restricting what a model may do
 
 A role's model can be kept from using tools, SQL, streaming or image
-input, whatever asks it. In Settings → AI, uncheck what the role's model
-**Allows**; in a file, list what it may not do:
+input, whatever asks it. List what it may not do in the role's setting
+(choosing its model on AI Settings keeps the list):
 
 ```yaml
 oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini, restrict: [tools, sql] }
@@ -101,7 +113,7 @@ It can't change providers, roles or keys.
 
 ## Seeing the calls
 
-**Recent Calls** in Settings → AI shows the last week by role and caller.
+**This week's calls** on AI Settings shows the last week by role and caller.
 Every call is also in the `v_ai_call` view, so you can query it in Explore
 Data or build a [page](pages.md) over it. Oxplow doesn't track spend; use
 your provider's dashboard for that.

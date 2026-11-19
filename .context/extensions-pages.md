@@ -509,7 +509,13 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   Escape) puts them back, and it lists its `fields`. `create`, the
   default, gathers something new. `choices` maps a field to a page of the
   extension, run with the form's params, whose rows (`value`, `label`,
-  optional `group`) are the field's choices. A field `{ name: native,
+  optional `group`) are the field's choices (`ChoiceSource`): a name, or
+  `{ from, params, open }`. `params` are bound like the form's input and run
+  the page with them besides the form's own (`{{row.x}}` on a row form: one
+  provider's models; refused at load on an action with no row). `open: true`
+  makes them suggestions (`FormStart.open_choices`): a text field with a
+  datalist that takes any value, shown even when it has none to suggest; the
+  server never checks a choice field's value against its choices. A field `{ name: native,
   from: <page> }` is an object whose children that page names, one row per
   child — `name`, `title`, `kind` (`enum`, `text`, `number`), `values`,
   `read_only` — and its value is the object of those children; the form
@@ -645,7 +651,7 @@ usability.md "Keyboard").
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
 group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, enabled?, fact?, primary?,
-prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm?, options_from?, current? }` (`PageAction`).
+prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm?, options_from?, current?, also? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,
 checked at load). A page action with `when` or `{{row.*}}` and no `row`
@@ -676,8 +682,7 @@ is gone, is the toast's (usability.md "A person's command that fails").
   `input`, `form`, `fixed`, `choices`, `drag`, `bulk`, `edit` or `group`.
   The extension check names a column the loader lacks (`when` and `open`
   alike, for page and viz actions). `PageAction.command` is nullable in the
-  bindings; `actionDoes` (vizActions.ts) is what an action's title says
-  (`opens <column>`). The Text view's "Open current version" is one:
+  bindings. The Text view's "Open current version" is one:
   `open: current_uri` over its loader's column.
 - A **`point:`** action (instead of `command:`) runs whichever command
   answers an action point, for the context `context:` binds (bound as
@@ -732,8 +737,32 @@ is gone, is the toast's (usability.md "A person's command that fails").
   - non-`fixed` `input` values are the fields' starting values; a
     `choices` field shows each row's `label`, sends its `value`, and
     starts on the one `input` names.
+- `also: [<id>, …]` (a form action) puts other actions of the same viz in
+  its form: quiet buttons at the left of its buttons (`SchemaForm`'s
+  `leading`), each offered as on the form's row (`when`), pressed on that
+  row as from its menu once the form closes (a command that asks asks
+  then). Each must run at once (not a form, drag, edit, open or options
+  action), be a row action when the form is one (a page action when not),
+  and be in one form only; load derives its `in_form`, and the app leaves
+  it off the row's menu, its click and keys, and the page's buttons
+  (`rowMenuAction`, `offeredWholePage`). A form with `also` is always the
+  modal, never the one-field prompt strip. AI Settings' provider
+  Edit… holds its Remove.
+- `help: <text>` (any action) is its hover, written for a person: what
+  pressing it does when the label doesn't say (`actionHelp`). Nothing else
+  is: a command's `summary` is written for agents (input names, ids,
+  backticks) and is never a hover, as a field's help is never its schema
+  `description`. No `help`, no hover; an icon-only button's hover is its
+  label.
+- `submit: <label>` (a form action) labels the form's button when the
+  action's label is the wrong verb for it: an Edit… over something that
+  exists submits with Save (`usability.md` "An action form is for a
+  person"). Without it the button is the label without its `…`. Load
+  refuses it on an action that isn't a form, and blank.
 - `primary: true` (a row action) is what a click on the row, or Enter,
-  runs: the first one the row is offered (`when`). `prominent: true`
+  runs: the first one the row is offered (`when`). When it is a form, a
+  table row also ends in its icon button (a pencil, or its `icon`; the
+  label its hover: `rowButton`, `usability.md`). `prominent: true`
   keeps a page action a button in the nav bar; the rest go in the ☰ menu
   (`submenu` groups them). `bulk` runs once per marked row; `key` runs on
   the cursor row; `group: <value>` puts the button in that group's

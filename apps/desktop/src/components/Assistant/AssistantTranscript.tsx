@@ -1,11 +1,15 @@
-import React, { memo, useEffect, useRef } from "react";
+import React, { memo, useEffect, useRef, useState } from "react";
+import { Brain, ChevronRight, Circle, CircleAlert, CircleCheck, CircleDot, CircleHelp, ShieldAlert, Wrench } from "lucide-react";
 
 import { Markdown } from "../Markdown/Markdown.js";
 import type { AssistantItem, AssistantToolCall } from "./assistantApi.js";
 
-/** The conversation: the person's prompts, the Assistant's text, folded
- *  thoughts, tool calls with their status, output and Undo, and permission
- *  cards (Allow / Decline). Follows the end while the person is at the bottom. */
+/** The conversation: the person's prompts (bubbles), the Assistant's text,
+ *  and everything else as rows in the dock panels' style — thinking and tool
+ *  calls open in place to their text (a call's status and Undo on its line),
+ *  a permission request is a decision row with Allow / Decline, a block or an
+ *  error a one-line note with its icon. Follows the end while the person is
+ *  at the bottom. */
 export const AssistantTranscript = memo(function AssistantTranscript({
   items,
   undone,
@@ -59,70 +63,71 @@ const Item = memo(function Item({
   switch (item.type) {
     case "user":
       return (
-        <div style={{ maxWidth: "85%", marginLeft: "auto", ...bubble("var(--accent-soft-bg)") }}>
+        <div style={{ maxWidth: "85%", marginLeft: "auto", background: "var(--accent-soft-bg)", borderRadius: 8, padding: "6px 10px" }}>
           <div style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>
         </div>
       );
     case "agent":
       return <Markdown value={item.text} />;
     case "thought":
-      return (
-        <details style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-          <summary>Thinking</summary>
-          <div style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>
-        </details>
-      );
+      return <Row icon={<Brain size={13} aria-hidden />} title="Thinking" muted body={<div style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>} />;
     case "tool":
-      return <ToolCard call={item.call} undone={undone} onUndo={onUndo} />;
+      return <ToolRow call={item.call} undone={undone} onUndo={onUndo} />;
     case "plan":
       return (
-        <div style={bubble("var(--surface-card)")}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Plan</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 2 }}>
+          <div style={{ color: "var(--text-muted)", fontWeight: 600 }}>Plan</div>
           {item.entries.map((e, i) => (
-            <div key={i} style={{ color: e.status === "completed" ? "var(--text-muted)" : "var(--text-primary)" }}>
-              {e.status === "completed" ? "●" : e.status === "in_progress" ? "◐" : "○"} {e.content}
+            <div key={i} style={{ display: "flex", gap: 6, color: e.status === "completed" ? "var(--text-muted)" : "var(--text-primary)" }}>
+              {e.status === "completed" ? (
+                <CircleCheck size={13} aria-label="Done" style={{ flexShrink: 0, marginTop: 1, color: "var(--status-done)" }} />
+              ) : e.status === "in_progress" ? (
+                <CircleDot size={13} aria-label="Working on it" style={{ flexShrink: 0, marginTop: 1, color: "var(--status-running)" }} />
+              ) : (
+                <Circle size={13} aria-label="To do" style={{ flexShrink: 0, marginTop: 1, color: "var(--text-muted)" }} />
+              )}
+              <span style={{ textDecoration: e.status === "completed" ? "line-through" : "none" }}>{e.content}</span>
             </div>
           ))}
         </div>
       );
     case "permission":
       return (
-        <div data-testid={`assistant-permission-${item.requestId}`} style={notice("var(--status-waiting)")}>
-          <div style={{ marginBottom: 6 }}>
-            The Assistant asks to run <strong>{item.title}</strong>
-          </div>
+        <div data-testid={`assistant-permission-${item.requestId}`} style={{ ...rowFrame, display: "flex", alignItems: "center", gap: 8, padding: "6px 8px" }}>
+          <CircleHelp size={13} aria-label="Asks you" style={{ flexShrink: 0, color: "var(--accent)" }} />
+          <span style={{ flex: 1, minWidth: 0 }}>
+            Asks to run <strong>{item.title}</strong>
+          </span>
           {item.answer ? (
-            <div style={{ color: "var(--text-secondary)" }}>{answerLine(item)}</div>
+            <span style={{ color: "var(--text-muted)" }}>{answerLine(item)}</span>
           ) : (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" data-testid={`assistant-allow-${item.requestId}`} style={primaryButton} onClick={() => onAnswer(item.requestId, true)}>
+            <>
+              <button type="button" className="ox-button ox-primary" data-testid={`assistant-allow-${item.requestId}`} onClick={() => onAnswer(item.requestId, true)}>
                 Allow
               </button>
-              <button type="button" data-testid={`assistant-decline-${item.requestId}`} style={smallButton} onClick={() => onAnswer(item.requestId, false)}>
+              <button type="button" className="ox-button" data-testid={`assistant-decline-${item.requestId}`} onClick={() => onAnswer(item.requestId, false)}>
                 Decline
               </button>
-            </div>
+            </>
           )}
         </div>
       );
     case "policy_denied":
-      return (
-        <div style={notice("var(--status-waiting)")}>
-          oxplow blocked {item.label}: {item.reason}
-        </div>
-      );
+      return <Note tone="var(--status-waiting)" icon={<ShieldAlert size={13} aria-label="Blocked" />} text={<>oxplow blocked {item.label}: {item.reason}</>} />;
     case "bypass":
       return (
-        <div style={notice("var(--severity-high)")}>
-          <strong>{item.label} ran without asking.</strong> oxplow would have blocked it: {item.reason}
-        </div>
+        <Note
+          tone="var(--severity-high)"
+          icon={<ShieldAlert size={13} aria-label="Ran without asking" />}
+          text={
+            <>
+              <strong>{item.label} ran without asking.</strong> oxplow would have blocked it: {item.reason}
+            </>
+          }
+        />
       );
     case "error":
-      return (
-        <div data-testid="assistant-error-item" style={notice("var(--severity-critical)")}>
-          {item.message}
-        </div>
-      );
+      return <Note testId="assistant-error-item" tone="var(--severity-critical)" icon={<CircleAlert size={13} aria-label="Failed" />} text={item.message} />;
   }
 });
 
@@ -133,34 +138,112 @@ function answerLine(item: Extract<AssistantItem, { type: "permission" }>): strin
   return kind && kind.startsWith("allow") ? "Allowed" : "Declined";
 }
 
-function ToolCard({ call, undone, onUndo }: { call: AssistantToolCall; undone: ReadonlySet<number>; onUndo(auditId: number): void }) {
+/** A one-line note: an icon in its tone and what it says. */
+function Note({ tone, icon, text, testId }: { tone: string; icon: React.ReactNode; text: React.ReactNode; testId?: string }) {
+  return (
+    <div data-testid={testId} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "2px 2px" }}>
+      <span style={{ display: "inline-flex", flexShrink: 0, marginTop: 1, color: tone }}>{icon}</span>
+      <span style={{ flex: 1, minWidth: 0, color: "var(--text-primary)" }}>{text}</span>
+    </div>
+  );
+}
+
+/** A row that opens in place, as a Context or Alerts row does: a chevron,
+ *  an icon, a title, what is at its right; its body under it once open. */
+function Row({
+  icon,
+  title,
+  right,
+  body,
+  muted = false,
+  testId,
+}: {
+  icon: React.ReactNode;
+  title: React.ReactNode;
+  right?: React.ReactNode;
+  body?: React.ReactNode;
+  muted?: boolean;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState(false);
+  const toggles = body != null;
+  return (
+    <div data-testid={testId} style={rowFrame}>
+      <div
+        role={toggles ? "button" : undefined}
+        tabIndex={toggles ? 0 : undefined}
+        aria-expanded={toggles ? open : undefined}
+        onClick={() => toggles && setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (toggles && e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: toggles ? "pointer" : "default", background: hover && toggles ? "rgba(255, 255, 255, 0.04)" : "transparent", minWidth: 0 }}
+      >
+        <ChevronRight
+          size={12}
+          aria-hidden
+          style={{ flexShrink: 0, color: "var(--text-muted)", visibility: toggles ? "visible" : "hidden", transform: open ? "rotate(90deg)" : "none", transition: "transform 150ms ease" }}
+        />
+        <span style={{ display: "inline-flex", flexShrink: 0, color: "var(--text-muted)" }}>{icon}</span>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: muted ? "var(--text-secondary)" : "var(--text-primary)" }}>{title}</span>
+        {right}
+      </div>
+      {toggles ? (
+        <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 180ms ease" }}>
+          <div inert={!open} aria-hidden={!open} style={{ overflow: "hidden", minHeight: 0 }}>
+            <div style={{ padding: "2px 8px 8px 46px", color: "var(--text-secondary)" }}>{body}</div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolRow({ call, undone, onUndo }: { call: AssistantToolCall; undone: ReadonlySet<number>; onUndo(auditId: number): void }) {
   const output = call.text.join("\n").trim();
   const canUndo = call.auditId != null && call.status === "completed";
   return (
-    <div data-testid="assistant-tool" style={{ ...bubble("var(--surface-card)"), fontSize: 12 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-        <span style={{ color: "var(--text-secondary)" }}>{call.kind}</span>
-        <span style={{ color: "var(--text-primary)", flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{call.title || call.name || "Tool call"}</span>
-        <span data-testid="assistant-tool-status" style={{ color: toolStatusColor(call.status) }}>
-          {call.status.replace("_", " ")}
-        </span>
-        {canUndo ? (
-          undone.has(call.auditId!) ? (
-            <span style={{ color: "var(--text-muted)" }}>undone</span>
-          ) : (
-            <button type="button" data-testid="assistant-undo" style={smallButton} onClick={() => onUndo(call.auditId!)}>
-              Undo
-            </button>
-          )
-        ) : null}
-      </div>
-      {output ? (
-        <details style={{ marginTop: 4 }}>
-          <summary style={{ color: "var(--text-secondary)" }}>Result</summary>
-          <pre style={preStyle}>{output}</pre>
-        </details>
-      ) : null}
-    </div>
+    <Row
+      testId="assistant-tool"
+      icon={<Wrench size={13} aria-label={call.kind} />}
+      title={
+        <>
+          <span style={{ color: "var(--text-muted)" }}>{call.kind} </span>
+          {call.title || call.name || "Tool call"}
+        </>
+      }
+      right={
+        <>
+          <span data-testid="assistant-tool-status" style={{ flexShrink: 0, color: toolStatusColor(call.status) }}>
+            {call.status.replace("_", " ")}
+          </span>
+          {canUndo ? (
+            undone.has(call.auditId!) ? (
+              <span style={{ flexShrink: 0, color: "var(--text-muted)" }}>undone</span>
+            ) : (
+              <button
+                type="button"
+                data-testid="assistant-undo"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUndo(call.auditId!);
+                }}
+                style={linkButton}
+              >
+                Undo
+              </button>
+            )
+          ) : null}
+        </>
+      }
+      body={output ? <pre style={preStyle}>{output}</pre> : undefined}
+    />
   );
 }
 
@@ -177,23 +260,16 @@ function toolStatusColor(s: AssistantToolCall["status"]): string {
   }
 }
 
-const bubble = (bg: string): React.CSSProperties => ({ background: bg, border: "1px solid var(--border-subtle)", borderRadius: 6, padding: "6px 10px" });
-const notice = (color: string): React.CSSProperties => ({
-  borderLeft: `3px solid ${color}`,
-  background: "var(--surface-card)",
-  padding: "6px 10px",
-  borderRadius: 4,
-  color: "var(--text-primary)",
-  fontSize: 12,
-});
-const preStyle: React.CSSProperties = { whiteSpace: "pre-wrap", margin: "4px 0 0", maxHeight: 240, overflow: "auto", fontSize: 11, color: "var(--text-secondary)" };
-const smallButton: React.CSSProperties = {
-  background: "transparent",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 4,
-  padding: "2px 10px",
-  fontSize: 12,
-  cursor: "pointer",
+const rowFrame: React.CSSProperties = { border: "1px solid var(--border-subtle)", borderRadius: 6, background: "rgba(255, 255, 255, 0.02)", overflow: "hidden" };
+const preStyle: React.CSSProperties = {
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  margin: 0,
+  maxHeight: 240,
+  overflow: "auto",
+  fontSize: 11,
+  fontFamily: "var(--font-mono, monospace)",
+  borderLeft: "2px solid var(--border-subtle)",
+  paddingLeft: 8,
 };
-const primaryButton: React.CSSProperties = { ...smallButton, background: "var(--button-primary-bg)", color: "var(--button-primary-fg)", border: "none" };
+const linkButton: React.CSSProperties = { background: "none", border: "none", padding: 0, font: "inherit", color: "var(--accent)", cursor: "pointer", flexShrink: 0 };

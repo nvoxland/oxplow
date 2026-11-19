@@ -1,0 +1,210 @@
+title: AI Settings
+label: AI settings
+description: Set up oxplow's AI — the providers models come from, the model each role uses (the Assistant's among them), and this week's calls.
+icon: sparkles
+category: System
+keywords: ai model provider key role assistant default summarize decide settings
+answers:
+- question: Which model does each AI role use, and where does it come from?
+  params: {}
+- question: How do I set up the Assistant?
+  params: {}
+- question: Which AI providers are set up?
+  params: {}
+params:
+# The provider and role a form's Model suggestions are for (a row's): never drawn.
+- { name: provider, role: view }
+- { name: role, role: view }
+loaders:
+  providers:
+    sql: |
+      SELECT p.id, p.kind AS kind_id, coalesce(k.title, p.kind) AS kind, coalesce(p.base_url, '') AS base_url,
+             CASE WHEN p.key_set THEN 'Saved' ELSE 'No key' END AS key,
+             -- The roles whose model comes from it, own or fallen back to.
+             coalesce((SELECT group_concat(CASE WHEN r.namespace IS NULL THEN upper(substr(r.role, 1, 1)) || substr(r.role, 2)
+                                                ELSE r.role END, ', ')
+                       FROM v_ai_role r WHERE r.effective_provider = p.id), '') AS used_by,
+             -- What Test… starts from: a model a role uses from it.
+             (SELECT r.effective_model FROM v_ai_role r WHERE r.effective_provider = p.id LIMIT 1) AS test_model,
+             NOT EXISTS (SELECT 1 FROM v_ai_role r WHERE r.provider = p.id) AS removable
+      FROM v_ai_provider p
+      LEFT JOIN v_capability_provider k ON k.capability = 'ai_provider' AND k.provider = p.kind
+      ORDER BY p.id
+  # Each role: the model it uses, and whether it was chosen for it or comes
+  # from the role it falls back to. Use the Fallback Model only while the
+  # fallback has one; a role project.yaml sets is changed there.
+  roles:
+    sql: |
+      SELECT r.role, own.name AS label,
+             -- Its name, then what it is used for.
+             '**' || own.name || '**' || CASE WHEN coalesce(r.description, '') = '' THEN '' ELSE ' — ' || r.description END AS name,
+             -- The model it uses: its own, its fallback's (named), or what it
+             -- would fall back to; a problem (its model can't do what the
+             -- role needs) follows the model, in warning.
+             CASE WHEN r.effective_model IS NULL
+                    THEN CASE WHEN r.fallback IS NOT NULL THEN 'Not set up (' || fb.name || ' has none)' ELSE 'Not set up' END
+                  ELSE CASE WHEN r.provider IS NULL AND NOT r.overridden THEN fb.name || '''s: ' ELSE '' END
+                       || r.effective_provider || ' · ' || r.effective_model
+                       || CASE WHEN r.overridden THEN ' (set in project.yaml)' ELSE '' END
+                       || coalesce(' — ' || replace(r.problem, '`', ''), '') END AS uses,
+             CASE WHEN r.problem IS NOT NULL THEN 'warning' END AS uses_tone,
+             NOT r.overridden AS can_choose,
+             (NOT r.overridden AND r.provider IS NOT NULL AND f.effective_model IS NOT NULL) AS can_fall_back,
+             -- Choose Model… starts at what it uses, else the first provider.
+             coalesce(r.effective_provider, (SELECT min(id) FROM v_ai_provider)) AS start_provider,
+             r.effective_model,
+             coalesce(r.restrict, '[]') AS restrict
+      FROM v_ai_role r
+      JOIN (SELECT role, CASE WHEN namespace IS NULL THEN upper(substr(role, 1, 1)) || substr(role, 2) ELSE role END AS name
+            FROM v_ai_role) own ON own.role = r.role
+      LEFT JOIN v_ai_role f ON f.role = r.fallback
+      LEFT JOIN (SELECT role, CASE WHEN namespace IS NULL THEN upper(substr(role, 1, 1)) || substr(role, 2) ELSE role END AS name
+                 FROM v_ai_role) fb ON fb.role = r.fallback
+  # The forms' choices: the configured providers, and the kinds not set up yet.
+  provider_choices:
+    sql: "SELECT id AS value, id AS label FROM v_ai_provider ORDER BY id"
+  add_choices:
+    sql: |
+      SELECT k.provider AS value, coalesce(k.title, k.provider) AS label
+      FROM v_capability_provider k
+      WHERE k.capability = 'ai_provider' AND NOT EXISTS (SELECT 1 FROM v_ai_provider p WHERE p.id = k.provider)
+      ORDER BY label
+  # A Model field's suggestions: one provider's models (a provider's row),
+  # else every provider's, labelled with it. The Assistant's leave out the
+  # ones its catalog says can't call tools. Any model id may still be typed.
+  models:
+    sql: |
+      SELECT model AS value,
+             CASE WHEN :provider IS NULL THEN provider || ' · ' || model ELSE model END AS label
+      FROM v_ai_model
+      WHERE (:provider IS NULL OR provider = :provider)
+        AND (coalesce(:role, '') <> 'assistant' OR tool_calling <> 'unsupported')
+      ORDER BY provider, model
+  calls:
+    sql: |
+      SELECT CASE WHEN r.namespace IS NULL THEN upper(substr(c.role, 1, 1)) || substr(c.role, 2) ELSE c.role END AS role,
+             c.caller, count(*) AS calls, sum(1 - c.ok) AS failed,
+             sum(c.input_tokens) AS input_tokens, sum(c.output_tokens) AS output_tokens, max(c.at) AS last_at
+      FROM v_ai_call c
+      LEFT JOIN v_ai_role r ON r.role = c.role
+      WHERE c.at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+      GROUP BY c.role, c.caller
+      ORDER BY last_at DESC
+view:
+  stack:
+  - id: providers
+    title: Providers
+    description: Where models come from. A key is kept in your OS keychain and never shown. Edit or remove a provider with its pencil, or a click on its row.
+    viz: table
+    from: providers
+    columns:
+    - { key: id, label: Name }
+    - { key: kind, label: Kind }
+    - { key: base_url, label: Base URL }
+    - { key: key, label: Key, width: 90 }
+    - { key: used_by, label: Used by }
+    empty: No providers yet. Add one to give oxplow's AI features a model.
+    actions:
+    - id: add-provider
+      label: Add a Provider…
+      command: oxplow.ai.set_provider
+      form: true
+      prominent: true
+      fields:
+      - { name: kind, label: Kind }
+      - { name: base_url, label: Base URL, help: "Leave it empty for the provider's own." }
+      - { name: key, label: API key, help: "Kept in your OS keychain, never shown." }
+      choices:
+        kind: oxplow/ai-settings#add_choices
+    - id: edit-provider
+      label: Edit…
+      command: oxplow.ai.set_provider
+      form: true
+      row: true
+      primary: true
+      submit: Save
+      also: [remove-provider]
+      about: id
+      fixed: [kind]
+      input:
+        kind: '{{row.kind_id}}'
+        base_url: '{{row.base_url}}'
+      fields:
+      - { name: base_url, label: Base URL, help: "Leave it empty for the provider's own." }
+      - { name: key, label: API key, help: "Leave it empty to keep the saved one." }
+    - id: test-provider
+      label: Test…
+      command: oxplow.ai.test_provider
+      form: true
+      row: true
+      about: id
+      help: Make one small call to a model at this provider, to check its key and URL. It spends your key.
+      fixed: [id]
+      input:
+        id: '{{row.id}}'
+        model: '{{row.test_model}}'
+      fields:
+      - { name: model, label: Model, help: "Pick one as you type, or type its id at this provider." }
+      choices:
+        model: { from: oxplow/ai-settings#models, params: { provider: '{{row.id}}' }, open: true }
+    - id: remove-provider
+      label: Remove
+      command: oxplow.ai.remove_provider
+      row: true
+      when: removable
+      input:
+        id: '{{row.id}}'
+  - id: roles
+    title: Models
+    description: Each AI feature uses the model of a role. A role without a model of its own uses Default's (an extension's role may fall back to another, which ends at Default), so setting Default makes them all work. Choose a role's model with its pencil, or a click on its row.
+    viz: table
+    from: roles
+    columns:
+    - { key: name, label: Role, format: markdown }
+    - { key: uses, label: Uses, tone: uses_tone }
+    empty: No roles.
+    actions:
+    - id: choose-model
+      label: Choose Model…
+      command: oxplow.ai.set_role
+      form: true
+      row: true
+      primary: true
+      submit: Save
+      when: can_choose
+      about: label
+      fixed: [role, restrict]
+      input:
+        role: '{{row.role}}'
+        provider: '{{row.start_provider}}'
+        model: '{{row.effective_model}}'
+        restrict: '{{row.restrict|json}}'
+      fields:
+      - { name: provider, label: Provider }
+      - { name: model, label: Model, help: "Pick one as you type, or type its id at that provider." }
+      choices:
+        provider: oxplow/ai-settings#provider_choices
+        model: { from: oxplow/ai-settings#models, params: { role: '{{row.role}}' }, open: true }
+    - id: use-fallback
+      label: Use the Fallback Model
+      command: oxplow.ai.set_role
+      row: true
+      when: can_fall_back
+      help: Stop using a model chosen for this role, and use the one the role it falls back to uses.
+      input:
+        role: '{{row.role}}'
+  - id: calls
+    title: This week's calls
+    viz: table
+    from: calls
+    columns:
+    - { key: role, label: Role, width: 110 }
+    - { key: caller, label: Asked by }
+    - { key: calls, label: Calls, format: integer, width: 70 }
+    - { key: failed, label: Failed, format: integer, width: 70 }
+    - { key: input_tokens, label: In, format: integer, width: 90 }
+    - { key: output_tokens, label: Out, format: integer, width: 90 }
+    - { key: last_at, label: Last, format: relative, width: 110 }
+    empty: No AI calls this week.
+see_also:
+- { page: oxplow/settings-category, params: { category: ai } }

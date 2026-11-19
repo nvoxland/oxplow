@@ -159,19 +159,6 @@ impl Page {
             .map_or(self.id.as_str(), |(ns, _)| ns)
     }
 
-    /// Say what each action does, from `summary` of its command: what a
-    /// button's hover reads.
-    pub fn describe_actions(&mut self, summary: impl Fn(&str) -> Option<String>) {
-        let mut describe = |a: &mut PageAction| {
-            a.does = a.command.as_deref().and_then(&summary);
-        };
-        self.actions.iter_mut().for_each(&mut describe);
-        self.view.for_each_action(&mut describe);
-        if let Some(rail) = &mut self.rail {
-            rail.for_each_action(&mut describe);
-        }
-    }
-
     pub fn nodes(&self) -> Vec<&Node> {
         let mut out = Vec::new();
         self.view.walk(&mut out);
@@ -510,21 +497,6 @@ impl Node {
                     c.for_each_origin(f);
                 }
             }
-            _ => {}
-        }
-    }
-
-    /// Each viz's actions below it, `self` included.
-    fn for_each_action(&mut self, f: &mut impl FnMut(&mut PageAction)) {
-        match &mut self.kind {
-            NodeKind::Stack { children }
-            | NodeKind::Grid { children }
-            | NodeKind::Switch { children, .. } => {
-                for c in children {
-                    c.for_each_action(f);
-                }
-            }
-            NodeKind::Viz { config, .. } => config.actions.iter_mut().for_each(&mut *f),
             _ => {}
         }
     }

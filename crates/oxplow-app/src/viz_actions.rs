@@ -278,6 +278,10 @@ pub struct FormStart {
     pub fields: Option<Vec<crate::pages::spec::FormField>>,
     /// Fields picked from a list, with their choices.
     pub choices: BTreeMap<String, Vec<Choice>>,
+    /// The choice fields whose choices are suggestions only (`open`): the
+    /// person may type any value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_choices: Vec<String>,
     /// Object fields' children, read from their `from` viz.
     pub subfields: BTreeMap<String, Vec<Subfield>>,
     /// What the `from` viz nodes read: when it changes, the form is read
@@ -493,6 +497,7 @@ pub fn component_form(
         fixed: Vec::new(),
         fields: None,
         choices: BTreeMap::new(),
+        open_choices: Vec::new(),
         subfields: BTreeMap::new(),
         reads: oxplow_db::Reads::default(),
     })

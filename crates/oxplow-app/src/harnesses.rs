@@ -139,6 +139,7 @@ pub(crate) fn setting_definitions(
             secret: false,
             order: 0,
             ui: Default::default(),
+            mask: Default::default(),
             owner: "core".into(),
         };
         let enabled = base(
@@ -227,6 +228,7 @@ pub(crate) fn declared_instance_settings(
                 secret: false,
                 order: 0,
                 ui: Default::default(),
+                mask: Default::default(),
                 owner: "core".into(),
             }
         })

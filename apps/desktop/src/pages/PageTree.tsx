@@ -22,7 +22,7 @@ import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
 import { actionOptionsOf } from "../viz/vizModel.js";
 import { CollapsibleSections } from "../components/CollapsibleSections.js";
 import { pageTabRef } from "../tabs/pageRefs.js";
-import { actionDoes, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
+import { actionHelp, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -327,14 +327,14 @@ function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; nod
       {actions.form ? (
         <VizActionRunnerContext.Provider value={runner}>
           <FormSourceContext.Provider value={forms}>
-            <ActionForm run={target} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
+            <ActionForm run={target} streamId={streamId} pressed={actions.form} others={embed.page.actions} onAlso={actions.run} onClose={actions.closeForm} />
           </FormSourceContext.Provider>
         </VizActionRunnerContext.Provider>
       ) : null}
       {offered.length > 0 ? (
         <div data-testid="viz-part-actions" className="ox-toolbar">
           {offered.map((a) => (
-            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, firstResult)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, firstResult)} title={actionHelp(a)} onClick={() => actions.run(a, null)}>
               {actions.busy === a.id ? `${a.label}…` : a.label}
             </button>
           ))}

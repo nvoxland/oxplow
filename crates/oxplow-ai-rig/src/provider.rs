@@ -208,13 +208,17 @@ impl ModelProvider for RigProvider {
 
     /// A hosted service's models, from Rig's built-in catalog (models.dev
     /// data compiled in): no call, no key. A local server's are whatever
-    /// it has pulled, so unknown.
+    /// it has pulled: the ones it lists (`local_models`), else unknown.
     async fn discover_models(
         &self,
-        _instance: &ProviderInstance<'_>,
+        instance: &ProviderInstance<'_>,
     ) -> Result<ModelCatalogV1, AiError> {
         let Some(id) = self.kind.provider_id().filter(|_| self.kind.hosted) else {
-            return Ok(ModelCatalogV1::unknown());
+            if self.kind.hosted {
+                return Ok(ModelCatalogV1::unknown());
+            }
+            let base = instance.base_url_or(self.default_base_url.as_deref().unwrap_or_default());
+            return Ok(local_models(&base).await);
         };
         let mut seen = std::collections::BTreeSet::new();
         let models = Catalog::builtin()
@@ -362,4 +366,85 @@ impl ModelProvider for RigProvider {
         }
         decide_via_chat(self, instance, req).await
     }
+}
+
+/// How long a local server's model list is kept, its failure too: the
+/// page that suggests them reads them often, and a server that is down
+/// mustn't hold every read for the timeout.
+const LOCAL_MODELS_KEPT: std::time::Duration = std::time::Duration::from_secs(30);
+
+type LocalModels = std::collections::HashMap<String, (std::time::Instant, ModelCatalogV1)>;
+
+/// The models a local server lists (`GET <base>/models`, the OpenAI list
+/// every local kind serves), asked with no key and a short timeout: each
+/// known by its id, what it can do unknown. A server that doesn't answer,
+/// or answers something else, gives an unknown catalog.
+async fn local_models(base: &str) -> ModelCatalogV1 {
+    use oxplow_ai::capabilities::{CapabilitySnapshotV1, CapabilitySupport};
+    static KEPT: std::sync::LazyLock<std::sync::Mutex<LocalModels>> =
+        std::sync::LazyLock::new(Default::default);
+    static CLIENT: std::sync::LazyLock<Option<reqwest::Client>> = std::sync::LazyLock::new(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .ok()
+    });
+    if base.is_empty() {
+        return ModelCatalogV1::unknown();
+    }
+    let kept = || KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, catalog)) = kept().get(base) {
+        if at.elapsed() < LOCAL_MODELS_KEPT {
+            return catalog.clone();
+        }
+    }
+    let listed = async {
+        let reply: serde_json::Value = CLIENT
+            .as_ref()?
+            .get(format!("{base}/models"))
+            .send()
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        let mut seen = std::collections::BTreeSet::new();
+        Some(
+            reply
+                .get("data")?
+                .as_array()?
+                .iter()
+                .filter_map(|m| m.get("id")?.as_str())
+                .filter(|id| !id.trim().is_empty() && seen.insert(id.to_string()))
+                .map(|id| CapabilitySnapshotV1 {
+                    schema_version: 1,
+                    model: Some(id.to_string()),
+                    model_known: true,
+                    text: CapabilitySupport::Unknown,
+                    image: CapabilitySupport::Unknown,
+                    tool_calling: CapabilitySupport::Unknown,
+                    streaming: CapabilitySupport::Unknown,
+                    context_tokens: None,
+                    output_tokens: None,
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+    .await;
+    let catalog = match listed {
+        Some(models) => ModelCatalogV1 {
+            schema_version: 1,
+            catalog_known: true,
+            models,
+        },
+        None => ModelCatalogV1::unknown(),
+    };
+    kept().insert(
+        base.to_string(),
+        (std::time::Instant::now(), catalog.clone()),
+    );
+    catalog
 }

@@ -144,8 +144,20 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
                 ctx.trace.count("config.secret");
                 ctx.run.trace().count("config.secret");
             }
+            let mut result = serde_json::to_value(&value).expect("setting serializes");
+            // An agent never holds a secret: it reads its presence and a
+            // mask. An extension's command reading its own (composed, owner
+            // checked above) gets the value it needs, whoever ran it.
+            if value.secret && ctx.run.actor().is_agent_driven() && ctx.run.composed_by().is_none()
+            {
+                result["value"] = Value::Null;
+                result["masked"] = value
+                    .value
+                    .as_ref()
+                    .map_or(Value::Null, |v| json!(definition.mask.apply(v)));
+            }
             Ok(HandlerOutput {
-                result: serde_json::to_value(value).expect("setting serializes"),
+                result,
                 ..Default::default()
             })
         })),
@@ -607,6 +619,60 @@ mod ownership_tests {
             Level::Project,
         );
         assert!(result.is_err());
+    }
+
+    /// An agent reading a secret gets its presence and a mask, never the
+    /// value; a person, and an extension reading its own, get the value.
+    /// An ordinary setting reads the same for both.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_reads_a_secret_masked() {
+        let fx = services_with_thread().await;
+        declare(fx._dir.path(), "alpha", CONFIGURATION);
+        reconcile(&fx).await;
+        let settings = target(&fx).settings().unwrap();
+        settings
+            .set(
+                "alpha.token",
+                json!("sk-ant-api03-abcdWXYZ"),
+                Level::Project,
+            )
+            .unwrap();
+        let agent = || {
+            RunContext::core(
+                Actor::Agent {
+                    session_id: None,
+                    thread_id: None,
+                    stream_id: None,
+                },
+                Mode::External,
+            )
+        };
+        let read = native_get(&fx, agent(), "alpha.token").await.unwrap();
+        assert_eq!(read["value"], Value::Null);
+        assert_eq!(read["masked"], "••••WXYZ");
+        assert_eq!(read["isSet"], true);
+        assert_eq!(read["secret"], true);
+        assert_eq!(read["origin"], "project");
+        assert!(!read.to_string().contains("abcd"));
+        assert_eq!(
+            native_get(
+                &fx,
+                RunContext::core(Actor::Human, Mode::External),
+                "alpha.token"
+            )
+            .await
+            .unwrap()["value"],
+            "sk-ant-api03-abcdWXYZ"
+        );
+        assert_eq!(
+            native_get(&fx, composed_run(&fx), "alpha.token")
+                .await
+                .unwrap()["value"],
+            "sk-ant-api03-abcdWXYZ"
+        );
+        let plain = native_get(&fx, agent(), "alpha.limit").await.unwrap();
+        assert_eq!(plain["value"], 1);
+        assert!(plain.get("masked").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]

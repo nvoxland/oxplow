@@ -33,6 +33,9 @@ pub struct SettingDefinition {
     pub order: i32,
     #[serde(default)]
     pub ui: SettingUi,
+    /// A secret's mask for readers that may not hold it.
+    #[serde(default)]
+    pub mask: SecretMask,
     /// Assigned by the registry host, never accepted as caller authority.
     pub owner: String,
 }
@@ -220,6 +223,57 @@ pub struct SettingValue {
     pub secret: bool,
 }
 
+/// Which ends of a secret a reader that may not hold it (an agent) sees:
+/// `prefix` characters, `••••`, `suffix` characters. A definition declares
+/// it (`x-mask`); the default shows the last four. Neither end is longer
+/// than [`SecretMask::MAX_END`], and the ends show only when they are at most
+/// a third of the secret, so no declaration reveals a usable key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SecretMask {
+    pub prefix: u8,
+    pub suffix: u8,
+}
+
+impl Default for SecretMask {
+    fn default() -> Self {
+        Self {
+            prefix: 0,
+            suffix: 4,
+        }
+    }
+}
+
+impl SecretMask {
+    pub const MAX_END: u8 = 8;
+    const DOTS: &'static str = "••••";
+
+    pub fn check(&self) -> Result<(), &'static str> {
+        if self.prefix > Self::MAX_END || self.suffix > Self::MAX_END {
+            return Err("x-mask shows at most 8 characters at each end");
+        }
+        Ok(())
+    }
+
+    /// What the reader sees of `value`.
+    pub fn apply(&self, value: &Value) -> String {
+        let shown = usize::from(self.prefix) + usize::from(self.suffix);
+        let Some(text) = value.as_str() else {
+            return Self::DOTS.into();
+        };
+        let length = text.chars().count();
+        if shown == 0 || length < 3 * shown {
+            return Self::DOTS.into();
+        }
+        let head: String = text.chars().take(self.prefix.into()).collect();
+        let tail: String = text
+            .chars()
+            .skip(length - usize::from(self.suffix))
+            .collect();
+        format!("{head}{}{tail}", Self::DOTS)
+    }
+}
+
 // Deliberately omit values: a caller logging an ordinary read must not expose a
 // secret merely because its registry definition changed.
 impl std::fmt::Debug for SettingValue {
@@ -272,6 +326,13 @@ pub trait SecretStore: Send + Sync {
     }
     fn set(&self, name: &str, value: &str) -> Result<(), String>;
     fn delete(&self, name: &str) -> Result<(), String>;
+    /// Whether a secret is stored under `name`, without reading it where the
+    /// backend can tell: reading one from the machine keychain may ask the
+    /// person, and a read that only shows presence (a Settings status, a
+    /// redacted value) needn't.
+    fn exists_with_documents(&self, name: &str, documents: &Documents) -> Result<bool, String> {
+        Ok(self.get_with_documents(name, documents)?.is_some())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -923,6 +984,25 @@ impl SettingsSnapshot {
             return Err(SettingsError::PlaintextSecret);
         }
         for level in levels {
+            // A redacted secret is its presence: asked without reading it.
+            if definition.secret && redact {
+                let identity = self.store.secret_identity(key, *level);
+                if self
+                    .store
+                    .secrets
+                    .exists_with_documents(&identity, &self.documents)
+                    .map_err(|_| SettingsError::SecureStorage)?
+                {
+                    return Ok(SettingValue {
+                        key: key.clone(),
+                        value: None,
+                        origin: Some((*level).into()),
+                        is_set: true,
+                        secret: true,
+                    });
+                }
+                continue;
+            }
             let value = if definition.secret {
                 self.store
                     .secrets
@@ -1171,6 +1251,48 @@ mod tests {
 
     use super::*;
 
+    /// A mask shows a secret's declared ends only when they are at most a
+    /// third of it; a short or non-string secret is dots. The default shows
+    /// the last four.
+    #[test]
+    fn a_mask_shows_its_ends_only_within_a_third_of_the_secret() {
+        let key = json!("sk_live_0123456789abcdefghijklmnWXYZ"); // 36: 3 × 12
+        assert_eq!(SecretMask::default().apply(&key), "••••WXYZ");
+        let both = SecretMask {
+            prefix: 8,
+            suffix: 4,
+        };
+        assert_eq!(both.apply(&key), "sk_live_••••WXYZ");
+        assert_eq!(
+            both.apply(&json!("sk_live_0123456789abcdefghijklmWXYZ")),
+            "••••",
+            "35 is short of 3 × 12"
+        );
+        assert_eq!(
+            SecretMask {
+                prefix: 0,
+                suffix: 0
+            }
+            .apply(&key),
+            "••••"
+        );
+        assert_eq!(SecretMask::default().apply(&json!("short-token")), "••••");
+        assert_eq!(both.apply(&json!({"user": "a", "password": "b"})), "••••");
+        assert!(both.check().is_ok());
+        assert!(SecretMask {
+            prefix: 9,
+            suffix: 0
+        }
+        .check()
+        .is_err());
+        assert!(SecretMask {
+            prefix: 0,
+            suffix: 9
+        }
+        .check()
+        .is_err());
+    }
+
     #[derive(Default)]
     struct MemorySecrets {
         values: Mutex<BTreeMap<String, String>>,
@@ -1216,6 +1338,7 @@ mod tests {
             secret: false,
             order: 0,
             ui: Default::default(),
+            mask: Default::default(),
             owner: "example".into(),
         }
     }
@@ -1240,6 +1363,38 @@ mod tests {
             json!({ "type": "integer", "minimum": 1 }),
             Some(json!(5)),
         )
+    }
+
+    /// A redacted read of a secret (a Settings status, `inspect`) asks the
+    /// backend whether it is there, never for the secret itself.
+    #[test]
+    fn a_redacted_secret_is_its_presence_and_is_never_read() {
+        struct PresenceOnly;
+        impl SecretStore for PresenceOnly {
+            fn get(&self, _: &str) -> Result<Option<String>, String> {
+                panic!("a redacted read decrypted the secret");
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn delete(&self, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn exists_with_documents(&self, name: &str, _: &Documents) -> Result<bool, String> {
+                // Stored at the global level only (its identity has no project).
+                Ok(name.contains("\"global\",null"))
+            }
+        }
+        let mut secret = definition("example.aSecret", json!({"type":"string"}), None);
+        secret.secret = true;
+        let (_project, _global, mut store) = store(vec![secret]);
+        store.secrets = Arc::new(PresenceOnly);
+        let snapshot = store.snapshot().unwrap();
+        let row = snapshot.row("example.aSecret").unwrap();
+        assert_eq!(row.statuses, ["unset", "unset", "set"]);
+        let inspected = snapshot.inspect("example.aSecret", None).unwrap();
+        assert!(inspected.is_set);
+        assert_eq!(inspected.value, None);
     }
 
     #[test]

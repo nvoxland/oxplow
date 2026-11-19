@@ -45,13 +45,16 @@ pub fn profiles_of(extensions: &[super::Extension]) -> Vec<oxplow_ai::config::Ai
         .collect()
 }
 
-/// The built-in roles a profile may fall back to.
-#[derive(Deserialize, schemars::JsonSchema)]
+/// The built-in roles a profile may fall back to: Default when it names
+/// none, and any other's chain ends at Default.
+#[derive(Deserialize, schemars::JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 enum FallbackFile {
-    Main,
+    #[default]
+    Default,
     Summarize,
     Decide,
+    Assistant,
 }
 
 /// What a bound model must support.
@@ -72,7 +75,9 @@ pub struct AiProfileFile {
     id: String,
     /// What the profile is for (at most 4096 bytes).
     description: String,
-    /// The built-in role whose model serves it until a model is bound.
+    /// The built-in role whose model serves it until a model is bound:
+    /// `default` when left out.
+    #[serde(default)]
     fallback: FallbackFile,
     /// What the bound model must support.
     #[serde(default)]
@@ -173,9 +178,10 @@ pub fn parse_ai_profiles(
                 id: raw.id,
                 description: raw.description,
                 fallback: match raw.fallback {
-                    FallbackFile::Main => BuiltinRole::Main,
+                    FallbackFile::Default => BuiltinRole::Default,
                     FallbackFile::Summarize => BuiltinRole::Summarize,
                     FallbackFile::Decide => BuiltinRole::Decide,
+                    FallbackFile::Assistant => BuiltinRole::Assistant,
                 },
                 features,
             });
@@ -187,12 +193,11 @@ pub fn parse_ai_profiles(
 /// A serde failure as the author reads it: the wrong `fallback` and
 /// `features` values say what is allowed.
 fn fields_error(serde: &str) -> String {
-    if serde.contains("unknown variant") && serde.contains("main") {
-        "ai profile `fallback` is `main`, `summarize` or `decide`".into()
+    if serde.contains("unknown variant") && serde.contains("summarize") {
+        "ai profile `fallback` is `default`, `summarize`, `decide` or `assistant` (left out: `default`)"
+            .into()
     } else if serde.contains("unknown variant") {
         "ai profile `features` are `text`, `tool_calling`, `streaming` or `image`".into()
-    } else if serde.contains("missing field `fallback`") {
-        "ai profile needs a `fallback`: `main`, `summarize` or `decide`".into()
     } else {
         format!("ai profile declaration has invalid fields: {serde}")
     }
@@ -202,7 +207,7 @@ fn fields_error(serde: &str) -> String {
 mod tests {
     use super::*;
 
-    const MANIFEST: &str = "ai_profiles:\n  - id: review\n    description: Reviews.\n    fallback: summarize\n    features: [tool_calling]\n  - id: bad-id\n    description: x\n    fallback: main\n";
+    const MANIFEST: &str = "ai_profiles:\n  - id: review\n    description: Reviews.\n    fallback: summarize\n    features: [tool_calling]\n  - id: bad-id\n    description: x\n    fallback: default\n  - id: plain\n    description: Plain.\n";
 
     fn parse(manifest: &str) -> (Vec<AiProfileDecl>, Vec<Diagnostic>) {
         let doc: Value = serde_yaml::from_str(manifest).unwrap();
@@ -214,12 +219,21 @@ mod tests {
         let (profiles, errors) = parse(MANIFEST);
         assert_eq!(
             profiles,
-            [AiProfileDecl {
-                id: "review".into(),
-                description: "Reviews.".into(),
-                fallback: BuiltinRole::Summarize,
-                features: vec![ModelFeature::ToolCalling],
-            }]
+            [
+                AiProfileDecl {
+                    id: "review".into(),
+                    description: "Reviews.".into(),
+                    fallback: BuiltinRole::Summarize,
+                    features: vec![ModelFeature::ToolCalling],
+                },
+                // No `fallback`: Default's model serves it.
+                AiProfileDecl {
+                    id: "plain".into(),
+                    description: "Plain.".into(),
+                    fallback: BuiltinRole::Default,
+                    features: vec![],
+                }
+            ]
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -235,18 +249,14 @@ mod tests {
         let cases = [
             (
                 "ai_profiles:\n  - { id: a, description: x, fallback: big }\n",
-                "`fallback` is `main`, `summarize` or `decide`",
+                "`fallback` is `default`, `summarize`, `decide` or `assistant`",
             ),
             (
-                "ai_profiles:\n  - { id: a, description: x, fallback: main, features: [telepathy] }\n",
+                "ai_profiles:\n  - { id: a, description: x, fallback: default, features: [telepathy] }\n",
                 "`features` are `text`",
             ),
             (
-                "ai_profiles:\n  - { id: a, description: x }\n",
-                "needs a `fallback`",
-            ),
-            (
-                "ai_profiles:\n  - { id: a, description: x, fallback: main }\n  - { id: a, description: y, fallback: main }\n",
+                "ai_profiles:\n  - { id: a, description: x, fallback: default }\n  - { id: a, description: y, fallback: default }\n",
                 "`a` is declared twice",
             ),
         ];
@@ -260,7 +270,7 @@ mod tests {
             );
         }
         let long = format!(
-            "ai_profiles:\n  - {{ id: a, description: \"{}\", fallback: main }}\n",
+            "ai_profiles:\n  - {{ id: a, description: \"{}\", fallback: default }}\n",
             "x".repeat(MAX_DESCRIPTION_BYTES + 1)
         );
         assert!(parse(&long).1[0].message.contains("exceeds 4096 bytes"));

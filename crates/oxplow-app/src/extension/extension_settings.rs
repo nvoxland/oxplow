@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_config::settings::{SettingDefinition, SettingsRegistry, SettingsStore};
+use oxplow_config::settings::{SecretMask, SettingDefinition, SettingsRegistry, SettingsStore};
 use serde_json::{Map, Value};
 
 use super::extensions::{config_schema::ConfigurationFile, Extension};
@@ -38,12 +38,20 @@ pub(crate) fn credential_definition(namespace: &str, name: &str) -> SettingDefin
         secret: true,
         order: 0,
         ui: Default::default(),
+        mask: Default::default(),
         owner: format!("{OWNER_PREFIX}{namespace}"),
     }
 }
 
 /// The `x-` annotations a settings schema may carry.
-const ANNOTATIONS: [&str; 5] = ["x-category", "x-secret", "x-atomic", "x-order", "x-ui"];
+const ANNOTATIONS: [&str; 6] = [
+    "x-category",
+    "x-secret",
+    "x-atomic",
+    "x-order",
+    "x-ui",
+    "x-mask",
+];
 
 struct Binding {
     definition: SettingDefinition,
@@ -289,6 +297,23 @@ fn collect(
             )
         })?,
     };
+    let mask = match schema.get("x-mask") {
+        None => SecretMask::default(),
+        Some(_) if !secret => {
+            return Err(ExtensionSettingsError::Declaration(
+                "x-mask is for a secret (x-secret: true)",
+            ))
+        }
+        Some(mask) => {
+            let mask: SecretMask = serde_json::from_value(mask.clone()).map_err(|_| {
+                ExtensionSettingsError::Declaration(
+                    "x-mask is { prefix, suffix }: how many characters each end shows",
+                )
+            })?;
+            mask.check().map_err(ExtensionSettingsError::Declaration)?;
+            mask
+        }
+    };
     out.push(Binding {
         definition: SettingDefinition {
             key: format!(
@@ -307,6 +332,7 @@ fn collect(
             secret,
             order,
             ui,
+            mask,
             owner: format!("{OWNER_PREFIX}{namespace}"),
         },
         path: path.clone(),
@@ -489,6 +515,43 @@ mod tests {
         invalid.configuration.as_mut().unwrap().schema["properties"]["token"]["default"] =
             json!("do not retain");
         assert!(definitions(&invalid).is_err());
+    }
+
+    /// `x-mask` says which ends of a secret an agent sees; it is refused on
+    /// a setting that is not a secret, past eight characters an end, or
+    /// incomplete. Left out, a secret shows its last four.
+    #[test]
+    fn a_secret_declares_its_mask() {
+        let declared = |token: Value| {
+            definitions(&extension(
+                json!({"type":"object","properties":{"token":token}}),
+            ))
+        };
+        let masked =
+            declared(json!({"type":"string","x-secret":true,"x-mask":{"prefix":8,"suffix":4}}))
+                .unwrap();
+        assert_eq!(
+            masked[0].mask,
+            SecretMask {
+                prefix: 8,
+                suffix: 4
+            }
+        );
+        assert_eq!(
+            declared(json!({"type":"string","x-secret":true})).unwrap()[0].mask,
+            SecretMask::default()
+        );
+        for refused in [
+            json!({"type":"string","x-mask":{"prefix":8,"suffix":4}}),
+            json!({"type":"string","x-secret":true,"x-mask":{"prefix":9,"suffix":0}}),
+            json!({"type":"string","x-secret":true,"x-mask":{"prefix":8}}),
+            json!({"type":"string","x-secret":true,"x-mask":"suffix"}),
+        ] {
+            assert!(
+                declared(refused.clone()).is_err(),
+                "{refused} must be refused"
+            );
+        }
     }
 
     #[test]

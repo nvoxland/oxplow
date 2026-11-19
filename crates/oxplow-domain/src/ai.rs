@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 const ROLE_KEY_PREFIX: &str = "oxplow.ai.roles.";
 
-/// The setting key of a role's assignment: `main` is
-/// `oxplow.ai.roles.main`; an extension role `namespace/profile` is
+/// The setting key of a role's assignment: `default` is
+/// `oxplow.ai.roles.default`; an extension role `namespace/profile` is
 /// `oxplow.ai.roles.namespace.profile`.
 pub fn role_setting_key(role: &str) -> String {
     format!("{ROLE_KEY_PREFIX}{}", role.replacen('/', ".", 1))
@@ -98,7 +98,7 @@ mod role_key_tests {
 
     #[test]
     fn a_role_and_its_setting_key_round_trip() {
-        for role in ["main", "acme/review"] {
+        for role in ["default", "acme/review"] {
             assert_eq!(
                 role_from_setting_key(&role_setting_key(role)).as_deref(),
                 Some(role)

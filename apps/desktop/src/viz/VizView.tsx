@@ -96,6 +96,7 @@ import { CodeViz } from "./CodeViz.js";
 import { MediaViz } from "./MediaViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
+import { iconFor } from "../icons.js";
 import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
@@ -107,7 +108,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { skipSummary, actionAnchor, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { skipSummary, actionAnchor, actionHelp, actionEnabled, actionOffered, formAlso, offeredWholePage, rowMenuAction, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
@@ -229,7 +230,7 @@ function VizViewBody(props: VizViewProps & { lazyOpen: CollapsedSet | null; bran
   // A form action's form: a slideover beside whatever pressed it, or a
   // prompt strip at the top of the viz when the form is one text field.
   const form = actions.form ? (
-    <ActionForm run={run} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
+    <ActionForm run={run} streamId={streamId} pressed={actions.form} others={run.config.actions} onAlso={actions.run} onClose={actions.closeForm} />
   ) : null;
   // Compact strips (a number inline) have no room for buttons; the page
   // draws Copy and its own actions in its nav bar.
@@ -487,7 +488,7 @@ function PartButton({ action: a, run, actions }: { action: VizRun["config"]["act
   const failure = useActionAnchor(actionAnchor(run.config.id, a.id));
   return (
     <>
-      <button type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+      <button type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionHelp(a)} onClick={() => actions.run(a, null)}>
         {actions.busy === a.id ? `${a.label}…` : a.label}
       </button>
       {failure ? <InlineError failure={failure} testId={`viz-action-error-${a.id}`} /> : null}
@@ -507,7 +508,7 @@ function BulkButton({ run, action, rows, actions, options }: { run: VizRun; acti
           data-testid={`viz-bulk-${action.id}`}
           aria-label={action.label}
           disabled={actions.busy !== null}
-          title={actionDoes(action)}
+          title={actionHelp(action)}
           value=""
           onChange={(e) => {
             if (e.target.value) actions.runMany(action, rows, e.target.value);
@@ -521,7 +522,7 @@ function BulkButton({ run, action, rows, actions, options }: { run: VizRun; acti
           ))}
         </select>
       ) : (
-        <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
+        <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionHelp(action)} onClick={() => actions.runMany(action, rows)}>
           {actions.busy === action.id ? `${action.label}…` : action.label}
         </button>
       )}
@@ -627,7 +628,7 @@ function RowsBody({
     cols.filter((c) => c.link).map((c) => [c.key, linkOrigins(viz.title, { node: viz.id, params: run.params }, c, result.rows, result.columns)] as const),
   );
   // An edit action is the markdown editor's Save, not a row's.
-  const rowActions0 = viz.actions.filter((a) => a.row && !a.edit);
+  const rowActions0 = viz.actions.filter(rowMenuAction);
   openRow = (row) => {
     const record = rowRecord(result.columns, row);
     const primary = rowActions0.find((a) => a.primary && actionOffered(a, record));
@@ -752,7 +753,7 @@ function RowsBody({
     );
   };
   const first = result.rows[0]?.[0] ?? null;
-  const rowActions = viz.actions.filter((a) => a.row && !a.edit);
+  const rowActions = viz.actions.filter(rowMenuAction);
   const rowItems = (row: SqlCell[]): MenuItems => {
     const base = rowBase(row);
     // The commands about what the row links to (their `ui.about`), as the
@@ -993,6 +994,28 @@ function RowsBody({
     heading,
     groupDrop,
     rowLook,
+    // A row whose click opens a form (its primary action's) shows it: an
+    // icon at its end, a pencil unless the action names one, its label the
+    // hover. A click that opens a page or runs at once needs none.
+    rowButton: (row) => {
+      const primary = actions ? primaryOf(row) : null;
+      if (!primary?.form) return null;
+      const Glyph = iconFor(primary.icon ?? "pencil") ?? iconFor("pencil")!;
+      const name = actionName(primary.label);
+      return (
+        <button
+          type="button"
+          className="ox-icon-button"
+          data-testid={`viz-row-button-${result.rows.indexOf(row)}`}
+          title={name}
+          aria-label={name}
+          disabled={actions!.busy !== null}
+          onClick={() => actions!.run(primary, rowRecord(result.columns, row))}
+        >
+          <Glyph size={14} aria-hidden />
+        </button>
+      );
+    },
     cursor: {
       // The list takes the keys itself: a row's own (Enter that picks, the
       // menu key) and a control's (an input in a cell) go first.
@@ -1098,6 +1121,9 @@ interface RowsView {
   /** A drop target for a whole group (a board column). */
   groupDrop(g: RowGroup): Record<string, unknown>;
   rowLook: RowLook;
+  /** A table row's button at its end, when its click opens a form: what
+   *  says the row is clickable and what it does. */
+  rowButton?(row: SqlCell[]): ReactNode;
   /** The keyboard cursor over the drawn rows (list and table). */
   cursor: {
     listProps: React.HTMLAttributes<HTMLElement>;
@@ -1429,6 +1455,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
         fields={start.fields ?? undefined}
         fixed={start.fixed}
         choices={start.choices}
+        openChoices={start.open_choices}
         serverErrors={form.serverErrors}
         schemaHelp={false}
         mode={mode}
@@ -1468,6 +1495,8 @@ export function ActionForm({
   streamId,
   pressed,
   subject,
+  others,
+  onAlso,
   onClose,
 }: {
   run: ActionTarget;
@@ -1477,6 +1506,10 @@ export function ActionForm({
    *  subtitle of a form that has `fixed` fields (the host's ids, never
    *  drawn). A row action has none — its row isn't the page. */
   subject?: string | null;
+  /** The viz's actions, where the ones the form's `also` names are. */
+  others?: readonly DeclaredPageAction[];
+  /** Runs one of them on the form's row, as from the row's menu. */
+  onAlso?(action: DeclaredPageAction, row: Record<string, SqlCell> | null): void;
   onClose(): void;
 }) {
   const { action, row } = pressed;
@@ -1515,6 +1548,8 @@ export function ActionForm({
   // A menu label's ellipsis says "this asks first"; the form that asks is
   // headed, and its button labelled, without it.
   const name = actionName(action.label);
+  // Its button, unless the page names it (`submit`: an Edit… saves).
+  const submit = action.submit ?? name;
   // What the form is about, in words: the row's `about` column, else — for
   // a page's own action with fixed fields — the page's title. Never an id.
   const aboutCell = action.about && row ? row[action.about] : null;
@@ -1524,11 +1559,36 @@ export function ActionForm({
       : row === null && start.fixed.length > 0
         ? (subject ?? null)
         : null;
-  const field = promptField(start);
+  // The actions `also` names: buttons at the left of the form's own, run
+  // on its row once the form is closed (a command that asks asks there).
+  const also = onAlso ? formAlso(action, others ?? [], row) : [];
+  const leading =
+    also.length > 0 ? (
+      <span style={{ display: "inline-flex", gap: 8, marginRight: "auto" }}>
+        {also.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            className="ox-button"
+            data-testid={`viz-action-form-also-${a.id}`}
+            title={actionHelp(a)}
+            disabled={form.busy}
+            onClick={() => {
+              onClose();
+              onAlso!(a, row);
+            }}
+          >
+            {a.label}
+          </button>
+        ))}
+      </span>
+    ) : null;
+  // The one-line strip has no room for those buttons: a form with any is the slideover.
+  const field = leading ? null : promptField(start);
   if (field) {
-    return <ActionPrompt label={name} about={about} start={start} field={field} form={form} submitLabel={name} onClose={onClose} testId="viz-action-form" />;
+    return <ActionPrompt label={name} about={about} start={start} field={field} form={form} submitLabel={submit} onClose={onClose} testId="viz-action-form" />;
   }
-  return <FormModal title={name} subtitle={about} start={start} form={form} submitLabel={name} onClose={onClose} testId="viz-action-form" />;
+  return <FormModal title={name} subtitle={about} start={start} form={form} submitLabel={submit} leading={leading} onClose={onClose} testId="viz-action-form" />;
 }
 
 /** An action's label as a form's heading and button: the menu label without
@@ -1608,6 +1668,7 @@ export function FormModal({
   start,
   form,
   submitLabel,
+  leading,
   onClose,
   testId,
 }: {
@@ -1617,6 +1678,8 @@ export function FormModal({
   start: FormStart | null;
   form: ReturnType<typeof useFormSubmit>;
   submitLabel: string;
+  /** Drawn at the left of the form's buttons (an action form's `also`). */
+  leading?: ReactNode;
   onClose(): void;
   testId: string;
 }) {
@@ -1638,10 +1701,12 @@ export function FormModal({
           initial={start.values}
           fixed={start.fixed}
           choices={start.choices}
+          openChoices={start.open_choices}
           fields={start.fields ?? undefined}
           serverErrors={form.serverErrors}
           schemaHelp={false}
           submitLabel={submitLabel}
+          leading={leading}
           busy={form.busy}
           onSubmit={(input) => void form.submit(input, false)}
           onCancel={onClose}
@@ -2303,6 +2368,10 @@ function TableViz({ rows, cols, cell, rowMenu, view, header }: RowsVizProps) {
     ),
     render: ([row]) => cell(row, c),
   }));
+  // Rows whose click opens a form end in its button.
+  if (view?.rowButton && rows.some((row) => view.rowButton!(row) !== null)) {
+    columns.push({ key: "__row-button", label: "", width: 40, truncate: false, wrap: "nowrap", render: ([row]) => view.rowButton!(row) });
+  }
   const parts = sections(rows, view);
   return (
     <DataTable<Row>

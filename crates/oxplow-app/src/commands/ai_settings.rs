@@ -32,8 +32,10 @@ pub const TEST_PROVIDER: &str = "oxplow.ai.test_provider";
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetProviderInput {
-    /// Your name for it (`anthropic`, `local-ollama`); also its keychain entry.
-    pub id: String,
+    /// Its id, which is its kind (`anthropic`); also its keychain entry.
+    /// Left out, the kind.
+    #[serde(default)]
+    pub id: Option<String>,
     /// What it is: a declared AI provider kind (`anthropic`, `openai`,
     /// `openai_compatible`, `openrouter`).
     pub kind: String,
@@ -101,16 +103,20 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     let input: SetProviderInput = parse(input)?;
                     let svc = services.get()?;
                     let key_set = input.key.as_deref().is_some_and(|k| !k.is_empty());
-                    let id = input.id.trim().to_string();
+                    let id = input
+                        .id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|i| !i.is_empty())
+                        .unwrap_or(&input.kind)
+                        .to_string();
+                    let provider = ProviderConfig {
+                        id: id.clone(),
+                        kind: input.kind,
+                        base_url: input.base_url.filter(|u| !u.trim().is_empty()),
+                    };
                     svc.ai
-                        .save_provider(
-                            ProviderConfig {
-                                id: id.clone(),
-                                kind: input.kind,
-                                base_url: input.base_url.filter(|u| !u.trim().is_empty()),
-                            },
-                            input.key,
-                        )
+                        .save_provider(provider, input.key)
                         .map_err(|e| refused("/id", e))?;
                     let events = svc.events.clone();
                     Ok(HandlerOutput {

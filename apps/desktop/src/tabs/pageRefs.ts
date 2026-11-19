@@ -520,6 +520,12 @@ export function contextRef(): TabRef {
   return pageTabRef("context");
 }
 
+/** AI Settings (foundation's `ai-settings`): the providers, each role's
+ *  model (the Assistant's among them) and this week's calls. */
+export function aiSettingsRef(): TabRef {
+  return pageTabRef("ai-settings");
+}
+
 export interface ExternalUrlPayload {
   url: string;
 }

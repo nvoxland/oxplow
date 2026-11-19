@@ -44,8 +44,10 @@ title from its id and order 1000. `v_config_value` carries `category_title`,
 category pages sort and title by them.
 
 Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
-`x-order`, `x-secret` and `x-atomic`; any other `x-` key is refused at check
-(`extension_settings::ANNOTATIONS`). `x-ui` (the
+`x-order`, `x-secret`, `x-mask` and `x-atomic`; any other `x-` key is refused at check
+(`extension_settings::ANNOTATIONS`). `x-mask: { prefix, suffix }` (a secret's
+only; each 0–8; the definition's `mask`, `settings::SecretMask`, default
+`{0, 4}`) is how many characters of each end an agent sees. `x-ui` (the
 definition's `ui`, `settings::SettingUi`) is one fixed vocabulary:
 `{ editor: multiline }` for a text area. A labeled choice is the schema's own:
 `oneOf` of `{ const, title, description }` (the editor's select shows the titles
@@ -168,7 +170,12 @@ plaintext YAML secret overrides are refused. Secure storage failures return safe
 errors and never fall back to files or an inherited value.
 
 Authorized reads return the actual value; inventories expose only presence and
-origin. A failed individual resolution retains its definition with
+origin. An agent never holds a secret: its own `oxplow.config.get` of one returns
+`value: null`, presence, origin and `masked` (`SecretMask::apply`: the declared
+ends around `••••`, shown only when they are at most a third of a string, dots
+otherwise; AI provider keys show 7 and 4, `sk-ant-••••WXYZ`), a separate field
+so a mask can't be saved back as the value. An extension command reading its own
+secret (composed, owner-checked) still gets the value when an agent runs it. A failed individual resolution retains its definition with
 `unavailable: true` and unknown value/origin, allowing Settings to load and
 repair credentials. Direct reads still fail closed. Settings values are omitted from write audit inputs. Secret-derived
 command reads propagate the internal `config.secret` trace marker through
@@ -229,8 +236,20 @@ change. Its hot configuration reads batch keys from one ordinary snapshot and do
 not acquire the registry's write lock. The Settings inventory derives effective
 values, overrides, and per-level statuses from one snapshot, reading each secure
 identity once per level. Endpoint binding uses those same ordinary documents.
-Showing all three secret levels still requires three distinct keychain queries;
-OS credential access may prompt or fail, in which case only that row/level is
+A redacted read of a secret (the inventory's statuses, `inspect`) is its
+presence: `SecretStore::exists_with_documents`, which the app's secure store
+answers with an attribute-only keychain search that decrypts nothing and so
+never prompts (its endpoint binding, inside the value, is checked only by a
+read that uses the secret). Keychain reads go through one process-wide cache
+(`oxplow_ai::secrets::CachedSecrets`): a secret is decrypted at most once per
+run. Reads that miss the cache take one lock and look again, so readers that
+start while the first waits on the person's keychain answer get that answer,
+not a prompt each. A presence check the keychain can't answer by search falls
+back to that cached read. Each real keychain read logs `reading a secret from
+the keychain` with the item's name (never its value) to the daemon log
+(`.oxplow/logs/daemon.<date>.log`), so a prompt can be traced to its read. macOS prompts twice for one read
+by an unsigned build, and again after each rebuild; dev builds signed with a
+stable local identity (`DEV.md` "Sign dev builds") are trusted across rebuilds. OS credential access may still fail, in which case only that row/level is
 unavailable. Unknown harness preferences remain stored through bootstrap until
 their schema returns (the runtime keeps them as plain JSON per harness); harness
 switches and role objects are validated before the typed view is built, with

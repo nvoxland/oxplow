@@ -1294,6 +1294,37 @@ impl AiService {
         .await?
     }
 
+    /// Each configured provider's models, from its catalog (`v_ai_model`):
+    /// in provider order, then the catalog's. No key is read; a provider
+    /// whose catalog is unknown, or can't be read, lists none.
+    pub async fn provider_models(
+        &self,
+    ) -> Result<Vec<(String, CapabilitySnapshotV1)>, AiServiceError> {
+        self.read_generation(async {
+            let config = self.config()?;
+            let mut out = Vec::new();
+            for provider in &config.providers {
+                let Ok(model_provider) = self.provider_of(provider) else {
+                    continue;
+                };
+                let Ok(catalog) = model_provider
+                    .discover_models(&instance(provider, None))
+                    .await
+                else {
+                    continue;
+                };
+                out.extend(
+                    catalog
+                        .models
+                        .into_iter()
+                        .map(|model| (provider.id.clone(), model)),
+                );
+            }
+            Ok(out)
+        })
+        .await?
+    }
+
     /// The models a person may pick for `role`: every role's binding, then
     /// each configured provider's catalog, leaving out a model its catalog
     /// says can't call tools when `role` needs that. No key is read.
@@ -2048,7 +2079,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "main",
+                "default",
                 "summarize",
                 "decide",
                 "assistant",
@@ -2057,7 +2088,7 @@ mod tests {
             ]
         );
         let assistant = &st.roles[3];
-        assert_eq!(assistant.fallback, Some(BuiltinRole::Main));
+        assert_eq!(assistant.fallback, Some(BuiltinRole::Default));
         let profile = &st.roles[4];
         assert_eq!(profile.description, "Reviews things.");
         assert_eq!(profile.namespace.as_deref(), Some("acme"));
@@ -2157,10 +2188,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://127.0.0.1:1", &dir);
         let err = svc
-            .complete(&Role::MAIN, "core", None, "hi", false)
+            .complete(&Role::DEFAULT, "core", None, "hi", false)
             .await
             .unwrap_err();
-        assert_eq!(err, AiServiceError::NotConfigured("main".into()));
+        assert_eq!(err, AiServiceError::NotConfigured("default".into()));
     }
 
     #[tokio::test]
@@ -2169,9 +2200,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service(&base, &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
-            BTreeMap::from([(Role::MAIN, RoleBinding::new("openrouter", "big"))])
+            BTreeMap::from([(Role::DEFAULT, RoleBinding::new("openrouter", "big"))])
         }));
-        svc.complete(&Role::MAIN, "core", None, "hi", false)
+        svc.complete(&Role::DEFAULT, "core", None, "hi", false)
             .await
             .unwrap();
         assert_eq!(seen.lock().unwrap()[0].2["model"], "big");
@@ -2237,7 +2268,7 @@ mod tests {
                 namespace: "acme".into(),
                 name: "custom".into(),
                 description: String::new(),
-                fallback: BuiltinRole::Main,
+                fallback: BuiltinRole::Default,
                 features: vec![],
             }]
         }));
@@ -2374,7 +2405,7 @@ mod tests {
         assert!(st
             .roles
             .iter()
-            .find(|r| r.role == Role::MAIN)
+            .find(|r| r.role == Role::DEFAULT)
             .unwrap()
             .binding
             .is_none());
@@ -2432,7 +2463,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
         let err = svc
-            .set_role(&Role::MAIN, Some(RoleBinding::new("nope", "m")))
+            .set_role(&Role::DEFAULT, Some(RoleBinding::new("nope", "m")))
             .unwrap_err();
         assert!(matches!(err, AiServiceError::Config(_)), "{err:?}");
         assert!(svc
@@ -2441,7 +2472,7 @@ mod tests {
             .unwrap()
             .roles
             .iter()
-            .all(|r| r.role != Role::MAIN || r.binding.is_none()));
+            .all(|r| r.role != Role::DEFAULT || r.binding.is_none()));
     }
 
     #[tokio::test]
@@ -2883,6 +2914,40 @@ mod typed_tests {
             secrets,
             seen,
         }
+    }
+
+    /// Each configured provider's models, from its catalog with no key
+    /// read: what AI Settings suggests for a Model. A
+    /// provider whose catalog is unknown lists none.
+    #[tokio::test]
+    async fn each_provider_lists_its_catalogs_models_without_its_key() {
+        let fx = fixture(
+            "fake",
+            Some(json!([
+                snapshot("m-tools", "supported", "unknown"),
+                snapshot("m-plain", "unsupported", "unknown")
+            ])),
+            json!({}),
+        )
+        .await;
+        let reads = fx.secrets.gets.load(Ordering::SeqCst);
+        let models = fx.svc.provider_models().await.unwrap();
+        let listed: Vec<(&str, &str, CapabilitySupport)> = models
+            .iter()
+            .map(|(p, m)| (p.as_str(), m.model.as_deref().unwrap(), m.tool_calling))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("fake", "m-tools", CapabilitySupport::Supported),
+                ("fake", "m-plain", CapabilitySupport::Unsupported)
+            ]
+        );
+        assert_eq!(
+            fx.secrets.gets.load(Ordering::SeqCst),
+            reads,
+            "no key is read"
+        );
     }
 
     fn typed_reply(source: &str) -> Value {
@@ -3440,6 +3505,10 @@ pub(crate) fn provider_key_definition(id: &str) -> oxplow_config::settings::Sett
         secret: true,
         order: 0,
         ui: Default::default(),
+        mask: oxplow_config::settings::SecretMask {
+            prefix: 7,
+            suffix: 4,
+        },
         owner: "core".into(),
     }
 }
@@ -3465,5 +3534,13 @@ mod provider_key_metadata_tests {
         assert_eq!(definition.owner, "core");
         assert_eq!(definition.category, "ai");
         assert!(definition.secret);
+        // `sk-ant-`, `sk-proj` and the like say which kind of key it is.
+        assert_eq!(
+            definition.mask,
+            oxplow_config::settings::SecretMask {
+                prefix: 7,
+                suffix: 4
+            }
+        );
     }
 }

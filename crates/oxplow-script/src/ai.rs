@@ -96,7 +96,7 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
     /// A V1 request with ordered messages and tools, using a configured role.
     fn ai_complete<'v>(
         request: starlark::values::Value<'v>,
-        #[starlark(default = "main")] role: &str,
+        #[starlark(default = "default")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let request = request.to_json_value()?;
@@ -107,7 +107,7 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
     }
 
     fn ai_capabilities<'v>(
-        #[starlark(default = "main")] role: &str,
+        #[starlark(default = "default")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let out = host(eval, "ai_capabilities")?
@@ -117,7 +117,7 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
     }
 
     fn ai_models<'v>(
-        #[starlark(default = "main")] role: &str,
+        #[starlark(default = "default")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let out = host(eval, "ai_models")?
@@ -175,7 +175,7 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
         text: &str,
         schema: starlark::values::Value<'v>,
         #[starlark(default = "")] instructions: &str,
-        #[starlark(require = named, default = "main")] role: &str,
+        #[starlark(require = named, default = "default")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let schema = schema.to_json_value()?;
@@ -273,7 +273,7 @@ def transform(input):
                 "score[sort] big change",
                 "summarize[summarize] a long text Some(\"risk\")",
                 "summarize[summarize] other text None",
-                "extract[main] count one two three \"object\"",
+                "extract[default] count one two three \"object\"",
             ]
         );
     }

@@ -260,7 +260,7 @@ left side.
 ## Actions
 
 `actions: [{ id, label, command, input, row?, group?, all?, when?, form?,
-confirm?, prominent?, icon?, submenu?, drag?, key?, edit? }]` on a viz node (a
+also?, submit?, help?, confirm?, prominent?, icon?, submenu?, drag?, key?, edit? }]` on a viz node (a
 row action) or the page (`page-format.md`).
 
 - `input` is the command's input; `"{{param.x}}"` binds a page param and,
@@ -287,6 +287,18 @@ row action) or the page (`page-format.md`).
   one a button in the nav bar (only for what a person comes to do);
   `icon:` names an icon (`plus`, `pencil`, `play`, …) or an svg in the
   extension (`assets/<name>.svg`).
+- `also: [<action id>]` on a form action puts those actions of the node in
+  its form, as buttons beside its own: an Edit… form with a Remove, `{ id:
+  edit, label: Edit…, row: true, form: true, primary: true, also: [remove],
+  … }`. They run on the form's row (when its `when` offers them there) and
+  are shown only in that form, not in the row's menu.
+- `help:` is the action's hover, for a person: what pressing it does when
+  the label alone doesn't say. Write it plainly, without ids or input
+  names; leave it off when the label says it all. The command's summary is
+  never shown as a hover.
+- A form's button is the action's label without its `…` ("Add Provider").
+  A form that changes something that exists names its button `submit:
+  Save`, since its Edit… saves rather than edits.
 - A page's actions without `row` or `group` go in its ☰ menu. Copy and Add
   to Context are on every page: don't declare them.
 - An action runs as the page acting for whoever pressed it.

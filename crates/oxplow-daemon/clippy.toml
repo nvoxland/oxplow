@@ -12,6 +12,7 @@ allow-expect-in-tests = true
 
 disallowed-methods = [
   { path = "oxplow_ai::secrets::SecretStore::delete", reason = "consent and credentials change only inside oxplow-app, behind a person's confirmation" },
+  { path = "oxplow_ai::secrets::SecretStore::exists", reason = "consent and credentials change only inside oxplow-app, behind a person's confirmation" },
   { path = "oxplow_ai::secrets::SecretStore::get", reason = "consent and credentials change only inside oxplow-app, behind a person's confirmation" },
   { path = "oxplow_ai::secrets::SecretStore::set", reason = "consent and credentials change only inside oxplow-app, behind a person's confirmation" },
   { path = "oxplow_db::agent_job_store::lose_all_unreported_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

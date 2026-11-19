@@ -4495,6 +4495,7 @@ version = "0.8.0"
 dependencies = [
  "async-trait",
  "keyring",
+ "keyring-core",
  "oxplow-ai-fake",
  "oxplow-domain",
  "oxplow-workspace-hack",

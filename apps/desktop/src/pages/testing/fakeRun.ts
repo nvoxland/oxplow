@@ -65,7 +65,7 @@ export function fakeAction(over: Partial<PageAction> & { id: string }): PageActi
     then: "stay",
     when: null,
     fact: null,
-    does: null,
+    help: null,
     primary: false,
     prominent: false,
     drag: false,

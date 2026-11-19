@@ -125,6 +125,14 @@ impl SecretStore for SecureSettings {
             .delete(name)
             .map_err(|_| "secure settings unavailable".into())
     }
+    /// Whether it is stored, asked of the backend without reading it (the
+    /// keychain asks the person to read one). Its endpoint binding is inside
+    /// the value, so it isn't checked here: a read that uses the secret does.
+    fn exists_with_documents(&self, name: &str, _: &Documents) -> Result<bool, String> {
+        self.backend
+            .exists(name)
+            .map_err(|_| "secure settings unavailable".into())
+    }
 }
 
 use oxplow_config::settings::Documents;
@@ -557,7 +565,7 @@ mod registry_tests {
         let main = json!({"provider":"openai", "model":"main"});
         let summarize = json!({"provider":"openai", "model":"small"});
         settings
-            .set("oxplow.ai.roles.main", main.clone(), Level::Global)
+            .set("oxplow.ai.roles.default", main.clone(), Level::Global)
             .unwrap();
         settings
             .set(
@@ -576,7 +584,7 @@ mod registry_tests {
         assert_eq!(
             settings
                 .snapshot()
-                .and_then(|snapshot| snapshot.get("oxplow.ai.roles.main", None))
+                .and_then(|snapshot| snapshot.get("oxplow.ai.roles.default", None))
                 .unwrap()
                 .value,
             Some(main)

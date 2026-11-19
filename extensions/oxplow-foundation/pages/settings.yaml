@@ -52,7 +52,7 @@ loaders:
   management_links:
     rows:
     - { title: Language servers, description: Install, remove or restart language servers., uri: 'oxplow:oxplow/page?page=management#area=lsp' }
-    - { title: AI providers and roles, description: Test models and inspect AI activity., uri: 'oxplow:oxplow/page?page=management#area=ai' }
+    - { title: AI, description: Set up providers and the model each AI role uses., uri: 'oxplow:oxplow/page?page=ai-settings' }
     - { title: Integrations, description: Manage capabilities, stores and connected services., uri: 'oxplow:oxplow/page?page=management#area=integrations' }
     - { title: Data delivery, description: Inspect collectors, effects and failed deliveries., uri: 'oxplow:oxplow/page?page=management#area=data' }
 view:
@@ -116,4 +116,4 @@ view:
       - { slot: integrations, id: integrations-mounts }
     - id: ai
       title: AI
-      embed: { page: oxplow/management, params: { area: ai } }
+      embed: { page: oxplow/ai-settings }

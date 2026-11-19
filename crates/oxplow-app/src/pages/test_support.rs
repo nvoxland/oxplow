@@ -356,6 +356,32 @@ view:
 "#,
     ),
     (
+        "pick-model",
+        r#"
+title: Pick Model
+params: [{ name: provider }]
+loaders:
+  providers: { rows: [{ id: a }, { id: b }] }
+  models:
+    sql: "SELECT model AS value, model AS label FROM (SELECT 'a' AS p, 'a-1' AS model UNION ALL SELECT 'b', 'b-1') WHERE p = :provider"
+view:
+  stack:
+    - id: providers
+      title: Providers
+      viz: table
+      from: providers
+      actions:
+        - id: use
+          label: Use…
+          command: oxplow.thread.create
+          row: true
+          form: true
+          input: { stream: str1, title: "" }
+          choices:
+            title: { from: acme/pick-model#models, params: { provider: "{{row.id}}" }, open: true }
+"#,
+    ),
+    (
         "slotted",
         r#"
 title: Slotted

@@ -23,7 +23,7 @@ import { LoadingScreen } from "../kit/Loading.js";
 import { LOADING_AFTER_MS, useDelayed } from "../kit/useDelayed.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
-import { actionAnchor, actionDoes, offeredWholePage } from "../viz/vizActions.js";
+import { actionAnchor, actionHelp, offeredWholePage } from "../viz/vizActions.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { useTabVisible } from "../tabs/TabVisible.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
@@ -147,7 +147,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     ...offered.map((a) => ({
       id: `page-action-${a.id}`,
       label: a.label,
-      title: actionDoes(a),
+      title: actionHelp(a),
       busy: actions.busy === a.id,
       disabled: actions.busy !== null && actions.busy !== a.id,
       prominent: a.prominent,
@@ -288,7 +288,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           {actions.form ? (
             <VizActionRunnerContext.Provider value={pageRunner}>
               <FormSourceContext.Provider value={pageForms}>
-                <ActionForm run={target} streamId={streamId} pressed={actions.form} subject={title || null} onClose={actions.closeForm} />
+                <ActionForm run={target} streamId={streamId} pressed={actions.form} subject={title || null} others={page?.actions ?? []} onAlso={actions.run} onClose={actions.closeForm} />
               </FormSourceContext.Provider>
             </VizActionRunnerContext.Provider>
           ) : null}

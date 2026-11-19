@@ -199,6 +199,28 @@ async fn an_embed_nodes_page_actions_run_on_the_embedded_run() {
     assert_eq!(titles(&svc).await, ["renamed"]);
 }
 
+/// A row action's choices may run their loader with params bound from the
+/// row (each provider's own models), and may be `open`: suggestions the
+/// person may type past, which the form start says.
+#[tokio::test]
+async fn a_row_forms_choices_bind_the_row_and_may_be_open() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let id = open(&svc, &runs, "acme/pick-model").await;
+    for (provider, model) in [("a", "a-1"), ("b", "b-1")] {
+        let row = BTreeMap::from([("id".to_string(), SqlCell::Text(provider.into()))]);
+        let form = page_action_form(&svc, &runs, &id, Some("providers"), "use", Some(row))
+            .await
+            .unwrap();
+        let values: Vec<&str> = form.choices["title"]
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(values, [model], "provider {provider}");
+        assert_eq!(form.open_choices, ["title"]);
+    }
+}
+
 /// A form node starts from its defaults (params bound) with its choices
 /// read from a page's loader, and submits its command for the person.
 #[tokio::test]

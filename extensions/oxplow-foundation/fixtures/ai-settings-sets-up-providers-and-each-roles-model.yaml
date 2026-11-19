@@ -1,0 +1,70 @@
+# AI Settings: the providers (the test oxplow's `fixture` one, every role
+# bound to it), each role's model and where it comes from. Add a Provider…
+# adds one; a role's Choose Model… gives it a model of its own; Use the
+# Fallback Model gives it back its fallback's, offered only while the
+# fallback has a model. Uses says the model, or the fallback's it takes,
+# or the fallback a role without one would use; a role's problem follows
+# its model, in a warning tone. Edit… saves a provider's URL; a provider a role uses can't be
+# removed.
+when: { page: oxplow/ai-settings }
+expect:
+  loaders:
+    providers:
+      rows: [{ id: fixture, used_by: "Default, Summarize, Decide, Assistant", removable: 0 }]
+    roles:
+      rows:
+      - { role: default, name: "**Default** — Every role without a model of its own, and general reasoning: extracting structured answers, such as a change's inferred decisions", uses: "fixture · fixture", uses_tone: null, can_choose: 1, can_fall_back: 0 }
+      - { role: summarize, uses: "fixture · fixture", can_fall_back: 1 }
+      - { role: decide, uses: "fixture · fixture" }
+      - { role: assistant, uses: "fixture · fixture", can_fall_back: 1 }
+    calls:
+      rows: 0
+steps:
+- press: { action: add-provider, node: providers, input: { kind: openai_compatible, base_url: "http://localhost:9" } }
+  expect: { ok: true }
+- expect:
+    loaders:
+      providers:
+        rows: { contains: [{ id: openai_compatible, key: "No key", used_by: "", removable: 1 }] }
+- press: { action: choose-model, node: roles, row: { role: assistant }, input: { provider: openai_compatible, model: qwen3 } }
+  expect: { ok: true }
+- expect:
+    loaders:
+      roles:
+        rows: { contains: [{ role: assistant, uses: "openai_compatible · qwen3", can_fall_back: 1 }] }
+      providers:
+        rows: { contains: [{ id: openai_compatible, used_by: Assistant, removable: 0 }] }
+- press: { action: edit-provider, node: providers, row: { id: openai_compatible }, input: { base_url: "http://localhost:10" } }
+  expect: { ok: true }
+- expect:
+    loaders:
+      providers:
+        rows: { contains: [{ id: openai_compatible, base_url: "http://localhost:10" }] }
+- press: { action: use-fallback, node: roles, row: { role: assistant } }
+  expect: { ok: true }
+- expect:
+    loaders:
+      roles:
+        rows: { contains: [{ role: assistant, uses: "Default's: fixture · fixture", can_fall_back: 0 }] }
+- press: { action: remove-provider, node: providers, row: { id: openai_compatible } }
+  expect: { ok: true }
+- expect:
+    loaders:
+      providers:
+        rows: [{ id: fixture }]
+- given:
+  - command: oxplow.ai.set_role
+    input: { role: assistant, provider: fixture, model: fixture, restrict: [tools] }
+- expect:
+    loaders:
+      roles:
+        rows: { contains: [{ role: assistant, uses: "fixture · fixture — the assistant role needs tool calling, which its binding fixture · fixture forbids", uses_tone: warning }] }
+- given:
+  - command: oxplow.ai.set_role
+    input: { role: assistant }
+  - command: oxplow.ai.set_role
+    input: { role: default }
+- expect:
+    loaders:
+      roles:
+        rows: { contains: [{ role: assistant, uses: "Not set up (Default has none)", uses_tone: null }, { role: default, uses: Not set up }] }

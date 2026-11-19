@@ -14,7 +14,7 @@ use oxplow_ai::parts::{
     FinishReasonV1, MessageRoleV1, MessageV1, PartV1, StreamDeltaV1, ToolDefinitionV1,
     TypedRequestV1, TypedResponseV1, UsageSourceV1,
 };
-use oxplow_ai_fake::{mock, mock_sse};
+use oxplow_ai_fake::{mock, mock_get, mock_sse};
 use serde_json::{json, Value};
 
 use crate::{completion_model, provider, KINDS};
@@ -582,6 +582,34 @@ async fn discovery_reads_the_catalog_without_a_call() {
     for local in ["ollama", "openai_compatible", "llamacpp"] {
         let catalog = shipped(local, None).discover_models(&none).await.unwrap();
         assert!(!catalog.catalog_known, "{local}");
+    }
+}
+
+/// A local server's models are the ones it lists (`GET <base>/models`, the
+/// OpenAI list), asked with no key: each known by its id, what it can do
+/// unknown. One that doesn't answer stays unknown.
+#[tokio::test]
+async fn a_local_server_lists_the_models_it_has() {
+    let base = mock_get(
+        "/v1/models",
+        json!({ "object": "list", "data": [{ "id": "llama3.2", "object": "model" }, { "id": "qwen3:8b", "object": "model" }] }),
+    )
+    .await;
+    let base = format!("{base}/v1");
+    for kind in ["ollama", "llamacpp", "openai_compatible"] {
+        let catalog = shipped(kind, None)
+            .discover_models(&at(&base, None))
+            .await
+            .unwrap();
+        assert!(catalog.catalog_known, "{kind}");
+        assert!(catalog.validate().is_ok());
+        let ids: Vec<&str> = catalog
+            .models
+            .iter()
+            .filter_map(|m| m.model.as_deref())
+            .collect();
+        assert_eq!(ids, ["llama3.2", "qwen3:8b"], "{kind}");
+        assert_eq!(catalog.models[0].tool_calling, CapabilitySupport::Unknown);
     }
 }
 

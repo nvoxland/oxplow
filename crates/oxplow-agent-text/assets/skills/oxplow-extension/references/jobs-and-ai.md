@@ -54,8 +54,8 @@ effects:
 ## AI profiles
 
 When a job or script needs "a model for X" that a person may want to
-choose, declare `ai_profiles: [{ id, description, fallback: main|summarize|decide,
+choose, declare `ai_profiles: [{ id, description, fallback?: default|summarize|decide|assistant,
 features? }]` rather than hard-coding a role, and name it by its id: a job
 request's `role: <id>`, a collector's `ai_classify(..., role = "<id>")`.
 `$OXPLOW_BIN extension check` shows what serves it. Until a person binds
-`<namespace>/<id>` in Settings → AI, the fallback role's model is used.
+`<namespace>/<id>` in AI Settings, the fallback role's model is used (`default`'s when it names none).

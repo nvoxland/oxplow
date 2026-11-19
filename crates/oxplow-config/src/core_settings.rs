@@ -78,6 +78,7 @@ fn setting(
             secret: false,
             order: 0,
             ui: Default::default(),
+            mask: Default::default(),
             owner: "core".into(),
         },
         apply,
@@ -554,6 +555,7 @@ pub fn definitions(fallback_name: &str) -> Vec<SettingDefinition> {
             secret: false,
             order: 0,
             ui: Default::default(),
+            mask: Default::default(),
             owner: "core".into(),
         }),
     );
@@ -594,6 +596,7 @@ fn core_definition(
         secret: false,
         order: 0,
         ui: Default::default(),
+        mask: Default::default(),
         owner: "core".into(),
     }
 }
@@ -643,6 +646,9 @@ pub fn retired_setting(key: &str) -> Option<&'static str> {
             Some("use oxplow.ai.<provider>.enabled, .baseUrl and secret .apiKey")
         }
         "oxplow.ai.roles" => Some("use one oxplow.ai.roles.<role> assignment per role"),
+        "oxplow.ai.roles.main" => Some(
+            "use oxplow.ai.roles.default: the main role is now default, the model every role without one uses",
+        ),
         "oxplow.newThreadSession" => {
             Some("new threads open the picker; its last choice is remembered in UI state")
         }
@@ -944,8 +950,8 @@ mod tests {
         );
         assert_eq!(find("oxplow.scripts.memoryMb").default, Some(json!(512)));
         assert_eq!(find("oxplow.generated.exclude").default, Some(json!([])));
-        assert_eq!(find("oxplow.ai.roles.main").default, None);
-        assert_eq!(find("oxplow.ai.roles.main").category, "ai");
+        assert_eq!(find("oxplow.ai.roles.default").default, None);
+        assert_eq!(find("oxplow.ai.roles.default").category, "ai");
         assert!(all
             .iter()
             .all(|definition| definition.key != "oxplow.scripts"));
@@ -1064,7 +1070,7 @@ mod tests {
             &values(&[
                 ("oxplow.activeProviders.snapshots", json!("hashes")),
                 (
-                    "oxplow.ai.roles.main",
+                    "oxplow.ai.roles.default",
                     json!({"provider": "local", "model": "a"}),
                 ),
                 ("oxplow.agents.claude.enabled", json!(false)),
@@ -1083,7 +1089,7 @@ mod tests {
         .unwrap();
         assert_eq!(config.active_providers["snapshots"], "hashes");
         assert_eq!(config.active_provider_origins["snapshots"], Level::Project);
-        assert_eq!(config.ai_roles["main"].model, "a");
+        assert_eq!(config.ai_roles["default"].model, "a");
         assert!(!config.agent_enabled["claude"]);
         assert!(!config.agent_enabled["acme/coder"]);
         assert_eq!(config.agent_config["claude"]["model"], json!("opus"));

@@ -44,6 +44,24 @@ pub async fn mock(path: &'static str, status: u16, reply: Value) -> (String, See
     (format!("http://{addr}"), seen)
 }
 
+/// Serve `reply` to every GET on `path` (a server's model list): the base
+/// URL.
+pub async fn mock_get(path: &'static str, reply: Value) -> String {
+    let app = Router::new().route(
+        path,
+        axum::routing::get(move || {
+            let reply = reply.clone();
+            async move { Json(reply) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a local port");
+    let addr = listener.local_addr().expect("local address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("mock server") });
+    format!("http://{addr}")
+}
+
 /// Serve `chunks` as a `text/event-stream` reply to every POST on `path`,
 /// one chunk every `every` (a chunk is raw text: one event, several, or
 /// part of one). After the last chunk the stream stays open for `hold`

@@ -250,7 +250,7 @@ pub fn for_each_ref(page: &mut Page, mut f: impl FnMut(&RefSite, &mut String)) {
                         node: format!("{node}: action `{}`", a.id),
                         field: field.clone(),
                     },
-                    target,
+                    target.from_mut(),
                 );
             }
         }
@@ -305,7 +305,7 @@ pub fn for_each_ref(page: &mut Page, mut f: impl FnMut(&RefSite, &mut String)) {
                                 node: id.clone(),
                                 field: field.clone(),
                             },
-                            target,
+                            target.from_mut(),
                         );
                     }
                 }

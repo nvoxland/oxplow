@@ -1922,7 +1922,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/prof/extension.yaml",
-            "manifest: 2\nname: prof\nintent:\n  purpose: x\n  examples: [{ name: a }]\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling, streaming] }\n  - { id: plain, description: Plain., fallback: main }\n",
+            "manifest: 2\nname: prof\nintent:\n  purpose: x\n  examples: [{ name: a }]\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling, streaming] }\n  - { id: plain, description: Plain. }\n",
         );
         write(
             dir.path(),

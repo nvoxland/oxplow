@@ -979,7 +979,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         with_model(
             &fx.svc,
-            Role::MAIN,
+            Role::DEFAULT,
             chat("```json\n{\"n\": \"three\"}\n```"),
         )
         .await;
@@ -987,7 +987,13 @@ mod tests {
         let refused = fx
             .svc
             .ai_compute
-            .extract("test", &Role::MAIN, "Count them.", "one two three", &schema)
+            .extract(
+                "test",
+                &Role::DEFAULT,
+                "Count them.",
+                "one two three",
+                &schema,
+            )
             .await
             .unwrap_err();
         assert!(refused.to_string().contains("`/n`"), "{refused}");

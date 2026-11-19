@@ -272,10 +272,10 @@ collectors:
   your extension's; an unbound profile reports its fallback's model), or
   `{role, model: null, problem}` saying why not. Use it to skip when no
   model is bound.
-- Declare `needs: [ai.discover]` to read `ai_capabilities(role = "main")`
-  or `ai_models(role = "main")` in a collector. Missing metadata is unknown.
+- Declare `needs: [ai.discover]` to read `ai_capabilities(role = "default")`
+  or `ai_models(role = "default")` in a collector. Missing metadata is unknown.
   Discovery reads no keys, makes no paid calls and works in pure previews.
-- `ai_complete({"schemaVersion": 1, "messages": [...]}, role = "main")`
+- `ai_complete({"schemaVersion": 1, "messages": [...]}, role = "default")`
   sends ordered text or tool parts through the configured role. The host
   chooses the model; supplying `model` is an error. Image parts are currently
   refused. Providers may opt into `completeTyped` transport; legacy adapters
@@ -437,7 +437,7 @@ commands:
 ```
 
 `enqueue` takes `{job, intentKey, request}`. For this operation, `request`
-is `{schemaVersion: 1, role, messages, tools?}`: `role` is `main`,
+is `{schemaVersion: 1, role, messages, tools?}`: `role` is `default`,
 `summarize`, `decide` or the id of one of your `ai_profiles`; the host
 chooses the model for it, and a job that declares `tools` takes none here. The request
 is private and limited to 1 MiB and 64 nesting levels. `cancel` and
@@ -489,7 +489,7 @@ script can ask for "the model that reviews" without naming one:
 ai_profiles:
   - id: review                      # [a-z][a-z0-9_]*, unique in the extension
     description: Reviews a request's evidence.   # at most 4096 bytes
-    fallback: summarize             # main | summarize | decide (required)
+    fallback: summarize             # default (when left out) | summarize | decide | assistant
     features: [tool_calling]        # optional: text | tool_calling | streaming | image
 ```
 
@@ -498,7 +498,8 @@ Name it by its id where your extension picks a role: a job request's
 (every `ai_*` builtin takes `role=`). Another extension's profiles aren't
 yours to name. The person binds `<namespace>/<id>` to a model in
 Settings → AI (or a project in the `oxplow.ai.roles.<namespace>.<profile>` setting);
-until they do, the `fallback` role's model serves it. `features` are what
+until they do, the `fallback` role's model serves it (`default`'s when the
+profile names none, and a named one without a model falls back to `default`). `features` are what
 the bound model must support: a job's typed call on a model that
 reports one unsupported is refused, and Settings shows why. A profile
 picks a model, nothing more — what a job's model may call is still its

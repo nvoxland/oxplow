@@ -152,7 +152,10 @@ markdown itself, nor edits it in a `<textarea>`.
   bottom bar and resizes, the other covers a tab.
 - **An action form is for a person** (rules for every `form: true`
   action, in `SchemaForm`/`FormModal`): heading and submit are the
-  action's label without its `…`; the submit is the primary button,
+  action's label without its `…` — a button names what it does ("Add
+  Provider", "Rename"), never "OK" or "Submit" — except a form that
+  changes something that exists, whose submit is Save (the action's
+  `submit:`; its Edit… saves, it doesn't edit); the submit is the primary button,
   right-aligned beside Cancel, disabled only while a required field is
   empty (hover says which), Enter submits, Escape cancels; `fixed` fields
   are never drawn (the subtitle says what the form is about); labels come
@@ -774,7 +777,9 @@ not a pick and isn't in the address.
   person comes to the page to do (a list's New, a
   timeline's Today/Fit). A button with an `icon` is the icon alone, its
   label the hover; give a prominent action one when the icon says it
-  plainly. A section's actions are `PageAction[]` too, at its heading. A
+  plainly. Any other action's hover is only the page's `help:`, for a
+  person, and only when the label doesn't say what it does — never the
+  command's agent-facing summary. A section's actions are `PageAction[]` too, at its heading. A
   primary action is the accent button; one per place.
 - **A page's title is in the nav bar, always**, with its icon; the body
   starts with its first section and draws no heading of its own. A long
@@ -1276,8 +1281,18 @@ caller may bypass the bus to write to the terminal.
   only Enter does. The prompt box: Enter sends, Shift+Enter adds a line,
   Escape stops a running turn (and is not passed on, or the dock would close);
   a running turn leaves the box read-only, not disabled, so Escape still
-  reaches it. States: no model (a link to Settings → AI), suggestions, running,
-  a permission card waiting (Allow / Decline), an error.
+  reaches it. The panel's toolbar (`DockToolbar`): New, the model (a quiet
+  button with its name, opening a menu), **Allow Changes** (a switch, accent
+  while on: it may then change things, each change asking first), Undo This
+  Turn, Continue in… (a menu of the stream's sessions), and at the right
+  what the conversation is about (fixed for it; New starts one about
+  nothing). The transcript: the person's prompts are bubbles, the
+  Assistant's text plain, thinking and tool calls rows that open in place to
+  their text (a call's status and Undo on its line), a permission request a
+  decision row (Allow / Decline), a block or an error a one-line note with
+  its icon. With no model the panel shows only "The Assistant needs a
+  model", **Set Up the Assistant** (foundation's AI Settings page): no toolbar,
+  no input.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   offered with no thread selected too), a
@@ -1371,6 +1386,15 @@ page never draws its own param input. One range vocabulary serves every page (`k
 key (`1d`…`90d`), `all`, or `a..b` (dates or date-times, either end open) —
 a page `date_range`, the metric pages' range and a chart's brushed window. A row shows the value it applied
 at once; it never waits for the run.
+
+**A row whose click opens a form shows it.** A table row whose `primary`
+action is a form (an Edit…, a Choose Model…) ends in an icon button that
+opens the same form: a pencil unless the action names its `icon`, its
+label (without the `…`) the hover and accessible name, quiet until the row
+is hovered (`ox-icon-button`, `viz-row-button-<i>`). The click on the row
+stays as the shortcut. A row whose click opens a page, or runs at once,
+gets none: a link already reads as clickable, and an action that runs
+belongs in the row's menu or a named button, not a hidden click.
 
 A param a column `select`s is the page's **selection**, never an input.
 A page row whose column `select`s a param is a pick: it reads as

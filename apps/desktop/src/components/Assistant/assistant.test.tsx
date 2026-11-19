@@ -113,15 +113,30 @@ test("only the latest turn's completed, audited calls undo together, newest firs
 
 // ---- the panel --------------------------------------------------------------------
 
-test("with no model, the panel says so and links to Settings → AI", async () => {
+test("with no model, the panel says only that, with Set Up the Assistant", async () => {
   snap = { ...idleSnap(), model: null, models: [], problem: { kind: "no_model", message: "Bind a model to the assistant role." } };
   await askAssistant(null);
   const opens: string[] = [];
   const view = render(<AssistantDockBody streamId="str1" onOpenPage={(r) => opens.push(r.id)} />);
   await waitFor(() => expect(view.getByTestId("assistant-no-model").textContent).toContain("Bind a model"));
   fireEvent.click(view.getByTestId("assistant-open-settings"));
-  expect(opens).toEqual(["oxplow:oxplow/page?page=settings#area=ai"]);
-  expect((view.getByTestId("assistant-input") as HTMLTextAreaElement).disabled).toBe(true);
+  expect(opens).toEqual(["oxplow:oxplow/page?page=ai-settings"]);
+  // Nothing else: no input to type in, no toolbar.
+  expect(view.queryByTestId("assistant-input")).toBeNull();
+  expect(view.queryByTestId("assistant-toolbar")).toBeNull();
+});
+
+// The toolbar: the model is a button showing its name that opens a menu,
+// and Allow Changes is a switch.
+test("the toolbar shows the model and switches Allow Changes", async () => {
+  await askAssistant(null);
+  const view = render(body());
+  const model = await waitFor(() => view.getByTestId("assistant-model"));
+  expect(model.textContent).toContain("p · m");
+  const allow = view.getByTestId("assistant-allow-changes");
+  expect(allow.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(allow);
+  await waitFor(() => expect(calls).toContain('set:{"allowChanges":true}'));
 });
 
 test("a fresh session offers suggestion chips that fill the box and send nothing", async () => {

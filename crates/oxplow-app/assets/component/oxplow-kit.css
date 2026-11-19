@@ -123,6 +123,11 @@
 .ox-button.ox-primary { color: var(--button-primary-fg); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
 .ox-button.ox-primary:hover { background: var(--button-primary-bg-hover); }
 .ox-button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* A row's icon button (a table row whose click opens a form): quiet until
+   the row is hovered or it is focused. */
+.ox-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-primary); border-color: var(--border-subtle); background: var(--surface-elevated); }
+.ox-icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Forms: a stack of fields, each a label over a control. */
 .ox-form { display: flex; flex-direction: column; gap: var(--space-3); }

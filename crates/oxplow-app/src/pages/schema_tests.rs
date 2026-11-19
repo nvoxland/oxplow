@@ -1375,26 +1375,23 @@ fn a_button_may_name_the_fact_it_goes_with() {
     assert!(why.contains("`fact`"), "{why}");
 }
 
-/// A button's hover is what its command does, for a page's actions and a
-/// viz's alike, and nothing for an action that runs no command.
+/// A button's hover is the page's own words for a person (`help:`), for a
+/// page's actions and a viz's alike; never its command's summary, which
+/// is written for agents. No `help`, no hover.
 #[test]
-fn a_run_says_what_each_action_does() {
+fn an_actions_hover_is_the_pages_help_only() {
     let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id, 'x' AS uri\" }\n";
-    let mut p = page(&format!(
-        "{head}actions:\n  - {{ id: top, label: Top, command: oxplow.a.top }}\nview:\n  stack:\n    - {{ id: n, title: N, viz: detail, from: q, actions: [ {{ id: inner, label: Inner, command: oxplow.a.inner }}, {{ id: go, label: Go, open: uri }} ] }}\n"
+    let p = page(&format!(
+        "{head}actions:\n  - {{ id: top, label: Top, command: oxplow.a.top, help: Starts over }}\nview:\n  stack:\n    - {{ id: n, title: N, viz: detail, from: q, actions: [ {{ id: inner, label: Inner, command: oxplow.a.inner, help: ' Does it ' }}, {{ id: go, label: Go, open: uri }} ] }}\n"
     ))
     .expect("loads");
-    p.describe_actions(|command| Some(format!("says {command}")));
-    assert_eq!(p.actions[0].does.as_deref(), Some("says oxplow.a.top"));
+    assert_eq!(p.actions[0].help.as_deref(), Some("Starts over"));
     let node = p.nodes().into_iter().find(|n| n.id == "n").unwrap().clone();
     let NodeKind::Viz { config, .. } = &node.kind else {
         panic!("a viz")
     };
-    assert_eq!(
-        config.actions[0].does.as_deref(),
-        Some("says oxplow.a.inner")
-    );
-    assert_eq!(config.actions[1].does, None);
+    assert_eq!(config.actions[0].help.as_deref(), Some("Does it"));
+    assert_eq!(config.actions[1].help, None);
 }
 
 /// A section may take its title from a column of its row; the file's title

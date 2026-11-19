@@ -82,6 +82,7 @@ pub(crate) fn provider_credential_definition(
         secret: true,
         order: 0,
         ui: Default::default(),
+        mask: Default::default(),
         owner: format!("extension/{namespace}"),
     }
 }

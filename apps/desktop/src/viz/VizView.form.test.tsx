@@ -229,6 +229,17 @@ test("a form action whose form is one text field opens a prompt strip, not a sli
   await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
 });
 
+// A form over something that exists submits with the page's own word for
+// it (`submit: Save` on an Edit…).
+test("a form action's `submit` labels its button", async () => {
+  const saved = { ...run, config: { ...viz, actions: [{ ...viz.actions[0], label: "Edit…", submit: "Save" }] } } as unknown as VizRun;
+  const view = render(<VizView run={saved} onOpenPage={() => {}} />);
+  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
+  await waitFor(() => view.getByTestId("viz-action-form"));
+  expect(view.getByTestId("viz-action-form-fields-submit").textContent).toBe("Save");
+});
+
 test("Escape closes the strip and runs nothing", async () => {
   const view = render(<VizView run={run} onOpenPage={() => {}} />);
   await pressRetitle(view);
@@ -579,4 +590,69 @@ test("a row action without `about` has no subtitle, whatever page it is on", asy
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../api.js", () => realApi);
+});
+
+// `also` puts another row action in a form action's form (a Remove in an
+// Edit form): a quiet button at the left of the form's buttons, run on the
+// form's row as from the row's menu, the form closing first. It is drawn
+// only there, never in the row's menu, and only where the row is offered
+// it (`when`). A form with one is never the one-line prompt strip: the
+// strip has no room for it.
+const withAlso = (when: string | null): VizRun =>
+  ({
+    ...run,
+    config: {
+      ...viz,
+      actions: [
+        { ...viz.actions[0], also: ["remove"] },
+        { id: "remove", label: "Remove", command: "acme.issue.remove", input: { uri: "{{row.uri}}" }, row: true, group: null, form: false, fixed: [], when, inForm: "retitle" },
+      ],
+    },
+    result: { columns: ["uri", "title", "removable"], rows: [["u1", "Old", 1]], truncated: false },
+  }) as unknown as VizRun;
+
+test("an action `also` names is a button in the form, run on its row, and not in the row's menu", async () => {
+  const view = render(<VizView run={withAlso(null)} onOpenPage={() => {}} />);
+  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  expect(view.queryByTestId("menu-item-viz-action-remove")).toBeNull();
+  fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
+  // One editable field, yet a slideover: the strip has no room for Remove.
+  const form = await waitFor(() => view.getByTestId("viz-action-form"));
+  expect(form.getAttribute("role")).toBe("dialog");
+  fireEvent.click(view.getByTestId("viz-action-form-also-remove"));
+  await waitFor(() => expect(runs).toHaveLength(1));
+  expect(runs[0]).toMatchObject({ action: "remove", row: { uri: "u1", title: "Old", removable: 1 }, confirmed: false });
+  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+});
+
+test("a form's `also` button shows only where its `when` offers it", async () => {
+  const view = render(<VizView run={withAlso("missing")} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  expect(view.queryByTestId("viz-action-form-also-remove")).toBeNull();
+  cleanup();
+  const offered = render(<VizView run={withAlso("removable")} onOpenPage={() => {}} />);
+  await pressRetitle(offered);
+  expect(offered.getByTestId("viz-action-form-also-remove").textContent).toBe("Remove");
+});
+
+// A row whose click opens a form says so: an icon button at the row's end
+// (a pencil, unless the action names its own icon), the primary action's
+// label without its `…` its hover and name, that opens the same form. A
+// primary action that runs at once (or a viz with none) draws no button.
+test("a table row whose primary action is a form has a button at its end that opens it", async () => {
+  const primaryForm = { ...run, config: { ...viz, actions: [{ ...viz.actions[0], primary: true }] } } as unknown as VizRun;
+  const view = render(<VizView run={primaryForm} onOpenPage={() => {}} />);
+  const button = view.getByTestId("viz-row-button-0");
+  expect(button.getAttribute("aria-label")).toBe("Retitle");
+  expect(button.getAttribute("title")).toBe("Retitle");
+  expect(button.querySelector("svg")).not.toBeNull();
+  fireEvent.click(button);
+  await waitFor(() => view.getByTestId("viz-action-form"));
+  cleanup();
+  const runsAtOnce = { ...run, config: { ...viz, actions: [{ ...viz.actions[0], primary: true, form: false }] } } as unknown as VizRun;
+  const plain = render(<VizView run={runsAtOnce} onOpenPage={() => {}} />);
+  expect(plain.queryByTestId("viz-row-button-0")).toBeNull();
+  cleanup();
+  const none = render(<VizView run={run} onOpenPage={() => {}} />);
+  expect(none.queryByTestId("viz-row-button-0")).toBeNull();
 });

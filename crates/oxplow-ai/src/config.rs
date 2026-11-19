@@ -14,14 +14,16 @@ pub const AI_CONFIG_FILE: &str = "global.yaml";
 /// The retired standalone AI file; its presence is reported, never read.
 const RETIRED_AI_FILE: &str = "ai.yaml";
 
-/// The jobs oxplow itself gives models. Every extension can name them,
-/// and each extension AI profile falls back to one.
+/// The jobs oxplow itself gives models. Every extension can name them.
+/// Default is the model every other role uses while it has none of its
+/// own; an extension's AI profile falls back to Default unless it names
+/// another built-in, whose own chain ends at Default.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum BuiltinRole {
-    Main,
+    Default,
     Summarize,
     Decide,
     Assistant,
@@ -29,7 +31,7 @@ pub enum BuiltinRole {
 
 impl BuiltinRole {
     pub const ALL: [BuiltinRole; 4] = [
-        BuiltinRole::Main,
+        BuiltinRole::Default,
         BuiltinRole::Summarize,
         BuiltinRole::Decide,
         BuiltinRole::Assistant,
@@ -37,18 +39,19 @@ impl BuiltinRole {
 
     pub fn name(self) -> &'static str {
         match self {
-            BuiltinRole::Main => "main",
+            BuiltinRole::Default => "default",
             BuiltinRole::Summarize => "summarize",
             BuiltinRole::Decide => "decide",
             BuiltinRole::Assistant => "assistant",
         }
     }
 
-    /// The built-in role it uses while it has no binding of its own.
+    /// The built-in role it uses while it has no binding of its own:
+    /// Default, for every role but Default itself.
     pub fn fallback(self) -> Option<BuiltinRole> {
         match self {
-            BuiltinRole::Assistant => Some(BuiltinRole::Main),
-            _ => None,
+            BuiltinRole::Default => None,
+            _ => Some(BuiltinRole::Default),
         }
     }
 
@@ -68,9 +71,9 @@ impl BuiltinRole {
     /// What oxplow uses it for, as Settings → AI shows it.
     pub fn description(self) -> &'static str {
         match self {
-            BuiltinRole::Main => {
-                "General reasoning: extracting structured answers, such as a change's inferred \
-                 decisions"
+            BuiltinRole::Default => {
+                "Every role without a model of its own, and general reasoning: extracting \
+                 structured answers, such as a change's inferred decisions"
             }
             BuiltinRole::Summarize => "Summaries of sessions and changes",
             BuiltinRole::Decide => "Typed yes/no, choice and score questions (e.g. Jev)",
@@ -97,7 +100,7 @@ pub enum Role {
 pub const DROPPED_ROLES: [&str; 3] = ["fast", "embed", "review"];
 
 impl Role {
-    pub const MAIN: Role = Role::Builtin(BuiltinRole::Main);
+    pub const DEFAULT: Role = Role::Builtin(BuiltinRole::Default);
     pub const SUMMARIZE: Role = Role::Builtin(BuiltinRole::Summarize);
     pub const DECIDE: Role = Role::Builtin(BuiltinRole::Decide);
     pub const ASSISTANT: Role = Role::Builtin(BuiltinRole::Assistant);
@@ -110,8 +113,8 @@ impl Role {
         }
         if DROPPED_ROLES.contains(&text) {
             return Err(format!(
-                "oxplow has no `{text}` role: nothing asked it; remove it (roles: main, \
-                 summarize, decide, or an extension's AI profile as `<namespace>/<name>`)"
+                "oxplow has no `{text}` role: nothing asked it; remove it (roles: default, \
+                 summarize, decide, assistant, or an extension's AI profile as `<namespace>/<name>`)"
             ));
         }
         match text.split_once('/') {
@@ -122,8 +125,8 @@ impl Role {
                 })
             }
             _ => Err(format!(
-                "unknown role `{text}` (roles: main, summarize, decide, or an extension's AI \
-                 profile as `<namespace>/<name>`)"
+                "unknown role `{text}` (roles: default, summarize, decide, assistant, or an \
+                 extension's AI profile as `<namespace>/<name>`)"
             )),
         }
     }
@@ -143,7 +146,7 @@ impl Role {
             });
         }
         Err(format!(
-            "`{text}` isn't a role: name `main`, `summarize`, `decide` or one of this \
+            "`{text}` isn't a role: name `default`, `summarize`, `decide`, `assistant` or one of this \
              extension's `ai_profiles` by its id"
         ))
     }
@@ -204,7 +207,8 @@ pub struct AiProfile {
     pub namespace: String,
     pub name: String,
     pub description: String,
-    /// The built-in role whose binding it uses until a person binds it.
+    /// The built-in role whose binding it uses until a person binds it
+    /// (Default unless its extension names another).
     pub fallback: BuiltinRole,
     /// What the bound model must support.
     pub features: Vec<crate::capabilities::ModelFeature>,
@@ -454,7 +458,7 @@ providers:
   - { id: openai_compatible, kind: openai_compatible, baseUrl: "http://localhost:11434/v1" }
   - { id: typesafe, kind: typesafe }
 roles:
-  main: { provider: anthropic, model: claude-opus-5-5 }
+  default: { provider: anthropic, model: claude-opus-5-5 }
   summarize: { provider: openai_compatible, model: qwen3:14b }
   decide: { provider: typesafe, model: jev-latest }
 "#;
@@ -560,14 +564,14 @@ roles:
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.summarize: { provider: openai, model: m, restrict: [tools, sql] }\noxplow.ai.roles.main: { provider: openai, model: m }\n",
+            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.summarize: { provider: openai, model: m, restrict: [tools, sql] }\noxplow.ai.roles.default: { provider: openai, model: m }\n",
         )
         .unwrap();
         let loaded = AiConfig::load(dir.path()).unwrap();
         let b = &loaded.roles[&Role::SUMMARIZE];
         assert!(b.forbids(AiRestriction::Tools) && b.forbids(AiRestriction::Sql));
         assert!(!b.forbids(AiRestriction::Streaming));
-        assert!(loaded.roles[&Role::MAIN].restrict.is_empty());
+        assert!(loaded.roles[&Role::DEFAULT].restrict.is_empty());
         loaded.save(dir.path()).unwrap();
         let saved = std::fs::read_to_string(dir.path().join(AI_CONFIG_FILE)).unwrap();
         assert_eq!(
@@ -578,7 +582,7 @@ roles:
         assert_eq!(AiConfig::load(dir.path()).unwrap(), loaded);
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.main: { provider: openai, model: m, restrict: [network] }\n",
+            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.default: { provider: openai, model: m, restrict: [network] }\n",
         )
         .unwrap();
         let err = AiConfig::load(dir.path()).unwrap_err().to_string();
@@ -591,16 +595,26 @@ roles:
         let (p, b) = c.resolve(&Role::SUMMARIZE, &[]).unwrap();
         assert_eq!(p.kind, "openai_compatible");
         assert_eq!(b.model, "qwen3:14b");
-        assert!(AiConfig::default().resolve(&Role::MAIN, &[]).is_none());
+        assert!(AiConfig::default().resolve(&Role::DEFAULT, &[]).is_none());
     }
 
-    /// The Assistant uses its own binding when it has one, else Main's;
-    /// it needs a model that calls tools and streams.
+    /// Every role but Default uses its own binding when it has one, else
+    /// Default's: setting Default makes every role work. Default falls
+    /// back to nothing. The Assistant needs a model that calls tools and
+    /// streams.
     #[test]
-    fn the_assistant_role_falls_back_to_main() {
-        let c = cfg();
-        let (_, b) = c.resolve(&Role::ASSISTANT, &[]).unwrap();
-        assert_eq!(b.model, "claude-opus-5-5", "Main's binding");
+    fn every_role_falls_back_to_default() {
+        let only_default: AiConfig = serde_yaml::from_str(
+            "providers:\n  - { id: anthropic, kind: anthropic }\nroles:\n  default: { provider: anthropic, model: claude-sonnet-5-5 }\n",
+        )
+        .unwrap();
+        for role in [Role::SUMMARIZE, Role::DECIDE, Role::ASSISTANT] {
+            assert_eq!(
+                only_default.resolve(&role, &[]).unwrap().1.model,
+                "claude-sonnet-5-5",
+                "{role:?} uses Default's"
+            );
+        }
         let mut own = cfg();
         own.roles.insert(
             Role::ASSISTANT,
@@ -610,8 +624,14 @@ roles:
             own.resolve(&Role::ASSISTANT, &[]).unwrap().1.model,
             "qwen3:14b"
         );
-        assert_eq!(BuiltinRole::Assistant.fallback(), Some(BuiltinRole::Main));
-        assert_eq!(BuiltinRole::Main.fallback(), None);
+        for role in [
+            BuiltinRole::Summarize,
+            BuiltinRole::Decide,
+            BuiltinRole::Assistant,
+        ] {
+            assert_eq!(role.fallback(), Some(BuiltinRole::Default));
+        }
+        assert_eq!(BuiltinRole::Default.fallback(), None);
         assert_eq!(
             BuiltinRole::Assistant.features(),
             &[
@@ -622,12 +642,38 @@ roles:
         assert!(AiConfig::default().resolve(&Role::ASSISTANT, &[]).is_none());
     }
 
+    /// A profile's named fallback is followed, and its chain still ends at
+    /// Default: a profile falling back to Summarize, with Summarize
+    /// unbound, uses Default's model.
+    #[test]
+    fn a_profiles_fallback_chain_ends_at_default() {
+        let profile = AiProfile {
+            namespace: "acme".into(),
+            name: "review".into(),
+            description: String::new(),
+            fallback: BuiltinRole::Summarize,
+            features: vec![],
+        };
+        let mut c: AiConfig = serde_yaml::from_str(
+            "providers:\n  - { id: anthropic, kind: anthropic }\nroles:\n  default: { provider: anthropic, model: d }\n",
+        )
+        .unwrap();
+        let profiles = [profile.clone()];
+        assert_eq!(c.resolve(&profile.role(), &profiles).unwrap().1.model, "d");
+        c.roles
+            .insert(Role::SUMMARIZE, RoleBinding::new("anthropic", "s"));
+        assert_eq!(c.resolve(&profile.role(), &profiles).unwrap().1.model, "s");
+    }
+
     #[test]
     fn project_overrides_win() {
         let mut o = BTreeMap::new();
-        o.insert(Role::MAIN, RoleBinding::new("openai_compatible", "llama"));
+        o.insert(
+            Role::DEFAULT,
+            RoleBinding::new("openai_compatible", "llama"),
+        );
         let c = cfg().with_overrides(&o);
-        assert_eq!(c.resolve(&Role::MAIN, &[]).unwrap().1.model, "llama");
+        assert_eq!(c.resolve(&Role::DEFAULT, &[]).unwrap().1.model, "llama");
         assert_eq!(
             c.resolve(&Role::DECIDE, &[]).unwrap().1.model,
             "jev-latest",
@@ -639,7 +685,8 @@ roles:
     fn validation_catches_unusable_config() {
         cfg().validate().unwrap();
         let mut bad = cfg();
-        bad.roles.insert(Role::MAIN, RoleBinding::new("nope", "m"));
+        bad.roles
+            .insert(Role::DEFAULT, RoleBinding::new("nope", "m"));
         assert!(
             matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("uses AI provider `nope`"))
         );
@@ -709,7 +756,7 @@ roles:
             .unwrap_err()
             .contains("unknown role `nope`"));
         assert_eq!(Role::parse_in("acme", "review").unwrap(), role);
-        assert_eq!(Role::parse_in("acme", "main").unwrap(), Role::MAIN);
+        assert_eq!(Role::parse_in("acme", "default").unwrap(), Role::DEFAULT);
         assert!(
             Role::parse_in("acme", "other/review").is_err(),
             "not shared"

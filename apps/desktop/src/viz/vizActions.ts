@@ -70,6 +70,23 @@ export function actionOffered(action: PageAction, row: Record<string, SqlCell>):
   return truthyCell(row[action.when]);
 }
 
+/** Whether `action` is one of a row's own actions (its menu, a click, its
+ *  key): a row action, not an editor's Save, and not one a form action's
+ *  `also` shows in its form only (`inForm`). */
+export function rowMenuAction(action: PageAction): boolean {
+  return action.row && !action.edit && !action.inForm;
+}
+
+/** The actions form action `action`'s `also` names, as buttons in its form:
+ *  those of `actions` offered on `row` (`when`), in `also`'s order. */
+export function formAlso(action: PageAction, actions: readonly PageAction[], row: Record<string, SqlCell> | null): PageAction[] {
+  return (action.also ?? []).flatMap((id) => {
+    const other = actions.find((a) => a.id === id);
+    if (!other) return [];
+    return row === null || actionOffered(other, row) ? [other] : [];
+  });
+}
+
 /** A cell that counts as true for a `when`: not null, 0, `""` or false. */
 export function truthyCell(v: SqlCell | undefined): boolean {
   return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false;
@@ -82,7 +99,7 @@ export function truthyCell(v: SqlCell | undefined): boolean {
  *  row and, if it has a `when`, that column is truthy on it. The server
  *  reads and checks the same row when it runs. */
 export function offeredWholePage(action: PageAction, result: Pick<VizRun["result"], "columns" | "rows">): boolean {
-  if (action.row || action.group || action.edit) return false;
+  if (action.row || action.group || action.edit || action.inForm) return false;
   if (action.all) return result.rows.length > 0;
   if (!action.oneRow) return true;
   if (result.rows.length !== 1) return false;
@@ -107,8 +124,8 @@ export interface ActionTarget {
 
 /** What a button's hover says: its command's summary, in words. Nothing
  *  when there is none (a command's id tells a person nothing). */
-export function actionDoes(action: Pick<PageAction, "does">): string {
-  return action.does ?? "";
+export function actionHelp(action: Pick<PageAction, "help">): string {
+  return action.help ?? "";
 }
 
 export async function performVizAction(

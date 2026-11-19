@@ -32,12 +32,12 @@ fn provider(id: &str) -> oxplow_ai::config::ProviderConfig {
 #[tokio::test]
 async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
     let fx = services_with_thread().await;
-    let roles = "SELECT role, provider, model, key_set FROM v_ai_role WHERE role IN ('main', 'decide') ORDER BY role";
+    let roles = "SELECT role, provider, model, key_set FROM v_ai_role WHERE role IN ('default', 'decide') ORDER BY role";
     assert_eq!(
         rows(&fx, roles).await,
         vec![
             vec![json!("decide"), Value::Null, Value::Null, json!(0)],
-            vec![json!("main"), Value::Null, Value::Null, json!(0)],
+            vec![json!("default"), Value::Null, Value::Null, json!(0)],
         ]
     );
 
@@ -56,7 +56,7 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
         rows(&fx, roles).await,
         vec![
             vec![json!("decide"), json!("typesafe"), json!("jev"), json!(1)],
-            vec![json!("main"), Value::Null, Value::Null, json!(0)],
+            vec![json!("default"), Value::Null, Value::Null, json!(0)],
         ]
     );
     assert_eq!(
@@ -347,7 +347,7 @@ async fn config_values_are_read_live_with_where_each_comes_from() {
     // The AI roles are settings too, documented like the rest.
     let roles = rows(
         &fx,
-        "SELECT doc FROM v_config_value WHERE key = 'oxplow.ai.roles.main'",
+        "SELECT doc FROM v_config_value WHERE key = 'oxplow.ai.roles.default'",
     )
     .await;
     assert_eq!(roles.len(), 1);

@@ -74,9 +74,9 @@ intent:
     - name: settings-agents-area-hands-set-agents-each-new-order
       input: { page: settings-category, params: { category: agents } }
       expect: agents in priority order with the lists a row hands set_agents; what new threads start with; the saved prompt addition
-    - name: settings-ai-area-lists-providers-roles-and-calls
-      input: { page: management, params: { area: ai } }
-      expect: a provider with its kind and a saved key (never the key), a role with its binding, a role bound to nothing with its fallback
+    - name: ai-settings-sets-up-providers-and-each-roles-model
+      input: { page: ai-settings }
+      expect: each provider with the roles that use it (never its key), each role's model and where it comes from; adding a provider, choosing a role's model, editing, falling back and removing
     - name: settings-data-area-lists-entities-collectors-and-effects
       input: { page: management, params: { area: data } }
       expect: the entities, the collectors and the declared effects
@@ -951,7 +951,7 @@ commands:
     example: {"text": "<a long log>", "focus": "risks"}
   # ai.settings, ai.test — Settings → AI (a key is a secret: never read back or recorded).
   - name: ai.set_provider
-    summary: "Add or replace an AI provider: its kind and API base, and its key (kept in the OS keychain, never read back or recorded). Left out, the stored key stays."
+    summary: "Add or replace an AI provider: its kind and API base, and its key (kept in the OS keychain, never read back or recorded). Left out, the stored key stays. Its `id` is its kind; left out, it is the kind."
     scope: ai.settings
     op: set_provider
     example: {"id": "anthropic", "kind": "anthropic", "key": "sk-ant-…"}
@@ -962,7 +962,7 @@ commands:
     confirm: always
     example: {"id": "anthropic"}
   - name: ai.set_role
-    summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding."
+    summary: "Bind a role (`default`, `summarize`, `decide`, `assistant`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding."
     scope: ai.settings
     op: set_role
     example: {"role": "summarize", "provider": "anthropic", "model": "claude-haiku-5-5"}
@@ -1072,7 +1072,7 @@ commands:
     example: {"collector": "work/hot"}
   # config.read
   - name: config.get
-    summary: "Read a registered setting by fully qualified key; omit level for the effective inherited value, or choose local, project or global."
+    summary: "Read a registered setting by fully qualified key; omit level for the effective inherited value, or choose local, project or global. An agent reading a secret gets `value: null`, whether it is set, and `masked` (its last four characters), never the value."
     scope: config.read
     op: get
     example: {"key": "oxplow.metrics.retentionDays"}

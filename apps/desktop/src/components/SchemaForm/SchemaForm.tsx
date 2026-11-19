@@ -14,7 +14,7 @@
 import type { CSSProperties } from "react";
 import { Markdown } from "../Markdown/Markdown.js";
 import { typingElsewhere } from "../../typingElsewhere.js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   draftsFrom,
@@ -54,6 +54,9 @@ export interface SchemaFormProps {
    *  says what a person reads in `fields` (`help`). */
   schemaHelp?: boolean;
   submitLabel?: string;
+  /** Drawn at the left of the buttons, before Cancel (an action form's
+   *  other actions: a Remove beside an Edit's Save). */
+  leading?: ReactNode;
   busy?: boolean;
   testIdPrefix?: string;
   /** Show only these top-level fields, in this order: a name, or `{ name,
@@ -81,6 +84,9 @@ export interface SchemaFormProps {
   /** Top-level fields picked from a list: a select of these choices
    *  instead of the field's own input. */
   choices?: Record<string, FieldChoice[]>;
+  /** The `choices` fields whose choices are suggestions only: a text field
+   *  that lists them as the person types, and takes any value. */
+  openChoices?: string[];
   /** A second submit beside the first: the same value, sent to its own
    *  handler (Save and Another). Enter still runs the primary. */
   again?: { label: string; onSubmit(value: Record<string, unknown>): void };
@@ -94,12 +100,14 @@ export function SchemaForm({
   onCancel,
   schemaHelp = true,
   submitLabel,
+  leading,
   busy = false,
   testIdPrefix = "schema-form",
   fields: shown,
   fixed,
   serverErrors,
   choices,
+  openChoices,
   again,
   mode = "create",
   draft,
@@ -186,7 +194,7 @@ export function SchemaForm({
   // optional field whose choices came back empty, an object without
   // children.
   const askable = (f: Field) =>
-    f.kind === "object" ? f.children.length > 0 : !(choices?.[f.path]?.length === 0 && !f.required);
+    f.kind === "object" ? f.children.length > 0 : !(choices?.[f.path]?.length === 0 && !f.required && !openChoices?.includes(f.path));
   const rendered = listed.filter((f) => !hidden.has(f.path) && askable(f));
   const live = Object.entries(serverErrors ?? {}).filter(([name]) => !edited.has(name));
   const drawn = rendered.filter((f) => !fixedSet.has(f.path));
@@ -245,6 +253,7 @@ export function SchemaForm({
               autoFocus={i === 0 && onSubmit !== undefined && mode === "create"}
               testIdPrefix={testIdPrefix}
               choices={choices?.[f.path]}
+              open={openChoices?.includes(f.path) ?? false}
               secret={secrets.has(f.path)}
               onSubmitShortcut={submit}
             />
@@ -265,6 +274,7 @@ export function SchemaForm({
       ) : null}
       {onSubmit ? (
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 4 }}>
+          {leading}
           {onCancel ? (
             <button type="button" className="ox-button" data-testid={`${testIdPrefix}-cancel`} style={buttonStyle} onClick={onCancel}>
               Cancel
@@ -306,6 +316,7 @@ function FieldInput({
   autoFocus,
   testIdPrefix,
   choices,
+  open = false,
   secret = false,
   onSubmitShortcut,
 }: {
@@ -320,6 +331,8 @@ function FieldInput({
   autoFocus: boolean;
   testIdPrefix: string;
   choices?: FieldChoice[];
+  /** Its choices are suggestions: a text field that takes any value. */
+  open?: boolean;
   /** Masked: a key, a token. */
   secret?: boolean;
   onSubmitShortcut?(): void;
@@ -354,7 +367,18 @@ function FieldInput({
     </label>
   );
   let input;
-  if (choices) {
+  if (choices && open) {
+    input = (
+      <>
+        <input id={id} data-testid={id} className="ox-input" type="text" list={`${id}-suggestions`} value={raw} onChange={(e) => onEdit(f.path, e.target.value)} style={inputStyle} />
+        <datalist id={`${id}-suggestions`}>
+          {choices.map((c) => (
+            <option key={c.value} value={c.value} label={c.label} />
+          ))}
+        </datalist>
+      </>
+    );
+  } else if (choices) {
     input = <ChoiceSelect id={id} value={raw} required={f.required} choices={choices} onChange={(v) => onEdit(f.path, v)} />;
   } else switch (f.kind) {
     case "boolean":

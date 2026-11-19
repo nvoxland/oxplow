@@ -1307,10 +1307,12 @@ export type Build_Serialize = {
 };
 
 /**
- *  The jobs oxplow itself gives models. Every extension can name them,
- *  and each extension AI profile falls back to one.
+ *  The jobs oxplow itself gives models. Every extension can name them.
+ *  Default is the model every other role uses while it has none of its
+ *  own; an extension's AI profile falls back to Default unless it names
+ *  another built-in, whose own chain ends at Default.
  */
-export type BuiltinRole = "main" | "summarize" | "decide" | "assistant";
+export type BuiltinRole = "default" | "summarize" | "decide" | "assistant";
 
 /**  A size in bytes (the blob store's total, say). */
 export type ByteSize = number;
@@ -1356,6 +1358,53 @@ export type ChoiceOption_Serialize = {
 	 *  toggle, the option is that icon alone, its label the hover.
 	 */
 	icon?: string | null,
+};
+
+/**
+ *  Where a choice field's choices come from: a page's loader or a viz
+ *  (`<extension>/<page>#<loader>`, `<extension>/<slug>`), its rows `value`,
+ *  `label` and an optional `group`. As a name, run with the form's params;
+ *  as `{ from, params, open }`, also with `params`, each bound like the
+ *  form's input (`{{param.x}}`, a row form's `{{row.x}}`: one provider's
+ *  models), and with `open: true` the choices are suggestions the person
+ *  may type past (a model id no list knows).
+ */
+export type ChoiceSource = ChoiceSource_Serialize | ChoiceSource_Deserialize;
+
+/**
+ *  Where a choice field's choices come from: a page's loader or a viz
+ *  (`<extension>/<page>#<loader>`, `<extension>/<slug>`), its rows `value`,
+ *  `label` and an optional `group`. As a name, run with the form's params;
+ *  as `{ from, params, open }`, also with `params`, each bound like the
+ *  form's input (`{{param.x}}`, a row form's `{{row.x}}`: one provider's
+ *  models), and with `open: true` the choices are suggestions the person
+ *  may type past (a model id no list knows).
+ */
+export type ChoiceSource_Deserialize = string | ChoiceSpec_Deserialize;
+
+/**
+ *  Where a choice field's choices come from: a page's loader or a viz
+ *  (`<extension>/<page>#<loader>`, `<extension>/<slug>`), its rows `value`,
+ *  `label` and an optional `group`. As a name, run with the form's params;
+ *  as `{ from, params, open }`, also with `params`, each bound like the
+ *  form's input (`{{param.x}}`, a row form's `{{row.x}}`: one provider's
+ *  models), and with `open: true` the choices are suggestions the person
+ *  may type past (a model id no list knows).
+ */
+export type ChoiceSource_Serialize = string | ChoiceSpec_Serialize;
+
+export type ChoiceSpec = ChoiceSpec_Serialize | ChoiceSpec_Deserialize;
+
+export type ChoiceSpec_Deserialize = {
+	from: string,
+	params?: { [key in string]: unknown },
+	open?: boolean,
+};
+
+export type ChoiceSpec_Serialize = {
+	from: string,
+	params?: { [key in string]: unknown },
+	open?: boolean,
 };
 
 /**  How a client authenticates to a token endpoint. */
@@ -3162,7 +3211,7 @@ export type FormSpec_Deserialize = {
 	 *  run with the form's params, whose rows are the choices (`value`,
 	 *  `label`, optional `group`).
 	 */
-	choices?: { [key in string]: string },
+	choices?: { [key in string]: ChoiceSource_Deserialize },
 	/**  What becomes of the page after a submit whose command opens one. */
 	then?: ActionThen,
 	/**
@@ -3198,7 +3247,7 @@ export type FormSpec_Serialize = {
 	 *  run with the form's params, whose rows are the choices (`value`,
 	 *  `label`, optional `group`).
 	 */
-	choices?: { [key in string]: string },
+	choices?: { [key in string]: ChoiceSource_Serialize },
 	/**  What becomes of the page after a submit whose command opens one. */
 	then: ActionThen,
 	/**
@@ -3227,6 +3276,11 @@ export type FormStart_Deserialize = {
 	fields: FormField_Deserialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
+	/**
+	 *  The choice fields whose choices are suggestions only (`open`): the
+	 *  person may type any value.
+	 */
+	open_choices?: string[],
 	/**  Object fields' children, read from their `from` viz. */
 	subfields: { [key in string]: Subfield[] },
 	/**
@@ -3248,6 +3302,11 @@ export type FormStart_Serialize = {
 	fields: FormField_Serialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
+	/**
+	 *  The choice fields whose choices are suggestions only (`open`): the
+	 *  person may type any value.
+	 */
+	open_choices?: string[],
 	/**  Object fields' children, read from their `from` viz. */
 	subfields: { [key in string]: Subfield[] },
 	/**
@@ -4733,7 +4792,7 @@ export type PageAction_Deserialize = {
 	 *  (`<extension>/<slug>`) run with the viz's params, whose rows are
 	 *  the choices (`value`, `label`, optional `group`).
 	 */
-	choices: { [key in string]: string },
+	choices: { [key in string]: ChoiceSource_Deserialize },
 	/**
 	 *  What becomes of the viz's page when the command's `ui.open_after`
 	 *  names a page.
@@ -4756,10 +4815,10 @@ export type PageAction_Deserialize = {
 	 */
 	fact: string | null,
 	/**
-	 *  What its command does, in words: its hover. From the command's
-	 *  summary when the page runs, never from the page's file.
+	 *  Its hover: the page's words for a person (`help:`). Never its
+	 *  command's summary, which is written for agents.
 	 */
-	does?: string | null,
+	help?: string | null,
 	/**
 	 *  The row action a click on the row (not on a link or control in it),
 	 *  or Enter on it, runs: the one a person most often wants. The first
@@ -4839,6 +4898,24 @@ export type PageAction_Deserialize = {
 	 *  now, drawn checked and not offered.
 	 */
 	current?: string | null,
+	/**
+	 *  A form action's other actions of the viz, drawn as buttons in its
+	 *  form beside its own (a Remove in an Edit form), each run on the
+	 *  form's row as it would be from the row's menu, when offered there.
+	 */
+	also?: string[],
+	/**
+	 *  The form action whose `also` names this one: it is drawn only in
+	 *  that form, never in the row's menu or the page's bar. Derived at
+	 *  load, not declared.
+	 */
+	inForm?: string | null,
+	/**
+	 *  A form action's submit button, when its label is the wrong verb for
+	 *  it: an Edit… over something that exists submits with Save. Without
+	 *  it the button is the label without its `…`.
+	 */
+	submit?: string | null,
 };
 
 /**
@@ -4917,7 +4994,7 @@ export type PageAction_Serialize = {
 	 *  (`<extension>/<slug>`) run with the viz's params, whose rows are
 	 *  the choices (`value`, `label`, optional `group`).
 	 */
-	choices: { [key in string]: string },
+	choices: { [key in string]: ChoiceSource_Serialize },
 	/**
 	 *  What becomes of the viz's page when the command's `ui.open_after`
 	 *  names a page.
@@ -4940,10 +5017,10 @@ export type PageAction_Serialize = {
 	 */
 	fact: string | null,
 	/**
-	 *  What its command does, in words: its hover. From the command's
-	 *  summary when the page runs, never from the page's file.
+	 *  Its hover: the page's words for a person (`help:`). Never its
+	 *  command's summary, which is written for agents.
 	 */
-	does: string | null,
+	help?: string | null,
 	/**
 	 *  The row action a click on the row (not on a link or control in it),
 	 *  or Enter on it, runs: the one a person most often wants. The first
@@ -5023,6 +5100,24 @@ export type PageAction_Serialize = {
 	 *  now, drawn checked and not offered.
 	 */
 	current?: string | null,
+	/**
+	 *  A form action's other actions of the viz, drawn as buttons in its
+	 *  form beside its own (a Remove in an Edit form), each run on the
+	 *  form's row as it would be from the row's menu, when offered there.
+	 */
+	also?: string[],
+	/**
+	 *  The form action whose `also` names this one: it is drawn only in
+	 *  that form, never in the row's menu or the page's bar. Derived at
+	 *  load, not declared.
+	 */
+	inForm?: string | null,
+	/**
+	 *  A form action's submit button, when its label is the wrong verb for
+	 *  it: an Edit… over something that exists submits with Save. Without
+	 *  it the button is the label without its `…`.
+	 */
+	submit?: string | null,
 };
 
 /**

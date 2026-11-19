@@ -1,14 +1,12 @@
 title: Manage services
-description: Install language servers, connect providers, inspect data delivery and manage integrations.
+description: Install language servers, inspect data delivery and manage integrations.
 icon: settings
 category: System
-keywords: language servers AI providers integrations collectors
+keywords: language servers integrations collectors
 see_also:
 - page: oxplow/settings
 - page: oxplow/extensions
-- page: oxplow/settings-category
-  params:
-    category: ai
+- page: oxplow/ai-settings
 refresh: true
 params:
 - name: area
@@ -104,21 +102,6 @@ loaders:
       \ ''), ',')\n          FROM v_provider_credential c WHERE c.instance = i.instance) AS credentials,\n       (SELECT group_concat(k.name\
       \ || ':' || k.status || ':' || k.records || ':' || coalesce(k.last_read_at, ''), ',')\n          FROM v_provider_collector\
       \ k WHERE k.instance = i.instance) AS collectors\nFROM v_provider_instance i\nORDER BY i.instance\n"
-  ai_providers:
-    sql: "SELECT p.id, coalesce(k.title, p.kind) AS kind,\n       coalesce(p.base_url, '') AS base_url,\n       CASE WHEN\
-      \ p.key_set THEN 'Key saved' ELSE 'No key' END AS key,\n       coalesce((SELECT r.model FROM v_ai_role r WHERE r.provider\
-      \ = p.id AND r.model IS NOT NULL LIMIT 1), '') AS test_model\nFROM v_ai_provider p\nLEFT JOIN v_capability_provider\
-      \ k ON k.capability = 'ai_provider' AND k.provider = p.kind\nORDER BY p.id\n"
-  ai_roles:
-    sql: "SELECT role, description,\n       CASE WHEN provider IS NULL THEN\n              CASE WHEN fallback IS NOT NULL\
-      \ THEN 'Falls back to ' || fallback || coalesce(' (' || effective_model || ')', '')\n                   ELSE 'Not assigned'\
-      \ END\n            ELSE provider || ' · ' || model END AS bound,\n       coalesce(problem, '') AS problem,\n       provider,\
-      \ coalesce(model, '') AS model, coalesce(restrict, '[]') AS restrict,\n       NOT overridden AS can_assign,\n      \
-      \ (NOT overridden) AND provider IS NOT NULL AS can_unassign\nFROM v_ai_role\n"
-  ai_calls:
-    sql: "SELECT role, caller, count(*) AS calls, sum(1 - ok) AS failed,\n       sum(input_tokens) AS input_tokens, sum(output_tokens)\
-      \ AS output_tokens, max(at) AS last_at\nFROM v_ai_call\nWHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')\n\
-      GROUP BY role, caller\nORDER BY last_at DESC\n"
 view:
   switch:
     param: area
@@ -399,77 +382,3 @@ view:
           input:
             extension: '{{row.extension}}'
             reference: '{{row.reference|json}}'
-    - id: ai
-      title: AI
-      stack:
-      - id: ai-providers
-        title: AI providers
-        from: ai_providers
-        viz: table
-        columns:
-        - key: id
-          label: Name
-        - key: kind
-          label: Kind
-        - key: base_url
-          label: Base URL
-        - key: key
-          label: Key
-          width: 100
-        empty: No AI providers enabled. Configure a provider under Settings → AI.
-        actions:
-        - id: test
-          label: Test…
-          command: oxplow.ai.test_provider
-          form: true
-          row: true
-          about: id
-          fixed:
-          - id
-          input:
-            id: '{{row.id}}'
-            model: '{{row.test_model}}'
-      - id: ai-roles
-        title: Roles
-        from: ai_roles
-        viz: table
-        columns:
-        - key: role
-          label: Role
-          width: 160
-        - key: description
-          label: Used for
-        - key: bound
-          label: Bound to
-        - key: problem
-          label: Problem
-        empty: No roles.
-      - id: ai-calls
-        title: Recent calls
-        from: ai_calls
-        viz: table
-        columns:
-        - key: role
-          label: Role
-          width: 110
-        - key: caller
-          label: Asked by
-        - key: calls
-          label: Calls
-          width: 70
-        - key: failed
-          label: Failed
-          width: 70
-        - key: input_tokens
-          label: In
-          format: integer
-          width: 90
-        - key: output_tokens
-          label: Out
-          format: integer
-          width: 90
-        - key: last_at
-          label: Last
-          format: relative
-          width: 110
-        empty: No calls in the last 7 days.

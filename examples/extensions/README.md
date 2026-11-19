@@ -70,7 +70,7 @@ Fixed while building them (some of the trials have since been removed):
   unlisted one failed with a bare "not found"; `extension check` now
   warns for an unlisted fixture, and `extension test` for an example with
   no fixture, each naming the file and the fix.
-- Three fixed AI roles: a job asked for `main`, `summarize` or `decide`.
+- Three fixed AI roles: a job asked for `default`, `summarize` or `decide`.
   An extension now declares `ai_profiles:` (triage's `sort`); a person binds `<extension>/<id>` in Settings → AI,
   else its fallback role's model is used.
 - A command script couldn't read `metric_grid()` / `metric_findings()`,

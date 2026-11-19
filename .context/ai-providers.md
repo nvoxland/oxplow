@@ -8,8 +8,9 @@ AI providers you configure, the roles that decide which model does what, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
 > `v_ai_call`), Settings → AI, and the `v_ai_role` / `v_ai_provider` live models, project role overrides,
 > recorded computations (`AiCompute`, `v_ai_result`, P5.E1) and the
-> `ai_*` Starlark builtins for collectors (P5.E2). **Not
-> yet:** a models.dev catalog.
+> `ai_*` Starlark builtins for collectors (P5.E2), and each provider's
+> models (`v_ai_model`, from the models.dev catalog Rig compiles in, or a
+> local server's own list).
 > Sections below say which parts are target design.
 
 ## Why
@@ -57,7 +58,7 @@ What can be called, as of 2026-09:
 - **A key is bound to the URL it was saved for.** Its secure value carries the
   key and normalized endpoint (empty for the kind's default). A connection
   pointed at another host gets no key; the call asks to re-save the provider in
-  Settings → AI. Saving a provider rebinds a kept key to its current URL.
+  AI Settings. Saving a provider rebinds a kept key to its current URL.
   Provider/role display rows remain readable when a binding is obsolete or the
   secure backend is unavailable; `key_set` means a usable key is available and
   is false on these failures. This display fallback does not apply to actual
@@ -83,7 +84,7 @@ active extension profile has its own atomic object setting,
 `oxplow.ai.roles.<role>`, with `provider`, `model`, and optional `restrict`.
 It has no default: absence enables role fallback. Local, project and global
 precedence applies separately to each role, so overriding summarize preserves
-an inherited main binding. Provider ids name declared implementations.
+an inherited default binding. Provider ids name declared implementations.
 
 ```yaml
 oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
@@ -97,18 +98,23 @@ oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning: `extract` (a collector's `ai_extract`) |
+| `default` | every role without a binding of its own; general reasoning: `extract` (a collector's `ai_extract`) |
 | `summarize` | summaries of sessions, requests, changes (`summarize`) |
 | `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`) |
-| `assistant` | the Assistant ("The Assistant" below); falls back to `main` and needs tool calling and streaming |
+| `assistant` | the Assistant ("The Assistant" below); needs tool calling and streaming |
 
-A built-in role may fall back to another while it has no binding of its
-own (`BuiltinRole::fallback`: `assistant` → `main`), as a profile does,
-and may need model features (`BuiltinRole::features`). Settings shows
-its `fallback`, and its `problem` when its model lacks a feature it needs
-or its binding forbids one. Unbound with an unbound fallback is
-`RoleNotConfigured`: "no model is assigned to the `assistant` role or the
-`main` role it falls back to".
+**Default is the fallback.** Every built-in role but `default` falls back
+to it while it has no binding of its own (`BuiltinRole::fallback`), so
+binding `default` once makes every role work; a role is bound on its own
+only to differ (a cheaper Summarize). An extension's AI profile falls back
+to `default` too unless it names another built-in, whose own chain then
+ends at `default` (`AiConfig::resolve` follows the chain). `default` was
+`main`: `oxplow.ai.roles.main` is a retired setting that says so
+(`core_settings::retired_setting`). A role may need model features
+(`BuiltinRole::features`). Settings shows its `fallback`, and its
+`problem` when its model lacks a feature it needs or its binding forbids
+one. Unbound with an unbound fallback is `RoleNotConfigured`: "no model is
+assigned to the `assistant` role or the `default` role it falls back to".
 
 A role exists only once something asks it. A config naming a role oxplow
 dropped (`fast`, `embed`, `review`: nothing asked them) fails to load,
@@ -119,7 +125,8 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
 
 An extension declares its own model needs as **AI profiles**
 (`ai_profiles:` in `extension.yaml`, [extensions-jobs.md](./extensions-jobs.md)):
-an id, a description, a required `fallback` built-in role and optional
+an id, a description, an optional `fallback` built-in role (`default` when
+left out; `summarize`, `decide` or `assistant` otherwise) and optional
 `features` (`text | tool_calling | streaming | image`). So
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
 `Profile { extension, name }`, written as one string (`summarize`,
@@ -218,8 +225,8 @@ an id, a description, a required `fallback` built-in role and optional
   `estimated` source; the text path's `Completion` and `Decision` token fields remain
   unchanged.
 - **Discovery from extension hosts.** Collectors declare `ai.discover` and
-  call `ai_capabilities(role = "main")` for the selected model or
-  `ai_models(role = "main")` for its provider's declared catalog. This service
+  call `ai_capabilities(role = "default")` for the selected model or
+  `ai_models(role = "default")` for its provider's declared catalog. This service
   needs no paid call and is usable in pure previews. Both resolve
   the role through `AiService` without reading the keychain; providers receive
   an instance with no key. They record no `ai_call` or AI usage. The host
@@ -230,12 +237,18 @@ an id, a description, a required `fallback` built-in role and optional
   rejects unresolved or duplicate model identities. A Rig kind reads Rig's
   built-in model catalog (models.dev data compiled into `rig-core`): a
   hosted kind lists its models, a local one (`ollama`, `llamacpp`,
-  `openai_compatible`) has an unknown catalog, and a model the catalog
+  `openai_compatible`) lists what its server answers to a keyless `GET
+  <base>/models` (the OpenAI list; 3 s timeout, kept 30 s per base URL, a
+  failure too, so a server that is down doesn't hold every read), each with
+  unknown capabilities, else an unknown catalog; a model the catalog
   doesn't list is unknown across the board. Streaming isn't a model fact
-  the catalog keeps, so it stays unknown. Rig's live model listing needs
-  the key, which discovery never reads, so it isn't used. Capability data
+  the catalog keeps, so it stays unknown. A hosted service's live listing
+  needs the key, which discovery never reads, so it isn't used.
+  `AiService::provider_models` is every configured provider's catalog, the
+  live `v_ai_model` dataset (provider, model, tool_calling, streaming,
+  context_tokens): AI Settings suggests them for a Model. Capability data
   moves with the `rig-core` version.
-- **Typed collector completion.** `ai_complete(request, role = "main")`
+- **Typed collector completion.** `ai_complete(request, role = "default")`
   is an `ai.compute` builtin and requires the same `ai` permission and live run
   checks as the text helpers. Its request is `{schemaVersion: 1, messages,
   tools?}`; the host binds the model from the role and refuses a supplied
@@ -293,7 +306,15 @@ an id, a description, a required `fallback` built-in role and optional
     `typesafe` is Rust of our own (`oxplow_ai_rig::jev`), since Rig doesn't
     speak Jev.
   - **Keys and URLs.** The key is always the instance's (the keychain),
-    never Rig's environment lookup; the base URL is the instance's, else
+    never Rig's environment lookup. Reading a key from the macOS keychain
+    asks the person (a password prompt per read unless they Always Allow;
+    a dev build is a new app to macOS after each rebuild), so every
+    `KeychainSecrets` goes through one process-wide `CachedSecrets`
+    (`oxplow_ai::secrets`): each key is read at most once per run, a save
+    or removal updates it, and `exists` answers presence by an
+    attribute-only search that decrypts nothing (the Settings statuses).
+    A provider's "key saved" (`ProviderStatus::key_set`) still reads it,
+    cached, because the key's endpoint binding is inside the value; the base URL is the instance's, else
     the declaration's. With no key, an OpenAI-shaped request carries no
     auth header (a local server). Rig sends through our own reqwest
     clients, which never follow a redirect: one with a 120 s total timeout
@@ -512,7 +533,7 @@ column is what core's callers and the collector builtins default to.
 | `score(caller, role, text, levels)` | `decide` (a `score` question, levels lowest first, `SCORE_INSTRUCTIONS`) | `{ level, score, probabilities }` |
 | `decide(caller, role, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) | answers by question name (a reply missing one is refused) |
 | `summarize(caller, role, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path | the summary |
-| `extract(caller, role, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) |
+| `extract(caller, role, instructions, text, schema)` | `default`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) |
 
 **The version follows the prompt.** There is no version constant to
 bump: an op's request carries its whole prompt — its instructions, its
@@ -537,7 +558,7 @@ record `input_hash` NULL.
 An **entity collector** (a starlark derived source) calls `ai_classify(text,
 labels)`, `ai_score(text, levels)`, `ai_summarize(text, focus = None)`
 and `ai_extract(text, schema, instructions = "")`, each with a keyword
-`role=` (defaults `decide`, `decide`, `summarize`, `main`; or one of its
+`role=` (defaults `decide`, `decide`, `summarize`, `default`; or one of its
 extension's AI profiles by id, qualified with the run's extension) — Starlark builtins
 (`crates/oxplow-script/src/ai.rs`) answered by the run's
 `AiHost`, one of the services the run was given (`runtime::Hosts`,
@@ -594,38 +615,58 @@ connection with no thread identity is refused. Agents can't change
 providers, roles or keys: those IPC commands are UI-only in the
 surface-parity manifest.
 
-## Settings → AI (current)
+## AI Settings (Settings → AI)
 
-The foundation's pages in `oxplow/settings-ai.sections` (`ai-providers`,
-`ai-provider-form`, `ai-roles`, `ai-calls`; the settings page's `ai_provider_kinds` and
-`ai_provider_choices` loaders are the choices the forms offer). They read the live
-models `v_ai_provider` and `v_ai_role` and write with commands
-(`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form page's: `oxplow.ai.set_provider { id, kind,
-base_url?, key? }` (scope `ai.settings`; `key` is a secret (`writeOnly`, commands.md "Secrets"), so a
-refusal that could quote it is recorded without its words, and it goes only to
-the keychain; it, `remove_provider` and `set_role` announce `ConfigChanged`,
-which re-reads the two models), `oxplow.ai.remove_provider { id }` (asks first,
-`confirm: always`), `oxplow.ai.set_role { role, provider?, model?, restrict? }`
-(neither provider nor model unbinds) and `oxplow.ai.test_provider { id,
-model }` (scope `ai.test`, `spends`: one small call on the person's key).
-`ai-provider-form` is a `form` page whose `key` field is `secret: true` (a
-password box, kept out of the draft and the record); Test… and Assign… are row
-form actions.
+One page, foundation's `ai-settings` (`AI Settings`, System), sets up all of
+oxplow's AI; Settings → AI embeds it, Settings' Manage services links it,
+and the Assistant panel's Set Up the Assistant opens it (`aiSettingsRef`):
+the Assistant is one role among the others, so it has no page of its own.
+It reads the live models `v_ai_provider`, `v_ai_role`, `v_ai_model` and
+`v_ai_call` and writes with commands (`commands/ai_settings.rs`), anyone's —
+a person's, their agent's, or a page's: `oxplow.ai.set_provider { id?, kind,
+base_url?, key? }` (`id` is the kind, which it defaults to) (scope
+`ai.settings`; `key` is a secret (`writeOnly`, commands.md "Secrets"), so a
+refusal that could quote it is recorded without its words, and it goes only
+to the keychain; it, `remove_provider` and `set_role` announce
+`ConfigChanged`, which re-reads the models), `oxplow.ai.remove_provider { id }`
+(asks first, `confirm: always`), `oxplow.ai.set_role { role, provider?,
+model?, restrict? }` (neither provider nor model unbinds) and
+`oxplow.ai.test_provider { id, model }` (scope `ai.test`, `spends`: one
+small call on the person's key). Every form is the tab modal; the key needs
+no `secret:` flag, since `set_provider` marks it `writeOnly`, which the
+modal masks and never drafts.
 
-- Providers: add or update by name (kind, base URL, key). A blank key keeps
-  the saved one. Remove is refused while a role uses the provider, and
-  deletes its key. Test makes one small call with a model you name (a
-  `decide` question for Jev); it isn't recorded in `ai_call`.
-- Roles: the built-ins (their text is `BuiltinRole::description`), then
-  each active extension's AI profiles (`RoleStatus.extension`,
-  `fallback`, `effective`, `problem`), then bindings for profiles nothing
-  declares (a problem, so they can be cleared). **Assign…** picks a provider
-  and model (and the binding's `restrict` list: `tools`, `sql`, `streaming`,
-  `images`); **Unassign** clears it, and an unbound profile shows "Falls back
-  to summarize (model)". A role the project sets in project.yaml
-  (`overridden`) is changed there.
-- Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
-  with `query_sql`, the same path pages use.
+- **Providers:** name, kind, base URL, key status and **Used by** (the roles
+  whose model comes from it, own or fallen back to). Add a Provider…
+  (prominent; the kinds not set up yet). A row's pencil, or a click on it, is **Edit…** (URL
+  and key; an empty key keeps the saved one; its button is Save, `submit`;
+  its form holds **Remove**, `also`, offered while no role is bound to it;
+  Remove deletes the key). **Test…** makes one small call with a model you
+  name, suggested from that provider's `v_ai_model` (a `decide` question
+  for Jev); it isn't recorded in `ai_call`.
+- **Models:** one row per role — the built-ins (their text is
+  `BuiltinRole::description`), then each active extension's AI profiles,
+  then bindings for profiles nothing declares (a problem, so they can be
+  cleared) — so it is one table, not a section per role: extensions add
+  rows. Two columns: **Role** (its name in bold, then what it is used for,
+  `format: markdown`) and **Uses**: its own model (`anthropic · m`), its
+  fallback's named (`Default's: anthropic · m`), what it would fall back to
+  ("Not set up (Default has none)"), "Not set up", or a model "(set in
+  project.yaml)" (`overridden`: changed there, so it offers nothing). A
+  role's `problem` (its model or its `restrict` lacks what the role needs;
+  a binding for a profile nothing declares) follows the model, the cell in
+  the warning tone. Default is the first row: every other role falls back
+  to it (a profile through the built-in it names), so one model set on
+  Default serves them all. A row's pencil, or a click, is **Choose Model…** (provider and model;
+  Save; the binding's `restrict` kept as it is; the Model suggests every
+  provider's models, labelled with theirs, and for the Assistant only ones
+  whose catalog doesn't say they can't call tools — open choices, any id
+  may be typed). **Use the Fallback Model** unbinds the role, offered only
+  while its fallback has a model, so it never leaves a role with none.
+- **This week's calls:** `v_ai_call` of the last 7 days by role and caller.
+
+Fixture `ai-settings-sets-up-providers-and-each-roles-model`. The raw
+settings behind it (`oxplow.ai.*`) stay in Settings' AI category.
 
 ## Host transport and live authority
 

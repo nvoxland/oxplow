@@ -54,9 +54,9 @@ export function AssistantPromptBox({
   };
 
   return (
-    <div data-testid="assistant-prompt" style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--surface-card)" }}>
+    <div data-testid="assistant-prompt" style={{ borderTop: "1px solid var(--border-subtle)", padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
       {suggestions.length > 0 && !busy ? (
-        <div data-testid="assistant-suggestions" style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 8px 0" }}>
+        <div data-testid="assistant-suggestions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {suggestions.map((s) => (
             <button
               key={s}
@@ -74,7 +74,7 @@ export function AssistantPromptBox({
           ))}
         </div>
       ) : null}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
         <textarea
           ref={inputRef}
           data-testid="assistant-input"
@@ -84,31 +84,26 @@ export function AssistantPromptBox({
           readOnly={busy}
           disabled={disabled}
           rows={2}
-          placeholder={
-            disabled
-              ? "The Assistant has no model"
-              : busy
-                ? "Working — Escape stops it"
-                : "Ask — Enter sends, Shift+Enter for a new line"
-          }
+          placeholder={busy ? "Working — Escape stops it" : "Ask — Enter sends, Shift+Enter for a new line"}
           style={{
             flex: 1,
             resize: "vertical",
             minHeight: 40,
-            background: "var(--surface-app)",
+            background: "var(--surface-card)",
             color: "var(--text-primary)",
-            border: "1px solid var(--border-strong)",
-            borderRadius: 4,
-            padding: 6,
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+            padding: "6px 8px",
             font: "inherit",
+            fontSize: "var(--text-sm)",
           }}
         />
         {busy ? (
-          <button type="button" data-testid="assistant-stop" onClick={onCancel} style={button(false)}>
+          <button type="button" className="ox-button" data-testid="assistant-stop" onClick={onCancel} title="Stop (Escape)">
             Stop
           </button>
         ) : (
-          <button type="button" data-testid="assistant-send" onClick={() => void send()} disabled={!canSend} style={button(true)}>
+          <button type="button" className="ox-button ox-primary" data-testid="assistant-send" onClick={() => void send()} disabled={!canSend}>
             Send
           </button>
         )}
@@ -118,22 +113,12 @@ export function AssistantPromptBox({
 }
 
 const chip: React.CSSProperties = {
-  background: "var(--surface-app)",
-  color: "var(--text-primary)",
+  background: "transparent",
+  color: "var(--text-secondary)",
   border: "1px solid var(--border-subtle)",
-  borderRadius: 12,
+  borderRadius: 999,
   padding: "2px 10px",
-  fontSize: 12,
+  font: "inherit",
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
-
-function button(primary: boolean): React.CSSProperties {
-  return {
-    background: primary ? "var(--button-primary-bg)" : "transparent",
-    color: primary ? "var(--button-primary-fg)" : "var(--text-primary)",
-    border: primary ? "none" : "1px solid var(--border-strong)",
-    borderRadius: 4,
-    padding: "6px 14px",
-    cursor: "pointer",
-  };
-}

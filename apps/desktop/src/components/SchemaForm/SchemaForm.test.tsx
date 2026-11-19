@@ -523,3 +523,34 @@ test("a form that opens takes the focus only when no other field has it", () => 
   expect(later.getByTestId("g-title")).not.toBe(document.activeElement);
   typing.remove();
 });
+
+// An open field's choices are suggestions: a text field that lists them as
+// you type (a datalist), taking any value too (a model no list knows). It
+// is shown even when it has none to suggest.
+test("an open field suggests its choices and takes any value", () => {
+  const submitted: unknown[] = [];
+  const view = render(
+    <SchemaForm
+      schema={{ type: "object", required: ["model"], properties: { model: { type: "string" } } }}
+      choices={{ model: [{ value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" }, { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" }] }}
+      openChoices={["model"]}
+      onSubmit={(v) => submitted.push(v)}
+      testIdPrefix="f"
+    />,
+  );
+  const field = view.getByTestId("f-model") as HTMLInputElement;
+  expect(field.tagName).toBe("INPUT");
+  const list = document.getElementById(field.getAttribute("list") ?? "") as HTMLDataListElement;
+  expect([...list.querySelectorAll("option")].map((o) => [o.getAttribute("value"), o.getAttribute("label")])).toEqual([
+    ["claude-sonnet-4-5", "Claude Sonnet 4.5"],
+    ["claude-haiku-4-5", "Claude Haiku 4.5"],
+  ]);
+  fireEvent.change(field, { target: { value: "my-fine-tune" } });
+  fireEvent.submit(view.getByTestId("f"));
+  expect(submitted).toEqual([{ model: "my-fine-tune" }]);
+  cleanup();
+  const none = render(
+    <SchemaForm schema={{ type: "object", properties: { model: { type: "string" } } }} choices={{ model: [] }} openChoices={["model"]} testIdPrefix="g" />,
+  );
+  expect(none.getByTestId("g-model").tagName).toBe("INPUT");
+});

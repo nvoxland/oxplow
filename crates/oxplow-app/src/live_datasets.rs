@@ -40,6 +40,7 @@ use crate::lsp_sessions::LspSessionManager;
 pub const NAMES: &[&str] = &[
     "ai_role",
     "ai_provider",
+    "ai_model",
     "lsp_server",
     "collector_state",
     "collector_credential",
@@ -85,6 +86,13 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "problem",
         ],
         "ai_provider" => &["id", "kind", "base_url", "key_set"],
+        "ai_model" => &[
+            "provider",
+            "model",
+            "tool_calling",
+            "streaming",
+            "context_tokens",
+        ],
         "lsp_server" => &[
             "language_id",
             "extensions",
@@ -331,7 +339,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
     use OxplowEvent as E;
     match change {
         Change::Event(event) => match name {
-            "ai_role" | "ai_provider" => matches!(
+            "ai_role" | "ai_provider" | "ai_model" => matches!(
                 event,
                 E::ConfigChanged | E::CredentialChanged { .. } | E::ExtensionsChanged
             ),
@@ -583,6 +591,7 @@ impl LiveDatasets {
         match name {
             "ai_role" => sources.ai_roles().await,
             "ai_provider" => sources.ai_providers().await,
+            "ai_model" => sources.ai_models().await,
             "lsp_server" => Ok(sources.lsp_servers().await),
             "collector_state" => sources.collector_state().await,
             "collector_credential" => sources.collector_credentials().await,
@@ -681,6 +690,35 @@ impl LiveSources {
                     opt(p.base_url.clone()),
                     flag(p.key_set),
                 ]
+            })
+            .collect())
+    }
+
+    async fn ai_models(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let models = self
+            .ai
+            .provider_models()
+            .await
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let support = |s: oxplow_ai::capabilities::CapabilitySupport| {
+            text(
+                serde_json::to_value(s)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "unknown".into()),
+            )
+        };
+        Ok(models
+            .into_iter()
+            .filter_map(|(provider, m)| {
+                Some(vec![
+                    text(provider),
+                    text(m.model?),
+                    support(m.tool_calling),
+                    support(m.streaming),
+                    m.context_tokens
+                        .map_or(SqlCell::Null(()), |l| SqlCell::Int(l.value as i64)),
+                ])
             })
             .collect())
     }

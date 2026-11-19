@@ -428,7 +428,7 @@ pub struct FormSpec {
     /// run with the form's params, whose rows are the choices (`value`,
     /// `label`, optional `group`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub choices: BTreeMap<String, String>,
+    pub choices: BTreeMap<String, ChoiceSource>,
     /// What becomes of the page after a submit whose command opens one.
     #[serde(default)]
     pub then: ActionThen,
@@ -508,6 +508,57 @@ pub struct FormFieldSpec {
     /// when the viz's data changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+}
+
+/// Where a choice field's choices come from: a page's loader or a viz
+/// (`<extension>/<page>#<loader>`, `<extension>/<slug>`), its rows `value`,
+/// `label` and an optional `group`. As a name, run with the form's params;
+/// as `{ from, params, open }`, also with `params`, each bound like the
+/// form's input (`{{param.x}}`, a row form's `{{row.x}}`: one provider's
+/// models), and with `open: true` the choices are suggestions the person
+/// may type past (a model id no list knows).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ChoiceSource {
+    Name(String),
+    Spec(ChoiceSpec),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChoiceSpec {
+    pub from: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[specta(type = BTreeMap<String, oxplow_domain::Json>)]
+    pub params: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
+}
+
+impl ChoiceSource {
+    pub fn from(&self) -> &str {
+        match self {
+            ChoiceSource::Name(from) => from,
+            ChoiceSource::Spec(spec) => &spec.from,
+        }
+    }
+    pub fn from_mut(&mut self) -> &mut String {
+        match self {
+            ChoiceSource::Name(from) => from,
+            ChoiceSource::Spec(spec) => &mut spec.from,
+        }
+    }
+    /// The params it binds besides the form's own.
+    pub fn params(&self) -> Option<&BTreeMap<String, serde_json::Value>> {
+        match self {
+            ChoiceSource::Name(_) => None,
+            ChoiceSource::Spec(spec) => Some(&spec.params),
+        }
+    }
+    /// Suggestions only: the field takes any value.
+    pub fn open(&self) -> bool {
+        matches!(self, ChoiceSource::Spec(spec) if spec.open)
+    }
 }
 
 /// A `visible_if` condition: one value or any of several.
@@ -1337,7 +1388,7 @@ pub struct PageAction {
     /// A form action's fields picked from a list: each names a viz
     /// (`<extension>/<slug>`) run with the viz's params, whose rows are
     /// the choices (`value`, `label`, optional `group`).
-    pub choices: BTreeMap<String, String>,
+    pub choices: BTreeMap<String, ChoiceSource>,
     /// What becomes of the viz's page when the command's `ui.open_after`
     /// names a page.
     pub then: ActionThen,
@@ -1351,10 +1402,10 @@ pub struct PageAction {
     /// A button drawn on this column's line of a `detail`, beside what it
     /// acts on, instead of with the buttons under the section.
     pub fact: Option<String>,
-    /// What its command does, in words: its hover. From the command's
-    /// summary when the page runs, never from the page's file.
-    #[serde(default)]
-    pub does: Option<String>,
+    /// Its hover: the page's words for a person (`help:`). Never its
+    /// command's summary, which is written for agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
     /// The row action a click on the row (not on a link or control in it),
     /// or Enter on it, runs: the one a person most often wants. The first
     /// `primary` action a row is offered (`when`) is the one.
@@ -1421,6 +1472,21 @@ pub struct PageAction {
     /// now, drawn checked and not offered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current: Option<String>,
+    /// A form action's other actions of the viz, drawn as buttons in its
+    /// form beside its own (a Remove in an Edit form), each run on the
+    /// form's row as it would be from the row's menu, when offered there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<String>,
+    /// The form action whose `also` names this one: it is drawn only in
+    /// that form, never in the row's menu or the page's bar. Derived at
+    /// load, not declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_form: Option<String>,
+    /// A form action's submit button, when its label is the wrong verb for
+    /// it: an Edit… over something that exists submits with Save. Without
+    /// it the button is the label without its `…`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submit: Option<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1482,7 +1548,7 @@ pub(crate) struct ActionFile {
     /// A form action's fields picked from a list: field → the viz whose
     /// rows are its choices.
     #[serde(default)]
-    choices: BTreeMap<String, String>,
+    choices: BTreeMap<String, ChoiceSource>,
     /// What becomes of the viz's page when the command opens one:
     /// `open` (default), `replace`, `stay` or `close`.
     #[serde(default)]
@@ -1531,6 +1597,15 @@ pub(crate) struct ActionFile {
     /// With `options_from`: the row's column holding its option now.
     #[serde(default)]
     current: Option<String>,
+    /// A form action's other actions, as buttons in its form.
+    #[serde(default)]
+    also: Vec<String>,
+    /// A form action's submit button, when its label is the wrong verb.
+    #[serde(default)]
+    submit: Option<String>,
+    /// Its hover, for a person.
+    #[serde(default)]
+    help: Option<String>,
 }
 
 /// The keys a row list keeps for itself: an action can't take one.
@@ -1835,6 +1910,22 @@ pub(crate) fn parse_actions(
                 ));
             }
         }
+        for (field, source) in &f.choices {
+            let Some(params) = source.params() else {
+                continue;
+            };
+            let params = serde_json::Value::Object(params.clone().into_iter().collect());
+            if let Some((_, name)) = action_templates(&params)
+                .into_iter()
+                .find(|(scope, _)| scope == "row")
+                .filter(|_| !row && !one_row)
+            {
+                return Err(format!(
+                    "actions: `{}`: the choices of `{field}` bind `{{{{row.{name}}}}}`, but the action has no row",
+                    f.id
+                ));
+            }
+        }
         if !f.choices.is_empty() && !(f.form || f.edit) {
             return Err(format!(
                 "actions: `{}`: `choices` is for a form action (`form: true`)",
@@ -1953,6 +2044,17 @@ pub(crate) fn parse_actions(
                 }
             }
         }
+        let submit = match f.submit.as_deref().map(str::trim) {
+            None => None,
+            Some(_) if !f.form => {
+                return Err(format!(
+                    "actions: `{}`: `submit` is for a form action (`form: true`): it labels the form's button",
+                    f.id
+                ));
+            }
+            Some("") => return Err(format!("actions: `{}`: `submit` is blank", f.id)),
+            Some(label) => Some(label.to_string()),
+        };
         let edit_field = if f.edit {
             Some(edit_field(&f.id, &input, &f.fixed)?)
         } else {
@@ -1976,7 +2078,10 @@ pub(crate) fn parse_actions(
             when: f.when,
             enabled: f.enabled,
             fact: f.fact,
-            does: None,
+            help: f
+                .help
+                .map(|h| h.trim().to_string())
+                .filter(|h| !h.is_empty()),
             primary: f.primary,
             prominent: f.prominent,
             submenu: f.submenu.map(|n| n.trim().to_string()),
@@ -1990,9 +2095,72 @@ pub(crate) fn parse_actions(
             all: f.all,
             options_from: f.options_from,
             current: f.current,
+            also: f.also,
+            in_form: None,
+            submit,
         });
     }
+    place_also(&mut out)?;
     Ok(out)
+}
+
+/// Check each form action's `also` and mark what it names as shown only
+/// in that form (`in_form`): another action of the viz, run at once (not a
+/// form, drag or edit), a row action when the form is one (and a page
+/// action when it isn't), in one form only.
+fn place_also(actions: &mut [PageAction]) -> Result<(), String> {
+    let mut placed: Vec<(usize, String)> = Vec::new();
+    for owner in actions.iter() {
+        if owner.also.is_empty() {
+            continue;
+        }
+        if !owner.form {
+            return Err(format!(
+                "actions: `{}`: `also` is for a form action (`form: true`): it puts buttons in the form",
+                owner.id
+            ));
+        }
+        for name in &owner.also {
+            if name == &owner.id {
+                return Err(format!("actions: `{}`: `also` names itself", owner.id));
+            }
+            let Some(at) = actions.iter().position(|a| &a.id == name) else {
+                return Err(format!(
+                    "actions: `{}`: `also` names `{name}`, which isn't an action of this viz",
+                    owner.id
+                ));
+            };
+            let other = &actions[at];
+            if other.form
+                || other.drag
+                || other.edit
+                || other.open.is_some()
+                || other.options_from.is_some()
+            {
+                return Err(format!(
+                    "actions: `{}`: `also` names `{name}`: a form's button runs at once (not a form, drag, edit, open or options action)",
+                    owner.id
+                ));
+            }
+            if other.row != owner.row {
+                return Err(format!(
+                    "actions: `{}`: `also` names `{name}`: a row action's form shows row actions, a page action's form page actions",
+                    owner.id
+                ));
+            }
+            if let Some((_, first)) = placed.iter().find(|(i, _)| *i == at) {
+                return Err(format!(
+                    "actions: `{}`: `also` names `{name}`, already in `{first}`'s form",
+                    owner.id
+                ));
+            }
+            placed.push((at, owner.id.clone()));
+        }
+    }
+    for (at, owner) in placed {
+        actions[at].in_form = Some(owner);
+    }
+    Ok(())
 }
 
 /// What's wrong with a form action's `fields`: a field twice, a fixed one

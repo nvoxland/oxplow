@@ -35412,5 +35412,40 @@
       ],
       "key": []
     }
+  },
+  "ai_model": {
+    "1": {
+      "columns": [
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider (`v_ai_provider.id`)."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model's id at that provider, as a role binds it (`claude-sonnet-4-5`)."
+        },
+        {
+          "name": "tool_calling",
+          "type": "TEXT",
+          "doc": "`supported`, `unsupported` or `unknown`: whether it calls tools (the Assistant needs it)."
+        },
+        {
+          "name": "streaming",
+          "type": "TEXT",
+          "doc": "`supported`, `unsupported` or `unknown`."
+        },
+        {
+          "name": "context_tokens",
+          "type": "INT",
+          "doc": "Its context window in tokens; NULL when unknown."
+        }
+      ],
+      "key": [
+        "provider",
+        "model"
+      ]
+    }
   }
 }

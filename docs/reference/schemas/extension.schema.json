@@ -2486,7 +2486,7 @@
           "type": "string"
         },
         "fallback": {
-          "description": "The built-in role whose model serves it until a model is bound.",
+          "description": "The built-in role whose model serves it until a model is bound:\n`default` when left out.",
           "allOf": [
             {
               "$ref": "#/definitions/FallbackFile"
@@ -2504,17 +2504,17 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "description",
-        "fallback"
+        "description"
       ]
     },
     "FallbackFile": {
-      "description": "The built-in roles a profile may fall back to.",
+      "description": "The built-in roles a profile may fall back to: Default when it names\nnone, and any other's chain ends at Default.",
       "type": "string",
       "enum": [
-        "main",
+        "default",
         "summarize",
-        "decide"
+        "decide",
+        "assistant"
       ]
     },
     "FeatureFile": {
