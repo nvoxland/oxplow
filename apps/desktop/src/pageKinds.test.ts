@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { ICONS } from "./icons.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
-import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
+import { DEFAULT_PAGE_ICON, declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindIconOrDefault, pageKindLabel } from "./pageKinds.js";
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
@@ -42,6 +42,21 @@ describe("pageKindIconComponent", () => {
   test("unknown kinds return null", () => {
     expect(pageKindIconComponent("nope")).toBeNull();
     expect(pageKindIconComponent("")).toBeNull();
+  });
+});
+
+// Where a page kind is drawn (a tab, Quick Open, a backlink, a link), a
+// kind nothing knows — a page an extension no longer declares — draws the
+// generic page icon, so its row lines up with the others.
+describe("pageKindIconOrDefault", () => {
+  test("a known kind draws its own icon", () => {
+    expect(pageKindIconOrDefault("task")).toBe(pageKindIconComponent("task")!);
+  });
+
+  test("an unknown kind draws the generic page icon", () => {
+    expect(pageKindIconOrDefault("assistant-settings")).toBe(DEFAULT_PAGE_ICON);
+    expect(pageKindIconOrDefault("")).toBe(DEFAULT_PAGE_ICON);
+    expect(pageKindIconComponent("page")).toBe(DEFAULT_PAGE_ICON);
   });
 });
 
