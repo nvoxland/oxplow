@@ -920,6 +920,7 @@ pub(super) async fn command_example(
         &input,
         &answers,
         host.svc.commands.as_ref(),
+        host.svc.languages.current(),
     )
     .await;
     let problem = match (decided, ex.expect.get("refused").and_then(Value::as_str)) {
@@ -1021,6 +1022,7 @@ pub(super) async fn effect_example(
         event,
         &answers,
         Some(host.svc.commands.as_ref()),
+        host.svc.languages.current(),
     )
     .await;
     if let Some(p) = reaction_problem(&ex.expect, decided) {

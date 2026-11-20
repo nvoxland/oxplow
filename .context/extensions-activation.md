@@ -204,7 +204,10 @@ same way (`extension_catalog::Failed`) and the candidate is staged again; if
 its last working version fails too, it is left out. A failure that names no
 held-able extension (the host) rejects the candidate. A command namespace
 collision names only the source refused and the one it collided with
-(`commands::NamespaceRefusal`). The active catalog is separate from raw
+(`commands::NamespaceRefusal`). A language that claims a name, file extension or
+LSP id an earlier extension's language holds is a `language.conflict` error of
+the later extension (`descriptors::hold_language_conflicts`, in
+`check_catalog`), which names the earlier and holds it. The active catalog is separate from raw
 candidate loads; its `source_generation` preserves the raw fingerprint. Runtime catalog reads use
 the committed snapshot and apply immediate explicit-disable and missing-folder
 revocation without loading edited declarations.

@@ -1282,6 +1282,7 @@ async fn impact_against(
     };
     Ok(impact_between(
         layer,
+        &layer.languages(),
         catalog,
         root,
         before.as_ref().map(|t| ReviewSide {

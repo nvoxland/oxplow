@@ -383,8 +383,40 @@ pub fn check_catalog(exts: &mut [Extension]) -> Registry {
             remove(ext, &c);
         }
     }
+    hold_language_conflicts(exts);
     order_catalog(exts, crate::event_pump::CORE_CONSUMERS);
     registry
+}
+
+/// A language whose name, file extension or LSP id an earlier extension's
+/// language already holds (the set's order, [`crate::extension::language_set::of`]:
+/// foundation, oxplow's own, then by name) is a load error of the later
+/// extension, naming the earlier, and is taken out of it, so the set and the
+/// declarations never disagree. A language that doesn't build is its own
+/// extension's error at load already.
+fn hold_language_conflicts(exts: &mut [Extension]) {
+    let (_, problems) = crate::extension::language_set::of(exts);
+    for p in problems
+        .into_iter()
+        .filter(|p| p.message.contains("already belongs to another language"))
+    {
+        let Some(ext) = exts.iter_mut().find(|e| e.name == p.extension) else {
+            continue;
+        };
+        ext.errors.push(
+            Diagnostic::error(
+                "language.conflict",
+                format!(
+                    "language `{}` can't be declared: {}",
+                    p.language, p.message
+                ),
+            )
+            .at("extension.yaml", None)
+            .contribution(format!("{}/{}", ext.namespace, p.language))
+            .fix("give it another id, alias or file extension, or turn off the extension that holds them"),
+        );
+        ext.languages.retain(|l| l.decl.id != p.language);
+    }
 }
 
 /// Whether contribution `d` is ordered: effects and collectors, the two

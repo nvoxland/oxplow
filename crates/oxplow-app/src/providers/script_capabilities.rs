@@ -479,6 +479,38 @@ async fn a_script_implementation_reads_the_worktree_with_tree_read() {
     );
 }
 
+/// A script implementation parses with the published language set: its
+/// `stat` reports how many Rust functions `ast_query` found as the size.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_script_implementation_parses_with_the_published_languages() {
+    let fx = crate::test_fixtures::services_with_thread().await;
+    worktree_files(&fx);
+    let script = WORKTREE_FILESYSTEM.replace(
+        "utf8_len(f[\"text\"])",
+        "len(ast_query(\"fn a() {}\\nfn b() {}\\n\", \"rust\", \"(function_item) @f\"))",
+    );
+    assert_ne!(script, WORKTREE_FILESYSTEM);
+    write(
+        &fx,
+        "script-tree",
+        &worktree_filesystem_manifest("[files.read]", "[tree.read]"),
+        &[("tree.star", &script)],
+    );
+    crate::test_fixtures::activate(&fx.svc).await;
+    let fs = fx
+        .svc
+        .filesystems
+        .resolve(Some("script-tree:tree"))
+        .unwrap();
+    let cx = oxplow_domain::filesystem::FsCx::default();
+    let stat = fs
+        .stat(&cx, None, "notes/hello.txt")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stat.size, Some(2));
+}
+
 /// `tree.read:<path>` bounds what the script sees to that folder: the
 /// host filters the tree before the script has it.
 #[tokio::test(flavor = "multi_thread")]

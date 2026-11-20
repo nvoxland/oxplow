@@ -37,6 +37,9 @@ pub struct SqlGateway {
     /// What makes the stored things a query names by their keys
     /// (`crate::on_demand`); shared by every clone, bound once by the app.
     on_demand: std::sync::Arc<crate::on_demand::OnDemand>,
+    /// The published language set the scripts a check or a review dry-runs
+    /// parse with (the app's; none declared until it is set).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 /// What a query result says about the data behind it: which collectors
@@ -69,7 +72,22 @@ impl SqlGateway {
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
             live: std::sync::Arc::new(crate::live_datasets::LiveDatasets::default()),
             on_demand: std::sync::Arc::new(crate::on_demand::OnDemand::default()),
+            languages: Default::default(),
         }
+    }
+
+    /// Dry-run scripts with the app's published `languages`.
+    pub fn with_languages(
+        mut self,
+        languages: crate::extension::language_set::LanguagesHandle,
+    ) -> Self {
+        self.languages = languages;
+        self
+    }
+
+    /// The language set a dry-run script parses with, as published now.
+    pub fn languages(&self) -> std::sync::Arc<oxplow_code_metrics::Languages> {
+        self.languages.current()
     }
 
     /// The handle the app binds the live datasets' sources through.

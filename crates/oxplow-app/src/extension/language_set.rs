@@ -125,3 +125,42 @@ impl LanguagesHandle {
         first || moved
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// A language whose file extension an earlier extension's language holds
+    /// holds the later extension back, naming the earlier; the set keeps the
+    /// earlier's, and the later's other contributions stay inactive.
+    #[tokio::test]
+    async fn a_language_conflict_holds_the_later_extension() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/zeta-rust");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: zeta-rust\nintent: { purpose: t, origin: null, examples: [] }\nlanguages:\n  - { id: zeta, title: Zeta, extensions: [rs] }\n",
+        )
+        .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(svc).await;
+        let held = problems
+            .get("zeta-rust")
+            .expect("the later extension is held");
+        let conflict = held
+            .iter()
+            .find(|d| d.code == "language.conflict")
+            .unwrap_or_else(|| panic!("{held:?}"));
+        assert!(
+            conflict.message.contains("files `.rs`") && conflict.message.contains("oxplow-rust"),
+            "{}",
+            conflict.message
+        );
+        let set = svc.languages.current();
+        assert_eq!(
+            set.for_path("src/a.rs").map(|l| l.name().to_string()),
+            Some("rust".to_string()),
+            "the earlier keeps `.rs`"
+        );
+        assert!(set.by_name("zeta").is_none());
+    }
+}

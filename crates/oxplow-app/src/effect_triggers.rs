@@ -948,7 +948,7 @@ pub(crate) async fn run_script(
     // The script is the run's pure part: what it calls is counted apart,
     // then added to the run it composes.
     let composing = run.child(None, Mode::Pure);
-    let sources = crate::services::Sources::default()
+    let sources = crate::services::Sources::new(svc.languages.current())
         .with_tree(crate::services::Trees::From(Arc::new(svc.metrics.clone())));
     let given = crate::services::prepare(&composing, &script, &needs, &sources).await?;
     let runtime = tokio::runtime::Handle::current();
@@ -1186,6 +1186,7 @@ mod tests {
                 .to_json(),
             &BTreeMap::new(),
             None,
+            svc.languages.current(),
         )
         .await
         .unwrap();
@@ -1626,6 +1627,27 @@ mod tests {
         interrupt(svc, &third).await;
         let out = retry(svc, &agent, &third, false).await.unwrap();
         assert_eq!(out.result["outcome"], json!("ok"));
+    }
+
+    /// An effect's script parses with the published language set: with
+    /// the Rust pack on, `ast_query(text, "rust", q)` finds both functions.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_script_parses_with_the_published_languages() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let script = "def transform(x):\n    return {\"skip\": str(len(ast_query(\"fn a() {}\\nfn b() {}\\n\", \"rust\", \"(function_item) @f\")))}\n";
+        extension(svc, MARK_DONE, &[("mark.star", script)]).await;
+        let ev = log(svc, settled(&fx, "taken")).await;
+        let (ext, decl) = effects(svc).into_iter().next().unwrap();
+        let run = crate::run_context::for_effect(
+            &svc.extension_catalog,
+            &svc.layout.project_dir,
+            &ext,
+            &decl,
+            &ev,
+        );
+        let (reaction, _) = run_script(svc, &run, &decl, &ev).await.unwrap();
+        assert_eq!(reaction, effects::Reaction::Skip("2".into()));
     }
 
     /// P9.D4: a retry runs the effect as it is now, so it needs what a
