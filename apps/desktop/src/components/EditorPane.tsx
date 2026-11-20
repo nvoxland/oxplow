@@ -7,7 +7,7 @@ import { languageForPath } from "../editor-language.js";
 import { hasLspServer, refreshLspServers } from "../lsp-servers-store.js";
 import type { EditorNavigationTarget } from "../lsp.js";
 import { normalizeDefinitionTarget } from "../lsp-monaco-mapping.js";
-import { getSuggestedLspPackage } from "../lspSuggestions.js";
+import { suggestedLspPackage } from "../lspSuggestions.js";
 import { logUi } from "../logger.js";
 import { isDirty as bufferDirty, useBuffer } from "../editor/buffers.js";
 import { buffers, loadMonaco } from "../editor/openFiles.js";
@@ -73,7 +73,22 @@ export function EditorPane({
   const languageId = languageForPath(filePath);
   const mirrorStatus = LspMirror.of(stream.id)?.status(languageId) ?? null;
   const lspStatus = ownStatus ?? mirrorStatus;
-  const lspInstallSuggestion = mirrorStatus && /LSP unavailable/i.test(mirrorStatus) ? getSuggestedLspPackage(languageId) : null;
+  // The server to suggest installing, read from `v_language` once the
+  // mirror says there is none.
+  const lspUnavailable = !!mirrorStatus && /LSP unavailable/i.test(mirrorStatus);
+  const [suggestedPackage, setSuggestedPackage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!lspUnavailable) {
+      setSuggestedPackage(null);
+      return;
+    }
+    let live = true;
+    suggestedLspPackage(languageId)
+      .then((pkg) => { if (live) setSuggestedPackage(pkg); })
+      .catch(() => { if (live) setSuggestedPackage(null); });
+    return () => { live = false; };
+  }, [languageId, lspUnavailable]);
+  const lspInstallSuggestion = lspUnavailable ? suggestedPackage : null;
   const [lspInstalling, setLspInstalling] = useState(false);
   async function installSuggested() {
     if (!lspInstallSuggestion) return;

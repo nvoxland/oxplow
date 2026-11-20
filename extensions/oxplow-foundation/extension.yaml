@@ -437,6 +437,24 @@ intent:
 # nothing parses them; they say which files a server covers and which
 # Mason package to suggest. Languages oxplow parses are the language
 # packs' (`oxplow-rust` and the rest).
+advisories:
+  # A language pack that is off while the project has files in its language:
+  # the person is told once per pack, and Alerts offers to turn it on.
+  - id: language-pack
+    on: turn-end
+    once_per: row
+    audience: person
+    query: |
+      SELECT l.extension AS key,
+             'This project has ' || group_concat(l.title, ', ') || ' files. Turn on the ['
+             || group_concat(l.title, ', ') || ' language pack](oxplow:oxplow/extension?name=' || l.extension
+             || ') to get its symbols, metrics and review signals.' AS message
+      FROM v_language l
+      WHERE l.enabled = 0 AND l.analyzable = 1
+        AND EXISTS (SELECT 1 FROM v_snapshot_file f, json_each(l.extensions) e
+                     WHERE f.stream_id = :stream_id AND f.storage <> 'deleted'
+                       AND lower(f.path) LIKE '%.' || e.value)
+      GROUP BY l.extension
 languages:
   - { id: lua, title: Lua, extensions: [lua], lsp: { package: lua-language-server } }
   - { id: json, title: JSON, extensions: [json, jsonc], lsp: { package: json-lsp } }

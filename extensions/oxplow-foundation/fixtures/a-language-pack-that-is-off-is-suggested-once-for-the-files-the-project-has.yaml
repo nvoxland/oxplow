@@ -1,0 +1,9 @@
+# The project has Python files and the Python pack is off: the person is told
+# once, with a link to the pack. (With the pack on, nothing is said; see the
+# sibling fixture.)
+given:
+  - observe: { snapshot: { files: [{ path: tools/run.py, hash: 0123456789abcdef0123456789abcdef }] } }
+when: { advisory: language-pack }
+expect:
+  lines:
+    - "This project has Python files. Turn on the [Python language pack](oxplow:oxplow/extension?name=oxplow-python) to get its symbols, metrics and review signals."

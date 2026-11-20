@@ -1,0 +1,6 @@
+# The Python pack is on: nothing to suggest for the project's Python files.
+requires: [oxplow-python]
+given:
+  - observe: { snapshot: { files: [{ path: tools/run.py, hash: 0123456789abcdef0123456789abcdef }] } }
+when: { advisory: language-pack }
+expect: { lines: [] }

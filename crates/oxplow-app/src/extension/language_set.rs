@@ -163,4 +163,47 @@ mod tests {
         );
         assert!(set.by_name("zeta").is_none());
     }
+
+    /// `v_language` lists every language every loaded extension declares,
+    /// on or off, with what oxplow knows about each.
+    #[tokio::test]
+    async fn v_language_lists_every_declared_language_on_or_off() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.extension.disable",
+                serde_json::json!({ "name": "oxplow-go" }),
+                true,
+            )
+            .await
+            .unwrap();
+        let rows = |sql: &str| {
+            let sql = sql.to_string();
+            async move {
+                serde_json::to_value(svc.sql.query_sql(&sql, vec![], None).await.unwrap().rows)
+                    .unwrap()
+            }
+        };
+        assert_eq!(
+            rows("SELECT id, extension, enabled, analyzable, lsp_package FROM v_language WHERE id IN ('go', 'rust', 'lua') ORDER BY id")
+                .await,
+            serde_json::json!([
+                ["go", "oxplow-go", 0, 1, "gopls"],
+                ["lua", "oxplow-foundation", 1, 0, "lua-language-server"],
+                ["rust", "oxplow-rust", 1, 1, "rust-analyzer"]
+            ])
+        );
+        assert_eq!(
+            rows("SELECT extensions, aliases, lsp_ids, facets FROM v_language WHERE id = 'tsx'")
+                .await,
+            serde_json::json!([[
+                "[\"tsx\"]",
+                "[]",
+                "[\"typescriptreact\"]",
+                "{\"imports\":1,\"merge\":1,\"duplication\":1,\"starter\":0}"
+            ]])
+        );
+    }
 }

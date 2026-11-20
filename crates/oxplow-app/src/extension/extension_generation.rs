@@ -29,6 +29,9 @@ pub struct PreparedExtensionDatabase {
     /// The enabled extensions' `file_kinds:` as `v_file_kind_rule` rows:
     /// `(kind, glob, label, extension)`.
     file_kinds: Vec<(String, String, Option<String>, String)>,
+    /// Every language every loaded extension declares, on or off
+    /// (`v_language`).
+    languages: Vec<oxplow_db::model_store::LanguageDeclRow>,
     /// The declarations of the extensions whose datasets read their own
     /// configuration (`config()`): their effective values are resolved in the
     /// publishing transaction and compiled into the views.
@@ -251,7 +254,13 @@ impl PreparedExtensionDatabase {
                 })
             })
             .collect();
+        let languages = snapshot
+            .extensions()
+            .iter()
+            .flat_map(language_rows)
+            .collect();
         Self {
+            languages,
             file_kinds,
             configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
@@ -340,6 +349,7 @@ impl PreparedExtensionDatabase {
             oxplow_db::model_store::replace_stage_decls_tx(tx, &self.models.stage_decls())?;
             oxplow_db::model_store::replace_store_decls_tx(tx, &self.models.store_decls())?;
             oxplow_db::model_store::replace_file_kind_rules_tx(tx, false, &self.file_kinds)?;
+            oxplow_db::model_store::replace_language_decls_tx(tx, &self.languages)?;
             let mut candidate = self.datasets.clone();
             for (extension, namespace, declaration) in &self.configurations {
                 let values = crate::extension::extension_configuration::effective_values(
@@ -518,4 +528,38 @@ fn rollback_candidate(tx: &rusqlite::Transaction<'_>) -> Result<(), DomainError>
         "ROLLBACK TO candidate_extension_database; RELEASE candidate_extension_database",
     )
     .map_err(oxplow_db::map_sql_err)
+}
+
+/// `extension`'s languages as `v_language` rows: what each is, and which
+/// facets its `analysis.yaml` and starter give it.
+fn language_rows(
+    extension: &crate::extension::extensions::Extension,
+) -> impl Iterator<Item = oxplow_db::model_store::LanguageDeclRow> + '_ {
+    extension.languages.iter().map(move |source| {
+        let decl = &source.decl;
+        let spec = source
+            .analysis
+            .as_deref()
+            .and_then(|text| oxplow_code_metrics::LanguageSpec::parse(text).ok());
+        let has = |present: bool| i64::from(present);
+        oxplow_db::model_store::LanguageDeclRow {
+            id: decl.id.clone(),
+            title: decl.title.clone(),
+            extension: extension.name.clone(),
+            enabled: extension.enabled,
+            analyzable: decl.grammar.is_some(),
+            extensions: decl.extensions.clone(),
+            aliases: decl.aliases.clone(),
+            lsp_ids: decl.lsp_ids.clone(),
+            lsp_package: decl.lsp.as_ref().map(|l| l.package.clone()),
+            facets: serde_json::json!({
+                "imports": has(spec.as_ref().is_some_and(|s| s.imports.is_some())),
+                "merge": has(spec.as_ref().is_some_and(|s| s.merge.is_some())),
+                "duplication": has(spec.as_ref().is_some_and(|s| {
+                    !s.duplication.skip_kinds.is_empty() || !s.duplication.skip_form_heads.is_empty()
+                })),
+                "starter": has(decl.starter.is_some()),
+            }),
+        }
+    })
 }

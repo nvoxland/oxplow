@@ -690,6 +690,52 @@ pub fn replace_file_kind_rules_tx(
     Ok(())
 }
 
+/// One declared language, as `language_decl` keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageDeclRow {
+    pub id: String,
+    pub title: String,
+    pub extension: String,
+    pub enabled: bool,
+    pub analyzable: bool,
+    pub extensions: Vec<String>,
+    pub aliases: Vec<String>,
+    pub lsp_ids: Vec<String>,
+    pub lsp_package: Option<String>,
+    pub facets: serde_json::Value,
+}
+
+/// Restate every loaded language (`language_decl`).
+pub fn replace_language_decls_tx(
+    conn: &rusqlite::Connection,
+    rows: &[LanguageDeclRow],
+) -> Result<(), DomainError> {
+    conn.execute("DELETE FROM language_decl", [])
+        .map_err(map_sql_err)?;
+    for r in rows {
+        conn.execute(
+            "INSERT OR IGNORE INTO language_decl
+               (id, title, extension, enabled, analyzable, extensions, aliases, lsp_ids,
+                lsp_package, facets)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                r.id,
+                r.title,
+                r.extension,
+                r.enabled,
+                r.analyzable,
+                serde_json::to_string(&r.extensions).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(&r.aliases).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(&r.lsp_ids).unwrap_or_else(|_| "[]".into()),
+                r.lsp_package,
+                r.facets.to_string(),
+            ],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Re-pin `source`'s pinned refs to now (`oxplow.refs.verify`): `files`,
 /// or every file it pins when `None`. Each must be a file it pins or be
 /// under a directory it pins (one under a directory becomes a pin of its
