@@ -7,6 +7,12 @@
 //!   key)` reads one param back, `uri_resource(uri)` its resource and
 //!   `uri_key(uri)` the param that names it (`thr3`; anything that isn't a
 //!   URI as it was). A NULL value leaves its param out.
+//! - `glob_match(glob, path)` is 1 when the repo-relative `path` matches
+//!   `glob`, else 0 (NULL when either is NULL). The dialect is the one
+//!   `testing.testPaths` use: `globset` with `literal_separator`, so `*`
+//!   stays within a folder and `**` crosses them (`**/tests/**`, `*.rs`
+//!   against `src/a.rs` is 0). A `\` in the path reads as `/`. A glob that
+//!   doesn't parse is an error. The compiled glob is kept per statement.
 //! - `first_sentence(markdown)` is a description's opening for a card or a
 //!   list row to draw as markdown (a `markdown` column, the kit's
 //!   `renderMarkdown`): the first line that isn't a heading, the list and
@@ -30,7 +36,26 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("first_sentence", 1, flags, |ctx| {
         Ok(text(ctx, 0)?.and_then(|t| first_sentence(&t)))
     })?;
+    c.create_scalar_function("glob_match", 2, flags, glob_match)?;
     c.create_scalar_function("read_measure", 1, flags, read_measure)
+}
+
+/// `glob_match(glob, path)`: see the module's doc.
+fn glob_match(ctx: &Context<'_>) -> rusqlite::Result<Option<bool>> {
+    if matches!(ctx.get_raw(0), ValueRef::Null) {
+        return Ok(None);
+    }
+    let matcher = ctx.get_or_create_aux(0, |glob| -> Result<globset::GlobMatcher, Error> {
+        let glob = glob
+            .as_str()
+            .map_err(|e| Error::UserFunctionError(e.into()))?;
+        globset::GlobBuilder::new(glob)
+            .literal_separator(true)
+            .build()
+            .map(|g| g.compile_matcher())
+            .map_err(|e| Error::UserFunctionError(format!("`{glob}` isn't a glob: {e}").into()))
+    })?;
+    Ok(text(ctx, 1)?.map(|path| matcher.is_match(path.replace('\\', "/"))))
 }
 
 /// The datasets whose reads `read_measure()` scopes to a measure: the facts
@@ -469,5 +494,40 @@ mod tests {
             assert_eq!(first(body).as_deref(), says, "{body:?}");
         }
         assert_eq!(run("SELECT first_sentence(NULL)").unwrap(), None);
+    }
+
+    /// `glob_match` is `testPaths`' dialect: `*` stays in a folder, `**`
+    /// crosses them; NULL in, NULL out; a bad glob is an error.
+    #[test]
+    fn glob_match_uses_the_literal_separator_dialect() {
+        let c = Connection::open_in_memory().unwrap();
+        register(&c).unwrap();
+        let m = |glob: &str, path: &str| -> Option<bool> {
+            c.query_row("SELECT glob_match(?1, ?2)", [glob, path], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(m("**/tests/**", "src/tests/a.rs"), Some(true));
+        assert_eq!(m("**/tests/**", "tests/a.rs"), Some(true));
+        assert_eq!(m("**/tests/**", "src/a.rs"), Some(false));
+        assert_eq!(m("*.rs", "a.rs"), Some(true));
+        assert_eq!(m("*.rs", "src/a.rs"), Some(false), "`*` doesn't cross `/`");
+        assert_eq!(m("**/*.rs", "src/deep/a.rs"), Some(true));
+        assert_eq!(
+            m(".github/workflows/**", ".github/workflows/ci.yml"),
+            Some(true)
+        );
+        assert_eq!(m("**/.env*", "app/.env.local"), Some(true));
+        assert_eq!(
+            m("src/**", "src\\a.rs"),
+            Some(true),
+            "a backslash reads as `/`"
+        );
+        let null: Option<bool> = c
+            .query_row("SELECT glob_match(NULL, 'a')", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(null, None);
+        assert!(c
+            .query_row("SELECT glob_match('a{b', 'a')", [], |r| r.get::<_, bool>(0))
+            .is_err());
     }
 }

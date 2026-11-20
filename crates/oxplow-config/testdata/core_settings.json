@@ -179,6 +179,21 @@
     ]
   },
   {
+    "key": "oxplow.files.kinds",
+    "title": "File kinds",
+    "description": "The project's own file-kind rules, on top of what the enabled extensions declare (`file_kinds:`): `[{ kind: generated, glob: \"gen/**\" }]`. A kind is lowercase letters, digits and dashes (`ci`, `sensitive`, `lockfile`, …).",
+    "category": "project",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "owner": "core",
+    "accepts": [
+      0,
+      17
+    ]
+  },
+  {
     "key": "oxplow.generated.exclude",
     "title": "Generated: exclude",
     "description": "Paths oxplow ignores even when `.gitignore` doesn't (watching, snapshots and scans): a single segment (`target`) matches any path component; a repo-relative path (`apps/desktop/dist`) matches that path and what is under it.",

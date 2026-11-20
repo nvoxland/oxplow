@@ -35719,5 +35719,32 @@
       ],
       "key": []
     }
+  },
+  "file_kind_rule": {
+    "1": {
+      "columns": [
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "The kind: `dependency-manifest`, `lockfile`, `test-harness`, `ci`, `lint-config`, `generated`, `vendored`, `migration`, `sensitive`, or any lowercase-dashed name."
+        },
+        {
+          "name": "glob",
+          "type": "TEXT",
+          "doc": "A repo-relative glob (`*` stays in a folder, `**` crosses folders), matched by `glob_match`."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What a person calls the kind, when the rule says; NULL otherwise."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares the rule; `project-settings` for the project's own."
+        }
+      ],
+      "key": []
+    }
   }
 }

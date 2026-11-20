@@ -4762,6 +4762,7 @@ name = "oxplow-db"
 version = "0.8.0"
 dependencies = [
  "async-trait",
+ "globset",
  "oxplow-domain",
  "oxplow-workspace-hack",
  "r2d2",

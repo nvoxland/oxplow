@@ -252,6 +252,26 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         d.description = Some(format!("{kind} runs: {}", r.patterns.join(", ")));
         out.push(d);
     }
+    // A file kind is named by its `kind`; two entries of one kind are
+    // `<kind>`, `<kind>-2`, … in declaration order.
+    let mut kinds: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (i, k) in ext.file_kinds.iter().enumerate() {
+        let n = kinds.entry(k.kind.as_str()).or_default();
+        *n += 1;
+        let id = if *n == 1 {
+            k.kind.clone()
+        } else {
+            format!("{}-{n}", k.kind)
+        };
+        let mut d = new(ContributionKind::FileKind, &id, RunsOn::Query);
+        d.source = item("file_kinds", i);
+        d.description = Some(
+            k.label
+                .clone()
+                .unwrap_or_else(|| format!("{}: {}", k.kind, k.globs.join(", "))),
+        );
+        out.push(d);
+    }
     // An implementation is chosen by `<capability>/<id>`.
     for i in &ext.implementations {
         let mut d = new(
@@ -625,6 +645,19 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::AiProfile => ext.ai_profiles.retain(|x| x.id != local),
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
         ContributionKind::AgentContext => ext.contexts.retain(|x| x.id != local),
+        ContributionKind::FileKind => {
+            let mut seen: std::collections::HashMap<String, usize> = Default::default();
+            ext.file_kinds.retain(|k| {
+                let n = seen.entry(k.kind.clone()).or_default();
+                *n += 1;
+                let id = if *n == 1 {
+                    k.kind.clone()
+                } else {
+                    format!("{}-{n}", k.kind)
+                };
+                id != local
+            })
+        }
         ContributionKind::RunPattern => {
             // Ids are `<kind>`, `<kind>-2`, … in declaration order.
             let mut seen: std::collections::HashMap<&'static str, usize> = Default::default();

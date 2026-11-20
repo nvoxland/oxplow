@@ -373,6 +373,17 @@
       },
       "default": null
     },
+    "file_kinds": {
+      "description": "What kind of file a path is, by glob (`v_file_kind_rule`).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/FileKindFile"
+      },
+      "default": null
+    },
     "providers": {
       "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
       "type": [
@@ -3715,6 +3726,36 @@
       "required": [
         "kind",
         "patterns"
+      ]
+    },
+    "FileKindFile": {
+      "description": "A `file_kinds:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The kind: lowercase words joined by dashes (`ci`, `lint-config`).",
+          "type": "string"
+        },
+        "globs": {
+          "description": "Repo-relative globs (`*` stays in a folder, `**` crosses folders); at\nleast one.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "description": "What a person calls the kind.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "globs"
       ]
     },
     "ProviderSpec": {

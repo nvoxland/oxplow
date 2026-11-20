@@ -848,6 +848,8 @@
     "effect",
     "advisory",
     "agent_context",
+    "run_pattern",
+    "file_kind",
     "skill",
     "implementation",
     "provider",

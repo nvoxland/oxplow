@@ -26,6 +26,9 @@ pub struct PreparedExtensionDatabase {
     /// person can ask and what they can configure, listed.
     listing: oxplow_db::catalog_listing_store::CatalogListing,
     capabilities: Option<PreparedCapabilities>,
+    /// The enabled extensions' `file_kinds:` as `v_file_kind_rule` rows:
+    /// `(kind, glob, label, extension)`.
+    file_kinds: Vec<(String, String, Option<String>, String)>,
     /// The declarations of the extensions whose datasets read their own
     /// configuration (`config()`): their effective values are resolved in the
     /// publishing transaction and compiled into the views.
@@ -231,7 +234,25 @@ impl PreparedExtensionDatabase {
                 ))
             })
             .collect();
+        let file_kinds = snapshot
+            .extensions()
+            .iter()
+            .filter(|extension| extension.enabled)
+            .flat_map(|extension| {
+                extension.file_kinds.iter().flat_map(|k| {
+                    k.globs.iter().map(|glob| {
+                        (
+                            k.kind.clone(),
+                            glob.clone(),
+                            k.label.clone(),
+                            extension.name.clone(),
+                        )
+                    })
+                })
+            })
+            .collect();
         Self {
+            file_kinds,
             configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
             models: crate::models::ModelRegistry::of(snapshot.extensions()),
@@ -318,6 +339,7 @@ impl PreparedExtensionDatabase {
             oxplow_db::model_store::replace_field_decls_tx(tx, &self.models.field_decls())?;
             oxplow_db::model_store::replace_stage_decls_tx(tx, &self.models.stage_decls())?;
             oxplow_db::model_store::replace_store_decls_tx(tx, &self.models.store_decls())?;
+            oxplow_db::model_store::replace_file_kind_rules_tx(tx, false, &self.file_kinds)?;
             let mut candidate = self.datasets.clone();
             for (extension, namespace, declaration) in &self.configurations {
                 let values = crate::extension::extension_configuration::effective_values(

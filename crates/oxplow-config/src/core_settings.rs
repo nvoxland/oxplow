@@ -30,6 +30,7 @@ pub mod keys {
     pub const METRIC_DETAIL_RETENTION_DAYS: &str = "oxplow.metrics.detailRetentionDays";
     pub const GENERATED_EXCLUDE: &str = "oxplow.generated.exclude";
     pub const GENERATED_INCLUDE: &str = "oxplow.generated.include";
+    pub const FILES_KINDS: &str = "oxplow.files.kinds";
     pub const TESTING_COMMAND: &str = "oxplow.testing.command";
     pub const TESTING_FAST_COMMAND: &str = "oxplow.testing.fastCommand";
     pub const TESTING_RUN_PATTERNS: &str = "oxplow.testing.runPatterns";
@@ -157,6 +158,38 @@ fn glob_list(value: Value) -> Result<Vec<String>, String> {
             .map_err(|e| format!("item {} `{glob}` isn't a valid glob: {e}", index + 1))?;
     }
     Ok(list)
+}
+
+/// `oxplow.files.kinds`: each rule's kind is lowercase-dashed and its glob
+/// parses (as `testPaths` do).
+fn file_kind_rules(value: Value) -> Result<Vec<crate::FileKindRule>, String> {
+    let rules = de::<Option<Vec<crate::FileKindRule>>>(value)?.unwrap_or_default();
+    for (index, rule) in rules.iter().enumerate() {
+        let item = index + 1;
+        if !valid_file_kind(&rule.kind) {
+            return Err(format!(
+                "item {item} kind `{}` must be lowercase letters, digits and dashes",
+                rule.kind
+            ));
+        }
+        globset::GlobBuilder::new(&rule.glob)
+            .literal_separator(true)
+            .build()
+            .map_err(|e| format!("item {item} `{}` isn't a valid glob: {e}", rule.glob))?;
+    }
+    Ok(rules)
+}
+
+/// Whether `kind` is a file kind's name: lowercase letters and digits in
+/// dash-separated words (`lint-config`).
+pub fn valid_file_kind(kind: &str) -> bool {
+    !kind.is_empty()
+        && kind.split('-').all(|word| {
+            !word.is_empty()
+                && word
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
 }
 
 fn generated(value: Value, key: &str) -> Result<Vec<String>, String> {
@@ -414,6 +447,18 @@ pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
             Some(json!([])),
             |c, v| {
                 c.testing.analysis_patterns = string_list(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::FILES_KINDS,
+            "File kinds",
+            "project",
+            "The project's own file-kind rules, on top of what the enabled extensions declare (`file_kinds:`): `[{ kind: generated, glob: \"gen/**\" }]`. A kind is lowercase letters, digits and dashes (`ci`, `sensitive`, `lockfile`, …).",
+            json!({"type": ["array", "null"], "items": schema_of::<crate::FileKindRule>()}),
+            Some(json!([])),
+            |c, v| {
+                c.files.kinds = file_kind_rules(v)?;
                 Ok(())
             },
         ),
@@ -924,6 +969,23 @@ mod tests {
     }
 
     #[test]
+    fn a_file_kind_rule_needs_a_dashed_kind_and_a_glob_that_parses() {
+        check(
+            keys::FILES_KINDS,
+            &json!([{"kind": "lint-config", "glob": "*.toml"}]),
+        )
+        .unwrap();
+        for bad in [
+            json!([{"kind": "Lint", "glob": "x"}]),
+            json!([{"kind": "a--b", "glob": "x"}]),
+            json!([{"kind": "ci", "glob": "a{b"}]),
+            json!([{"kind": "ci", "glob": "x", "extra": 1}]),
+        ] {
+            assert!(check(keys::FILES_KINDS, &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn one_value_is_checked_by_its_own_rule() {
         check(keys::REPLACEMENTS, &json!({"task.board": "oxplow"})).unwrap();
         let refused = check(keys::REPLACEMENTS, &json!({"unknown.target": "x"}))
@@ -1001,6 +1063,10 @@ mod tests {
                 (keys::TESTING_FAST_COMMAND, json!("")),
                 (keys::TESTING_RUN_PATTERNS, json!(["pytest"])),
                 (keys::TESTING_TEST_PATHS, json!(["spec/**"])),
+                (
+                    keys::FILES_KINDS,
+                    json!([{"kind": "generated", "glob": "gen/**", "label": "Generated"}]),
+                ),
                 (keys::SCRIPTS_MAX_CONCURRENT, json!(2)),
                 (keys::SCRIPTS_MEMORY_MB, json!(256)),
                 (keys::METRICS, json!([{"use": "oxplow.loc", "target": 3}])),
@@ -1030,6 +1096,14 @@ mod tests {
         assert_eq!(config.testing.fast_command, None);
         assert_eq!(config.testing.run_patterns, ["pytest"]);
         assert_eq!(config.testing.test_paths, ["spec/**"]);
+        assert_eq!(
+            config.files.kinds,
+            [crate::FileKindRule {
+                kind: "generated".into(),
+                glob: "gen/**".into(),
+                label: Some("Generated".into())
+            }]
+        );
         assert_eq!(config.scripts.max_concurrent, 2);
         assert_eq!(config.scripts.memory_bytes, 256 * 1024 * 1024);
         assert_eq!(config.metrics[0].use_key.as_deref(), Some("oxplow.loc"));

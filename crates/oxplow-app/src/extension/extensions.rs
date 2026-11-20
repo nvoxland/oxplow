@@ -25,6 +25,7 @@ pub mod config_schema;
 pub mod custom_components;
 pub mod decorators;
 pub mod descriptors;
+pub mod file_kinds;
 pub mod implementations;
 pub mod imports;
 pub mod jobs;
@@ -404,6 +405,9 @@ pub struct Extension {
     /// The command substrings it says mark a test or analysis run
     /// (`run_patterns:`; valid ones — invalid ones are in `errors`).
     pub run_patterns: Vec<run_patterns::RunPatternDecl>,
+    /// The kinds of file it names by glob (`file_kinds:`; valid ones —
+    /// invalid ones are in `errors`).
+    pub file_kinds: Vec<file_kinds::FileKindDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1822,6 +1826,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         skills: Vec::new(),
         contexts: Vec::new(),
         run_patterns: Vec::new(),
+        file_kinds: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -2042,6 +2047,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = m.run_patterns.as_ref() {
             let (declared, errors) = run_patterns::parse_run_patterns(v, man, &manifest);
             ext.run_patterns = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.file_kinds.as_ref() {
+            let (declared, errors) = file_kinds::parse_file_kinds(v, man, &manifest);
+            ext.file_kinds = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
@@ -3750,6 +3760,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.skills.clear();
     ext.contexts.clear();
     ext.run_patterns.clear();
+    ext.file_kinds.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
     ext.measures.clear();

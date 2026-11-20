@@ -662,6 +662,34 @@ pub fn replace_stage_decls_tx(
     Ok(())
 }
 
+/// The extension name of the project's own file-kind rules
+/// (`oxplow.files.kinds`) in `file_kind_rule_decl`.
+pub const PROJECT_FILE_KINDS: &str = "project-settings";
+
+/// Restate the file-kind rules (`file_kind_rule_decl`) of one source:
+/// the project's own (`project`, `PROJECT_FILE_KINDS`) or the enabled
+/// extensions'. Each row is `(kind, glob, label, extension)`.
+pub fn replace_file_kind_rules_tx(
+    conn: &rusqlite::Connection,
+    project: bool,
+    rows: &[(String, String, Option<String>, String)],
+) -> Result<(), DomainError> {
+    conn.execute(
+        "DELETE FROM file_kind_rule_decl WHERE (extension = ?1) = ?2",
+        params![PROJECT_FILE_KINDS, project],
+    )
+    .map_err(map_sql_err)?;
+    for (kind, glob, label, extension) in rows {
+        conn.execute(
+            "INSERT OR IGNORE INTO file_kind_rule_decl (kind, glob, label, extension)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![kind, glob, label, extension],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Re-pin `source`'s pinned refs to now (`oxplow.refs.verify`): `files`,
 /// or every file it pins when `None`. Each must be a file it pins or be
 /// under a directory it pins (one under a directory becomes a pin of its

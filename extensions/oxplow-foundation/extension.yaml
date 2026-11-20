@@ -15,6 +15,13 @@ custom_components:
 run_patterns:
   - { kind: test, patterns: [pytest, 'cargo test', 'cargo nextest', 'npm test', 'npm run test', 'pnpm test', 'yarn test', 'bun test', jest, vitest, 'go test', 'gradle test', 'mvn test', 'dotnet test', rspec, phpunit] }
   - { kind: analysis, patterns: ['cargo clippy', 'clippy-driver', eslint, ruff, 'golangci-lint', flake8, pylint, mypy, staticcheck, 'tsc --noemit', 'tsc --noEmit'] }
+# Kinds of file that belong to no language (the language packs name the rest).
+file_kinds:
+  - { kind: ci, label: CI, globs: ['.github/workflows/**', '.gitlab-ci.yml', '.circleci/**', 'azure-pipelines.yml', 'Jenkinsfile'] }
+  - { kind: generated, label: Generated, globs: ['**/generated/**', '**/*.generated.*', '**/*_generated.*'] }
+  - { kind: vendored, label: Vendored, globs: ['vendor/**', 'third_party/**', '**/node_modules/**'] }
+  - { kind: migration, label: Migration, globs: ['**/migrations/**'] }
+  - { kind: sensitive, label: Sensitive, globs: ['**/auth/**', '**/*secret*', '**/*credential*', '**/crypto/**', '**/.env*'] }
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a page can
@@ -813,6 +820,11 @@ resources:
     label: Run pattern
     params: { run_pattern: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: terminal
+  - name: file_kind
+    description: "What kind of file a path is, by glob."
+    label: File kind
+    params: { file_kind: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: file-text
   - name: implementation
     description: "One way to provide a capability, such as a task tracker or an agent."
     label: Implementation

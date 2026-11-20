@@ -185,7 +185,19 @@ opening for a card or a list row: past headings and the list and quote marks
 that lead its line, to the first `.`, `!` or `?` that ends a sentence outside
 a code span or a link, its inline markdown kept so a `markdown` column (or a
 component's `renderMarkdown`) draws it (bundled's `task-rows` query reads an
-item's this way). Other URIs are selected from their owning dataset's
+item's this way). **`glob_match(glob, path)`** is 1 when the repo-relative
+`path` matches `glob`, else 0 (NULL for a NULL argument; a glob that doesn't
+parse is an error): `globset` with `literal_separator`, the dialect
+`testing.testPaths` use, so `**/tests/**` crosses folders and `*.rs` does
+not match `src/a.rs` (SQLite's own `GLOB` has no `**`, so it can't). The
+compiled glob is kept per statement. With it, `v_file_kind_rule` (V55
+`file_kind_rule_decl`: `kind`, `glob`, `label`, `extension`) says what kind of
+file a path is: one row per glob of every enabled extension's `file_kinds:`
+(restated with each published generation) and of the project's
+`oxplow.files.kinds` (extension `project-settings`, restated when the
+setting changes and at boot):
+`SELECT DISTINCT kind FROM v_file_kind_rule WHERE glob_match(glob, :path)`.
+Other URIs are selected from their owning dataset's
 `uri` column (`.context/resources.md` "Using URIs").
 
 **`read_measure(key)`** returns `key` and records that the query reads the
