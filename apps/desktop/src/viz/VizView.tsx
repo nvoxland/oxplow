@@ -125,7 +125,7 @@ import {
   type DropAt,
 } from "./rowInteract.js";
 import { VIZ_ROW_DRAG_MIME } from "../dragMimes.js";
-import { VizIcon, vizIcon, toneColor } from "./vizIcons.js";
+import { VizIcon, cellIcon, toneColor } from "./vizIcons.js";
 import { useExtensions } from "../extensionsStore.js";
 
 /** A cell; `display` is the text it shows in place of its value (a path
@@ -649,7 +649,7 @@ function RowsBody({
   const iconCell: CellRenderer = (row, c) => {
     const raw = row[c.index] ?? null;
     const label = String(formatCell(raw, undefined, c.format) || "");
-    const spec = c.iconIndex === null ? null : vizIcon(row[c.iconIndex] ?? null, extensions);
+    const spec = c.iconIndex === null ? null : cellIcon(row[c.iconIndex] ?? null, c.link, extensions);
     const Glyph = spec && "Icon" in spec ? spec.Icon : null;
     const face = Glyph ? <Glyph size={14} aria-hidden /> : <span aria-hidden>{spec && "glyph" in spec ? spec.glyph : "•"}</span>;
     const ref = c.link && raw !== null ? cellLinkRef(c.link, c.key, row, result.columns) : null;
@@ -711,7 +711,7 @@ function RowsBody({
     // Its icon and tone, named by other columns of the row.
     const toneName = c.toneIndex === null ? null : (row[c.toneIndex] ?? null);
     const tone = toneColor(toneName);
-    const icon = c.iconIndex === null ? null : vizIcon(row[c.iconIndex] ?? null, extensions);
+    const icon = c.iconIndex === null ? null : cellIcon(row[c.iconIndex] ?? null, c.link, extensions);
     // An empty value is no link: there is nothing there to open.
     const ref = c.link && raw !== null ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     const mine = ref ? badges.filter((b) => b.ref === linkTargetId(ref)) : [];

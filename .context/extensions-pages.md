@@ -583,7 +583,10 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   names (`extension_resources::ICONS`), and any page kind's icon. `tone`'s
   value is `accent`, `success`, `warning`, `danger` or `muted`. Values
   come from the query, so the loader cannot check them: an unknown name
-  draws nothing, an unknown tone is plain.
+  draws nothing — except in a column that links to a page (`link: { kind:
+  page }`), where it draws the generic page icon (`cellIcon`), so a list
+  of pages lines up even when one names a page no extension declares any
+  more — and an unknown tone is plain.
 - `width` is pixels (a table lays out fixed; cells are cut to one line).
   `format` (`ColumnFormat`): `date`, `datetime`, `relative`, `bytes`,
   `duration` (ms), `integer`, `percent` (a 0–1 fraction), `sparkline` (a
