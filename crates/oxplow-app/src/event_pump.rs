@@ -63,6 +63,7 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "collection",
     "collection.run_reports",
     "config.extensions",
+    "config.file_kinds",
     "config.metrics",
     "config.providers",
     "config.scripts",

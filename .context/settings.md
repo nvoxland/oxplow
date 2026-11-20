@@ -89,6 +89,13 @@ Its origin metadata distinguishes local, project, global and default choices.
 `capability.choose` resets just one scalar override, exposing inheritance; it
 never writes an empty map that masks a project's choices.
 
+**`oxplow.files.kinds`** (project category) holds the project's own file-kind
+rules, `[{ kind, glob, label? }]`: a kind is lowercase words joined by dashes
+and a glob parses as `testing.testPaths` do (a bad one is refused when set).
+They are the `project-settings` rows of `v_file_kind_rule`, beside the enabled
+extensions' `file_kinds:`; `config_reactors::restate_file_kinds` restates them
+on a change and at boot.
+
 ## APIs and consumers
 
 **Reads go through one snapshot.** `SettingsStore::snapshot()` reads the three

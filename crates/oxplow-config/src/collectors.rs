@@ -391,8 +391,14 @@ impl CollectorSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReportInput {
-    /// Relative to the project (`target/type-coverage.json`).
+    /// Relative to the project (`target/type-coverage.json`): the report's
+    /// path, or its default when `setting` names where the path is set.
     pub path: String,
+    /// A JSON pointer into the extension's own `configuration:`
+    /// (`/reports/clippy`): when it has a value (defaults < project <
+    /// personal) that is the path, else `path`. Absent for a plain path.
+    #[serde(default)]
+    pub setting: Option<String>,
     /// How it's parsed before the script sees it: `text` (the default),
     /// `json`, `xml`, `lcov` or `lines`.
     #[serde(default = "text_format")]
@@ -726,9 +732,23 @@ enum RuntimeName {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawReport {
-    path: String,
+    path: RawReportPath,
     #[serde(default)]
     format: Option<String>,
+}
+
+/// A report's path: a string, or the extension's own setting that holds it
+/// (`{ setting: /reports/clippy, default: target/clippy.json }`).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum RawReportPath {
+    Plain(String),
+    Setting {
+        /// A JSON pointer to a string setting of the extension's `configuration:`.
+        setting: String,
+        /// The path when the setting has no value.
+        default: String,
+    },
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -1313,7 +1333,16 @@ fn validate(
     let report = match raw.report.take() {
         None => None,
         Some(r) => Some(ReportInput {
-            path: r.path,
+            path: match r.path {
+                RawReportPath::Plain(path) => path,
+                RawReportPath::Setting { .. } => {
+                    return Err(ctx(
+                        "a report path from a setting is for a report collector (`records:`)"
+                            .into(),
+                    ))
+                }
+            },
+            setting: None,
             format: r.format.unwrap_or_else(text_format),
         }),
     };
@@ -1602,13 +1631,6 @@ fn validate_report_collector(
             )))
         }
     };
-    if !declarer.own {
-        return Err(ctx(
-            "a report collector (`records:`) is the project's own: declare it in an extension \
-             of the project's (`.oxplow/extensions/project/`)"
-                .into(),
-        ));
-    }
     if !raw.facts.is_empty() || !raw.entities.is_empty() {
         return Err(ctx(
             "records a report, or facts, or entities: one per collector".into(),
@@ -1661,10 +1683,21 @@ fn validate_report_collector(
             "names the `report: { path }` it reads, relative to the project".into(),
         ));
     };
-    if !is_inside(&report.path) {
+    let (path, setting) = match report.path {
+        RawReportPath::Plain(path) => (path, None),
+        RawReportPath::Setting { setting, default } => {
+            if !setting.starts_with('/') || setting.len() < 2 {
+                return Err(ctx(format!(
+                    "report `setting` is a JSON pointer into the extension's `configuration:` \
+                     (`/reports/clippy`), not `{setting}`"
+                )));
+            }
+            (default, Some(setting))
+        }
+    };
+    if !is_inside(&path) {
         return Err(ctx(format!(
-            "report `{}` must be a path inside the project",
-            report.path
+            "report `{path}` must be a path inside the project"
         )));
     }
     let Some(entry) = raw.entry else {
@@ -1723,6 +1756,15 @@ fn validate_report_collector(
                 )))
             }
         };
+        if runtime == CollectorRuntime::Exec && !declarer.own {
+            return Err(ctx(
+                "a report collector that runs a program (`runtime: exec`) is the project's own: \
+                 declare it in an extension of the project's (`.oxplow/extensions/project/`); \
+                 another extension's reads its report with a bundled parser (`oxplow:<name>`), \
+                 `jaq` or `starlark`"
+                    .into(),
+            ));
+        }
         let format = match (runtime, report.format) {
             (CollectorRuntime::Exec, Some(_)) => {
                 return Err(ctx(
@@ -1753,7 +1795,8 @@ fn validate_report_collector(
         after: Vec::new(),
         input: None,
         report: Some(ReportInput {
-            path: report.path,
+            path,
+            setting,
             format,
         }),
         sync: CollectorSync::Replace,
@@ -2481,15 +2524,73 @@ mod tests {
             "- id: r\n  runtime: jaq\n  entry: oxplow:lcov\n  facts: [a.b]\n",
             "goes with `records:`",
         );
-        // An extension's collectors don't read reports.
-        let v: serde_yaml::Value =
-            serde_yaml::from_str(&format!("{base}  records: tests\n  entry: oxplow:junit\n"))
-                .unwrap();
-        let (_, errors) = parse_collectors(&Declarer::shared("my-gh", "my-gh"), &v, &knows);
+        // Another extension's report collector reads with a bundled parser
+        // or a sandboxed script; a program stays the project's own.
+        let shared = |yaml: &str| {
+            let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+            parse_collectors(&Declarer::shared("my-gh", "my-gh"), &v, &knows)
+        };
+        let (out, errors) = shared(&format!(
+            "{base}  records: tests\n  entry: oxplow:junit\n  on: {{ run: test }}\n"
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out[0].bundled_parser(), Some("junit"));
+        let (out, errors) = shared(
+            "- id: r\n  records: analysis\n  runtime: starlark\n  entry: p.star\n  report: { path: r.json, format: json }\n  on: { run: analysis }\n",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out[0].runtime, CollectorRuntime::Starlark);
+        let (out, errors) = shared(
+            "- id: r\n  records: tests\n  runtime: exec\n  entry: p\n  report: { path: r.txt }\n",
+        );
+        assert!(out.is_empty());
         assert!(
-            errors.iter().any(|e| e.contains("project's own")),
+            errors
+                .iter()
+                .any(|e| e.contains("runs a program") && e.contains("project's own")),
             "{errors:?}"
         );
+    }
+
+    /// A report path may come from the extension's own setting, with a
+    /// default; the default stays inside the project, the pointer is a
+    /// pointer, and a derived collector's `input.report` takes none.
+    #[test]
+    fn a_report_path_may_name_a_setting() {
+        let ok = |report: &str| {
+            let v: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "- id: r\n  records: analysis\n  entry: oxplow:clippy\n  on: {{ run: analysis }}\n  report: {report}\n"
+            ))
+            .unwrap();
+            parse_collectors(&Declarer::shared("rust", "rust"), &v, &knows)
+        };
+        let (out, errors) =
+            ok("{ path: { setting: /reports/clippy, default: target/clippy.json } }");
+        assert!(errors.is_empty(), "{errors:?}");
+        let report = out[0].report.as_ref().unwrap();
+        assert_eq!(report.path, "target/clippy.json");
+        assert_eq!(report.setting.as_deref(), Some("/reports/clippy"));
+        let (out, errors) = ok("{ path: target/clippy.json }");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out[0].report.as_ref().unwrap().setting, None);
+        for (report, needle) in [
+            (
+                "{ path: { setting: reports.clippy, default: a.json } }",
+                "JSON pointer",
+            ),
+            (
+                "{ path: { setting: /r, default: ../a.json } }",
+                "inside the project",
+            ),
+            ("{ path: { setting: /r } }", "did not match any variant"),
+        ] {
+            let (out, errors) = ok(report);
+            assert!(out.is_empty(), "{report}");
+            assert!(
+                errors.iter().any(|e| e.contains(needle)),
+                "{report}: {errors:?}"
+            );
+        }
     }
 
     #[test]

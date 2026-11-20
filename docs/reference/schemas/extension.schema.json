@@ -373,6 +373,28 @@
       },
       "default": null
     },
+    "run_patterns": {
+      "description": "Command substrings that mark a shell call as a test or\nstatic-analysis run.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/RunPatternFile"
+      },
+      "default": null
+    },
+    "file_kinds": {
+      "description": "What kind of file a path is, by glob (`v_file_kind_rule`).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/FileKindFile"
+      },
+      "default": null
+    },
     "providers": {
       "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
       "type": [
@@ -1871,7 +1893,7 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "$ref": "#/definitions/RawReportPath"
         },
         "format": {
           "type": [
@@ -1884,6 +1906,31 @@
       "additionalProperties": false,
       "required": [
         "path"
+      ]
+    },
+    "RawReportPath": {
+      "description": "A report's path: a string, or the extension's own setting that holds it\n(`{ setting: /reports/clippy, default: target/clippy.json }`).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setting": {
+              "description": "A JSON pointer to a string setting of the extension's `configuration:`.",
+              "type": "string"
+            },
+            "default": {
+              "description": "The path when the setting has no value.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "setting",
+            "default"
+          ]
+        }
       ]
     },
     "CollectorSync": {
@@ -3892,6 +3939,58 @@
         "function",
         "branch",
         "tail"
+      ]
+    },
+    "RunPatternFile": {
+      "description": "A `run_patterns:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "`test` or `analysis`.",
+          "type": "string"
+        },
+        "patterns": {
+          "description": "Command substrings, matched case-insensitively; none empty.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "patterns"
+      ]
+    },
+    "FileKindFile": {
+      "description": "A `file_kinds:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The kind: lowercase words joined by dashes (`ci`, `lint-config`).",
+          "type": "string"
+        },
+        "globs": {
+          "description": "Repo-relative globs (`*` stays in a folder, `**` crosses folders); at\nleast one.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "description": "What a person calls the kind.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "globs"
       ]
     },
     "ProviderSpec": {

@@ -944,6 +944,7 @@ mod tests {
             inject_session_context: true,
             icon_tint: None,
             testing: Default::default(),
+            files: Default::default(),
             scripts: Default::default(),
             metrics: Default::default(),
             agent_config: Default::default(),

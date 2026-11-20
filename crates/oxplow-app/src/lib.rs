@@ -31,7 +31,7 @@ pub mod capabilities;
 #[cfg(test)]
 mod catalog_datasets_tests;
 pub mod change_analysis;
-pub mod change_diff;
+pub(crate) mod change_diff;
 pub mod change_reactor;
 pub mod chat;
 pub mod churn;
@@ -1571,6 +1571,12 @@ impl Services {
         )
         .with_extensions(extension_catalog.clone())
         .with_marks(snapshots.clone())
+        .with_global_dir(
+            machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
+        )
         .with_vocabulary(vocabulary.clone())
         .with_run_log(collector_runner::RunLog {
             db: db.clone(),

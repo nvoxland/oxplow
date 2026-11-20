@@ -558,6 +558,29 @@ pub struct TestingConfig {
     pub agent_hint: Option<String>,
 }
 
+/// One of the project's own file-kind rules (`oxplow.files.kinds`): files
+/// matching `glob` (repo-relative, `/`-separated) are of `kind`
+/// (`generated`, `ci`, `sensitive`, …, as an extension's `file_kinds:`
+/// names them), on top of what the enabled extensions declare.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileKindRule {
+    /// Lowercase letters, digits and dashes.
+    pub kind: String,
+    /// A glob (`literal_separator`, as `testPaths`): `deploy/**`.
+    pub glob: String,
+    /// What a person calls the kind; optional.
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// What the project says about its files (`oxplow.files.*`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+pub struct FilesConfig {
+    /// `oxplow.files.kinds`: the project's own file-kind rules.
+    pub kinds: Vec<FileKindRule>,
+}
+
 /// The limits on the processes that run extension and project scripts
 /// (the `scripts:` block): how many run at once, host-wide, and how much
 /// memory one may use before it is stopped.
@@ -679,6 +702,8 @@ pub struct OxplowConfig {
     pub icon_tint: Option<String>,
     /// How the project's tests run (the `testing:` block).
     pub testing: TestingConfig,
+    /// What the project says about its files (`oxplow.files.*`).
+    pub files: FilesConfig,
     /// Limits on script workers (the `scripts:` block).
     pub scripts: ScriptsConfig,
     /// Which metrics are on in this project (the `metrics:` block): a `use:`
@@ -1021,6 +1046,7 @@ fn blank_config(project_name: &str) -> OxplowConfig {
         inject_session_context: false,
         icon_tint: None,
         testing: TestingConfig::default(),
+        files: FilesConfig::default(),
         scripts: ScriptsConfig::default(),
         metrics: Vec::new(),
         agent_config: Default::default(),

@@ -33,64 +33,26 @@ use oxplow_script::{Collector, CollectorInput, CollectorKind, CollectorOutput, C
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
 
-/// Built-in command substrings that count as a test run. The `testing:`
-/// block's `runPatterns` extends (never replaces) this list.
-const DEFAULT_TEST_PATTERNS: &[&str] = &[
-    "pytest",
-    "cargo test",
-    "cargo nextest",
-    "npm test",
-    "npm run test",
-    "pnpm test",
-    "yarn test",
-    "bun test",
-    "jest",
-    "vitest",
-    "go test",
-    "gradle test",
-    "mvn test",
-    "dotnet test",
-    "rspec",
-    "phpunit",
-];
-
-/// Built-in command substrings that count as a static-analysis run. The
-/// `testing:` block's `analysisPatterns` extends (never replaces) this
-/// list. Tool-agnostic: no command→tool knowledge lives here, only "did an
-/// analyzer run?" — the report a run regenerates is what gets parsed.
-const DEFAULT_ANALYSIS_PATTERNS: &[&str] = &[
-    "cargo clippy",
-    "clippy-driver",
-    "eslint",
-    "ruff",
-    "golangci-lint",
-    "flake8",
-    "pylint",
-    "mypy",
-    "staticcheck",
-    "tsc --noemit",
-    "tsc --noEmit",
-];
-
 /// Does `command` look like a test run? Case-insensitive substring match
-/// against the built-in patterns plus any caller-supplied extras.
-pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
-    test_run_segment(command, extra_patterns).is_some()
+/// against `patterns`: what the enabled extensions declare
+/// (`run_patterns:`) and the project's own ([`CollectionService::test_patterns`]).
+pub fn detect_test_run(command: &str, patterns: &[String]) -> bool {
+    test_run_segment(command, patterns).is_some()
 }
 
 /// The sub-command of `command` that runs the tests, trimmed — what a test
 /// run shows as its command, not the agent's whole Bash call. A
 /// `--no-run` invocation builds the tests without running any, so it isn't
 /// one.
-pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<String> {
-    matched_segments(command, DEFAULT_TEST_PATTERNS, extra_patterns)
+pub fn test_run_segment(command: &str, patterns: &[String]) -> Option<String> {
+    matched_segments(command, &[], patterns)
         .find(|sub| !sub.split_whitespace().any(|t| t == "--no-run"))
 }
 
 /// Does `command` look like a static-analysis run? Same substring matching as
-/// [`detect_test_run`], against the analysis patterns + profile extras.
-pub fn detect_analysis_run(command: &str, extra_patterns: &[String]) -> bool {
-    matches_any(command, DEFAULT_ANALYSIS_PATTERNS, extra_patterns)
+/// [`detect_test_run`], against the analysis patterns.
+pub fn detect_analysis_run(command: &str, patterns: &[String]) -> bool {
+    matches_any(command, &[], patterns)
 }
 
 /// Executables that only READ. A sub-command leading with one of these can
@@ -419,6 +381,9 @@ pub struct CollectionService {
     /// `collector.synced`) and its health kept. Without one (unit
     /// harnesses) a report is still read, its run unrecorded.
     run_log: Option<crate::collector_runner::RunLog>,
+    /// The person's settings folder: a report path an extension's setting
+    /// names is read through it (`None`: the project's and defaults only).
+    global_dir: Option<PathBuf>,
     /// The metric-ancestry resolver for this service's own
     /// `tree_state_series` call — built in `new` from the stores it already
     /// holds, so the wiring can't be forgotten at a call site. Same rule,
@@ -589,6 +554,7 @@ impl CollectionService {
             config,
             extensions: Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             run_log: None,
+            global_dir: None,
             metric_engine,
             delta_memo: Default::default(),
             sum_folds: Default::default(),
@@ -624,6 +590,13 @@ impl CollectionService {
         self
     }
 
+    /// The person's settings folder, which a report path read from an
+    /// extension's setting resolves through.
+    pub fn with_global_dir(mut self, dir: PathBuf) -> Self {
+        self.global_dir = Some(dir);
+        self
+    }
+
     /// Where report collectors' runs are recorded.
     pub fn with_run_log(mut self, log: crate::collector_runner::RunLog) -> Self {
         self.run_log = Some(log);
@@ -640,13 +613,28 @@ impl CollectionService {
             .map(|t| t.stream_id.to_string()))
     }
 
-    /// What counts as a test run besides the built-in patterns: the
+    /// What the enabled extensions say marks a `kind` run (`run_patterns:`).
+    async fn declared_patterns(&self, kind: oxplow_config::collectors::RunKind) -> Vec<String> {
+        let root = self.worktrees.resolve(None).await.into_local_path();
+        self.extensions
+            .unpinned(&root, "run patterns are read from declarations")
+            .iter()
+            .filter(|e| e.enabled)
+            .flat_map(|e| e.run_patterns.iter().filter(|r| r.kind == kind))
+            .flat_map(|r| r.patterns.iter().cloned())
+            .collect()
+    }
+
+    /// What counts as a test run: the enabled extensions' patterns, the
     /// project's `runPatterns`, and its own configured commands — running
     /// the way you declared to run tests is a test run, so `fastCommand`
-    ///  detects without a built-in pattern in its script name.
-    fn test_patterns(&self) -> Vec<String> {
+    /// detects without a pattern in its script name.
+    async fn test_patterns(&self) -> Vec<String> {
         let cfg = self.testing_cfg();
-        let mut patterns = cfg.run_patterns.clone();
+        let mut patterns = self
+            .declared_patterns(oxplow_config::collectors::RunKind::Test)
+            .await;
+        patterns.extend(cfg.run_patterns.clone());
         patterns.extend(cfg.command.clone());
         patterns.extend(cfg.fast_command.clone());
         patterns
@@ -660,24 +648,64 @@ impl CollectionService {
             .unwrap_or_default()
     }
 
-    /// The report collectors (`collectors:` with `records:`) the project's
-    /// own extensions in checkout `root` declare, as they are now.
+    /// The report collectors (`collectors:` with `records:`) the enabled
+    /// extensions declare, as they are now: the project's own and any
+    /// other's that reads with a bundled parser or a sandboxed script.
     fn report_collectors(&self, root: &std::path::Path) -> Vec<ReportCollector> {
         self.extensions
             .unpinned(root, "report collectors are read from declarations")
             .iter()
-            .filter(|e| e.enabled && e.is_own())
+            .filter(|e| e.enabled)
             .flat_map(|e| {
                 e.collectors
                     .iter()
                     .filter(|s| s.records.is_some())
                     .map(|s| ReportCollector {
                         owner: e.name.clone(),
+                        namespace: e.namespace.clone(),
+                        own: e.is_own(),
+                        configuration: e.configuration.clone(),
                         dir: e.path.clone(),
                         spec: s.clone(),
                     })
             })
             .collect()
+    }
+
+    /// The path `collector` reads its report at: its `report.path`, or, when
+    /// that names a setting of the extension's own `configuration:`, the
+    /// setting's effective value (defaults < project < personal) when it
+    /// has one. Still checked to be inside the checkout where it is read.
+    fn report_path(&self, collector: &ReportCollector, root: &std::path::Path) -> String {
+        let Some(report) = collector.spec.report.as_ref() else {
+            return String::new();
+        };
+        let (Some(pointer), Some(declaration)) =
+            (report.setting.as_deref(), collector.configuration.as_ref())
+        else {
+            return report.path.clone();
+        };
+        let project = self.extensions.project_of(root);
+        let global = self
+            .global_dir
+            .clone()
+            .unwrap_or_else(|| project.join(".oxplow/global"));
+        crate::extension::extension_configuration::effective_values(
+            project,
+            &global,
+            &collector.namespace,
+            declaration,
+        )
+        .ok()
+        .and_then(|values| {
+            values
+                .pointer(pointer)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| report.path.clone())
     }
 
     /// Whether `owner/id` is a report collector of the project's.
@@ -787,21 +815,20 @@ impl CollectionService {
         root: &std::path::Path,
     ) -> ReportRead {
         let spec = &collector.spec;
-        let Some(report) = spec.report.as_ref() else {
+        if spec.report.is_none() {
             return ReportRead::Missing(String::new());
-        };
-        let abs = match Self::in_checkout(root, &report.path) {
+        }
+        let path = self.report_path(collector, root);
+        let abs = match Self::in_checkout(root, &path) {
             Ok(Some(abs)) => abs,
-            Ok(None) => return ReportRead::Missing(report.path.clone()),
-            Err(e) => {
-                return ReportRead::Failed(format!("{} ({}): report {e}", report.path, spec.id))
-            }
+            Ok(None) => return ReportRead::Missing(path),
+            Err(e) => return ReportRead::Failed(format!("{path} ({}): report {e}", spec.id)),
         };
         if window.is_some_and(|w| !w.holds(&abs)) {
             return ReportRead::NotFresh;
         }
         let Ok(content) = std::fs::read_to_string(&abs) else {
-            return ReportRead::Missing(report.path.clone());
+            return ReportRead::Missing(path);
         };
         let key = crate::collector_runner::contribution_key(&collector.owner, &spec.id);
         if let Some(log) = &self.run_log {
@@ -853,7 +880,7 @@ impl CollectionService {
                 exec,
                 label,
             },
-            Err(e) => ReportRead::Failed(format!("{} ({}): {e}", report.path, spec.id)),
+            Err(e) => ReportRead::Failed(format!("{path} ({}): {e}", spec.id)),
         }
     }
 
@@ -931,6 +958,61 @@ impl CollectionService {
             .await
     }
 
+    /// The report collectors that read after a `run`, of `records` when given,
+    /// with one reader per path: when several resolve to the same path, the
+    /// project's own extension (`project`) wins, then the checkout's other
+    /// extensions, then the rest, the first by extension name (then
+    /// collector id) within each; the others are skipped and logged, not errors.
+    fn winning_collectors(
+        &self,
+        run: RunKind,
+        records: Option<Records>,
+        root: &std::path::Path,
+    ) -> Vec<ReportCollector> {
+        let mut all: Vec<ReportCollector> = self
+            .report_collectors(root)
+            .into_iter()
+            .filter(|c| {
+                c.spec.trigger == (Trigger::OnRun { run })
+                    && records.is_none_or(|r| c.spec.records == Some(r))
+            })
+            .collect();
+        // The project's own extension first, then the other extensions of
+        // the checkout, then the rest; by name within each.
+        let rank = |c: &ReportCollector| match (
+            c.owner == oxplow_config::collectors::PROJECT_EXTENSION,
+            c.own,
+        ) {
+            (true, _) => 0,
+            (false, true) => 1,
+            (false, false) => 2,
+        };
+        all.sort_by(|a, b| {
+            rank(a)
+                .cmp(&rank(b))
+                .then_with(|| a.owner.cmp(&b.owner))
+                .then_with(|| a.spec.id.cmp(&b.spec.id))
+        });
+        let mut taken: std::collections::HashMap<String, (String, String)> = Default::default();
+        let mut winners = Vec::new();
+        for collector in all {
+            let path = self.report_path(&collector, root);
+            match taken.get(&path) {
+                Some((owner, id)) => tracing::info!(
+                    collector = %format!("{}/{}", collector.owner, collector.spec.id),
+                    winner = %format!("{owner}/{id}"),
+                    path = %path,
+                    "a report collector reads the same report as another and is skipped: the project's own extension wins, then the first by name"
+                ),
+                None => {
+                    taken.insert(path, (collector.owner.clone(), collector.spec.id.clone()));
+                    winners.push(collector);
+                }
+            }
+        }
+        winners
+    }
+
     /// [`Self::read_run_reports`] of the collectors that record `records`
     /// only, when given.
     async fn read_run_reports_of(
@@ -949,13 +1031,8 @@ impl CollectionService {
             cause,
         };
         let mut out = RunReports::default();
-        for collector in self.report_collectors(root) {
+        for collector in self.winning_collectors(run, records, root) {
             let spec = &collector.spec;
-            if spec.trigger != (Trigger::OnRun { run })
-                || records.is_some_and(|r| spec.records != Some(r))
-            {
-                continue;
-            }
             match self.read_report(&collector, Some(window), &how, root).await {
                 ReportRead::Parsed {
                     output,
@@ -1085,7 +1162,7 @@ impl CollectionService {
         let mut payload = serde_json::Map::new();
         // The sub-command that ran the tests; the whole call beside it
         // when it was more.
-        let shown = test_run_segment(command, &self.test_patterns())
+        let shown = test_run_segment(command, &self.test_patterns().await)
             .unwrap_or_else(|| command.trim().to_string());
         if shown != command.trim() {
             payload.insert("shellCommand".into(), json!(command));
@@ -2080,9 +2157,13 @@ impl CollectionService {
             return Ok(None);
         }
         let cfg = self.testing_cfg();
-        let test_patterns = self.test_patterns();
+        let test_patterns = self.test_patterns().await;
+        let mut analysis_patterns = self
+            .declared_patterns(oxplow_config::collectors::RunKind::Analysis)
+            .await;
+        analysis_patterns.extend(cfg.analysis_patterns.clone());
         let is_test = detect_test_run(bash.command, &test_patterns);
-        let is_analysis = detect_analysis_run(bash.command, &cfg.analysis_patterns);
+        let is_analysis = detect_analysis_run(bash.command, &analysis_patterns);
         if !is_test && !is_analysis {
             return Ok(None);
         }
@@ -3573,6 +3654,13 @@ enum ParserProblem {
 #[derive(Debug, Clone)]
 struct ReportCollector {
     owner: String,
+    /// Its extension's namespace: its settings are stored under it.
+    namespace: String,
+    /// Whether its extension is one of the project's own (in the
+    /// checkout, not installed): it wins a collision over one that isn't.
+    own: bool,
+    /// Its extension's `configuration:`, which `report.setting` points into.
+    configuration: Option<crate::extension::extensions::config_schema::ConfigurationFile>,
     /// Its extension's folder, project-relative (`.oxplow/extensions/project`).
     dir: String,
     spec: CollectorSpec,
@@ -3804,6 +3892,41 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extension::extensions::run_patterns::parse_run_patterns;
+
+    /// What oxplow-foundation declares for `kind` (`run_patterns:`): the
+    /// patterns a running oxplow matches before a project adds its own.
+    fn foundation(kind: RunKind) -> Vec<String> {
+        let text = include_str!("../../../extensions/oxplow-foundation/extension.yaml");
+        let v: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+        let (declared, errors) = parse_run_patterns(&v["run_patterns"], "extension.yaml", text);
+        assert!(errors.is_empty(), "{errors:?}");
+        declared
+            .into_iter()
+            .filter(|d| d.kind == kind)
+            .flat_map(|d| d.patterns)
+            .collect()
+    }
+
+    fn with(kind: RunKind, extra: &[String]) -> Vec<String> {
+        let mut all = foundation(kind);
+        all.extend(extra.iter().cloned());
+        all
+    }
+
+    // The detection tests below read as they always did: the foundation's
+    // patterns, and what a test adds.
+    fn detect_test_run(command: &str, extra: &[String]) -> bool {
+        super::detect_test_run(command, &with(RunKind::Test, extra))
+    }
+
+    fn test_run_segment(command: &str, extra: &[String]) -> Option<String> {
+        super::test_run_segment(command, &with(RunKind::Test, extra))
+    }
+
+    fn detect_analysis_run(command: &str, extra: &[String]) -> bool {
+        super::detect_analysis_run(command, &with(RunKind::Analysis, extra))
+    }
     use crate::blob_store::BlobStore;
 
     #[test]
@@ -3926,6 +4049,55 @@ mod tests {
             trust("coverage-report", &["tests.parse".into(), "x".into()]),
             "exec:tests.parse,x"
         );
+    }
+
+    /// An enabled extension's `run_patterns:` are matched — the foundation's
+    /// and a project extension's — and a disabled extension's are not.
+    #[tokio::test]
+    async fn an_extensions_run_patterns_count_while_it_is_enabled() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/mine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: mine\nintent: { purpose: t, origin: null, examples: [] }\nrun_patterns:\n  - { kind: test, patterns: [run-my-suite] }\n  - { kind: analysis, patterns: [lint-it] }\n",
+        )
+        .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let tests = || async { fx.svc.collection.test_patterns().await };
+        let analysis = || async {
+            fx.svc
+                .collection
+                .declared_patterns(oxplow_config::collectors::RunKind::Analysis)
+                .await
+        };
+        let t = tests().await;
+        assert!(t.contains(&"run-my-suite".to_string()), "{t:?}");
+        assert!(
+            t.contains(&"cargo test".to_string()),
+            "foundation's too: {t:?}"
+        );
+        assert!(super::detect_test_run("./run-my-suite --fast", &t));
+        let a = analysis().await;
+        assert!(a.contains(&"lint-it".to_string()) && a.contains(&"ruff".to_string()));
+        // A test pattern is no analysis pattern.
+        assert!(!a.contains(&"run-my-suite".to_string()));
+
+        fx.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.extension.disable",
+                json!({ "name": "mine" }),
+                true,
+            )
+            .await
+            .unwrap();
+        let t = tests().await;
+        assert!(!t.contains(&"run-my-suite".to_string()), "{t:?}");
+        assert!(!analysis().await.contains(&"lint-it".to_string()));
+        assert!(t.contains(&"cargo test".to_string()));
     }
 
     #[test]
@@ -6743,6 +6915,114 @@ mod tests {
             })
             .await
             .unwrap()
+        }
+
+        /// Write extension `name` (not the project's own) with `body` after
+        /// its manifest header, and the files it names.
+        fn write_extension(h: &Harness, name: &str, body: &str) {
+            let dir = h.tmp.path().join(".oxplow/extensions").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\n{body}"),
+            )
+            .unwrap();
+        }
+
+        /// The `collector_run` rows of `owner`'s collector `id`.
+        async fn runs_of(h: &Harness, owner: &str, id: &str) -> i64 {
+            let (owner, id) = (owner.to_string(), id.to_string());
+            h.db.read(move |c| {
+                c.query_row(
+                    "SELECT count(*) FROM collector_run WHERE owner = ?1 AND id = ?2",
+                    [&owner, &id],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+        }
+
+        const SHELF: &str = "collectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: clippy.json }, on: { run: analysis } }\n";
+
+        /// An extension that isn't the project's reads reports with a
+        /// bundled parser, and its read is recorded as its own run.
+        #[tokio::test]
+        async fn another_extensions_report_collector_reads_a_run_that_wrote_its_report() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            write_extension(&h, "shelf", SHELF);
+            let reads = run_reads(&h, RunKind::Analysis).await;
+            assert!(reads.analysis().is_some(), "{:?}", reads.unread);
+            assert_eq!(runs_of(&h, "shelf", "lint").await, 1);
+        }
+
+        /// A report path may come from the extension's own setting: its
+        /// default, then a project override.
+        #[tokio::test]
+        async fn a_report_path_read_from_a_setting_follows_it() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("default.json"), CLIPPY_JSON).unwrap();
+            write_extension(
+                &h,
+                "shelf",
+                "configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      reports:\n        type: object\n        properties:\n          clippy: { type: string, default: \"\" }\ncollectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: { setting: /reports/clippy, default: default.json } }, on: { run: analysis } }\n",
+            );
+            let reads = run_reads(&h, RunKind::Analysis).await;
+            assert!(
+                reads.analysis().is_some(),
+                "the default path: {:?}",
+                reads.unread
+            );
+            // The project says where it is.
+            std::fs::remove_file(h.tmp.path().join("default.json")).unwrap();
+            std::fs::create_dir_all(h.tmp.path().join("out")).unwrap();
+            std::fs::write(h.tmp.path().join("out/lint.json"), CLIPPY_JSON).unwrap();
+            std::fs::create_dir_all(h.tmp.path().join(".oxplow")).unwrap();
+            std::fs::write(
+                h.tmp.path().join(".oxplow/project.yaml"),
+                "shelf.reports.clippy: out/lint.json\n",
+            )
+            .unwrap();
+            let reads = run_reads(&h, RunKind::Analysis).await;
+            assert!(
+                reads.analysis().is_some(),
+                "the project's path: {:?}",
+                reads.unread
+            );
+        }
+
+        /// Two collectors on one report: the project's own wins; between
+        /// two others, the first by extension name. The loser reads nothing.
+        #[tokio::test]
+        async fn two_report_collectors_on_one_path_read_it_once() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            write_extension(&h, "zeta", SHELF);
+            write_extension(&h, "alpha", SHELF);
+            let reads = run_reads(&h, RunKind::Analysis).await;
+            assert!(reads.analysis().is_some());
+            assert_eq!(runs_of(&h, "alpha", "lint").await, 1, "first by name");
+            assert_eq!(runs_of(&h, "zeta", "lint").await, 0, "skipped");
+
+            // The project's own extension reads it, and the others sit out.
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            write_extension(&h, "alpha", SHELF);
+            declare(
+                &h,
+                vec![report_collector(
+                    "lint.clippy",
+                    "analysis",
+                    "oxplow:clippy",
+                    "clippy.json",
+                    "analysis",
+                )],
+            );
+            run_reads(&h, RunKind::Analysis).await;
+            assert_eq!(runs_of(&h, "project", "lint.clippy").await, 1, "own wins");
+            assert_eq!(runs_of(&h, "alpha", "lint").await, 0, "the other sits out");
         }
 
         /// a test run reads its `on_run: test` collectors, an

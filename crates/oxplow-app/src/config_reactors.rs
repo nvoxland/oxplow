@@ -25,6 +25,8 @@ pub const PROVIDERS: &str = "config.providers";
 /// Any key: the metric catalog reseeds (`measures`, `metrics`,
 /// `dimensions`, `collectors`, the retention and visibility keys).
 pub const METRICS: &str = "config.metrics";
+/// `oxplow.files.kinds` changed: the project's file-kind rules are restated.
+pub const FILE_KINDS: &str = "config.file_kinds";
 /// `scripts` changed: the script workers take the new bounds.
 pub const SCRIPTS: &str = "config.scripts";
 
@@ -134,10 +136,50 @@ pub fn register(state: &Arc<crate::Services>) {
         }),
     ));
     state.event_pump.register_async(reactor(
+        FILE_KINDS,
+        &["oxplow.files.kinds"],
+        Box::new(|svc| {
+            Box::pin(async move {
+                if let Err(error) = restate_file_kinds(&svc).await {
+                    tracing::warn!(%error, "restating the project's file kinds failed");
+                }
+            })
+        }),
+    ));
+    // The rules as the config stands at boot.
+    let boot = state.clone();
+    tokio::spawn(async move {
+        if let Err(error) = restate_file_kinds(&boot).await {
+            tracing::warn!(%error, "restating the project's file kinds failed");
+        }
+    });
+    state.event_pump.register_async(reactor(
         METRICS,
         &[],
         Box::new(|svc| Box::pin(async move { svc.metrics.reseed().await })),
     ));
+}
+
+/// Restate the project's own file-kind rules (`v_file_kind_rule`, extension
+/// `project-settings`) from `oxplow.files.kinds` as the config stands.
+pub async fn restate_file_kinds(svc: &crate::Services) -> Result<(), DomainError> {
+    let rows: Vec<(String, String, Option<String>, String)> =
+        crate::config_service::read_config(&svc.config)
+            .files
+            .kinds
+            .into_iter()
+            .map(|rule| {
+                (
+                    rule.kind,
+                    rule.glob,
+                    rule.label,
+                    oxplow_db::model_store::PROJECT_FILE_KINDS.to_string(),
+                )
+            })
+            .collect();
+    svc.db
+        .transaction(move |tx| oxplow_db::model_store::replace_file_kind_rules_tx(tx, true, &rows))
+        .await
 }
 
 /// `generated` changed: the snapshot captures take the new filter, so an
@@ -199,6 +241,91 @@ mod tests {
             .unwrap()
             .workspace_filter()
             .ignore(Path::new(path), false)
+    }
+
+    /// `v_file_kind_rule` lists the foundation's kinds, an enabled
+    /// extension's `file_kinds:` and the project's `oxplow.files.kinds`;
+    /// a disabled extension's go, and a changed setting is restated.
+    #[tokio::test]
+    async fn file_kind_rules_follow_extensions_and_the_project_setting() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        register(svc);
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/mine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: mine\nintent: { purpose: t, origin: null, examples: [] }\nfile_kinds:\n  - { kind: house-rules, globs: ['docs/rules/**', 'RULES.md'], label: House rules }\n",
+        )
+        .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let rules = |filter: &'static str| async move {
+            let out = svc
+                .sql
+                .query_sql(
+                    &format!("SELECT kind, glob, label, extension FROM v_file_kind_rule WHERE {filter} ORDER BY glob"),
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(out.rows).unwrap()
+        };
+        assert_eq!(
+            rules("extension = 'mine'").await,
+            json!([
+                ["house-rules", "RULES.md", "House rules", "mine"],
+                ["house-rules", "docs/rules/**", "House rules", "mine"]
+            ])
+        );
+        assert_eq!(
+            rules("kind = 'ci' AND glob_match(glob, '.github/workflows/test.yml')").await,
+            json!([["ci", ".github/workflows/**", "CI", "oxplow-foundation"]])
+        );
+
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(ThreadId::new(1)),
+            stream_id: Some(StreamId::new(1)),
+        };
+        svc.commands
+            .run(
+                &agent,
+                "oxplow.config.set",
+                json!({ "key": "oxplow.files.kinds", "value": [{"kind": "generated", "glob": "gen/**"}], "level": "project" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(
+            svc.event_pump
+                .settle(&[FILE_KINDS], Duration::from_secs(5))
+                .await
+        );
+        assert_eq!(
+            rules("extension = 'project-settings'").await,
+            json!([["generated", "gen/**", null, "project-settings"]])
+        );
+
+        svc.commands
+            .run(
+                &Actor::Human,
+                "oxplow.extension.disable",
+                json!({ "name": "mine" }),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(rules("extension = 'mine'").await, json!([]));
+        assert_eq!(
+            rules("extension = 'project-settings'")
+                .await
+                .as_array()
+                .map(Vec::len),
+            Some(1),
+            "a publication leaves the project's own rows"
+        );
     }
 
     /// an agent's `oxplow.config.set` on `generated` (not only the

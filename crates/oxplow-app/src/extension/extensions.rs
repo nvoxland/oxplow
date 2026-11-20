@@ -25,6 +25,7 @@ pub mod config_schema;
 pub mod custom_components;
 pub mod decorators;
 pub mod descriptors;
+pub mod file_kinds;
 pub mod implementations;
 pub mod imports;
 pub mod jobs;
@@ -32,6 +33,7 @@ pub(crate) mod languages;
 pub mod manifest_v2;
 pub mod public_contracts;
 pub mod replacements;
+pub mod run_patterns;
 pub mod schema;
 pub mod shared_models;
 pub mod skills;
@@ -406,6 +408,12 @@ pub struct Extension {
     #[serde(skip)]
     #[specta(skip)]
     pub languages: Vec<oxplow_code_metrics::LanguageSource>,
+    /// The command substrings it says mark a test or analysis run
+    /// (`run_patterns:`; valid ones — invalid ones are in `errors`).
+    pub run_patterns: Vec<run_patterns::RunPatternDecl>,
+    /// The kinds of file it names by glob (`file_kinds:`; valid ones —
+    /// invalid ones are in `errors`).
+    pub file_kinds: Vec<file_kinds::FileKindDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1824,6 +1832,8 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         skills: Vec::new(),
         contexts: Vec::new(),
         languages: Vec::new(),
+        run_patterns: Vec::new(),
+        file_kinds: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -2045,6 +2055,16 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let (declared, errors) =
                 languages::parse_languages(v, man, &manifest, files, name, origin == "bundled");
             ext.languages = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.run_patterns.as_ref() {
+            let (declared, errors) = run_patterns::parse_run_patterns(v, man, &manifest);
+            ext.run_patterns = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.file_kinds.as_ref() {
+            let (declared, errors) = file_kinds::parse_file_kinds(v, man, &manifest);
+            ext.file_kinds = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
@@ -3035,6 +3055,31 @@ fn check_config_reads(ext: &mut Extension) {
             }
         }
     }
+    // A report path read from a setting names a string setting of the
+    // extension's own `configuration:`.
+    for spec in &ext.collectors {
+        let Some(pointer) = spec.report.as_ref().and_then(|r| r.setting.as_deref()) else {
+            continue;
+        };
+        let known = ext
+            .configuration
+            .as_ref()
+            .and_then(|declaration| config_key_type(&declaration.schema, pointer));
+        if known != Some("string") {
+            problems.push(
+                Diagnostic::error(
+                    "config.unknown_key",
+                    format!(
+                        "collector `{}`: report setting `{pointer}` isn't a string key of \
+                         `configuration.schema`",
+                        spec.id
+                    ),
+                )
+                .at("extension.yaml", None)
+                .fix("declare it under `properties` with `type: string`"),
+            );
+        }
+    }
     ext.errors.extend(problems);
 }
 
@@ -3752,6 +3797,8 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.implementations.clear();
     ext.skills.clear();
     ext.contexts.clear();
+    ext.run_patterns.clear();
+    ext.file_kinds.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
     ext.measures.clear();
@@ -10385,6 +10432,34 @@ commands:
         );
         assert!(errs.contains("context `broken`"), "{errs}");
         assert!(!errs.contains("context `fine`"), "{errs}");
+    }
+
+    /// A report path read from a setting names a string key of the
+    /// extension's own `configuration:`: another key, or none declared, is
+    /// a load error.
+    #[test]
+    fn a_report_path_setting_names_a_string_key_of_the_configuration() {
+        let collectors = "collectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: { setting: /reports/clippy, default: c.json } }, on: { run: analysis } }\n";
+        let schema = |ty: &str| {
+            format!(
+                "configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      reports:\n        type: object\n        properties:\n          clippy: {{ type: {ty} }}\n"
+            )
+        };
+        let (_d, ext) = load_x(&[], &format!("{}{collectors}", schema("string")));
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        for body in [
+            format!("{}{collectors}", schema("integer")),
+            collectors.to_string(),
+        ] {
+            let (_d, ext) = load_x(&[], &body);
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.message.contains("report setting `/reports/clippy`")),
+                "{body}: {:?}",
+                ext.errors
+            );
+        }
     }
 
     #[test]

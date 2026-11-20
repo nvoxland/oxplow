@@ -185,7 +185,19 @@ opening for a card or a list row: past headings and the list and quote marks
 that lead its line, to the first `.`, `!` or `?` that ends a sentence outside
 a code span or a link, its inline markdown kept so a `markdown` column (or a
 component's `renderMarkdown`) draws it (bundled's `task-rows` query reads an
-item's this way). Other URIs are selected from their owning dataset's
+item's this way). **`glob_match(glob, path)`** is 1 when the repo-relative
+`path` matches `glob`, else 0 (NULL for a NULL argument; a glob that doesn't
+parse is an error): `globset` with `literal_separator`, the dialect
+`testing.testPaths` use, so `**/tests/**` crosses folders and `*.rs` does
+not match `src/a.rs` (SQLite's own `GLOB` has no `**`, so it can't). The
+compiled glob is kept per statement. With it, `v_file_kind_rule` (V55
+`file_kind_rule_decl`: `kind`, `glob`, `label`, `extension`) says what kind of
+file a path is: one row per glob of every enabled extension's `file_kinds:`
+(restated with each published generation) and of the project's
+`oxplow.files.kinds` (extension `project-settings`, restated when the
+setting changes and at boot):
+`SELECT DISTINCT kind FROM v_file_kind_rule WHERE glob_match(glob, :path)`.
+Other URIs are selected from their owning dataset's
 `uri` column (`.context/resources.md` "Using URIs").
 
 **`read_measure(key)`** returns `key` and records that the query reads the
@@ -1118,8 +1130,9 @@ extension's own declared event types, logged with the run (P9.D2;
   `collector_run` row and `collector.synced@2` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
-- A **report collector** (`records: tests | coverage | analysis`,) is a non-bundled extension's (`Extension::is_own`; the project's, in
-  `.oxplow/extensions/project/`): it parses one `report:` file with a bundled
+- A **report collector** (`records: tests | coverage | analysis`,) is any enabled extension's when it reads with a bundled parser or a sandboxed script, and the
+  own extension's (`Extension::is_own`; the project's, in
+  `.oxplow/extensions/project/`) when it runs a program (`exec`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
   or its own jaq / Starlark / exec script (paths relative to the extension
   folder; `report.path` relative to the project root), on `on: { run: test |
@@ -1167,7 +1180,7 @@ in the capability's dataset and which `oxplow.provider.sync` runs; `env`,
 `credentials`, `network` only on an exec entity collector; `input` only on
 starlark/jaq; exactly one of `entities` / `facts`; `report` only with
 `facts`; a fact collector isn't `exec` unless its extension is own;
-`records:` only on an own extension; `after` and `where` only with `on:`,
+`records:` with an `exec` runtime only on an own extension (`report.path` may be `{ setting, default }`); `after` and `where` only with `on:`,
 whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 

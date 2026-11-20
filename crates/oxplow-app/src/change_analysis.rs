@@ -939,6 +939,18 @@ async fn resolve_side(
     })
 }
 
+/// The checkout `stream`'s changes are read in: the analyzer's (and
+/// `change_diff`'s) one place that takes a worktree as a local path.
+pub(crate) async fn stream_root(
+    worktrees: &crate::worktrees::WorktreeRouter,
+    stream: i64,
+) -> std::path::PathBuf {
+    worktrees
+        .resolve(Some(&stream.to_string()))
+        .await
+        .into_local_path()
+}
+
 async fn analyze(
     svc: &crate::Services,
     target: ChangeTarget,

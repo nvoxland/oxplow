@@ -288,6 +288,15 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<oxplow_code_metrics::LanguageDecl>>")]
     pub languages: Option<Value>,
+    /// Command substrings that mark a shell call as a test or
+    /// static-analysis run.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::run_patterns::RunPatternFile>>")]
+    pub run_patterns: Option<Value>,
+    /// What kind of file a path is, by glob (`v_file_kind_rule`).
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::file_kinds::FileKindFile>>")]
+    pub file_kinds: Option<Value>,
     /// External providers: programs implementing a capability, whose
     /// operations its `commands:` declare.
     #[serde(default)]
