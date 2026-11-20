@@ -1,0 +1,27 @@
+# Each name in a `const (…)` or `var (…)` group is a definition, so is an
+# alias; a variable, constant or function literal inside a function is not.
+when:
+  language: go
+  path: p.go
+  body: |
+
+    package p
+
+    const (
+    	A = iota
+    	B
+    )
+    var (
+    	m, n int
+    )
+    type Alias = string
+
+    func f() { var local int; const c = 1; _ = func() {} }
+expect:
+  symbols:
+    - { kind: constant, id: A }
+    - { kind: constant, id: B }
+    - { kind: variable, id: m }
+    - { kind: variable, id: n }
+    - { kind: type, id: Alias }
+    - { kind: function, id: f }

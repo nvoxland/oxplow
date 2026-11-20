@@ -1,0 +1,21 @@
+# A single import, each path in a group and an aliased path all give their
+# import path.
+when:
+  language: go
+  path: a.go
+  body: |
+
+    package main
+
+    import "fmt"
+    import (
+        "os"
+        "github.com/foo/bar"
+        alias "github.com/baz/qux"
+    )
+expect:
+  imports:
+    - { module: fmt, kind: goimport }
+    - { module: os, kind: goimport }
+    - { module: github.com/foo/bar, kind: goimport }
+    - { module: github.com/baz/qux, kind: goimport }

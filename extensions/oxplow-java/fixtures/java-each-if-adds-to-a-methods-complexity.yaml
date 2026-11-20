@@ -1,0 +1,16 @@
+# A method with two `if`s has complexity 3.
+when:
+  language: java
+  path: Foo.java
+  body: |
+
+    class Foo {
+        public int classify(int x) {
+            if (x > 0) return 1;
+            if (x < 0) return -1;
+            return 0;
+        }
+    }
+expect:
+  functions:
+    - { name: classify, parameter_count: 1, complexity: 3 }

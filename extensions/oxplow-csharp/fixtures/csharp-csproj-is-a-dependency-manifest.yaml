@@ -1,0 +1,6 @@
+# A .csproj is a dependency manifest.
+when:
+  sql: "SELECT DISTINCT kind FROM v_file_kind_rule WHERE extension = 'oxplow-csharp' AND glob_match(glob, 'src/App/App.csproj')"
+expect:
+  rows:
+    - { kind: dependency-manifest }

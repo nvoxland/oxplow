@@ -5,3 +5,7 @@ What oxplow knows about Clojure, as a language pack that ships with oxplow and i
 - `languages:` in `extension.yaml` declares each language: its file extensions, other names, its grammar (compiled into oxplow), and the Mason package of its language server.
 - `languages/<id>/analysis.yaml` is what code analysis reads: function and decision node kinds, the parameter list, how visibility and doc comments are told, and the import, merge and duplication facets.
 - `languages/<id>/symbols.scm` (and `symbols.yaml`) say what a file defines.
+- `file_kinds:` names the files that are a dependency manifest or a test harness.
+- `collectors:` holds the idiom metric `defn` count, on while the pack is on.
+- `skills/clojure-setup` tells the agent how to make the stack write the JUnit and cobertura reports oxplow reads.
+- `run_patterns:` marks the pack's test and analysis commands as runs.

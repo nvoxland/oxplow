@@ -11,7 +11,9 @@
  * lucide-react icon used everywhere a page-kind label renders —
  * tabs, rail history/finished, backlinks list, markdown links. An entity
  * kind's icon is here; a declared page's is the one its `pages:` entry
- * names, so a page added to a manifest needs nothing here.
+ * names, so a page added to a manifest needs nothing here. Where a page
+ * kind is drawn, a kind nothing knows draws `DEFAULT_PAGE_ICON`
+ * (`pageKindIconOrDefault`), so every row of pages lines up.
  */
 import {
   Bot,
@@ -36,6 +38,10 @@ import { useExtensions } from "./extensionsStore.js";
 import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { pageFileOf } from "./pages/pageFiles.js";
+
+/** The generic page's icon: a page no enabled extension declares, a
+ *  declared page that names no icon, and any kind nothing knows. */
+export const DEFAULT_PAGE_ICON: LucideIcon = Glasses;
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -73,7 +79,7 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
 
     // A page no enabled extension declares (yet).
     case "page":
-      return Glasses;
+      return DEFAULT_PAGE_ICON;
     case "symbol":
       return Braces;
 
@@ -90,8 +96,15 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     default:
       // A declared page that names no icon draws the generic page's, so a
       // list of pages (Go To, a bookmark list) has one for every row.
-      return resourceIcon(kind) ?? declaredPageIcon(extensions, kind) ?? (declaredPageOf(extensions, kind) ? Glasses : null);
+      return resourceIcon(kind) ?? declaredPageIcon(extensions, kind) ?? (declaredPageOf(extensions, kind) ? DEFAULT_PAGE_ICON : null);
   }
+}
+
+/** The icon a page kind draws where one is shown: its own, or the
+ *  generic page's when nothing knows the kind (a page an extension no
+ *  longer declares), so it never draws without one. */
+export function pageKindIconOrDefault(kind: string, extensions: Extension[] | null = null): LucideIcon {
+  return pageKindIconComponent(kind, extensions) ?? DEFAULT_PAGE_ICON;
 }
 
 /** The page file a page kind names (`tasks`, `gh/open-prs`). */
@@ -121,24 +134,14 @@ export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref
 }
 
 /**
- * Render the icon for `kind`. Returns `null` for unknown kinds so
- * call sites can interleave `<PageKindIcon …/>` with a label and
- * unrecognized kinds simply lose the leading glyph rather than
- * crashing or rendering a question-mark placeholder.
+ * Render the icon for `kind` — the generic page's when nothing knows the
+ * kind, so a list of pages lines up.
  *
  * `aria-hidden` is set by default because the adjacent text label
  * is the accessible name; the icon is decorative.
  */
-export function PageKindIcon({ kind, size = 14, ...rest }: PageKindIconProps): ReactElement | null {
-  const Icon = pageKindIconComponent(kind);
-  if (!Icon) return <DeclaredPageIcon kind={kind} size={size} {...rest} />;
-  return <Icon aria-hidden size={size} {...rest} />;
-}
-
-/** A declared page's icon, which only the loaded extensions know. */
-function DeclaredPageIcon({ kind, size, ...rest }: PageKindIconProps): ReactElement | null {
-  const Icon = declaredPageIcon(useExtensions(), kind);
-  if (!Icon) return null;
+export function PageKindIcon({ kind, size = 14, ...rest }: PageKindIconProps): ReactElement {
+  const Icon = pageKindIconOrDefault(kind, useExtensions());
   return <Icon aria-hidden size={size} {...rest} />;
 }
 

@@ -26,6 +26,10 @@ pub use oxplow_config::collectors::RunKind;
 /// One `run_patterns:` entry as the extension declares it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct RunPatternDecl {
+    /// Its id within the extension: `id:` as declared, else `<kind>`, then
+    /// `<kind>-2`, … in declaration order. Extensions sharing a namespace
+    /// (oxplow's shipped ones) name theirs apart (`rust-test`).
+    pub id: String,
     pub kind: RunKind,
     pub patterns: Vec<String>,
 }
@@ -34,6 +38,11 @@ pub struct RunPatternDecl {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RunPatternFile {
+    /// Its id within the extension (lowercase letters, digits, dashes);
+    /// default `<kind>`. Name it when another extension of your namespace
+    /// declares the same kind.
+    #[serde(default)]
+    id: Option<String>,
     /// `test` or `analysis`.
     kind: String,
     /// Command substrings, matched case-insensitively; none empty.
@@ -98,7 +107,41 @@ pub(crate) fn parse_run_patterns(
             ));
             continue;
         }
+        let id = match f.id {
+            Some(id) => id,
+            None => {
+                let kind = match kind {
+                    RunKind::Test => "test",
+                    RunKind::Analysis => "analysis",
+                };
+                let n = out
+                    .iter()
+                    .filter(|o: &&RunPatternDecl| {
+                        o.id == kind || o.id.starts_with(&format!("{kind}-"))
+                    })
+                    .count();
+                if n == 0 {
+                    kind.to_string()
+                } else {
+                    format!("{kind}-{}", n + 1)
+                }
+            }
+        };
+        if !oxplow_domain::contribution::valid_local(
+            oxplow_domain::contribution::ContributionKind::RunPattern,
+            &id,
+        ) || out.iter().any(|o| o.id == id)
+        {
+            errors.push(at(
+                "run_patterns.invalid_id",
+                file,
+                line,
+                format!("run_patterns: id `{id}` is lowercase letters, digits and dashes, once per extension"),
+            ));
+            continue;
+        }
         out.push(RunPatternDecl {
+            id,
             kind,
             patterns: f.patterns,
         });
@@ -125,10 +168,12 @@ mod tests {
             ok,
             vec![
                 RunPatternDecl {
+                    id: "test".into(),
                     kind: RunKind::Test,
                     patterns: vec!["pytest".into(), "cargo test".into()]
                 },
                 RunPatternDecl {
+                    id: "analysis".into(),
                     kind: RunKind::Analysis,
                     patterns: vec!["ruff".into()]
                 },

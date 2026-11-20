@@ -13,8 +13,8 @@ custom_components:
 # What counts as a test or an analysis run: core matches these (and the
 # project's own `testing:` patterns) and names no tool itself.
 run_patterns:
-  - { kind: test, patterns: [pytest, 'cargo test', 'cargo nextest', 'npm test', 'npm run test', 'pnpm test', 'yarn test', 'bun test', jest, vitest, 'go test', 'gradle test', 'mvn test', 'dotnet test', rspec, phpunit] }
-  - { kind: analysis, patterns: ['cargo clippy', 'clippy-driver', eslint, ruff, 'golangci-lint', flake8, pylint, mypy, staticcheck, 'tsc --noemit', 'tsc --noEmit'] }
+  # Runners no language pack covers; each pack declares its own stack's.
+  - { kind: test, patterns: [rspec, phpunit] }
 # Kinds of file that belong to no language (the language packs name the rest).
 file_kinds:
   - { kind: ci, label: CI, globs: ['.github/workflows/**', '.gitlab-ci.yml', '.circleci/**', 'azure-pipelines.yml', 'Jenkinsfile'] }
@@ -1890,6 +1890,9 @@ commands:
 # (tokens, requests, tests, coverage, analysis) and the code collectors write
 # facts on, and the metrics over them; the producers' Rust only records the facts.
 measures:
+  # The language packs' idiom collectors (unsafe blocks, unwrap calls, …) emit
+  # it: foundation's, so a pack needs nothing but foundation.
+  - {"key": "oxplow.ast_hit", "title": "AST idiom hits", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A match of a rule that looks for an idiom in code, such as an `unwrap` call."}
   - {"key": "oxplow.complexity", "title": "Cyclomatic complexity", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Cyclomatic complexity of a function."}
   - {"key": "oxplow.fn_length", "title": "Function length", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Length of a function, in lines."}
   - {"key": "oxplow.parameter_count", "title": "Parameter count", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Number of parameters a function takes."}

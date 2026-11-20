@@ -583,6 +583,14 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   text uncut, `null` when it has nothing to say. A text over
   `CONTEXT_BUDGET` is a warning (`context.over_budget`): the agent gets it
   cut.
+- `when: { language: <id>, path, body }`, `expect: { symbols?, functions?,
+  imports? }` — one file read as a language the fixture's oxplow declares
+  (`examples::language_example`): its definitions (`kind`, `id`, `name`,
+  `container`, `line`), its functions' metrics (`complexity`, `length`,
+  `parameter_count`, `visibility`, `has_doc`, `start_line`) and its imports
+  (`module`, `kind`, `line`). A language pack's behavior is tested this way;
+  an unknown or unparseable language is an error naming the pack to
+  `requires:`.
 - `when: { query: <slug | ext/slug>[#loader], params? }`, `expect: { rows,
   columns? }` — a query's last loader, or `<page>#<loader>`: one loader of
   any page file, run alone through `options::source_rows` as an option list

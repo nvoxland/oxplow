@@ -1,0 +1,6 @@
+# A jest snapshot file is a test harness file.
+when:
+  sql: "SELECT DISTINCT kind FROM v_file_kind_rule WHERE extension = 'oxplow-typescript' AND glob_match(glob, 'src/__snapshots__/a.test.ts.snap')"
+expect:
+  rows:
+    - { kind: test-harness }

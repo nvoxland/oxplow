@@ -1,0 +1,13 @@
+# One field declaration with two declarators gives two symbols, and `const`
+# ones are constants.
+when:
+  language: csharp
+  path: a.cs
+  body: "class P { public static readonly int A = 1, B = 2; public const int C = 3, D = 4; }"
+expect:
+  symbols:
+    - { kind: class, id: P }
+    - { kind: field, id: "P::A" }
+    - { kind: field, id: "P::B" }
+    - { kind: constant, id: "P::C" }
+    - { kind: constant, id: "P::D" }

@@ -1,0 +1,6 @@
+# A Cargo.lock anywhere is a lockfile.
+when:
+  sql: "SELECT DISTINCT kind FROM v_file_kind_rule WHERE extension = 'oxplow-rust' AND glob_match(glob, 'crates/a/Cargo.lock')"
+expect:
+  rows:
+    - { kind: lockfile }

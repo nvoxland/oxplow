@@ -1,0 +1,52 @@
+# Every kind of Rust definition gets a stable id: an `impl`'s methods sit in
+# their type, a trait impl is named `<Type as Trait>::name`, nested items sit
+# in their parent, and a second definition of one name gets `~2`.
+when:
+  language: rust
+  path: src/lib.rs
+  body: |
+
+    pub struct Services { db: Db, pub(crate) name: String }
+    impl Services {
+        pub fn boot() {}
+        fn new() -> Self { todo!() }
+    }
+    impl Display for Parser {
+        fn fmt(&self, f: &mut Formatter) -> fmt::Result { Ok(()) }
+    }
+    impl<T> Stack<T> { fn push(&mut self, t: T) {} }
+    const MAX_FILES: usize = 3;
+    static REGISTRY: u8 = 0;
+    enum Kind { Function, Class(u8) }
+    trait Shape { fn area(&self) -> f64; type Unit; }
+    mod tests { fn parses() { let f = |x: i32| x + 1; } }
+    macro_rules! bail { () => {} }
+    type Alias = u8;
+    fn outer() { fn inner() {} }
+    #[cfg(unix)] fn plat() {}
+    #[cfg(windows)] fn plat() {}
+expect:
+  symbols:
+    - { kind: struct, id: Services }
+    - { kind: field, id: "Services::db" }
+    - { kind: field, id: "Services::name" }
+    - { kind: method, id: "Services::boot" }
+    - { kind: method, id: "Services::new" }
+    - { kind: method, id: "<Parser as Display>::fmt" }
+    - { kind: method, id: "Stack::push" }
+    - { kind: constant, id: MAX_FILES }
+    - { kind: constant, id: REGISTRY }
+    - { kind: enum, id: Kind }
+    - { kind: enum_member, id: "Kind::Function" }
+    - { kind: enum_member, id: "Kind::Class" }
+    - { kind: trait, id: Shape }
+    - { kind: method, id: "Shape::area" }
+    - { kind: type, id: "Shape::Unit" }
+    - { kind: module, id: tests }
+    - { kind: function, id: "tests::parses" }
+    - { kind: macro, id: bail }
+    - { kind: type, id: Alias }
+    - { kind: function, id: outer }
+    - { kind: function, id: "outer::inner" }
+    - { kind: function, id: plat }
+    - { kind: function, id: "plat~2" }

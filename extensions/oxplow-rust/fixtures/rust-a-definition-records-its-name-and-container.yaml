@@ -1,0 +1,10 @@
+# A method's symbol has its short name, the type that holds it, and the line
+# of its name.
+when:
+  language: rust
+  path: a.rs
+  body: "struct A;\n\nimpl A {\n    pub fn go(&self) {\n        1;\n    }\n}\n"
+expect:
+  symbols:
+    - { kind: struct, id: A, name: A, line: 1 }
+    - { kind: method, id: "A::go", name: go, container: A, line: 4 }

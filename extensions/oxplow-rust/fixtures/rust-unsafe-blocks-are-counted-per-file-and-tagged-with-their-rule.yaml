@@ -1,0 +1,10 @@
+# Rust: each file with unsafe blocks has one ast_hit fact tagged unsafe_block (src/a.rs has 2, src/b.rs none, the README is skipped).
+when:
+  collector: oxplow.rust.unsafe_blocks
+  files:
+    "README.md": "unsafe { not code } panic!()"
+    "src/a.rs": "\n// TODO: clean this up\nfn a() {\nunsafe { foo(); }\nlet x = maybe().unwrap();\nlet y = maybe().expect(\"nope\");\nif x { panic!(\"boom\"); }\n}\nfn b() {\nunsafe { bar(); }\ntodo!();\nstd::panic!(\"path-qualified macro counts too\");\n}\n"
+    "src/b.rs": "// FIXME later\nfn c() { let s = \"a TODO in a string is ignored\"; }\n"
+expect:
+  facts:
+    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "rule": "unsafe_block", "dims": {"oxplow.language": "rust"}}

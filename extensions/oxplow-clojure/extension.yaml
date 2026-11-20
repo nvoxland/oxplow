@@ -9,6 +9,37 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: clojure-deps-edn-is-a-dependency-manifest
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+    - name: clojure-defn-count-counts-heads-only
+      input: { collector: oxplow.clojure.defn_count }
+      expect: the facts the collector records for the files given
+    - name: clojure-defs-and-their-ids
+      input: { language: clojure }
+      expect: the symbol of each definition form
+    - name: clojure-multimethods-name-their-dispatch-value
+      input: { language: clojure }
+      expect: a function symbol per defmethod dispatch value
+    - name: clojure-protocols-and-records
+      input: { language: clojure }
+      expect: protocol, method and record symbols
+    - name: clojure-def-of-fn-is-one-function-symbol
+      input: { language: clojure }
+      expect: a def of a fn as one function symbol
+    - name: clojure-defn-measures-and-visibility
+      input: { language: clojure }
+      expect: parameter count, complexity and visibility of defns
+    - name: clojure-branching-and-closures-add-to-complexity
+      input: { language: clojure }
+      expect: cond branches and closures in complexity
+    - name: clojure-top-level-lists-that-are-not-functions
+      input: { language: clojure }
+      expect: no function for values and plain calls
+    - name: clojure-ns-requires-are-imports
+      input: { language: clojure }
+      expect: the ns form's requires as imports
 test_conventions:
   - { id: clojure-tests, languages: [clojure], paths: ['**/*_test.clj', '**/*_test.cljc'] }
 languages:
@@ -20,3 +51,19 @@ languages:
     analysis: languages/clojure/analysis.yaml
     symbols: languages/clojure/symbols.scm
     units: [class, module]
+# Commands that mark a shell call as a test or analysis run.
+run_patterns:
+  - { id: clojure-test, kind: test, patterns: ['clojure -M:test', 'lein test', 'bb test'] }
+# Kinds of file a Clojure project has.
+file_kinds:
+  - { id: clojure-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/deps.edn', '**/project.clj', '**/shadow-cljs.edn', '**/bb.edn'] }
+  - { id: clojure-test-harness, kind: test-harness, label: Test harness, globs: ['**/tests.edn'] }
+# What its collectors read: the project's files. The skill is text for the agent.
+permissions: [files.read, agent.write]
+skills:
+  - { name: clojure-setup, file: skills/clojure-setup/SKILL.md }
+collectors:
+  # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
+  - { id: oxplow.clojure.defn_count, doc: "Counts the `defn` forms in Clojure files.", runtime: starlark, entry: collectors/clojure/defn_count.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+metrics:
+  - { key: oxplow.clojure.defn_count, title: "defn count", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'defn')", unit: count, direction: neutral, displayKind: gauge, category: static-quality, language: clojure, description: "Number of `defn` definitions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.clojure.defn_count }

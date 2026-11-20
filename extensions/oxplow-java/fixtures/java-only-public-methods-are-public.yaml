@@ -1,0 +1,17 @@
+# `public` is public; `private` and no modifier (package-private, which
+# nothing outside can call) are private.
+when:
+  language: java
+  path: Foo.java
+  body: |
+
+    class Foo {
+        private int alpha() { return 0; }
+        public int beta() { return 0; }
+        int packagePriv() { return 0; }
+    }
+expect:
+  functions:
+    - { name: alpha, visibility: private }
+    - { name: beta, visibility: public }
+    - { name: packagePriv, visibility: private }

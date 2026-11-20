@@ -1,0 +1,6 @@
+# An .editorconfig is lint config.
+when:
+  sql: "SELECT DISTINCT kind FROM v_file_kind_rule WHERE extension = 'oxplow-csharp' AND glob_match(glob, '.editorconfig')"
+expect:
+  rows:
+    - { kind: lint-config }

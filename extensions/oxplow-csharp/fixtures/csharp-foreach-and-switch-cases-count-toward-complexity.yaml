@@ -1,0 +1,9 @@
+# A `foreach` and each `switch` case group add to complexity: 1, the loop, and
+# three case groups.
+when:
+  language: csharp
+  path: A.cs
+  body: "\nclass A {\n    int F(int[] xs, int k) {\n        foreach (var x in xs) { }\n        switch (k) {\n            case 1: return 1;\n            case 2: return 2;\n            default: return 0;\n        }\n    }\n}\n"
+expect:
+  functions:
+    - { name: F, complexity: 5 }

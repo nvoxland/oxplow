@@ -1,0 +1,37 @@
+# Go definitions get stable ids: a method is named by its receiver's type
+# (pointer or not, generic or not), struct fields and interface methods sit in
+# their type, and a function literal is not a definition.
+when:
+  language: go
+  path: main.go
+  body: |
+
+    package main
+
+    type Server struct { addr string; Port int }
+    type Shape interface { Area() float64 }
+    type ID int
+    type Box[T any] struct { v T }
+    const X = 1
+    var y int
+
+    func Main() { f := func() {}; f() }
+    func (s *Server) Start() {}
+    func (s Server) Stop() {}
+    func (b *Box[T]) Get() T { return b.v }
+expect:
+  symbols:
+    - { kind: struct, id: Server }
+    - { kind: field, id: "Server::addr" }
+    - { kind: field, id: "Server::Port" }
+    - { kind: interface, id: Shape }
+    - { kind: method, id: "Shape::Area" }
+    - { kind: type, id: ID }
+    - { kind: struct, id: Box }
+    - { kind: field, id: "Box::v" }
+    - { kind: constant, id: X }
+    - { kind: variable, id: y }
+    - { kind: function, id: Main }
+    - { kind: method, id: "Server::Start" }
+    - { kind: method, id: "Server::Stop" }
+    - { kind: method, id: "Box::Get" }

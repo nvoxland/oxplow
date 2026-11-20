@@ -1,0 +1,10 @@
+# `cond` branches add to a function's complexity, and a closure inside a
+# `defn` is not a function of its own: its branch counts toward the `defn`.
+when:
+  language: clojure
+  path: src/demo.clj
+  body: "(defn classify [x]\n  (cond\n    (pos? x) :pos\n    (neg? x) :neg\n    :else :zero))\n\n(defn outer [xs]\n  (map (fn [x] (if x 1 2)) xs))\n"
+expect:
+  functions:
+    - { name: classify, complexity: 2 }
+    - { name: outer, parameter_count: 1, complexity: 2 }

@@ -1,0 +1,8 @@
+# A name that starts with `_` is private; a lambda is a function of its own.
+when:
+  language: starlark
+  path: a.bzl
+  body: "def _helper(a, b = 1):\n    return a + b\n\nkeep = lambda v: v\n"
+expect:
+  functions:
+    - { name: _helper, parameter_count: 2, visibility: private, has_doc: false }

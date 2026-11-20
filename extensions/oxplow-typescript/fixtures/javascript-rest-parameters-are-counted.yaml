@@ -1,0 +1,8 @@
+# A rest parameter counts as a parameter of a JavaScript function.
+when:
+  language: javascript
+  path: a.js
+  body: "function f(a, ...rest) { return a; }\n"
+expect:
+  functions:
+    - { name: f, parameter_count: 2 }

@@ -10,6 +10,23 @@ C++), `oxplow-csharp`, `oxplow-clojure`); a project turns on the ones it uses
 languages oxplow knows only by their language servers (Lua, JSON, YAML,
 HTML, CSS, Bash, Ruby, Zig): no grammar, so nothing parses them.
 
+## What a pack holds
+
+Beside its `languages:` (below), a pack holds everything about its stack:
+its idiom metrics and their collectors (`oxplow.rust.*`, `oxplow.ts.*`,
+`oxplow.csharp.*`, `oxplow.clojure.*`, on with the pack; the shared measure
+`oxplow.ast_hit` and dimension `oxplow.rule` are foundation's), its
+`test_conventions:`, its `file_kinds:` (dependency manifests, lockfiles,
+lint and test-harness config), its `run_patterns:` (foundation keeps only
+`rspec` and `phpunit`, which no pack covers), report collectors with a
+bundled parser (Rust's clippy, TypeScript's eslint; each path a setting
+with a default), and a setup skill saying how to make the stack write the
+reports oxplow reads. Its `run_patterns:` and `file_kinds:` entries carry
+ids (`rust-test`, `ts-lockfile`): every shipped pack shares the `oxplow`
+namespace. The packs are `oxplow-rust`, `oxplow-typescript`, `oxplow-python`,
+`oxplow-go`, `oxplow-java`, `oxplow-c`, `oxplow-csharp`, `oxplow-clojure` and
+`oxplow-starlark` (Starlark, for extension authors' `.star` files).
+
 ## A language's declaration
 
 ```yaml
@@ -101,7 +118,17 @@ languages:
   offers them (online and in the SDK; the extension it writes `requires:`
   its language's pack), and an installed language server covers its
   language's files and keeps its Mason suggestion while the pack is off.
-- **Tests** read the checkout's packs:
+- **A language is tested by its pack's fixtures**: `when: { language: <id>, path, body }`
+  → `expect: { symbols, functions, imports }` (the file's definitions, its
+  functions' complexity, length, parameter count, visibility and doc, its
+  imports), run on the fixture's oxplow with the pack on. Each pack's
+  `fixtures/` holds the cases the per-language Rust tests used to; the
+  crates keep only engine tests (and the cases a fixture can't say yet:
+  markers, `list_units`, `ast_query`).
+- **Core names no language**: `source_guards::core_names_no_language` fails
+  on a quoted language id in production code outside `native_grammar` and
+  the editor's Monaco id table (`oxplow-domain/src/language_id.rs`).
+- **Rust tests** read the checkout's packs:
   `oxplow_code_metrics::for_tests::{shipped, lang}`; an oxplow-app test that
   parses code turns the packs on with
   `test_fixtures::enable_language_packs(dir)` (`services_with_thread` does).
@@ -308,9 +335,5 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 Live: languages from extensions, the shipped packs with native grammars, the
 LSP symbol surface, generic unit listing, and tree-sitter symbols with their
 index. **Still open** (the change-review plan, milestones 2 to 5): the
-a fixture kind for a
-language's analysis with each pack's cases moved into it, a guard that core
-names no language, one `Parsers` pool,
-test conventions /
-file kinds / run patterns / report collectors in the packs, and WebAssembly
+one `Parsers` pool, and WebAssembly
 grammars (Clojure first).

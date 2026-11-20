@@ -1,0 +1,25 @@
+# A TypeScript file defines a function for each declaration and for each
+# arrow or function expression bound to a name; a nested one sits in its
+# outer function, and a callback passed as an argument is not a definition.
+when:
+  language: typescript
+  path: a.ts
+  body: |
+
+    export function parseRef(s: string) {}
+    const handler = () => {};
+    export const g = (a: number) => a;
+    const f = function () {};
+    function* gen() {}
+    function outer() { const inner = () => {}; }
+    items.map(x => x + 1);
+    describe("thing", () => { it("works", () => {}); });
+expect:
+  symbols:
+    - { kind: function, id: parseRef }
+    - { kind: function, id: handler }
+    - { kind: function, id: g }
+    - { kind: function, id: f }
+    - { kind: function, id: gen }
+    - { kind: function, id: outer }
+    - { kind: function, id: "outer::inner" }

@@ -1,0 +1,9 @@
+# A `def` of a `fn` is the function, and the `fn` inside it is not a second
+# symbol (in a `.cljs` file as well).
+when:
+  language: clojure
+  path: a.cljs
+  body: "(def handler (fn handler* [req] (if req 1 2)))"
+expect:
+  symbols:
+    - { kind: function, id: handler }

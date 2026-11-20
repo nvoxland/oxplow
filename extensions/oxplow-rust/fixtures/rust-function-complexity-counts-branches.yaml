@@ -1,0 +1,33 @@
+# A plain function has complexity 1, each `if` adds one (an `else` does not,
+# so an if/else-if/else chain is 3) and each `match` arm adds one.
+when:
+  language: rust
+  path: src/x.rs
+  body: |
+
+    fn add(a: i32, b: i32) -> i32 {
+        a + b
+    }
+
+    fn classify(x: i32) -> &'static str {
+        if x > 0 {
+            "pos"
+        } else if x < 0 {
+            "neg"
+        } else {
+            "zero"
+        }
+    }
+
+    fn by_match(x: i32) -> &'static str {
+        match x {
+            0 => "zero",
+            1 => "one",
+            _ => "other",
+        }
+    }
+expect:
+  functions:
+    - { name: add, parameter_count: 2, complexity: 1, length: 3 }
+    - { name: classify, parameter_count: 1, complexity: 3 }
+    - { name: by_match, parameter_count: 1, complexity: 4 }

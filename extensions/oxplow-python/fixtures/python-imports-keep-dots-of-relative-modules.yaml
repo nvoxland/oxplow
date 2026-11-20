@@ -1,0 +1,20 @@
+# `import` and `from … import` give the module; a relative import keeps its
+# leading dots.
+when:
+  language: python
+  path: a.py
+  body: |
+
+    import os
+    import collections.abc
+    from foo.bar import baz
+    from .sibling import thing
+    from ..parent import other
+expect:
+  imports:
+    contains:
+      - { module: os }
+      - { module: collections.abc }
+      - { module: foo.bar }
+      - { module: .sibling }
+      - { module: ..parent }

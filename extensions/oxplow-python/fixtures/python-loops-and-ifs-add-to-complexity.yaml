@@ -1,0 +1,9 @@
+# A function's loops and branches add to its complexity: the `for` and the
+# `if` here make 3.
+when:
+  language: python
+  path: src/x.py
+  body: "\ndef histogram(items):\n    out = {}\n    for it in items:\n        if it in out:\n            out[it] += 1\n        else:\n            out[it] = 1\n    return out\n"
+expect:
+  functions:
+    - { name: histogram, parameter_count: 1, complexity: 3 }

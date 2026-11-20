@@ -1,0 +1,17 @@
+# A method of a nested class has its own class and the outer class as
+# containers, outermost first.
+when:
+  language: java
+  path: Outer.java
+  body: |
+
+    class Outer {
+        static class Inner {
+            public int val() { return 1; }
+        }
+    }
+expect:
+  symbols:
+    - { kind: class, id: Outer }
+    - { kind: class, id: "Outer::Inner", container: Outer }
+    - { kind: method, id: "Outer::Inner::val()", name: val, container: "Outer::Inner" }

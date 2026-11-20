@@ -1,0 +1,11 @@
+# A file-scoped namespace (`namespace Acme;`) is a symbol, and the types after
+# it are not nested in its id.
+when:
+  language: csharp
+  path: a.cs
+  body: "namespace Acme;\nclass P { void Run() {} }\n"
+expect:
+  symbols:
+    - { kind: namespace, id: Acme }
+    - { kind: class, id: P }
+    - { kind: method, id: "P::Run()" }

@@ -1,0 +1,28 @@
+# C typedefs of enums, structs and function pointers, `extern` variable
+# lists, and pointer return types give the right definitions; locals do not.
+when:
+  language: c
+  path: a.c
+  body: |
+
+    typedef enum { A, B } mode;
+    typedef struct node { int v; struct node *next; void (*cb)(int); int arr[3]; } node_t;
+    typedef int (*handler)(int);
+    extern int shared, other;
+    int proto(void);
+    char **make(void) { int local = 1; return 0; }
+expect:
+  symbols:
+    - { kind: enum, id: mode }
+    - { kind: enum_member, id: "mode::A" }
+    - { kind: enum_member, id: "mode::B" }
+    - { kind: struct, id: node }
+    - { kind: field, id: "node::v" }
+    - { kind: field, id: "node::next" }
+    - { kind: field, id: "node::cb" }
+    - { kind: field, id: "node::arr" }
+    - { kind: type, id: node_t }
+    - { kind: type, id: handler }
+    - { kind: variable, id: shared }
+    - { kind: variable, id: other }
+    - { kind: function, id: make }

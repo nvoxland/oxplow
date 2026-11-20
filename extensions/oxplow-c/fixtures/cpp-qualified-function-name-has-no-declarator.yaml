@@ -1,0 +1,14 @@
+# The name of a C++ function defined as `Foo::bar` is the name alone,
+# without its parameters.
+when:
+  language: cpp
+  path: src/x.cpp
+  body: |
+
+    int Foo::bar(int x, int y) {
+        if (x > y) return x;
+        return y;
+    }
+expect:
+  functions:
+    - { name: bar }

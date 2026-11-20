@@ -2965,6 +2965,12 @@ export type FieldValues = FieldValue[] | FieldValue;
 
 /**  One `file_kinds:` entry as the extension declares it. */
 export type FileKindDecl = {
+	/**
+	 *  Its id within the extension: `id:` as declared, else `<kind>`, then
+	 *  `<kind>-2`, … in declaration order. Extensions sharing a namespace
+	 *  (oxplow's shipped ones) name theirs apart (`rust-lockfile`).
+	 */
+	id: string,
 	kind: string,
 	globs: string[],
 	label: string | null,
@@ -6029,6 +6035,12 @@ export type RunNode_Serialize = {
 
 /**  One `run_patterns:` entry as the extension declares it. */
 export type RunPatternDecl = {
+	/**
+	 *  Its id within the extension: `id:` as declared, else `<kind>`, then
+	 *  `<kind>-2`, … in declaration order. Extensions sharing a namespace
+	 *  (oxplow's shipped ones) name theirs apart (`rust-test`).
+	 */
+	id: string,
 	kind: RunKind,
 	patterns: string[],
 };

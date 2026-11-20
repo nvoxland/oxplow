@@ -1,0 +1,11 @@
+# A method's symbol names the class that holds it.
+when:
+  language: python
+  path: src/x.py
+  body: "\nclass Greeter:\n    def greet(self, name):\n        return name\n"
+expect:
+  symbols:
+    - { kind: class, id: Greeter }
+    - { kind: method, id: "Greeter::greet", name: greet, container: Greeter }
+  functions:
+    - { name: greet, parameter_count: 2 }

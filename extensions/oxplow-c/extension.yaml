@@ -3,12 +3,50 @@ name: oxplow-c
 namespace: oxplow
 description: "What oxplow knows about C and C++: their grammars, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses C and C++."
 engine: ">=0.7"
+permissions: [agent.write]
 intent:
   purpose: >-
     Hold everything oxplow knows about C and C++ in one place, as an
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: c-definitions-and-their-ids
+      input: { language: c }
+      expect: the definitions of a C file
+    - name: c-typedef-forms-pointers-and-prototypes
+      input: { language: c }
+      expect: typedefs, pointers and prototypes
+    - name: c-function-metrics-and-static-visibility
+      input: { language: c }
+      expect: a function's metrics and visibility
+    - name: c-includes
+      input: { language: c }
+      expect: the includes of a file
+    - name: cpp-definitions-and-their-ids
+      input: { language: cpp }
+      expect: the definitions of a C++ file
+    - name: cpp-qualified-templates-operators-and-wrappers
+      input: { language: cpp }
+      expect: qualified names, templates and operators
+    - name: cpp-qualified-function-name-has-no-declarator
+      input: { language: cpp }
+      expect: a qualified function's name
+    - name: cpp-includes-and-using
+      input: { language: cpp }
+      expect: includes and using edges
+    - name: c-cmake-is-a-dependency-manifest
+      input: { language: cpp }
+      expect: the file kind a path has
+file_kinds:
+  - { id: c-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/CMakeLists.txt', '**/conanfile.*', '**/vcpkg.json', '**/meson.build'] }
+  - { id: c-lockfile, kind: lockfile, label: Lockfile, globs: ['**/conan.lock', '**/vcpkg-lock.json'] }
+  - { id: c-lint-config, kind: lint-config, label: Lint config, globs: ['**/.clang-format', '**/.clang-tidy'] }
+run_patterns:
+  - { id: c-test, kind: test, patterns: ['ctest'] }
+  - { id: c-analysis, kind: analysis, patterns: ['clang-tidy'] }
+skills:
+  - { name: setup-c-reports, file: skills/setup-c-reports/SKILL.md }
 languages:
   - id: c
     title: "C"

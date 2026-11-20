@@ -1,0 +1,31 @@
+# A TypeScript class defines its methods, fields, constructor, accessors,
+# arrow-function properties and private `#` fields, each in its class.
+when:
+  language: typescript
+  path: a.ts
+  body: |
+
+    class TabStore {
+        open() {}
+        private x = 1;
+        static y: number;
+        constructor() {}
+        onClick = () => {};
+        get size() { return 1; }
+        #secret = 2;
+        abstract run(): void;
+    }
+    abstract class Base { abstract go(): void; }
+expect:
+  symbols:
+    - { kind: class, id: TabStore }
+    - { kind: method, id: "TabStore::open", container: TabStore }
+    - { kind: field, id: "TabStore::x" }
+    - { kind: field, id: "TabStore::y" }
+    - { kind: constructor, id: "TabStore::constructor" }
+    - { kind: method, id: "TabStore::onClick" }
+    - { kind: method, id: "TabStore::size" }
+    - { kind: field, id: "TabStore::#secret" }
+    - { kind: method, id: "TabStore::run" }
+    - { kind: class, id: Base }
+    - { kind: method, id: "Base::go" }

@@ -1,0 +1,11 @@
+# What an `ns` form requires (aliased, with `:refer`, or bare) is an import.
+when:
+  language: clojure
+  path: a.clj
+  body: "\n(ns my.ns\n  (:require [foo.bar :as fb]\n            [foo.baz :refer [a b]]\n            qux.bare)\n  (:import [java.util Date]))\n\n(defn -main [] (fb/run))\n"
+expect:
+  imports:
+    contains:
+      - { module: foo.bar, kind: cljrequire }
+      - { module: foo.baz, kind: cljrequire }
+      - { module: qux.bare, kind: cljrequire }

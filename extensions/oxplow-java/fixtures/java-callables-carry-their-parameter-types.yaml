@@ -1,0 +1,33 @@
+# A Java method or constructor id ends with its parameter types, so overloads
+# differ; a nested class and an enum sit in their outer class.
+when:
+  language: java
+  path: src/main/java/com/acme/Parser.java
+  body: |
+
+    package com.acme;
+    class Parser {
+        private int depth = 0;
+        Parser(String source) {}
+        int parse(String s, int n) { return n; }
+        int parse(List<String> xs) { return 0; }
+        void log(String... parts) {}
+        class Inner { int x; }
+        enum Mode { FAST, SLOW }
+    }
+    interface Shape { double area(); }
+expect:
+  symbols:
+    - { kind: class, id: Parser }
+    - { kind: field, id: "Parser::depth" }
+    - { kind: constructor, id: "Parser::Parser(String)" }
+    - { kind: method, id: "Parser::parse(String,int)" }
+    - { kind: method, id: "Parser::parse(List<String>)" }
+    - { kind: method, id: "Parser::log(String...)" }
+    - { kind: class, id: "Parser::Inner" }
+    - { kind: field, id: "Parser::Inner::x" }
+    - { kind: enum, id: "Parser::Mode" }
+    - { kind: enum_member, id: "Parser::Mode::FAST" }
+    - { kind: enum_member, id: "Parser::Mode::SLOW" }
+    - { kind: interface, id: Shape }
+    - { kind: method, id: "Shape::area()" }

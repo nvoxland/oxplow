@@ -3,14 +3,44 @@ name: oxplow-python
 namespace: oxplow
 description: "What oxplow knows about Python: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Python."
 engine: ">=0.7"
+permissions: [agent.write]
 intent:
   purpose: >-
     Hold everything oxplow knows about Python in one place, as an
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: python-definitions-get-their-ids
+      input: { language: python }
+      expect: every definition and its id
+    - name: python-loops-and-ifs-add-to-complexity
+      input: { language: python }
+      expect: complexity of loops and ifs
+    - name: python-a-method-sits-in-its-class
+      input: { language: python }
+      expect: a method's class as its container
+    - name: python-docstrings-and-leading-underscores
+      input: { language: python }
+      expect: doc and visibility of functions
+    - name: python-imports-keep-dots-of-relative-modules
+      input: { language: python }
+      expect: each imported module
+    - name: python-pyproject-is-a-dependency-manifest
+      input: { language: python }
+      expect: the file kind a path has
 test_conventions:
   - { id: python-tests, languages: [python], paths: ['**/test_*.py'] }
+file_kinds:
+  - { id: python-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/pyproject.toml', '**/requirements*.txt', '**/setup.py', '**/setup.cfg', '**/Pipfile'] }
+  - { id: python-lockfile, kind: lockfile, label: Lockfile, globs: ['**/poetry.lock', '**/uv.lock', '**/Pipfile.lock'] }
+  - { id: python-lint-config, kind: lint-config, label: Lint config, globs: ['**/ruff.toml', '**/.flake8', '**/mypy.ini', '**/.pylintrc'] }
+  - { id: python-test-harness, kind: test-harness, label: Test harness, globs: ['**/conftest.py', '**/pytest.ini', '**/tox.ini', '**/noxfile.py'] }
+run_patterns:
+  - { id: python-test, kind: test, patterns: ['pytest'] }
+  - { id: python-analysis, kind: analysis, patterns: ['ruff', 'flake8', 'pylint', 'mypy'] }
+skills:
+  - { name: setup-python-reports, file: skills/setup-python-reports/SKILL.md }
 languages:
   - id: python
     title: "Python"

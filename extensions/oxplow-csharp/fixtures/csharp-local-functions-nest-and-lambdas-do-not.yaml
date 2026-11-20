@@ -1,0 +1,10 @@
+# A local function is a symbol inside its method; a lambda is not a symbol.
+when:
+  language: csharp
+  path: a.cs
+  body: "\nclass P {\n    void Run() {\n        int local(int a) { return a; }\n        Func<int,int> f = x => x + 1;\n    }\n}\n"
+expect:
+  symbols:
+    - { kind: class, id: P }
+    - { kind: method, id: "P::Run()" }
+    - { kind: function, id: "P::Run::local(int)" }

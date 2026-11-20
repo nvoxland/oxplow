@@ -1,0 +1,11 @@
+# A `defn` gives its parameter count and complexity, and is public; `defn-`
+# and the `^:private` metadata make a function private.
+when:
+  language: clojure
+  path: src/demo/core.clj
+  body: "(ns demo.core)\n\n(defn add [a b]\n  (+ a b))\n\n(defn- helper [x] x)\n\n(defn ^:private secret [x] x)\n"
+expect:
+  functions:
+    - { name: add, parameter_count: 2, complexity: 1, visibility: public }
+    - { name: helper, visibility: private }
+    - { name: secret, visibility: private }

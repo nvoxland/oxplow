@@ -514,17 +514,3 @@ fn identifier_in(node: Node<'_>) -> Option<Node<'_>> {
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tests_c;
-#[cfg(test)]
-mod tests_clojure;
-#[cfg(test)]
-mod tests_cpp;
-#[cfg(test)]
-mod tests_csharp;
-#[cfg(test)]
-mod tests_go;
-#[cfg(test)]
-mod tests_javascript;
-#[cfg(test)]
-mod tests_typescript;

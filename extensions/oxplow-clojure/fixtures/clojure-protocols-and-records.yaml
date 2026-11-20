@@ -1,0 +1,13 @@
+# A `defprotocol` is an interface whose signatures are methods in it, and
+# `defrecord` and `deftype` are structs.
+when:
+  language: clojure
+  path: a.clj
+  body: "\n(defprotocol Shape\n  (area [this])\n  (perimeter [this] \"doc\"))\n(defrecord Point [x y])\n(deftype Box [w])\n"
+expect:
+  symbols:
+    - { kind: interface, id: Shape }
+    - { kind: method, id: "Shape::area" }
+    - { kind: method, id: "Shape::perimeter" }
+    - { kind: struct, id: Point }
+    - { kind: struct, id: Box }

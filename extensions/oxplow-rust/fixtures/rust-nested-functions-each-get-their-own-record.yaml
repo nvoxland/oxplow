@@ -1,0 +1,17 @@
+# A function inside another has its own record, and its branches count for
+# it, not for the function around it.
+when:
+  language: rust
+  path: src/x.rs
+  body: |
+
+    fn outer() {
+        fn inner(x: i32) -> i32 {
+            if x > 0 { x } else { -x }
+        }
+        let _ = inner(1);
+    }
+expect:
+  functions:
+    - { name: outer, complexity: 1 }
+    - { name: inner, complexity: 2 }

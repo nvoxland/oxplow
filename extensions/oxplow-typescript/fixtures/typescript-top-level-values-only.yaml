@@ -1,0 +1,19 @@
+# Only top-level `const`, `let` and `var` are definitions; the ones inside
+# a function body are not.
+when:
+  language: typescript
+  path: a.ts
+  body: |
+
+    const X = 3;
+    let y;
+    var z = 1;
+    export const W = { a: 1 };
+    function f() { const local = 1; let l2 = 2; }
+expect:
+  symbols:
+    - { kind: constant, id: X }
+    - { kind: variable, id: y }
+    - { kind: variable, id: z }
+    - { kind: constant, id: W }
+    - { kind: function, id: f }

@@ -426,6 +426,7 @@ pub fn native_grammar(name: &str) -> Option<TsLanguage> {
         "tsx" => tree_sitter_typescript::LANGUAGE_TSX.into(),
         "javascript" => tree_sitter_javascript::LANGUAGE.into(),
         "python" => tree_sitter_python::LANGUAGE.into(),
+        "starlark" => tree_sitter_starlark::LANGUAGE.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
         "java" => tree_sitter_java::LANGUAGE.into(),
         "c" => tree_sitter_c::LANGUAGE.into(),

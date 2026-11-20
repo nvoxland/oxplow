@@ -1,0 +1,16 @@
+# Interfaces, structs, records, enums with their members, and delegates each
+# get their own symbol kind (a record is a class, a delegate a type).
+when:
+  language: csharp
+  path: a.cs
+  body: "\ninterface IShape { double Area(); }\nstruct Pt { }\nrecord R(int X);\nenum Color { Red, Green }\ndelegate void Handler(int x);\n"
+expect:
+  symbols:
+    - { kind: interface, id: IShape }
+    - { kind: method, id: "IShape::Area()" }
+    - { kind: struct, id: Pt }
+    - { kind: class, id: R }
+    - { kind: enum, id: Color }
+    - { kind: enum_member, id: "Color::Red" }
+    - { kind: enum_member, id: "Color::Green" }
+    - { kind: type, id: Handler }

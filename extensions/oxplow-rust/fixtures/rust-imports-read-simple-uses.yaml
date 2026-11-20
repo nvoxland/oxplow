@@ -1,0 +1,10 @@
+# Each `use` gives its path, in source order, and a `pub use` counts too.
+when:
+  language: rust
+  path: a.rs
+  body: "\nuse std::fs;\nuse std::collections::HashMap;\npub use crate::foo;\n"
+expect:
+  imports:
+    - { module: "std::fs", kind: use, line: 2 }
+    - { module: "std::collections::HashMap", kind: use, line: 3 }
+    - { module: "crate::foo", kind: use, line: 4 }

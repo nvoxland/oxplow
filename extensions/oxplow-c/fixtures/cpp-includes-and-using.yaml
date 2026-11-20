@@ -1,0 +1,19 @@
+# A C++ file's `#include` lines are `include` edges and its `using`
+# declarations and directives are `using` edges.
+when:
+  language: cpp
+  path: a.cpp
+  body: |
+
+    #include <vector>
+    #include "foo.hpp"
+    using std::cout;
+    using namespace foo;
+
+    int main() { return 0; }
+expect:
+  imports:
+    - { module: "<vector>", kind: include }
+    - { module: '"foo.hpp"', kind: include }
+    - { module: "std::cout", kind: using }
+    - { module: foo, kind: using }

@@ -1,0 +1,20 @@
+# A group gives each path in it (nested groups and `self` included); an alias
+# gives the real path; a glob gives its parent; `extern crate` gives the crate.
+when:
+  language: rust
+  path: a.rs
+  body: |
+
+    use std::{fs, io::{self, Read}};
+    use foo::bar as baz;
+    use foo::*;
+    extern crate serde;
+expect:
+  imports:
+    contains:
+      - { module: "std::fs" }
+      - { module: "std::io" }
+      - { module: "std::io::Read" }
+      - { module: "foo::bar" }
+      - { module: foo }
+      - { module: serde }

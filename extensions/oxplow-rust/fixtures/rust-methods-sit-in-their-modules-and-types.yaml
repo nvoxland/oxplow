@@ -1,0 +1,22 @@
+# A method's container is every module and the type around it, outermost
+# first; a function at the top of a file has no container.
+when:
+  language: rust
+  path: src/x.rs
+  body: |
+    fn top() {}
+    mod outer {
+        mod inner {
+            struct Foo;
+            impl Foo {
+                fn bar(&self) -> i32 { 1 }
+            }
+        }
+    }
+expect:
+  symbols:
+    - { kind: function, id: top, name: top, container: null }
+    - { kind: module, id: outer }
+    - { kind: module, id: "outer::inner", container: outer }
+    - { kind: struct, id: "outer::inner::Foo", container: "outer::inner" }
+    - { kind: method, id: "outer::inner::Foo::bar", name: bar, container: "outer::inner::Foo" }

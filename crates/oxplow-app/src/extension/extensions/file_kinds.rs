@@ -23,6 +23,10 @@ use super::manifest_v2::{at, item_lines, key_line};
 /// One `file_kinds:` entry as the extension declares it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct FileKindDecl {
+    /// Its id within the extension: `id:` as declared, else `<kind>`, then
+    /// `<kind>-2`, … in declaration order. Extensions sharing a namespace
+    /// (oxplow's shipped ones) name theirs apart (`rust-lockfile`).
+    pub id: String,
     pub kind: String,
     pub globs: Vec<String>,
     pub label: Option<String>,
@@ -32,6 +36,11 @@ pub struct FileKindDecl {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FileKindFile {
+    /// Its id within the extension (lowercase letters, digits, dashes);
+    /// default `<kind>`. Name it when another extension of your namespace
+    /// declares the same kind.
+    #[serde(default)]
+    id: Option<String>,
     /// The kind: lowercase words joined by dashes (`ci`, `lint-config`).
     kind: String,
     /// Repo-relative globs (`*` stays in a folder, `**` crosses folders); at
@@ -105,14 +114,42 @@ pub(crate) fn parse_file_kinds(
                     })
             })
         };
-        match problem {
-            Some((code, message)) => errors.push(at(code, file, line, message)),
-            None => out.push(FileKindDecl {
-                kind: f.kind,
-                globs: f.globs,
-                label: f.label.filter(|l| !l.trim().is_empty()),
-            }),
+        if let Some((code, message)) = problem {
+            errors.push(at(code, file, line, message));
+            continue;
         }
+        let id = f.id.unwrap_or_else(|| {
+            let n = out
+                .iter()
+                .filter(|o: &&FileKindDecl| {
+                    o.id == f.kind || o.id.starts_with(&format!("{}-", f.kind))
+                })
+                .count();
+            if n == 0 {
+                f.kind.clone()
+            } else {
+                format!("{}-{}", f.kind, n + 1)
+            }
+        });
+        if !oxplow_domain::contribution::valid_local(
+            oxplow_domain::contribution::ContributionKind::FileKind,
+            &id,
+        ) || out.iter().any(|o| o.id == id)
+        {
+            errors.push(at(
+                "file_kinds.invalid_id",
+                file,
+                line,
+                format!("file_kinds: id `{id}` is lowercase letters, digits and dashes, once per extension"),
+            ));
+            continue;
+        }
+        out.push(FileKindDecl {
+            id,
+            kind: f.kind,
+            globs: f.globs,
+            label: f.label.filter(|l| !l.trim().is_empty()),
+        });
     }
     (out, errors)
 }
@@ -137,11 +174,13 @@ mod tests {
             ok,
             vec![
                 FileKindDecl {
+                    id: "ci".into(),
                     kind: "ci".into(),
                     globs: vec![".github/workflows/**".into()],
                     label: Some("CI".into())
                 },
                 FileKindDecl {
+                    id: "house-rules".into(),
                     kind: "house-rules".into(),
                     globs: vec!["docs/**".into()],
                     label: None

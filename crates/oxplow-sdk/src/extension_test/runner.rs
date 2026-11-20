@@ -233,6 +233,8 @@ pub(super) async fn dispatch(
         item_commands_example(host, ex, uri, report).await;
     } else if let Some(id) = ex.when.get("context").and_then(Value::as_str) {
         context_example(host, ext, ex, id, report).await;
+    } else if let Some(id) = ex.when.get("language").and_then(Value::as_str) {
+        language_example(host, ex, id, report).await;
     } else if let Some(sql) = ex.when.get("sql").and_then(Value::as_str) {
         sql_example(host, ex, sql, report).await;
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
@@ -354,6 +356,11 @@ pub(super) const KINDS: &[Kind] = &[
         key: "context",
         when: "{ context: <id>, thread? }",
         expect: "{ text: <string> | null }",
+    },
+    Kind {
+        key: "language",
+        when: "{ language: <id>, path, body } (the file `body` at `path`, read as that language)",
+        expect: "{ symbols?: [{ kind, id, name, container, line }], functions?: [{ name, id, complexity, length, parameter_count, visibility, has_doc, start_line }], imports?: [{ module, kind, line }] }",
     },
     Kind {
         key: "sql",

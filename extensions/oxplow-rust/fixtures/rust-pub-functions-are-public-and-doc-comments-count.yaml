@@ -1,0 +1,30 @@
+# `pub` makes a function public, otherwise it is private. Only a `///` doc
+# comment counts as documentation, even with an attribute between it and the
+# function; a plain `//` does not.
+when:
+  language: rust
+  path: src/x.rs
+  body: |
+
+    pub fn exported() {}
+    fn private_fn() {}
+
+    /// A documented function.
+    pub fn documented() {}
+
+    // Just a regular comment, not a doc comment.
+    pub fn plain_comment() {}
+
+    pub fn undocumented() {}
+
+    /// Documented, with an attribute between the doc and the fn.
+    #[inline]
+    pub fn documented_with_attr() {}
+expect:
+  functions:
+    - { name: exported, visibility: public, has_doc: false }
+    - { name: private_fn, visibility: private, has_doc: false }
+    - { name: documented, has_doc: true }
+    - { name: plain_comment, has_doc: false }
+    - { name: undocumented, has_doc: false }
+    - { name: documented_with_attr, has_doc: true }

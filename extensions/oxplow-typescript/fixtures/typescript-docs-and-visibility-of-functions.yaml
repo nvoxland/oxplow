@@ -1,0 +1,37 @@
+# In TypeScript only a `/** */` comment documents a function, a class
+# member is public unless marked `private`, and a top-level function is
+# public only when exported.
+when:
+  language: typescript
+  path: src/x.ts
+  body: |
+
+    /** JSDoc. */
+    export function documented(): void {}
+
+    // plain leading comment
+    export function plain(): void {}
+
+    function helper() {}
+
+    class Greeter {
+        private secret(): void {}
+        public hello(): void {}
+        plain2(): void {}
+    }
+expect:
+  functions:
+    - { name: documented, has_doc: true, visibility: public }
+    - { name: plain, has_doc: false, visibility: public }
+    - { name: helper, visibility: private }
+    - { name: secret, visibility: private }
+    - { name: hello, visibility: public }
+    - { name: plain2, visibility: public }
+  symbols:
+    - { kind: function, id: documented }
+    - { kind: function, id: plain }
+    - { kind: function, id: helper }
+    - { kind: class, id: Greeter }
+    - { kind: method, id: "Greeter::secret", container: Greeter }
+    - { kind: method, id: "Greeter::hello" }
+    - { kind: method, id: "Greeter::plain2" }

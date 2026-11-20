@@ -1,0 +1,13 @@
+# The overload signatures and the implementation of a function are one
+# definition.
+when:
+  language: typescript
+  path: a.ts
+  body: |
+
+    function format(a: string): string;
+    function format(a: number): string;
+    function format(a: any): string { return ""; }
+expect:
+  symbols:
+    - { kind: function, id: format }

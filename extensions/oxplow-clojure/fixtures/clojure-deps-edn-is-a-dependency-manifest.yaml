@@ -1,0 +1,6 @@
+# A deps.edn is a dependency manifest.
+when:
+  sql: "SELECT DISTINCT kind FROM v_file_kind_rule WHERE extension = 'oxplow-clojure' AND glob_match(glob, 'deps.edn')"
+expect:
+  rows:
+    - { kind: dependency-manifest }
