@@ -32,23 +32,14 @@ into the git provider's merge/pull/rebase/cherry-pick/revert
 path as a Tier-1.5 fallback (see "Wiring" below). Two layers:
 
 - **Parse → items (languages extended in):**
-  `parse_top_level_items(src, Language) -> Option<Vec<Item>>` +
-  `language_for_path` + the per-language `MergeSpec` kind tables.
-  tree-sitter and **ten grammars** are real `oxplow-git` deps now: the 6
-  first-slice (rust, typescript, tsx, javascript, python, go) plus the 4
-  second-slice (java, c, cpp, clojure).
-
-  > **One `Language` enum.** `ast_merge` no longer declares its own
-  > `Language` — it `pub use`s the canonical `oxplow_code_metrics::Language`
-  > (the single source of truth) and keys its `MergeSpec` table off it via
-  > the free fn `merge_spec(lang) -> Option<&MergeSpec>`. Canonical variants
-  > the merge tier doesn't support (today only `CSharp`, which *is* analysed
-  > for metrics) return `None` there — identity stays unified, support is a
-  > per-spec property, not a separate enum. `ast_merge::language_for_path`
-  > resolves through `oxplow_code_metrics::language_for_path` then drops
-  > languages with no `MergeSpec` (so `.cs` ⇒ `None`, unchanged behavior).
-  > The LSP↔analysis namespace bridge is `language_from_lsp_id` in the same
-  > crate (maps `typescriptreact`→`Tsx`, etc.).
+  `parse_top_level_items(src, &Language) -> Option<Vec<Item>>` +
+  `language_for_path(&Languages, path)`. A language merges when its
+  `analysis.yaml` has a `merge:` facet (`key: named | c_declarator |
+  form_head`, the kind tables beside it; `.context/language-support.md`);
+  one without (C#) is `None`, so git's markers stand. The grammars come from
+  the language packs; `oxplow-git` depends on no grammar crate.
+  `auto_resolve_conflicts(repo, &Languages)` takes the set from its caller
+  (`GitProvider` holds the app's `LanguagesHandle`).
 
   Each `Item` carries `{
   key, text, byte_span }`. Identity key depends on the language's
@@ -97,8 +88,8 @@ original scoped design.
 `auto_resolve_conflicts` (`smart_merge.rs`) now runs the AST pass as a
 **Tier-1.5 fallback, per file**: when Tier-1's `merge3_str` returns
 `Err(Conflicted)`, it calls `ast_merge_resolve(path, base, ours, theirs)`,
-which gates on `ast_merge::language_for_path` (the six first-slice
-grammars) and accepts the result **only** when `merge_top_level` returns
+which gates on `ast_merge::language_for_path` (a language with a merge
+facet) and accepts the result **only** when `merge_top_level` returns
 `AstMerge::Resolved` — i.e. the re-parse guard has already passed. Any
 `Conflict`, `Bail` (parse-fail / duplicate-keys / reparse-fail), or
 unsupported extension → `None`, leaving git's markers untouched. Same

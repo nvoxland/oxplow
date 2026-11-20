@@ -1,4 +1,6 @@
 # one parameter-count fact per function.
+# The languages its files are in: their packs.
+requires: [oxplow-clojure, oxplow-rust, oxplow-typescript]
 when:
   collector: oxplow.fn_count
   files:

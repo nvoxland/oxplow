@@ -81,6 +81,46 @@ mod generated {
         FILES.get_or_init(|| read("oxwiki"))
     }
 
+    pub fn oxplow_rust() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-rust"))
+    }
+
+    pub fn oxplow_typescript() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-typescript"))
+    }
+
+    pub fn oxplow_python() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-python"))
+    }
+
+    pub fn oxplow_go() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-go"))
+    }
+
+    pub fn oxplow_java() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-java"))
+    }
+
+    pub fn oxplow_c() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-c"))
+    }
+
+    pub fn oxplow_csharp() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-csharp"))
+    }
+
+    pub fn oxplow_clojure() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-clojure"))
+    }
+
     /// `extensions/<name>/`'s files, kept for the life of the process.
     fn read(name: &str) -> Files {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -120,6 +160,53 @@ pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxwiki",
         files: generated::oxwiki,
+        required: false,
+    }, // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-rust",
+        files: generated::oxplow_rust,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-typescript",
+        files: generated::oxplow_typescript,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-python",
+        files: generated::oxplow_python,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-go",
+        files: generated::oxplow_go,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-java",
+        files: generated::oxplow_java,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-c",
+        files: generated::oxplow_c,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-csharp",
+        files: generated::oxplow_csharp,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-clojure",
+        files: generated::oxplow_clojure,
         required: false,
     },
 ];

@@ -1,4 +1,6 @@
 # Rust: each file with unsafe blocks has one ast_hit fact tagged unsafe_block (src/a.rs has 2, src/b.rs none, the README is skipped).
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 when:
   collector: oxplow.rust.unsafe_blocks
   files:

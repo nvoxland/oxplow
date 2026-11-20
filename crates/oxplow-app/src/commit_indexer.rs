@@ -731,7 +731,7 @@ mod tests {
         let git = oxplow_db::SqliteGitStore::new(db.clone());
         let n = index_recent(
             &tasks_kinds(),
-            &crate::vcs::GitProvider,
+            &crate::vcs::GitProvider::default(),
             dir.path(),
             &page_refs,
             &git,
@@ -787,7 +787,7 @@ mod tests {
         // Re-index — nothing new.
         let n2 = index_recent(
             &tasks_kinds(),
-            &crate::vcs::GitProvider,
+            &crate::vcs::GitProvider::default(),
             dir.path(),
             &page_refs,
             &git,
@@ -824,7 +824,7 @@ mod tests {
             async move {
                 index_recent(
                     &tasks_kinds(),
-                    &crate::vcs::GitProvider,
+                    &crate::vcs::GitProvider::default(),
                     &ws,
                     &page_refs,
                     &git,

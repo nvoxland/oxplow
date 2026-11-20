@@ -100,7 +100,7 @@ mod tests {
     fn reader(dir: &std::path::Path) -> SnapshotContent {
         SnapshotContent::new(
             BlobStore::new(dir.join(".oxplow/objects")),
-            crate::vcs::GitProvider.object_store(dir),
+            crate::vcs::GitProvider::default().object_store(dir),
         )
     }
 

@@ -648,7 +648,7 @@ it):
   *same concept across languages* (TODOs, complexity, …), a metric shouldn't
   name a language. Two globals make that possible:
   - `source_files()` → `[{path, text, language}]` — every **recognized** source
-    file from the host (filtered by `oxplow-code-metrics::is_supported_path`),
+    file from the host (filtered by the run's languages, `Languages::is_supported_path`),
     each tagged with its detected `language`. This is the reader: a script sweeps
     it and never writes a glob or names a language.
   - `markers(text, language)` → `[{line, kind, text}]` — TODO/FIXME/HACK/XXX/BUG

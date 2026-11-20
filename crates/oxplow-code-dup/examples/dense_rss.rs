@@ -43,7 +43,11 @@ fn main() {
         })
         .collect();
     let started = std::time::Instant::now();
-    let blocks = detect_duplicates(files, DupOptions::default());
+    let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
+        files,
+        DupOptions::default(),
+    );
     let values: Vec<serde_json::Value> = blocks
         .iter()
         .map(|b| {

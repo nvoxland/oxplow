@@ -1248,7 +1248,7 @@ async fn impact_against(
     use oxplow_app::extension::extensions::{extension_tree_at, impact_between, ReviewSide};
     // A revision's files through the VCS; nothing here reads a snapshot.
     let trees = oxplow_app::trees::Trees::new(
-        std::sync::Arc::new(oxplow_app::vcs::GitProvider),
+        std::sync::Arc::new(oxplow_app::vcs::GitProvider::default()),
         std::sync::Arc::new(oxplow_db::SqliteSnapshotStore::new(
             oxplow_db::Database::in_memory(),
         )),

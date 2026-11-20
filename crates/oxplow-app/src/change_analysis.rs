@@ -1429,6 +1429,7 @@ async fn compute(
                 .map_err(|e| e.to_string())?,
         ));
     }
+    let languages = svc.languages.current();
     tokio::task::spawn_blocking(move || -> Result<ChangeResults, String> {
         let specs: Vec<AnalyzeFileSpec> = analyzed
             .iter()
@@ -1439,7 +1440,7 @@ async fn compute(
                 head_content: h.clone(),
             })
             .collect();
-        let analysis = analyze_files(specs);
+        let analysis = analyze_files(&languages, specs);
         let files: Vec<ChangedFile> = entries
             .into_iter()
             .map(|e| ChangedFile {
@@ -1866,12 +1867,14 @@ mod tests {
             staged: None,
             untracked: None,
         }];
-        let analysis =
-            crate::code_analysis::analyze_files(vec![crate::code_analysis::AnalyzeFileSpec {
+        let analysis = crate::code_analysis::analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![crate::code_analysis::AnalyzeFileSpec {
                 path: "src/P.java".into(),
                 base_content: Some(base.into()),
                 head_content: Some(head.into()),
-            }]);
+            }],
+        );
         let r = build_results(&files, &analysis, &TestPaths::default());
         let mut refs: Vec<_> = r
             .functions
@@ -1987,12 +1990,14 @@ mod tests {
         let base = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n";
         // b modified (line 2), c deleted, e inserted at the end.
         let head = "fn a() {}\nfn b2() {}\nfn d() {}\nfn e() {}\n";
-        let analysis =
-            crate::code_analysis::analyze_files(vec![crate::code_analysis::AnalyzeFileSpec {
+        let analysis = crate::code_analysis::analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![crate::code_analysis::AnalyzeFileSpec {
                 path: "src/lib.rs".into(),
                 base_content: Some(base.into()),
                 head_content: Some(head.into()),
-            }]);
+            }],
+        );
         let r = build_results(&[], &analysis, &TestPaths::default());
         let got: Vec<_> = r
             .hunks
@@ -2019,12 +2024,14 @@ mod tests {
 
     #[test]
     fn a_pure_deletion_is_anchored_after_a_head_line() {
-        let analysis =
-            crate::code_analysis::analyze_files(vec![crate::code_analysis::AnalyzeFileSpec {
+        let analysis = crate::code_analysis::analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![crate::code_analysis::AnalyzeFileSpec {
                 path: "src/lib.rs".into(),
                 base_content: Some("fn a() {}\nfn b() {}\nfn c() {}\n".into()),
                 head_content: Some("fn a() {}\nfn c() {}\n".into()),
-            }]);
+            }],
+        );
         let r = build_results(&[], &analysis, &TestPaths::default());
         assert_eq!(
             r.hunks,
@@ -2236,7 +2243,7 @@ mod tests {
             f.svc.snapshot_store.clone(),
             f.svc.blobs.clone(),
             root.clone(),
-            std::sync::Arc::new(crate::vcs::GitProvider),
+            std::sync::Arc::new(crate::vcs::GitProvider::default()),
             oxplow_domain::StreamId::new(1),
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -2329,7 +2336,7 @@ mod tests {
             f.svc.snapshot_store.clone(),
             f.svc.blobs.clone(),
             root.clone(),
-            std::sync::Arc::new(crate::vcs::GitProvider),
+            std::sync::Arc::new(crate::vcs::GitProvider::default()),
             oxplow_domain::StreamId::new(1),
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -2393,7 +2400,7 @@ mod tests {
             f.svc.snapshot_store.clone(),
             f.svc.blobs.clone(),
             root.clone(),
-            std::sync::Arc::new(crate::vcs::GitProvider),
+            std::sync::Arc::new(crate::vcs::GitProvider::default()),
             oxplow_domain::StreamId::new(1),
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),

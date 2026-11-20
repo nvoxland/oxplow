@@ -351,54 +351,56 @@ mod tests {
     #[tokio::test]
     async fn git_an_unmerged_branch_is_deleted_only_by_force() {
         let ws = workspace();
-        an_unmerged_branch_is_deleted_only_by_force(&GitProvider, ws.path()).await;
+        an_unmerged_branch_is_deleted_only_by_force(&GitProvider::default(), ws.path()).await;
     }
 
     #[tokio::test]
     async fn git_a_commit_reads_back_what_it_captured() {
         let ws = workspace();
-        a_commit_reads_back_what_it_captured(&GitProvider, ws.path()).await;
+        a_commit_reads_back_what_it_captured(&GitProvider::default(), ws.path()).await;
     }
 
     #[tokio::test]
     async fn git_the_clean_baseline_vouches_only_for_untouched_files() {
         let ws = workspace();
-        the_clean_baseline_vouches_only_for_untouched_files(&GitProvider, ws.path()).await;
+        the_clean_baseline_vouches_only_for_untouched_files(&GitProvider::default(), ws.path())
+            .await;
     }
 
     #[tokio::test]
     async fn git_two_revisions_diff_to_what_changed() {
         let ws = workspace();
-        two_revisions_diff_to_what_changed(&GitProvider, ws.path()).await;
+        two_revisions_diff_to_what_changed(&GitProvider::default(), ws.path()).await;
     }
 
     #[tokio::test]
     async fn git_status_reports_edits_and_is_clean_after_commit() {
         let ws = workspace();
-        status_reports_edits_and_is_clean_after_commit(&GitProvider, ws.path()).await;
+        status_reports_edits_and_is_clean_after_commit(&GitProvider::default(), ws.path()).await;
     }
 
     #[tokio::test]
     async fn git_head_resolves_and_the_log_walks_newest_first() {
         let ws = workspace();
-        head_resolves_and_the_log_walks_newest_first(&GitProvider, ws.path()).await;
+        head_resolves_and_the_log_walks_newest_first(&GitProvider::default(), ws.path()).await;
     }
 
     #[tokio::test]
     async fn git_branches_meet_at_their_merge_base() {
         let ws = workspace();
-        branches_meet_at_their_merge_base(&GitProvider, ws.path()).await;
+        branches_meet_at_their_merge_base(&GitProvider::default(), ws.path()).await;
     }
 
     #[tokio::test]
     async fn git_the_log_starts_anywhere_narrows_to_a_path_and_pages() {
         let ws = workspace();
-        the_log_starts_anywhere_narrows_to_a_path_and_pages(&GitProvider, ws.path()).await;
+        the_log_starts_anywhere_narrows_to_a_path_and_pages(&GitProvider::default(), ws.path())
+            .await;
     }
 
     #[tokio::test]
     async fn git_blame_attributes_lines_to_their_revision() {
         let ws = workspace();
-        blame_attributes_lines_to_their_revision(&GitProvider, ws.path()).await;
+        blame_attributes_lines_to_their_revision(&GitProvider::default(), ws.path()).await;
     }
 }

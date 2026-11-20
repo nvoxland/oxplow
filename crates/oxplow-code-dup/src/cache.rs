@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 /// tokenizer's normalization, skip rules, the tree-sitter grammars): a
 /// golden test pins the hashes to it, so changing the hashing without
 /// bumping this fails the suite.
-pub const DETECTOR_VERSION: u32 = 1;
+pub const DETECTOR_VERSION: u32 = 2;
 
 /// What the cache may hold, in bytes of records. Sized so the whole
 /// source tree of a large repo fits: a record is [`RECORD_BYTES`] and a
@@ -54,7 +54,7 @@ pub struct FileKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CacheKey {
     pub file: FileKey,
-    pub lang: u32,
+    pub lang: u64,
     pub min_nodes: u32,
     pub min_lines: u32,
     pub version: u32,

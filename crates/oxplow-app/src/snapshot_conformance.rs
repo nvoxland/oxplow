@@ -332,7 +332,7 @@ pub(crate) mod tests {
                 f.svc.snapshot_store.clone(),
                 f.svc.blobs.clone(),
                 f.svc.layout.project_dir.clone(),
-                Arc::new(crate::vcs::GitProvider),
+                Arc::new(crate::vcs::GitProvider::default()),
                 stream,
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),

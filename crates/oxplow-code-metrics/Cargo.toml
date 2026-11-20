@@ -22,6 +22,7 @@ tree-sitter-c-sharp = { workspace = true }
 streaming-iterator = "0.1"
 serde = { workspace = true }
 serde_yaml = { workspace = true }
+schemars = { workspace = true }
 
 [lints]
 workspace = true

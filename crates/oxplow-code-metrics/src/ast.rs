@@ -8,7 +8,7 @@
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, Query, QueryCursor, Tree};
 
-use crate::spec::{language_from_name, Language};
+use crate::spec::{Language, Languages};
 
 /// One capture from a tree-sitter query: the capture name (`@foo`), the matched
 /// source text, and its 0-based start/end position. Flat by design so a script
@@ -26,7 +26,8 @@ pub struct QueryMatch {
 /// Why an [`ast_query`] / [`query`] call failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AstQueryError {
-    /// The language name wasn't recognized (see [`language_from_name`]).
+    /// The language name isn't one the enabled extensions declare (or has
+    /// no grammar).
     UnknownLanguage(String),
     /// tree-sitter couldn't build a parse tree for the text.
     Parse,
@@ -50,10 +51,10 @@ impl std::error::Error for AstQueryError {}
 /// grammar can't be loaded or the text can't be parsed. (The parser is built
 /// fresh per call — same as the metric walker — so this is `Send`-friendly and
 /// holds no shared state.)
-pub fn parse(text: &str, language: Language) -> Option<Tree> {
-    let spec = language.spec();
+pub fn parse(text: &str, language: &Language) -> Option<Tree> {
+    let grammar = language.grammar()?;
     let mut parser = Parser::new();
-    if parser.set_language(&spec.tree_sitter_language()).is_err() {
+    if parser.set_language(grammar).is_err() {
         return None;
     }
     parser.parse(text, None)
@@ -66,7 +67,7 @@ pub fn query(
     tree: &Tree,
     src: &[u8],
     sexpr: &str,
-    language: Language,
+    language: &Language,
 ) -> Result<Vec<QueryMatch>, AstQueryError> {
     let ts_lang = language.tree_sitter_language();
     let q = Query::new(&ts_lang, sexpr).map_err(|e| AstQueryError::BadQuery(e.to_string()))?;
@@ -97,11 +98,14 @@ pub fn query(
 /// tree-sitter `sexpr` query — the one-call entry the `ast_query`
 /// builtin is built on.
 pub fn ast_query(
+    languages: &Languages,
     text: &str,
     language: &str,
     sexpr: &str,
 ) -> Result<Vec<QueryMatch>, AstQueryError> {
-    let lang = language_from_name(language)
+    let lang = languages
+        .by_name(language)
+        .filter(|l| l.analyzable())
         .ok_or_else(|| AstQueryError::UnknownLanguage(language.to_string()))?;
     let tree = parse(text, lang).ok_or(AstQueryError::Parse)?;
     query(&tree, text.as_bytes(), sexpr, lang)
@@ -129,7 +133,7 @@ struct S;
 "#;
         let q = "(attribute_item (attribute (identifier) @a)) \
                  (inner_attribute_item (attribute (identifier) @a))";
-        let matches = ast_query(src, "rust", q).expect("query runs");
+        let matches = ast_query(&crate::for_tests::shipped(), src, "rust", q).expect("query runs");
         let allows = matches.iter().filter(|m| m.text == "allow").count();
         assert_eq!(allows, 2, "one outer + one inner; `derive` is not an allow");
     }
@@ -141,7 +145,13 @@ fn a() { unsafe { let x = 1; } }
 fn b() { let y = 2; }
 fn c() { unsafe { foo(); } }
 "#;
-        let matches = ast_query(src, "rust", "(unsafe_block) @u").expect("query runs");
+        let matches = ast_query(
+            &crate::for_tests::shipped(),
+            src,
+            "rust",
+            "(unsafe_block) @u",
+        )
+        .expect("query runs");
         assert_eq!(matches.len(), 2);
         assert!(matches.iter().all(|m| m.capture == "u"));
         assert!(matches[0].text.starts_with("unsafe"));
@@ -150,8 +160,13 @@ fn c() { unsafe { foo(); } }
     #[test]
     fn ast_query_captures_text_and_position() {
         let src = "fn hello() {}\n";
-        let matches =
-            ast_query(src, "rust", "(function_item name: (identifier) @name)").expect("runs");
+        let matches = ast_query(
+            &crate::for_tests::shipped(),
+            src,
+            "rust",
+            "(function_item name: (identifier) @name)",
+        )
+        .expect("runs");
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].capture, "name");
         assert_eq!(matches[0].text, "hello");
@@ -161,13 +176,19 @@ fn c() { unsafe { foo(); } }
 
     #[test]
     fn ast_query_rejects_unknown_language() {
-        let err = ast_query("x", "cobol", "(x) @x").unwrap_err();
+        let err = ast_query(&crate::for_tests::shipped(), "x", "cobol", "(x) @x").unwrap_err();
         assert_eq!(err, AstQueryError::UnknownLanguage("cobol".into()));
     }
 
     #[test]
     fn ast_query_rejects_malformed_query() {
-        let err = ast_query("fn a() {}", "rust", "(nonsense_node) @x").unwrap_err();
+        let err = ast_query(
+            &crate::for_tests::shipped(),
+            "fn a() {}",
+            "rust",
+            "(nonsense_node) @x",
+        )
+        .unwrap_err();
         assert!(matches!(err, AstQueryError::BadQuery(_)));
     }
 
@@ -176,7 +197,13 @@ fn c() { unsafe { foo(); } }
         // C# method declarations resolve through the new `Language::CSharp`
         // grammar (the catalog under oxplow-script builds on this).
         let src = "class C { public void M(int x) { if (x > 0) { Do(); } } }";
-        let methods = ast_query(src, "csharp", "(method_declaration) @m").expect("runs");
+        let methods = ast_query(
+            &crate::for_tests::shipped(),
+            src,
+            "csharp",
+            "(method_declaration) @m",
+        )
+        .expect("runs");
         assert_eq!(methods.len(), 1);
     }
 
@@ -184,7 +211,13 @@ fn c() { unsafe { foo(); } }
     fn ast_query_works_across_languages() {
         // TypeScript: count `any` type annotations (a `predefined_type` node).
         let ts = "function f(x: any): any { return x; }";
-        let anys = ast_query(ts, "typescript", "(predefined_type) @a").expect("runs");
+        let anys = ast_query(
+            &crate::for_tests::shipped(),
+            ts,
+            "typescript",
+            "(predefined_type) @a",
+        )
+        .expect("runs");
         assert_eq!(anys.len(), 2);
         assert!(anys.iter().all(|m| m.text == "any"));
     }

@@ -21,7 +21,7 @@ fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
         }
         if path.is_dir() {
             walk(&path, out);
-        } else if oxplow_code_metrics::is_supported_path(&path) {
+        } else if oxplow_code_metrics::for_tests::shipped().is_supported_path(&path) {
             out.push(path);
         }
     }
@@ -49,6 +49,7 @@ fn main() {
     let cache = DupCache::with_budget(usize::MAX / 2);
     let started = std::time::Instant::now();
     let (_, stats) = detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
         files,
         &std::collections::BTreeSet::new(),
         DupOptions::default(),

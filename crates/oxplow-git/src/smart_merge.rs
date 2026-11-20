@@ -278,7 +278,10 @@ fn is_regular_blob(mode: u32) -> bool {
     mode == 0o100_644 || mode == 0o100_755
 }
 
-pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
+pub fn auto_resolve_conflicts(
+    repo_path: &Path,
+    languages: &oxplow_code_metrics::Languages,
+) -> AutoResolveReport {
     let Ok(repo) = git2::Repository::open(repo_path) else {
         return AutoResolveReport::default();
     };
@@ -333,7 +336,7 @@ pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
         // cleanly. Both tiers can only ever *reduce* the conflict count.
         let merged = match merge3_str(&base, &ours, &theirs) {
             Ok(m) => Some((m, false)),
-            Err(_) => ast_merge_resolve(&path, &base, &ours, &theirs).map(|m| (m, true)),
+            Err(_) => ast_merge_resolve(languages, &path, &base, &ours, &theirs).map(|m| (m, true)),
         };
         let Some((merged, via_ast)) = merged else {
             continue; // neither tier could resolve — leave git's markers.
@@ -379,8 +382,14 @@ pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
 /// git's markers. Preserves the reduce-only invariant.
 ///
 /// [`merge_top_level`]: crate::ast_merge::merge_top_level
-fn ast_merge_resolve(path: &str, base: &str, ours: &str, theirs: &str) -> Option<String> {
-    let lang = crate::ast_merge::language_for_path(path)?;
+fn ast_merge_resolve(
+    languages: &oxplow_code_metrics::Languages,
+    path: &str,
+    base: &str,
+    ours: &str,
+    theirs: &str,
+) -> Option<String> {
+    let lang = crate::ast_merge::language_for_path(languages, path)?;
     match crate::ast_merge::merge_top_level(base, ours, theirs, lang) {
         crate::ast_merge::AstMerge::Resolved(text) => Some(text),
         crate::ast_merge::AstMerge::Conflict(_) | crate::ast_merge::AstMerge::Bail(_) => None,
@@ -563,7 +572,7 @@ mod tests {
         assert!(!r.success, "expected git revert to conflict");
         assert_eq!(count_unmerged(p), 1);
 
-        let report = auto_resolve_conflicts(p);
+        let report = auto_resolve_conflicts(p, &oxplow_code_metrics::for_tests::shipped());
         assert_eq!(report.resolved.len(), 1);
         assert_eq!(report.remaining, 0);
         assert_eq!(
@@ -625,7 +634,7 @@ mod tests {
         assert!(!out.status.success(), "expected git merge to conflict");
         assert_eq!(count_unmerged(p), 1);
 
-        let report = auto_resolve_conflicts(p);
+        let report = auto_resolve_conflicts(p, &oxplow_code_metrics::for_tests::shipped());
         assert_eq!(report.resolved.len(), 1, "{report:?}");
         assert_eq!(report.ast_resolved, 1, "AST tier should own the win");
         assert_eq!(report.remaining, 0);
@@ -637,8 +646,11 @@ mod tests {
         assert!(merged.contains("fn main()"), "{merged}");
         // The reconstruction must itself parse.
         assert!(
-            crate::ast_merge::parse_top_level_items(&merged, crate::ast_merge::Language::Rust)
-                .is_some(),
+            crate::ast_merge::parse_top_level_items(
+                &merged,
+                &oxplow_code_metrics::for_tests::lang("rust")
+            )
+            .is_some(),
             "AST reconstruction must re-parse: {merged}"
         );
     }
@@ -694,7 +706,7 @@ mod tests {
         assert!(!out.status.success(), "expected git merge to conflict");
         assert_eq!(count_unmerged(p), 1, "the symlink is the conflict");
 
-        let report = auto_resolve_conflicts(p);
+        let report = auto_resolve_conflicts(p, &oxplow_code_metrics::for_tests::shipped());
 
         // The victim must be untouched, whatever we decide about the link.
         let victim = std::fs::read_to_string(p.join("d1/victim.txt")).unwrap();
@@ -744,7 +756,7 @@ mod tests {
         assert!(!out.status.success(), "expected git merge to conflict");
         assert_eq!(count_unmerged(p), 1);
 
-        let report = auto_resolve_conflicts(p);
+        let report = auto_resolve_conflicts(p, &oxplow_code_metrics::for_tests::shipped());
         assert!(report.resolved.is_empty(), "{report:?}");
         assert_eq!(report.ast_resolved, 0);
         assert_eq!(report.remaining, 1, "unsupported ext left for the user");
@@ -782,7 +794,7 @@ mod tests {
             "expected git merge to conflict for {file}"
         );
         assert_eq!(count_unmerged(p), 1);
-        let report = auto_resolve_conflicts(p);
+        let report = auto_resolve_conflicts(p, &oxplow_code_metrics::for_tests::shipped());
         let merged = std::fs::read_to_string(p.join(file)).unwrap();
         (report, merged)
     }

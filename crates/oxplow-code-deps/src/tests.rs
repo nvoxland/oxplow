@@ -1,7 +1,7 @@
 use crate::{diff_edges, extract_imports, ImportKind};
 
 fn modules(path: &str, source: &str) -> Vec<(ImportKind, String)> {
-    extract_imports(path, source)
+    extract_imports(&oxplow_code_metrics::for_tests::shipped(), path, source)
         .into_iter()
         .map(|e| (e.kind, e.module))
         .collect()
@@ -198,7 +198,12 @@ fn clojure_ns_require() {
 
 #[test]
 fn unsupported_extension_yields_empty() {
-    assert!(extract_imports("a.md", "import foo from 'bar';").is_empty());
+    assert!(extract_imports(
+        &oxplow_code_metrics::for_tests::shipped(),
+        "a.md",
+        "import foo from 'bar';"
+    )
+    .is_empty());
 }
 
 #[test]
@@ -211,8 +216,8 @@ use std::io;
 use std::fs;
 use std::path::Path;
 "#;
-    let b = extract_imports("a.rs", before);
-    let a = extract_imports("a.rs", after);
+    let b = extract_imports(&oxplow_code_metrics::for_tests::shipped(), "a.rs", before);
+    let a = extract_imports(&oxplow_code_metrics::for_tests::shipped(), "a.rs", after);
     let (added, removed) = diff_edges(&b, &a);
     let added_mods: Vec<&str> = added.iter().map(|e| e.module.as_str()).collect();
     let removed_mods: Vec<&str> = removed.iter().map(|e| e.module.as_str()).collect();

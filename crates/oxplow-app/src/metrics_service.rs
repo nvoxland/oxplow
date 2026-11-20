@@ -322,6 +322,9 @@ pub struct MetricsService {
     /// What a fact collector that declares `ai.compute` asks. `None` in
     /// tests that don't wire it: such a collector is refused the dataset.
     ai: Option<Arc<crate::ai_compute::AiCompute>>,
+    /// What a fact collector's parsing builtins parse with. A test service
+    /// without one gets the shipped packs' (`Default`: none).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 /// How often a state entity metric may be re-captured.
@@ -478,6 +481,7 @@ impl MetricsService {
             last_tree: Arc::default(),
             run_log: None,
             ai: None,
+            languages: Default::default(),
         }
     }
 
@@ -490,6 +494,15 @@ impl MetricsService {
     /// What a fact collector that asks a model asks (`ai.compute`).
     pub fn with_ai(mut self, ai: Arc<crate::ai_compute::AiCompute>) -> Self {
         self.ai = Some(ai);
+        self
+    }
+
+    /// The languages the enabled extensions declare.
+    pub fn with_languages(
+        mut self,
+        languages: crate::extension::language_set::LanguagesHandle,
+    ) -> Self {
+        self.languages = languages;
         self
     }
 
@@ -912,8 +925,13 @@ impl MetricsService {
                 "{dir} already exists; pick another name or edit it in place"
             ));
         }
-        let starter =
-            crate::metric_scaffold::MetricStarter::new(language.as_deref(), glob.as_deref())?;
+        // The languages oxplow ships, on or off: scaffolding writes an
+        // extension, which works once its language's pack is on.
+        let starter = crate::metric_scaffold::MetricStarter::new(
+            &crate::extension::language_set::shipped(),
+            language.as_deref(),
+            glob.as_deref(),
+        )?;
         Ok(MetricScaffold {
             name: name.to_string(),
             dir,
@@ -2216,8 +2234,9 @@ impl MetricsService {
         let FactRunner::Starlark(script) = runner else {
             return Ok(crate::services::Given::default());
         };
-        let mut sources =
-            crate::services::Sources::default().with_tree(crate::services::Trees::Fixed(files));
+        let mut sources = crate::services::Sources::default()
+            .with_tree(crate::services::Trees::Fixed(files))
+            .with_languages(self.languages.current());
         if let Some(ai) = &self.ai {
             sources = sources.with_ai(
                 ai.clone(),
@@ -3000,6 +3019,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         crate::test_fixtures::install_code_metrics(dir.path());
+        crate::test_fixtures::enable_language_packs(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;

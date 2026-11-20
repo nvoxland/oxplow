@@ -15,7 +15,7 @@
 //!
 //! Files in unsupported languages yield no edges (silently skipped).
 
-use oxplow_code_metrics::{language_for_path, Language};
+use oxplow_code_metrics::{Language, Languages};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tree_sitter::{Node, Parser};
@@ -77,8 +77,8 @@ pub struct ImportEdge {
 ///
 /// Returns an empty Vec for unsupported languages or files that fail
 /// to parse. Order is source order (top-to-bottom).
-pub fn extract_imports(path: &str, source: &str) -> Vec<ImportEdge> {
-    let Some(lang) = language_for_path(path) else {
+pub fn extract_imports(languages: &Languages, path: &str, source: &str) -> Vec<ImportEdge> {
+    let Some(lang) = languages.for_path(path) else {
         return Vec::new();
     };
     extract_with_language(path, source, lang)
@@ -87,7 +87,10 @@ pub fn extract_imports(path: &str, source: &str) -> Vec<ImportEdge> {
 /// Like [`extract_imports`] but with the language explicitly chosen
 /// (useful when the path doesn't reveal it — e.g. content pulled
 /// from a git ref into a temp buffer).
-pub fn extract_with_language(path: &str, source: &str, language: Language) -> Vec<ImportEdge> {
+pub fn extract_with_language(path: &str, source: &str, language: &Language) -> Vec<ImportEdge> {
+    let Some(strategy) = language.spec().imports else {
+        return Vec::new(); // the language reads no imports
+    };
     let mut parser = Parser::new();
     if parser
         .set_language(&language.tree_sitter_language())
@@ -100,7 +103,7 @@ pub fn extract_with_language(path: &str, source: &str, language: Language) -> Ve
     };
     let src = source.as_bytes();
     let mut out = Vec::new();
-    extractors::walk(tree.root_node(), src, language, path, &mut out);
+    extractors::walk(tree.root_node(), src, strategy, path, &mut out);
     out
 }
 

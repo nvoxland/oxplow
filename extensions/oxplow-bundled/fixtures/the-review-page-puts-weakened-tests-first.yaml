@@ -1,6 +1,8 @@
 # The Review page lists the files with something worth a look, worst first,
 # beside what the change was asked to do; the brief on the change pages
 # says the same in one line and links to it.
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 given:
   - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
   - observe: { turn: { prompt: base lib, write: { path: src/lib.rs, body: "pub fn grow(a: u32) -> u32 {\n    a\n}\n" } } }

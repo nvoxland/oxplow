@@ -285,7 +285,7 @@ mod tests {
     fn config_for(project: &std::path::Path) -> SnapshotCaptureRegistryConfig {
         let db = Database::in_memory();
         SnapshotCaptureRegistryConfig {
-            vcs: std::sync::Arc::new(crate::vcs::GitProvider),
+            vcs: std::sync::Arc::new(crate::vcs::GitProvider::default()),
             snapshot_store: Arc::new(SqliteSnapshotStore::new(db)),
             blobs: BlobStore::new(project.join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,

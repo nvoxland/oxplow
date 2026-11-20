@@ -144,7 +144,7 @@ impl Host {
     ) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
-        let project = &oxplow_app::vcs::GitProvider
+        let project = &oxplow_app::vcs::GitProvider::default()
             .main_checkout(checkout)
             .await
             .unwrap_or_else(|| checkout.to_path_buf());
@@ -271,7 +271,7 @@ impl Host {
             copy_all(&self.root, &root, &store)
                 .map_err(|e| format!("forking throwaway files: {e}"))?;
         }
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(&root)
             .await
             .map_err(|e| e.to_string())?;
@@ -337,7 +337,7 @@ impl Host {
         env: HostEnv,
         builds: bool,
     ) -> Result<Host, String> {
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(&root)
             .await
             .map_err(|e| e.to_string())?;
@@ -626,7 +626,7 @@ mod tests {
     #[tokio::test]
     async fn a_test_runs_an_extension_with_what_it_declares_and_nothing_else() {
         let main = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(main.path())
             .await
             .unwrap();
@@ -689,7 +689,7 @@ mod tests {
     #[tokio::test]
     async fn a_fork_links_to_its_deployments_instead_of_copying_them() {
         let project = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(project.path())
             .await
             .unwrap();
@@ -723,7 +723,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn forks_share_a_file_boundary_with_fixture_model_settings_writes() {
         let project = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(project.path())
             .await
             .unwrap();
@@ -776,7 +776,7 @@ mod tests {
     #[tokio::test]
     async fn a_source_kept_elsewhere_is_reported_where_it_is() {
         let project = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(project.path())
             .await
             .unwrap();
@@ -823,7 +823,7 @@ mod tests {
     #[tokio::test]
     async fn scalar_feature_settings_and_scaffolding_are_isolated() {
         let project = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(project.path())
             .await
             .unwrap();

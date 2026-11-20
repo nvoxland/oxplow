@@ -8,7 +8,9 @@
 //! run per process:
 //!
 //! - host → worker: an optional `{"tree": {files}}` (the run's
-//!   snapshot, when it was given `tree.read`), then `{"run": {runtime,
+//!   snapshot, when it was given `tree.read`), an optional
+//!   `{"languages": {sources}}` (the enabled extensions' languages, for
+//!   the parsing builtins), then `{"run": {runtime,
 //!   func, script, input, given}}`;
 //! - worker → host: `{"call": {seq, kind, id, args}}` for each `scope(…)`
 //!   or `ai_*` call, answered by host → worker `{"answer": {seq, ok | err}}`;
@@ -76,6 +78,11 @@ pub struct Given {
 pub enum ToWorker {
     Tree {
         files: HashMap<String, String>,
+    },
+    /// The languages the enabled extensions declare, before the run: the
+    /// worker builds its own set from them.
+    Languages {
+        sources: Vec<oxplow_code_metrics::LanguageSource>,
     },
     Run {
         #[serde(flatten)]
@@ -414,10 +421,15 @@ pub fn main() -> ! {
         seq: 0,
     }));
     let mut tree = None;
+    let mut languages = oxplow_code_metrics::Languages::default();
     let (engine, script, input, given) = loop {
         let msg = line.lock().unwrap_or_else(|e| e.into_inner()).read();
         match msg {
             ToWorker::Tree { files } => tree = Some(crate::runtime::TreeHost::new(files)),
+            // The host built the same set, so nothing here is refused.
+            ToWorker::Languages { sources } => {
+                languages = oxplow_code_metrics::Languages::build(&sources).0
+            }
             ToWorker::Run {
                 engine,
                 script,
@@ -427,7 +439,7 @@ pub fn main() -> ! {
             ToWorker::Answer { .. } => fail_hard("an answer before any call"),
         }
     };
-    let out = run(&line, engine, &script, &input, given, tree);
+    let out = run(&line, engine, &script, &input, given, tree, languages);
     let (ok, err) = match out {
         Ok(v) => (Some(v), None),
         Err(e) => (None, Some(Failure::of(&e))),
@@ -449,6 +461,7 @@ fn run(
     input: &Value,
     given: Given,
     tree: Option<crate::runtime::TreeHost>,
+    languages: oxplow_code_metrics::Languages,
 ) -> Result<Value, CollectError> {
     use crate::runtime::{run_jaq, run_starlark_inner, Hosts};
     let func = match engine {
@@ -456,6 +469,7 @@ fn run(
         Engine::Starlark { func } => func,
     };
     let hosts = Hosts {
+        languages: Arc::new(languages),
         tree: given.tree.then(|| tree.unwrap_or_default()),
         ai: given
             .ai

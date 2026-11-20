@@ -12,7 +12,7 @@
 //! the file and line, and an intent example with the fixture
 //! `oxplow extension test` runs the collector over.
 
-use oxplow_code_metrics::{language_for_path, language_from_name, language_support, Language};
+use oxplow_code_metrics::{Language, Languages};
 use oxplow_domain::contribution::extension_namespace;
 use serde_json::json;
 
@@ -32,41 +32,48 @@ pub struct MetricStarter {
 }
 
 impl Default for MetricStarter {
+    /// Rust over its files, from the languages oxplow ships.
     fn default() -> Self {
-        Self::new(None, None).expect("the default starter is valid")
+        Self::new(&crate::extension::language_set::shipped(), None, None)
+            .expect("the default starter is valid")
     }
 }
 
-/// Languages with a starter sample (the fixture's source), in the order
-/// the error lists them.
-const SAMPLED: &[Language] = &[
-    Language::Rust,
-    Language::TypeScript,
-    Language::JavaScript,
-    Language::Python,
-    Language::Go,
-    Language::C,
-    Language::Cpp,
-];
+/// The languages with a starter sample (their `starter:`, the fixture's
+/// source), in the order the error lists them.
+fn sampled(languages: &Languages) -> Vec<&Language> {
+    languages
+        .all()
+        .iter()
+        .filter(|l| l.analyzable() && l.decl().starter.is_some())
+        .collect()
+}
 
 impl MetricStarter {
     /// The starter for `language` (default `rust`) over `glob` (default:
     /// every file with one of the language's extensions).
-    pub fn new(language: Option<&str>, glob: Option<&str>) -> Result<Self, String> {
-        let language = match language.filter(|l| !l.is_empty()) {
-            None => Language::Rust,
-            Some(name) => language_from_name(name).ok_or_else(|| {
+    pub fn new(
+        languages: &Languages,
+        language: Option<&str>,
+        glob: Option<&str>,
+    ) -> Result<Self, String> {
+        let sampled = sampled(languages);
+        let name = language.filter(|l| !l.is_empty()).unwrap_or("rust");
+        let language = languages
+            .by_name(name)
+            .filter(|l| l.analyzable())
+            .cloned()
+            .ok_or_else(|| {
                 format!(
-                    "`{name}` isn't a language oxplow analyses; one of {}",
-                    names(SAMPLED)
+                    "`{name}` isn't a language oxplow analyses here (its language pack is off?); one of {}",
+                    names(&sampled)
                 )
-            })?,
-        };
-        if !SAMPLED.contains(&language) {
+            })?;
+        if language.decl().starter.is_none() {
             return Err(format!(
                 "no starter sample for `{}` yet; scaffold one of {} and change LANGUAGE in the script",
                 language.name(),
-                names(SAMPLED)
+                names(&sampled)
             ));
         }
         let glob = match glob.filter(|g| !g.is_empty()) {
@@ -74,24 +81,24 @@ impl MetricStarter {
                 if g.contains(['{', '[', '?']) {
                     return Err(format!(
                         "--glob `{g}`: use `*` and `**` only (e.g. `src/**/*.{}`)",
-                        extension_of(language)
+                        extension_of(&language)
                     ));
                 }
                 g.to_string()
             }
-            None => format!("**/*.{}", extension_of(language)),
+            None => format!("**/*.{}", extension_of(&language)),
         };
         let starter = Self { language, glob };
         // The sample's paths come from the glob: they must still be files
         // of the language, or the fixture could never match.
         for path in starter.sample_paths() {
-            if language_for_path(&path) != Some(language) {
+            if languages.for_path(&path) != Some(&starter.language) {
                 return Err(format!(
                     "--glob `{}` doesn't name {} files (its sample path `{path}` isn't one); \
                      end it in `*.{}`",
                     starter.glob,
-                    language.name(),
-                    extension_of(language)
+                    starter.language.name(),
+                    extension_of(&starter.language)
                 ));
             }
         }
@@ -123,7 +130,7 @@ impl MetricStarter {
     }
 }
 
-fn names(languages: &[Language]) -> String {
+fn names(languages: &[&Language]) -> String {
     languages
         .iter()
         .map(|l| format!("`{}`", l.name()))
@@ -131,8 +138,13 @@ fn names(languages: &[Language]) -> String {
         .join(", ")
 }
 
-fn extension_of(language: Language) -> &'static str {
-    language_support(language).extensions[0]
+fn extension_of(language: &Language) -> &str {
+    language
+        .decl()
+        .extensions
+        .first()
+        .map(String::as_str)
+        .unwrap_or_default()
 }
 
 /// One file of the extension: its path relative to the project root, and
@@ -314,9 +326,9 @@ impl Sample {
     fn new(starter: &MetricStarter, measure: &str, area: &str) -> Self {
         let over = COMPLEXITY_LIMIT as usize + 1;
         // Complexity is 1 + the decisions: `over` branches is over the limit.
-        let (engine, engine_starts) = source(starter.language, &[("calm", 0), ("busy", over)]);
+        let (engine, engine_starts) = source(&starter.language, &[("calm", 0), ("busy", over)]);
         let (view, view_starts) = source(
-            starter.language,
+            &starter.language,
             &[("busy_a", over), ("busy_b", over + 1), ("calm", 0)],
         );
         Self {
@@ -364,60 +376,19 @@ impl Sample {
 }
 
 /// A source file in `language` defining each `(name, branches)` function
-/// with that many `if` branches; the line each function starts on.
-pub(crate) fn source(language: Language, functions: &[(&str, usize)]) -> (String, Vec<usize>) {
+/// with that many decisions (its `starter:`); the line each function starts
+/// on. A language with no starter gives an empty file.
+pub(crate) fn source(language: &Language, functions: &[(&str, usize)]) -> (String, Vec<usize>) {
     let mut lines: Vec<String> = Vec::new();
     let mut starts = Vec::new();
+    let Some(starter) = language.decl().starter.as_ref() else {
+        return (String::new(), Vec::new());
+    };
     for (name, branches) in functions {
         starts.push(lines.len() + 1);
-        lines.extend(function(language, name, *branches));
+        lines.extend(starter.function(name, *branches));
     }
     (lines.join("\n") + "\n", starts)
-}
-
-fn function(language: Language, name: &str, branches: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    let i = 1..=branches;
-    match language {
-        Language::Rust => {
-            out.push(format!("fn {name}(x: i32) -> i32 {{"));
-            out.extend(i.map(|n| format!("    if x == {n} {{ return {n}; }}")));
-            out.push("    0".into());
-            out.push("}".into());
-        }
-        Language::TypeScript | Language::JavaScript => {
-            let params = if language == Language::TypeScript {
-                "x: number): number"
-            } else {
-                "x)"
-            };
-            out.push(format!("function {name}({params} {{"));
-            out.extend(i.map(|n| format!("    if (x === {n}) {{ return {n}; }}")));
-            out.push("    return 0;".into());
-            out.push("}".into());
-        }
-        Language::Python => {
-            out.push(format!("def {name}(x):"));
-            for n in i {
-                out.push(format!("    if x == {n}:"));
-                out.push(format!("        return {n}"));
-            }
-            out.push("    return 0".into());
-        }
-        Language::Go => {
-            out.push(format!("func {name}(x int) int {{"));
-            out.extend(i.map(|n| format!("    if x == {n} {{ return {n} }}")));
-            out.push("    return 0".into());
-            out.push("}".into());
-        }
-        _ => {
-            out.push(format!("int {name}(int x) {{"));
-            out.extend(i.map(|n| format!("    if (x == {n}) {{ return {n}; }}")));
-            out.push("    return 0;".into());
-            out.push("}".into());
-        }
-    }
-    out
 }
 
 fn title_case(name: &str) -> String {
@@ -442,9 +413,15 @@ mod tests {
     /// and its "calm" one isn't, at the line the fixture expects.
     #[test]
     fn every_starter_sample_has_one_function_over_the_limit_at_the_expected_line() {
-        for language in SAMPLED {
-            let (text, starts) = source(*language, &[("calm", 0), ("busy", 11)]);
-            let fns = oxplow_code_metrics::analyze_with_language("", &text, *language);
+        let languages = crate::extension::language_set::shipped();
+        let sampled = sampled(&languages);
+        assert_eq!(
+            names(&sampled),
+            "`rust`, `typescript`, `javascript`, `python`, `go`, `c`, `cpp`"
+        );
+        for language in sampled {
+            let (text, starts) = source(language, &[("calm", 0), ("busy", 11)]);
+            let fns = oxplow_code_metrics::analyze_with_language("", &text, language);
             let busy = fns
                 .iter()
                 .find(|f| f.name == "busy")
@@ -459,10 +436,11 @@ mod tests {
     #[test]
     fn the_starter_defaults_to_rust_over_its_files_and_refuses_what_cannot_be_sampled() {
         let s = MetricStarter::default();
-        assert_eq!((s.language, s.glob.as_str()), (Language::Rust, "**/*.rs"));
-        let ts = MetricStarter::new(Some("ts"), None).unwrap();
+        assert_eq!((s.language.name(), s.glob.as_str()), ("rust", "**/*.rs"));
+        let languages = crate::extension::language_set::shipped();
+        let ts = MetricStarter::new(&languages, Some("ts"), None).unwrap();
         assert_eq!(ts.glob, "**/*.ts");
-        let src = MetricStarter::new(Some("rust"), Some("src/**/*.rs")).unwrap();
+        let src = MetricStarter::new(&languages, Some("rust"), Some("src/**/*.rs")).unwrap();
         assert_eq!(
             src.sample_paths(),
             [
@@ -470,16 +448,16 @@ mod tests {
                 "src/web/view.rs".to_string()
             ]
         );
-        assert!(MetricStarter::new(Some("klingon"), None)
+        assert!(MetricStarter::new(&languages, Some("klingon"), None)
             .unwrap_err()
             .contains("isn't a language"));
-        assert!(MetricStarter::new(Some("java"), None)
+        assert!(MetricStarter::new(&languages, Some("java"), None)
             .unwrap_err()
             .contains("no starter sample"));
-        assert!(MetricStarter::new(None, Some("**/*.{rs,toml}"))
+        assert!(MetricStarter::new(&languages, None, Some("**/*.{rs,toml}"))
             .unwrap_err()
             .contains("`*` and `**` only"));
-        assert!(MetricStarter::new(None, Some("**/*.md"))
+        assert!(MetricStarter::new(&languages, None, Some("**/*.md"))
             .unwrap_err()
             .contains("doesn't name rust files"));
     }

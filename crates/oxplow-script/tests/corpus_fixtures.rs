@@ -76,6 +76,7 @@ fn the_tree_has_files_of_a_hundred_to_three_hundred_lines_in_three_languages() {
 fn the_tree_has_duplicated_blocks_for_the_detector() {
     let files = tree::corpus(tree::DEFAULT_FILES);
     let blocks = oxplow_code_dup::detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         files.iter().map(|(p, t)| (p.clone(), t.as_str())),
         oxplow_code_dup::DupOptions {
             min_lines: 10,

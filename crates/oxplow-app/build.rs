@@ -28,7 +28,20 @@ use std::path::{Path, PathBuf};
 mod stray_folder;
 
 /// The extensions that ship with oxplow, by folder name.
-const BUNDLED: &[&str] = &["oxplow-foundation", "oxplow-bundled", "oxtask", "oxwiki"];
+const BUNDLED: &[&str] = &[
+    "oxplow-foundation",
+    "oxplow-bundled",
+    "oxtask",
+    "oxwiki",
+    "oxplow-rust",
+    "oxplow-typescript",
+    "oxplow-python",
+    "oxplow-go",
+    "oxplow-java",
+    "oxplow-c",
+    "oxplow-csharp",
+    "oxplow-clojure",
+];
 
 fn main() {
     let manifest_dir =

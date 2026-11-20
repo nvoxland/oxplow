@@ -1,0 +1,23 @@
+# Python: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [function_definition, lambda]
+  param_list_fields: [parameters]
+  parameter_kinds: [identifier, default_parameter, typed_parameter, typed_default_parameter, list_splat_pattern, dictionary_splat_pattern, tuple_pattern]
+decisions:
+  kinds: [if_statement, elif_clause, for_statement, while_statement, try_statement, except_clause, with_statement, conditional_expression, boolean_operator, match_statement, case_clause]
+visibility:
+  strategy: underscore_prefix
+doc:
+  strategy: first_string_statement
+imports:
+  strategy: python_import
+duplication:
+  skip_kinds: [import_statement, import_from_statement, future_import_statement]
+merge:
+  key: named
+  import_kinds: [import_statement, import_from_statement, future_import_statement]
+  # A decorated def wraps the real function_definition/class_definition
+  # under the `definition` field; the decorators ride along in the text.
+  transparent_kinds: [decorated_definition]
+  inner_decl_fields: [definition]
+  name_fields: [name]

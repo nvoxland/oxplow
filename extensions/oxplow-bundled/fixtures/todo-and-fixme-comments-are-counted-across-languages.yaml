@@ -1,4 +1,6 @@
 # one todo fact per marker comment; a README is not source.
+# The languages its files are in: their packs.
+requires: [oxplow-clojure, oxplow-rust, oxplow-typescript]
 when:
   collector: oxplow.todos
   files:

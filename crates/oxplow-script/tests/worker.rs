@@ -519,7 +519,11 @@ fn a_file_is_parsed_once_across_a_sweeps_scripts() {
     let run = |script: &str| {
         w.run(
             &budget(10_000),
-            ScriptRun::starlark(script, json!({})).with_tree(tree.clone()),
+            ScriptRun::starlark(script, json!({}))
+                .with_tree(tree.clone())
+                .with_languages(std::sync::Arc::new(
+                    oxplow_code_metrics::for_tests::shipped(),
+                )),
             None,
         )
         .unwrap()
@@ -543,7 +547,11 @@ fn a_file_is_parsed_once_across_a_sweeps_scripts() {
     let uncached = fresh
         .run(
             &budget(10_000),
-            ScriptRun::starlark(&sweep_script("len(fns)"), json!({})).with_tree(tree.clone()),
+            ScriptRun::starlark(&sweep_script("len(fns)"), json!({}))
+                .with_tree(tree.clone())
+                .with_languages(std::sync::Arc::new(
+                    oxplow_code_metrics::for_tests::shipped(),
+                )),
             None,
         )
         .unwrap()
@@ -556,7 +564,11 @@ fn a_file_is_parsed_once_across_a_sweeps_scripts() {
     let after = w
         .run(
             &budget(10_000),
-            ScriptRun::starlark(&sweep_script("len(fns)"), json!({})).with_tree(Arc::new(edited)),
+            ScriptRun::starlark(&sweep_script("len(fns)"), json!({}))
+                .with_tree(Arc::new(edited))
+                .with_languages(std::sync::Arc::new(
+                    oxplow_code_metrics::for_tests::shipped(),
+                )),
             None,
         )
         .unwrap()

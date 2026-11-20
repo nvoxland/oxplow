@@ -33,7 +33,11 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         ("src/a.rs".to_string(), body.to_string()),
         ("src/b.rs".to_string(), body.to_string()),
     ];
-    let blocks = detect_duplicates(files, detect_opts());
+    let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
+        files,
+        detect_opts(),
+    );
     assert!(!blocks.is_empty(), "expected at least one duplicate");
     let b = &blocks[0];
     assert_eq!(b.a_path, "src/a.rs");
@@ -74,6 +78,7 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), original.to_string()),
             ("src/b.rs".to_string(), renamed.to_string()),
@@ -88,6 +93,7 @@ fn ignores_unique_files() {
     let a = "fn add(a: i32, b: i32) -> i32 { a + b }";
     let b = "fn unrelated() { println!(\"hello world\"); }";
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), a.to_string()),
             ("src/b.rs".to_string(), b.to_string()),
@@ -101,6 +107,7 @@ fn ignores_unique_files() {
 fn ignores_short_clones_below_min_lines() {
     let body = "fn tiny() { println!(\"x\"); }";
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), body.to_string()),
             ("src/b.rs".to_string(), body.to_string()),
@@ -122,6 +129,7 @@ fn cross_language_files_dont_match() {
         return b
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), rs.to_string()),
             ("src/b.py".to_string(), py.to_string()),
@@ -156,6 +164,7 @@ fn a(x: i32) -> i32 {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/x.c".to_string(), c_src.to_string()),
             ("src/x.rs".to_string(), rust_src.to_string()),
@@ -207,6 +216,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), a.to_string()),
             ("src/b.rs".to_string(), b.to_string()),
@@ -245,6 +255,7 @@ fn completely_different_logic(name: &str) -> String {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), a.to_string()),
             ("src/b.rs".to_string(), b.to_string()),
@@ -278,6 +289,7 @@ function unique_b(x: number) {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.ts".to_string(), a.to_string()),
             ("src/b.ts".to_string(), b.to_string()),
@@ -311,6 +323,7 @@ def unique_b(x):
     return x * 2
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.py".to_string(), a.to_string()),
             ("src/b.py".to_string(), b.to_string()),
@@ -358,6 +371,7 @@ const bannerStyle = {
 };
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.tsx".to_string(), a.to_string()),
             ("src/b.tsx".to_string(), b.to_string()),
@@ -400,6 +414,7 @@ pub enum LspClientError {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), a.to_string()),
             ("src/b.rs".to_string(), b.to_string()),
@@ -453,6 +468,7 @@ export function MountB(): string {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.tsx".to_string(), a.to_string()),
             ("src/b.tsx".to_string(), b.to_string()),
@@ -493,6 +509,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), body.to_string()),
             ("src/b.rs".to_string(), body.to_string()),
@@ -510,6 +527,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 #[test]
 fn skips_unsupported_languages() {
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             (
                 "README.md".to_string(),
@@ -548,6 +566,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     let mut scope = BTreeSet::new();
     scope.insert("src/a.rs".to_string());
     let blocks = detect_duplicates_scoped(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), body.to_string()),
             ("src/b.rs".to_string(), body.to_string()),
@@ -589,6 +608,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     let mut scope = BTreeSet::new();
     scope.insert("src/changed.rs".to_string()); // not in corpus
     let blocks = detect_duplicates_scoped(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), body.to_string()),
             ("src/b.rs".to_string(), body.to_string()),
@@ -630,6 +650,7 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
     let mut scope = BTreeSet::new();
     scope.insert("src/single.rs".to_string());
     let blocks = detect_duplicates_scoped(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![("src/single.rs".to_string(), body_with_repeat.to_string())],
         &scope,
         DupOptions::default(),
@@ -690,6 +711,7 @@ function elsewhere() {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/host.ts".to_string(), host.to_string()),
             ("src/peer.ts".to_string(), peer.to_string()),
@@ -737,6 +759,7 @@ fn clojure_clone_across_two_files() {
     @out))
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.clj".to_string(), body.to_string()),
             ("src/b.clj".to_string(), other.to_string()),
@@ -770,6 +793,7 @@ fn clojure_ns_require_preamble_is_skipped() {
   (* x 2))
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.clj".to_string(), a.to_string()),
             ("src/b.clj".to_string(), b.to_string()),
@@ -795,7 +819,13 @@ fn detections_run_one_at_a_time() {
     let threads: Vec<_> = (0..4)
         .map(|_| {
             let corpus = corpus.clone();
-            std::thread::spawn(move || detect_duplicates(corpus, detect_opts()))
+            std::thread::spawn(move || {
+                detect_duplicates(
+                    &oxplow_code_metrics::for_tests::shipped(),
+                    corpus,
+                    detect_opts(),
+                )
+            })
         })
         .collect();
     for t in threads {
@@ -833,7 +863,11 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 #[test]
 fn a_dense_clone_family_reports_a_pair_per_member_not_per_pair_of_members() {
     let n = 60;
-    let blocks = detect_duplicates(dense(n), detect_opts());
+    let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
+        dense(n),
+        detect_opts(),
+    );
     assert!(
         blocks.len() < 2 * n,
         "{} blocks for {n} identical functions",
@@ -853,7 +887,12 @@ fn a_dense_clone_family_reports_a_pair_per_member_not_per_pair_of_members() {
 #[test]
 fn a_dense_family_member_in_scope_still_has_a_finding() {
     let scope: BTreeSet<String> = ["src/m037.rs".to_string()].into();
-    let blocks = detect_duplicates_scoped(dense(60), &scope, detect_opts());
+    let blocks = detect_duplicates_scoped(
+        &oxplow_code_metrics::for_tests::shipped(),
+        dense(60),
+        &scope,
+        detect_opts(),
+    );
     assert!(!blocks.is_empty());
     assert!(blocks.iter().all(|b| b.a_path == "src/m037.rs"));
 }
@@ -902,6 +941,7 @@ fn single(items: Vec<i32>) -> i32 {
 }
 "#;
     let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
         vec![
             ("src/a.rs".to_string(), twice.to_string()),
             ("src/b.rs".to_string(), once.to_string()),
@@ -938,7 +978,12 @@ fn a_scoped_scan_keeps_only_subtrees_that_could_match_the_scope() {
     files.push(("src/scope.rs".into(), clone.clone()));
     files.push(("src/twin.rs".into(), clone));
     let scope: BTreeSet<String> = ["src/scope.rs".to_string()].into();
-    let blocks = detect_duplicates_scoped(files.clone(), &scope, detect_opts());
+    let blocks = detect_duplicates_scoped(
+        &oxplow_code_metrics::for_tests::shipped(),
+        files.clone(),
+        &scope,
+        detect_opts(),
+    );
     assert!(
         blocks
             .iter()
@@ -947,7 +992,11 @@ fn a_scoped_scan_keeps_only_subtrees_that_could_match_the_scope() {
     );
     let kept = last_scan_records();
     let whole = {
-        detect_duplicates(files, detect_opts());
+        detect_duplicates(
+            &oxplow_code_metrics::for_tests::shipped(),
+            files,
+            detect_opts(),
+        );
         last_scan_records()
     };
     assert!(kept * 4 < whole, "kept {kept} of {whole} subtrees");
@@ -959,7 +1008,12 @@ fn a_scoped_scan_reports_what_the_whole_tree_scan_would_for_the_scope() {
     let mut files = dense(6);
     files.extend((0..10).map(unique_file));
     let scope: BTreeSet<String> = ["src/m002.rs".to_string(), "src/u003.rs".to_string()].into();
-    let scoped = detect_duplicates_scoped(files.clone(), &scope, detect_opts());
+    let scoped = detect_duplicates_scoped(
+        &oxplow_code_metrics::for_tests::shipped(),
+        files.clone(),
+        &scope,
+        detect_opts(),
+    );
     assert!(scoped.iter().any(|b| b.a_path == "src/m002.rs"));
     assert!(scoped.iter().all(|b| scope.contains(&b.a_path)));
     // Whole tree, then filtered to the scope: the same regions.
@@ -975,10 +1029,14 @@ fn a_scoped_scan_reports_what_the_whole_tree_scan_would_for_the_scope() {
             .filter(|(p, _, _)| scope.contains(p))
             .collect()
     };
-    let whole: Vec<DuplicateBlock> = detect_duplicates(files, detect_opts())
-        .into_iter()
-        .filter(|b| b.a_path != b.b_path)
-        .collect();
+    let whole: Vec<DuplicateBlock> = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
+        files,
+        detect_opts(),
+    )
+    .into_iter()
+    .filter(|b| b.a_path != b.b_path)
+    .collect();
     assert_eq!(regions(&scoped), regions(&whole));
 }
 
@@ -1013,19 +1071,34 @@ fn family() -> (Vec<(String, String)>, BTreeSet<String>) {
 fn a_second_scan_of_an_unchanged_tree_parses_nothing() {
     let (files, scope) = family();
     let cache = DupCache::default();
-    let (first, cold) =
-        detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    let (first, cold) = detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     assert_eq!(cold.hits, 0);
     assert_eq!(cold.misses, files.len());
     let parsed = parses();
-    let (second, warm) =
-        detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    let (second, warm) = detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     assert_eq!(parses(), parsed, "the warm scan parsed");
     assert_eq!((warm.hits, warm.misses), (files.len(), 0));
     assert_eq!(first, second);
     assert_eq!(
         first,
-        detect_duplicates_scoped(files.clone(), &scope, detect_opts())
+        detect_duplicates_scoped(
+            &oxplow_code_metrics::for_tests::shipped(),
+            files.clone(),
+            &scope,
+            detect_opts()
+        )
     );
 }
 
@@ -1034,7 +1107,13 @@ fn a_second_scan_of_an_unchanged_tree_parses_nothing() {
 fn a_cached_file_is_not_read() {
     let (files, scope) = family();
     let cache = DupCache::default();
-    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     let unread: Vec<CachedFile> = files
         .iter()
         .map(|(p, t)| CachedFile {
@@ -1046,7 +1125,13 @@ fn a_cached_file_is_not_read() {
             text: Box::new(|| panic!("read a cached file")),
         })
         .collect();
-    detect_duplicates_scoped_cached(unread, &scope, detect_opts(), &cache);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        unread,
+        &scope,
+        detect_opts(),
+        &cache,
+    );
 }
 
 /// An edit is a new content id: that file alone is parsed again.
@@ -1054,10 +1139,21 @@ fn a_cached_file_is_not_read() {
 fn an_edited_file_is_parsed_again_and_no_other() {
     let (mut files, scope) = family();
     let cache = DupCache::default();
-    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     files[3].1.push_str("\n// edited\n");
-    let (_, stats) =
-        detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    let (_, stats) = detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     assert_eq!((stats.hits, stats.misses), (files.len() - 1, 1));
 }
 
@@ -1066,12 +1162,24 @@ fn an_edited_file_is_parsed_again_and_no_other() {
 fn the_size_floors_are_part_of_the_key() {
     let (files, scope) = family();
     let cache = DupCache::default();
-    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     let other = DupOptions {
         min_nodes: 60,
         ..detect_opts()
     };
-    let (_, stats) = detect_duplicates_scoped_cached(cached(&files, true), &scope, other, &cache);
+    let (_, stats) = detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        other,
+        &cache,
+    );
     assert_eq!(stats.hits, 0);
 }
 
@@ -1080,8 +1188,13 @@ fn the_size_floors_are_part_of_the_key() {
 fn a_file_with_no_key_bypasses_the_cache() {
     let (files, scope) = family();
     let cache = DupCache::default();
-    let (_, stats) =
-        detect_duplicates_scoped_cached(cached(&files, false), &scope, detect_opts(), &cache);
+    let (_, stats) = detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, false),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
     assert_eq!((stats.hits, stats.misses), (0, files.len()));
     assert_eq!(cache.held(), (0, 0));
 }
@@ -1092,18 +1205,36 @@ fn a_file_with_no_key_bypasses_the_cache() {
 fn the_cache_evicts_the_least_recently_used_file_to_stay_in_budget() {
     let (files, scope) = family();
     let whole = DupCache::default();
-    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &whole);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &whole,
+    );
     let (records, bytes) = whole.held();
     assert!(records > 0 && bytes == records * RECORD_BYTES);
 
     let small = DupCache::with_budget(bytes / 3);
-    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &small);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &small,
+    );
     let (_, held) = small.held();
     assert!(held <= bytes / 3, "{held} > {}", bytes / 3);
     assert!(held > 0);
     // A budget below one file's records holds nothing.
     let tiny = DupCache::with_budget(RECORD_BYTES);
-    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &tiny);
+    detect_duplicates_scoped_cached(
+        &oxplow_code_metrics::for_tests::shipped(),
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &tiny,
+    );
     assert_eq!(tiny.held().1, 0);
 }
 
@@ -1115,25 +1246,33 @@ fn the_cache_evicts_the_least_recently_used_file_to_stay_in_budget() {
 fn the_records_are_pinned_to_the_detector_version() {
     let body = dense(1).remove(0).1;
     let mut out = Vec::new();
-    scan_file("src/pin.rs", &body, detect_opts(), None, &mut out);
+    scan_file(
+        &oxplow_code_metrics::for_tests::shipped(),
+        "src/pin.rs",
+        &body,
+        detect_opts(),
+        None,
+        &mut out,
+    );
     let hashes: Vec<(u64, u32, u32, u32)> = out
         .iter()
         .map(|s| (s.hash, s.node_count, s.start_line, s.end_line))
         .collect();
-    assert_eq!(DETECTOR_VERSION, 1, "re-pin the hashes below, then bump");
-    assert_eq!(hashes, PINNED_V1);
+    assert_eq!(DETECTOR_VERSION, 2, "re-pin the hashes below, then bump");
+    assert_eq!(hashes, PINNED_V2, "{hashes:?}");
 }
 
-const PINNED_V1: &[(u64, u32, u32, u32)] = &[
-    (3679152524243699532, 116, 2, 14),
-    (13672393085675031171, 94, 2, 14),
-    (3199666752499502949, 76, 4, 12),
-    (362106070147055594, 75, 4, 12),
-    (7382068709588596213, 70, 4, 12),
-    (16313548889648378043, 67, 5, 11),
-    (3996386052852592696, 66, 5, 11),
-    (12028981030681832557, 43, 7, 11),
-    (378789080419906373, 41, 7, 11),
+/// v2: a language's salt is a hash of its id (languages come from packs).
+const PINNED_V2: &[(u64, u32, u32, u32)] = &[
+    (6252413702465532130, 116, 2, 14),
+    (16000299457699003937, 94, 2, 14),
+    (10827644829822975571, 76, 4, 12),
+    (4384064466397523600, 75, 4, 12),
+    (801440645861892931, 70, 4, 12),
+    (4667518649476452273, 67, 5, 11),
+    (9144724630292081198, 66, 5, 11),
+    (18024098137475070791, 43, 7, 11),
+    (881846451359834463, 41, 7, 11),
 ];
 
 /// A copy inside a closure sits in two functions at once (the closure and
@@ -1154,7 +1293,11 @@ fn a_copy_inside_a_closure_is_one_block() {
             body("third", "let b = other();"),
         ),
     )];
-    let blocks = detect_duplicates(files, detect_opts());
+    let blocks = detect_duplicates(
+        &oxplow_code_metrics::for_tests::shipped(),
+        files,
+        detect_opts(),
+    );
     assert!(!blocks.is_empty(), "the copy is found");
     let mut seen = std::collections::HashSet::new();
     for b in &blocks {

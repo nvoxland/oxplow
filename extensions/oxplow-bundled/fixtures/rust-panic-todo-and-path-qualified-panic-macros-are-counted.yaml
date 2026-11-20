@@ -1,4 +1,6 @@
 # Rust: panic!, todo! and std::panic! count (the scoped form too).
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 when:
   collector: oxplow.rust.panic_macros
   files:

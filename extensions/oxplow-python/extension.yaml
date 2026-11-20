@@ -1,0 +1,26 @@
+manifest: 2
+name: oxplow-python
+namespace: oxplow
+description: "What oxplow knows about Python: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Python."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Python in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: python
+    title: "Python"
+    extensions: [py]
+    aliases: ["py"]
+    grammar: { native: python }
+    analysis: languages/python/analysis.yaml
+    symbols: languages/python/symbols.scm
+    lsp: { package: pyright }
+    units: [class]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "def {name}(x):"
+      branch: ["    if x == {n}:", "        return {n}"]
+      tail: ["    return 0"]

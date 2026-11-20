@@ -1,0 +1,20 @@
+manifest: 2
+name: oxplow-clojure
+namespace: oxplow
+description: "What oxplow knows about Clojure: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Clojure."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Clojure in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: clojure
+    title: "Clojure"
+    extensions: [clj, cljs, cljc]
+    aliases: ["clj", "cljs", "cljc"]
+    grammar: { native: clojure }
+    analysis: languages/clojure/analysis.yaml
+    symbols: languages/clojure/symbols.scm
+    units: [class, module]

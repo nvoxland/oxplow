@@ -1,4 +1,6 @@
 # one length fact per function in every language.
+# The languages its files are in: their packs.
+requires: [oxplow-clojure, oxplow-rust, oxplow-typescript]
 when:
   collector: oxplow.long_functions
   files:

@@ -413,6 +413,19 @@ intent:
     - name: the-extension-page-links-each-contribution-to-its-definition
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
       expect: each contribution table opens the definition, not the data
+# Languages oxplow knows only by their language servers: no grammar, so
+# nothing parses them; they say which files a server covers and which
+# Mason package to suggest. Languages oxplow parses are the language
+# packs' (`oxplow-rust` and the rest).
+languages:
+  - { id: lua, title: Lua, extensions: [lua], lsp: { package: lua-language-server } }
+  - { id: json, title: JSON, extensions: [json, jsonc], lsp: { package: json-lsp } }
+  - { id: yaml, title: YAML, extensions: [yaml, yml], lsp: { package: yaml-language-server } }
+  - { id: html, title: HTML, extensions: [html, htm], lsp: { package: html-lsp } }
+  - { id: css, title: CSS, extensions: [css], lsp: { package: css-lsp } }
+  - { id: bash, title: Bash, extensions: [sh, bash], aliases: [shell], lsp: { package: bash-language-server } }
+  - { id: ruby, title: Ruby, extensions: [rb], lsp: { package: ruby-lsp } }
+  - { id: zig, title: Zig, extensions: [zig], lsp: { package: zls } }
 panels:
   # The left nav's Go To, beside the Go To page its header opens: the
   # thread's bookmarks, recent or most visited pages, one kind at a time

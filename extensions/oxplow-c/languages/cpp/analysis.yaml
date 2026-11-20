@@ -1,0 +1,21 @@
+# C++: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [function_definition, lambda_expression]
+  param_list_fields: [parameters]
+  parameter_kinds: [parameter_declaration, optional_parameter_declaration]
+decisions:
+  kinds: [if_statement, case_statement, for_statement, for_range_loop, while_statement, do_statement, catch_clause, conditional_expression]
+visibility:
+  strategy: access_specifier
+doc:
+  strategy: preceding_comment
+  prefixes: ["/**", "///", "//!", "/*!"]
+imports:
+  strategy: cpp_include
+duplication:
+  skip_kinds: [preproc_include, using_declaration]
+merge:
+  # Uses the bespoke c_declarator key resolver (declarator-based names +
+  # signatures); import_kinds covers #include.
+  key: c_declarator
+  import_kinds: [preproc_include]

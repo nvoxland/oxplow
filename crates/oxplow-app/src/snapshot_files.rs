@@ -245,7 +245,7 @@ mod tests {
             f.svc.snapshot_store.clone(),
             f.svc.blobs.clone(),
             worktree.path().to_path_buf(),
-            std::sync::Arc::new(crate::vcs::GitProvider),
+            std::sync::Arc::new(crate::vcs::GitProvider::default()),
             stream,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),

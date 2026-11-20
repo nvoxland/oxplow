@@ -342,14 +342,14 @@ mod tests {
         let db = Database::in_memory();
         let svc = StreamService::new(
             WorkspaceLayout::for_project(&project),
-            Arc::new(crate::vcs::GitProvider),
+            Arc::new(crate::vcs::GitProvider::default()),
             Arc::new(SqliteStreamStore::new(db.clone())),
             Arc::new(SqliteThreadStore::new(db.clone())),
         );
         svc.ensure_primary().await.unwrap();
         let captures = SnapshotCaptureRegistry::new(
             crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
-                vcs: Arc::new(crate::vcs::GitProvider),
+                vcs: Arc::new(crate::vcs::GitProvider::default()),
                 snapshot_store: Arc::new(oxplow_db::SqliteSnapshotStore::new(db)),
                 blobs: crate::blob_store::BlobStore::new(project.join(".oxplow/snapshots")),
                 max_file_bytes: 1_000_000,
@@ -360,7 +360,7 @@ mod tests {
         let registry = StreamWatchRegistry::new(
             svc.clone(),
             captures,
-            Arc::new(crate::vcs::GitProvider),
+            Arc::new(crate::vcs::GitProvider::default()),
             bus.clone(),
             crate::ref_moves::RefMoves::new(bus.clone()),
         );

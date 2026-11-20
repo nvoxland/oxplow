@@ -1,0 +1,21 @@
+# C: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [function_definition]
+  param_list_fields: [parameters]
+  parameter_kinds: [parameter_declaration]
+decisions:
+  kinds: [if_statement, case_statement, for_statement, while_statement, do_statement, conditional_expression]
+visibility:
+  strategy: static_storage
+doc:
+  strategy: preceding_comment
+  prefixes: ["/**", "///", "//!", "/*!"]
+imports:
+  strategy: c_include
+duplication:
+  skip_kinds: [preproc_include]
+merge:
+  # Uses the bespoke c_declarator key resolver (declarator-based names +
+  # signatures); import_kinds covers #include.
+  key: c_declarator
+  import_kinds: [preproc_include]

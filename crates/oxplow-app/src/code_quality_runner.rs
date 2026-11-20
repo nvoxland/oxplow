@@ -79,6 +79,7 @@ pub struct RunOptions {
 /// Runs on the blocking pool (tree-sitter is CPU-bound) under the
 /// `opts.timeout` budget.
 pub async fn scan_duplicates(
+    languages: Arc<oxplow_code_metrics::Languages>,
     corpus: Vec<(String, String)>,
     scope: BTreeSet<String>,
     opts: RunOptions,
@@ -88,9 +89,11 @@ pub async fn scan_duplicates(
     let task = tokio::task::spawn_blocking(move || {
         let inputs: Vec<(String, String)> = corpus
             .into_iter()
-            .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
+            .filter(|(p, _)| languages.is_supported_path(Path::new(p)))
             .collect();
-        blocks_to_findings(detect_duplicates_scoped(inputs, &scope, dup_opts))
+        blocks_to_findings(detect_duplicates_scoped(
+            &languages, inputs, &scope, dup_opts,
+        ))
     });
     match tokio::time::timeout(timeout, task).await {
         Ok(Ok(findings)) => Ok(findings),
@@ -105,6 +108,7 @@ pub async fn scan_duplicates(
 /// whose content id it knows is neither read nor parsed. Returns the
 /// findings and how many files hit and missed.
 pub async fn scan_duplicates_cached(
+    languages: Arc<oxplow_code_metrics::Languages>,
     files: Vec<oxplow_code_dup::CachedFile>,
     scope: BTreeSet<String>,
     opts: RunOptions,
@@ -115,10 +119,11 @@ pub async fn scan_duplicates_cached(
     let task = tokio::task::spawn_blocking(move || {
         let files: Vec<_> = files
             .into_iter()
-            .filter(|f| oxplow_code_metrics::is_supported_path(Path::new(&f.path)))
+            .filter(|f| languages.is_supported_path(Path::new(&f.path)))
             .collect();
-        let (blocks, stats) =
-            oxplow_code_dup::detect_duplicates_scoped_cached(files, &scope, dup_opts, &cache);
+        let (blocks, stats) = oxplow_code_dup::detect_duplicates_scoped_cached(
+            &languages, files, &scope, dup_opts, &cache,
+        );
         (blocks_to_findings(blocks), stats)
     });
     match tokio::time::timeout(timeout, task).await {
@@ -211,6 +216,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     #[tokio::test]
     async fn duplicates_are_paired_with_their_peers() {
         let findings = scan_duplicates(
+            Arc::new(oxplow_code_metrics::for_tests::shipped()),
             corpus(&[("a.rs", BODY), ("b.rs", BODY), ("README.md", BODY)]),
             BTreeSet::from(["a.rs".to_string(), "README.md".to_string()]),
             small(),
@@ -231,6 +237,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     #[tokio::test]
     async fn unique_files_have_no_duplicates() {
         let findings = scan_duplicates(
+            Arc::new(oxplow_code_metrics::for_tests::shipped()),
             corpus(&[
                 ("a.rs", "fn add(a: i32, b: i32) -> i32 { a + b }"),
                 ("b.rs", "fn unrelated() { println!(\"hi\"); }"),
@@ -248,6 +255,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     #[tokio::test]
     async fn a_scoped_scan_finds_copies_in_unchanged_peers() {
         let findings = scan_duplicates(
+            Arc::new(oxplow_code_metrics::for_tests::shipped()),
             corpus(&[("changed.rs", BODY), ("untouched.rs", BODY)]),
             BTreeSet::from(["changed.rs".to_string()]),
             small(),
@@ -267,6 +275,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     async fn a_scoped_scan_drops_same_file_matches() {
         let twice = format!("{BODY}\n{}", BODY.replace("helper", "helper_two"));
         let findings = scan_duplicates(
+            Arc::new(oxplow_code_metrics::for_tests::shipped()),
             corpus(&[("only.rs", &twice)]),
             BTreeSet::from(["only.rs".to_string()]),
             small(),

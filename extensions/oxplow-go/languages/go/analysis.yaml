@@ -1,0 +1,20 @@
+# Go: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [function_declaration, method_declaration, func_literal]
+  param_list_fields: [parameters]
+  parameter_kinds: [parameter_declaration, variadic_parameter_declaration]
+decisions:
+  kinds: [if_statement, for_statement, type_switch_statement, expression_switch_statement, type_case, expression_case, select_statement, communication_case]
+visibility:
+  strategy: capitalized_name
+doc:
+  strategy: preceding_comment
+  prefixes: ["//", "/*"]
+imports:
+  strategy: go_import
+duplication:
+  skip_kinds: [import_declaration, import_spec, import_spec_list, package_clause]
+merge:
+  key: named
+  import_kinds: [import_declaration]
+  name_fields: [name]

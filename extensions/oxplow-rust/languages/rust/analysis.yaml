@@ -1,0 +1,25 @@
+# Rust: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [function_item, closure_expression]
+  param_list_fields: [parameters]
+  parameter_kinds: [parameter, self_parameter]
+decisions:
+  # `else_clause` deliberately excluded: McCabe counts only
+  # condition-bearing branches, so an `if/else if/else` chain adds 2
+  # (the two ifs), not 4.
+  # Boolean operators (&&, ||) are tokens inside binary_expression, not
+  # their own nodes: skipped for simplicity.
+  kinds: [if_expression, match_arm, while_expression, for_expression, loop_expression, try_expression]
+visibility:
+  strategy: visibility_modifier
+doc:
+  strategy: preceding_comment
+  prefixes: ["///", "//!", "/**"]
+imports:
+  strategy: rust_use
+duplication:
+  skip_kinds: [use_declaration, extern_crate_declaration]
+merge:
+  key: named
+  import_kinds: [use_declaration, extern_crate_declaration]
+  name_fields: [name]

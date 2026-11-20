@@ -31,6 +31,8 @@ pub struct DuplicationRecorder {
     trees: Arc<Trees>,
     cache: Arc<oxplow_code_dup::DupCache>,
     background_tasks: BackgroundTaskStore,
+    /// What the detector parses with (the enabled extensions' languages).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 impl DuplicationRecorder {
@@ -40,6 +42,7 @@ impl DuplicationRecorder {
             trees: svc.trees.clone(),
             cache: svc.dup_cache.clone(),
             background_tasks: svc.background_tasks.clone(),
+            languages: svc.languages.clone(),
         }
     }
 
@@ -76,26 +79,33 @@ impl DuplicationRecorder {
         });
         // Read only what the detector can parse: the rest (binaries,
         // assets, docs) would be read whole and then dropped.
-        let parseable = |p: &str| oxplow_code_metrics::is_supported_path(std::path::Path::new(p));
+        let languages = svc.languages.current();
+        let parseable = |p: &str| languages.is_supported_path(std::path::Path::new(p));
         let started = std::time::Instant::now();
         let scanned_corpus = match svc.trees.cached_corpus(&ws, &revision, parseable).await {
             Ok(files) => {
-                scan_duplicates_cached(files, scope_paths, RunOptions::default(), svc.cache.clone())
-                    .await
-                    .map(|(findings, stats)| {
-                        // A cold scan after a restart is all misses.
-                        tracing::info!(
-                            scope = %scope,
-                            revision = %revision_str,
-                            findings = findings.len(),
-                            cache_hits = stats.hits,
-                            cache_misses = stats.misses,
-                            elapsed_ms = started.elapsed().as_millis() as u64,
-                            "duplicate scan"
-                        );
-                        findings
-                    })
-                    .map_err(|e| e.to_string())
+                scan_duplicates_cached(
+                    languages.clone(),
+                    files,
+                    scope_paths,
+                    RunOptions::default(),
+                    svc.cache.clone(),
+                )
+                .await
+                .map(|(findings, stats)| {
+                    // A cold scan after a restart is all misses.
+                    tracing::info!(
+                        scope = %scope,
+                        revision = %revision_str,
+                        findings = findings.len(),
+                        cache_hits = stats.hits,
+                        cache_misses = stats.misses,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "duplicate scan"
+                    );
+                    findings
+                })
+                .map_err(|e| e.to_string())
             }
             Err(e) => Err(e.to_string()),
         };

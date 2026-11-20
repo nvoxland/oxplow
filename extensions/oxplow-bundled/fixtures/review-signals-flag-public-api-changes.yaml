@@ -1,6 +1,8 @@
 # The review's `api` signals: a public function whose parameters changed, and
 # a public function the change removed. Callers outside the change may break.
 # A private function, a body-only change and a test are not API changes.
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 given:
   - observe:
       change:

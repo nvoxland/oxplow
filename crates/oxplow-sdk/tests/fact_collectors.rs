@@ -16,7 +16,7 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
 async fn a_fact_collectors_examples_run_over_their_files() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    oxplow_app::vcs::GitProvider
+    oxplow_app::vcs::GitProvider::default()
         .init_repository(root)
         .await
         .unwrap();

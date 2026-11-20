@@ -1,4 +1,6 @@
 # Rust: unwrap and expect calls are counted per file.
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 when:
   collector: oxplow.rust.unwrap_expect_calls
   files:

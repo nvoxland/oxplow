@@ -2,9 +2,9 @@
 //! definition by (`.context/language-support.md` "Symbols").
 //!
 //! Each language describes its definitions as **data**: a tree-sitter
-//! query (`languages/<lang>/symbols.scm`) and an optional spec
-//! (`languages/<lang>/symbols.yaml`). Nothing here is per-language code,
-//! so a language contributed later brings the same two files.
+//! query (its `symbols.scm`) and an optional spec (`symbols.yaml` beside
+//! it), files of the extension that declares the language. Nothing here is
+//! per-language code.
 //!
 //! The query's captures:
 //!
@@ -23,13 +23,12 @@
 //! nth definition with that same id in the file (in position order).
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use serde::Deserialize;
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Node, Query, QueryCursor, Tree};
+use tree_sitter::{Language as TsLanguage, Node, Query, QueryCursor, Tree};
 
-use crate::spec::Language;
+use crate::spec::{Language, Languages};
 
 /// What a definition is — one vocabulary for every language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -191,9 +190,8 @@ pub struct SymbolSpec {
 impl SymbolSpec {
     /// Compile `query` against `language`'s grammar, with `yaml` as its
     /// `symbols.yaml`. Refuses a capture outside the vocabulary.
-    pub fn compile(language: Language, query: &str, yaml: Option<&str>) -> Result<Self, String> {
-        let query = Query::new(&language.tree_sitter_language(), query)
-            .map_err(|e| format!("symbols.scm: {e}"))?;
+    pub fn compile(grammar: &TsLanguage, query: &str, yaml: Option<&str>) -> Result<Self, String> {
+        let query = Query::new(grammar, query).map_err(|e| format!("symbols.scm: {e}"))?;
         let roles = query
             .capture_names()
             .iter()
@@ -235,66 +233,17 @@ fn role(name: &str) -> Result<Role, String> {
     }
 }
 
-/// The built-in `symbols.scm` / `symbols.yaml` of `language`.
-fn builtin(language: Language) -> (&'static str, Option<&'static str>) {
-    match language {
-        Language::Rust => (
-            include_str!("../languages/rust/symbols.scm"),
-            Some(include_str!("../languages/rust/symbols.yaml")),
-        ),
-        Language::TypeScript | Language::Tsx => {
-            (include_str!("../languages/typescript/symbols.scm"), None)
-        }
-        Language::JavaScript => (include_str!("../languages/javascript/symbols.scm"), None),
-        Language::Python => (include_str!("../languages/python/symbols.scm"), None),
-        Language::Go => (include_str!("../languages/go/symbols.scm"), None),
-        Language::Java => (
-            include_str!("../languages/java/symbols.scm"),
-            Some(include_str!("../languages/java/symbols.yaml")),
-        ),
-        Language::C => (include_str!("../languages/c/symbols.scm"), None),
-        Language::Cpp => (
-            include_str!("../languages/cpp/symbols.scm"),
-            Some(include_str!("../languages/cpp/symbols.yaml")),
-        ),
-        Language::Clojure => (include_str!("../languages/clojure/symbols.scm"), None),
-        Language::CSharp => (
-            include_str!("../languages/csharp/symbols.scm"),
-            Some(include_str!("../languages/csharp/symbols.yaml")),
-        ),
-    }
-}
-
-/// `language`'s compiled built-in spec (compiled once).
-pub(crate) fn symbol_spec(language: Language) -> Result<&'static SymbolSpec, String> {
-    static SPECS: OnceLock<HashMap<Language, Result<SymbolSpec, String>>> = OnceLock::new();
-    let specs = SPECS.get_or_init(|| {
-        crate::registry()
-            .iter()
-            .map(|s| {
-                let (query, yaml) = builtin(s.language);
-                (s.language, SymbolSpec::compile(s.language, query, yaml))
-            })
-            .collect()
-    });
-    match specs.get(&language) {
-        Some(Ok(spec)) => Ok(spec),
-        Some(Err(e)) => Err(format!("{}: {e}", language.name())),
-        None => Err(format!("{}: no symbol spec", language.name())),
-    }
-}
-
 /// The definitions in `source`, a file at `path`, in source order. Empty
 /// for a file of no supported language or one that doesn't parse.
-pub fn extract(path: &str, source: &str) -> Vec<Definition> {
-    let Some(language) = crate::language_for_path(path) else {
+pub fn extract(languages: &Languages, path: &str, source: &str) -> Vec<Definition> {
+    let Some(language) = languages.for_path(path) else {
         return Vec::new();
     };
     extract_with_language(source, language)
 }
 
 /// [`extract`] with the language given.
-pub fn extract_with_language(source: &str, language: Language) -> Vec<Definition> {
+pub fn extract_with_language(source: &str, language: &Language) -> Vec<Definition> {
     let Some(tree) = crate::parse(source, language) else {
         return Vec::new();
     };
@@ -320,9 +269,9 @@ struct Raw<'t> {
 pub(crate) fn extract_tree<'t>(
     tree: &'t Tree,
     src: &[u8],
-    language: Language,
+    language: &Language,
 ) -> Vec<(Definition, Node<'t>)> {
-    let spec = match symbol_spec(language) {
+    let spec = match language.symbol_spec() {
         Ok(spec) => spec,
         Err(_) => return Vec::new(),
     };

@@ -260,7 +260,7 @@ pub(crate) fn registry_over(
         streams: Arc::new(oxplow_db::SqliteStreamStore::new(db.clone())),
         content: crate::snapshot_content::SnapshotContent::new(
             blobs,
-            oxplow_domain::vcs::Vcs::object_store(&crate::vcs::GitProvider, project_dir),
+            oxplow_domain::vcs::Vcs::object_store(&crate::vcs::GitProvider::default(), project_dir),
         ),
         project_dir: project_dir.to_path_buf(),
     };
@@ -292,7 +292,7 @@ mod tests {
                 f.svc.snapshot_store.clone(),
                 f.svc.blobs.clone(),
                 f.svc.layout.project_dir.clone(),
-                Arc::new(crate::vcs::GitProvider),
+                Arc::new(crate::vcs::GitProvider::default()),
                 stream,
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),

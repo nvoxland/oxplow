@@ -22,21 +22,10 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
 time = { workspace = true }
-# Tier-2 AST structural merge: parse→top-level-items front half.
-# tree-sitter + the first-slice grammars (rust/ts+tsx/js/python/go), plus
-# the second-slice grammars (java/c/cpp/clojure), promoted from
-# dev-deps now that production code uses them.
+# Tier-2 AST structural merge: parse→top-level-items front half. Grammars
+# come from the languages oxplow's packs declare (oxplow-code-metrics).
 # See .context/smart-merge.md.
 tree-sitter = { workspace = true }
-tree-sitter-rust = { workspace = true }
-tree-sitter-typescript = { workspace = true }
-tree-sitter-javascript = { workspace = true }
-tree-sitter-python = { workspace = true }
-tree-sitter-go = { workspace = true }
-tree-sitter-java = { workspace = true }
-tree-sitter-c = { workspace = true }
-tree-sitter-cpp = { workspace = true }
-tree-sitter-clojure-orchard = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dependencies.serde_json]

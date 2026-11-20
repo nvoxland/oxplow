@@ -1,0 +1,26 @@
+manifest: 2
+name: oxplow-rust
+namespace: oxplow
+description: "What oxplow knows about Rust: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Rust."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Rust in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: rust
+    title: "Rust"
+    extensions: [rs]
+    aliases: ["rs"]
+    grammar: { native: rust }
+    analysis: languages/rust/analysis.yaml
+    symbols: languages/rust/symbols.scm
+    lsp: { package: rust-analyzer }
+    units: [class, module]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "fn {name}(x: i32) -> i32 {"
+      branch: ["    if x == {n} { return {n}; }"]
+      tail: ["    0", "}"]

@@ -6,12 +6,9 @@
 //! - **function-length** — line count of the function body.
 //! - **parameter-count** — number of declared parameters.
 //!
-//! Languages bundled: Rust, TypeScript, TSX, JavaScript, Python, Go,
-//! Java, C, C++, Clojure, C#. Each language is declared as one cohesive
-//! [`language::LanguageSupport`] in the registry (identity, extensions, LSP
-//! suggestion, unit kinds) plus its `LanguageSpec` node tables in
-//! [`spec`]. Adding a language is a single, well-isolated change — see
-//! `.context/language-support.md`.
+//! Core names no language: each is a `languages:` entry of an extension
+//! (oxplow's language packs ship them), built into [`Languages`] at each
+//! publication. See [`spec`] and `.context/language-support.md`.
 //!
 //! Files in unsupported languages are silently skipped (the caller
 //! sees no findings for them).
@@ -22,17 +19,18 @@ use std::path::Path;
 use tree_sitter::Node;
 
 mod ast;
+#[doc(hidden)]
+pub mod for_tests;
 pub mod language;
 mod spec;
 pub mod symbols;
 
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
-pub use language::{
-    for_language as language_support, language_for_path, mason_suggestion, registry,
-    LanguageSupport, UnitKind,
-};
+pub use language::UnitKind;
 pub use spec::{
-    language_from_lsp_id, language_from_name, Language, LanguageSpec, VisibilityStrategy,
+    native_grammar, DocStrategy, Duplication, Forms, GrammarDecl, ImportStrategy, Language,
+    LanguageDecl, LanguageProblem, LanguageSource, LanguageSpec, Languages, LspDecl, MergeKey,
+    MergeSpec, StarterDecl, VisibilityStrategy,
 };
 pub use symbols::{extract, extract_with_language, Definition, SymbolKind};
 pub use tree_sitter::Tree;
@@ -86,7 +84,7 @@ pub struct FunctionMetrics {
 /// language-support epic builds navigation / roll-ups on. One per
 /// function, class-like container, module/namespace, or package the file
 /// participates in. The set of kinds a language exposes is declared on its
-/// [`language::LanguageSupport::unit_kinds`].
+/// language's `units:`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeUnit {
     /// What kind of unit this is.
@@ -105,8 +103,8 @@ pub struct CodeUnit {
 
 /// Analyze a single file. Returns an empty Vec for unsupported
 /// languages (or files that fail to parse).
-pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
-    let Some(lang) = language_for_path(path) else {
+pub fn analyze_file(languages: &Languages, path: &str, source: &str) -> Vec<FunctionMetrics> {
+    let Some(lang) = languages.for_path(path) else {
         return Vec::new();
     };
     analyze_with_language(path, source, lang)
@@ -120,18 +118,15 @@ pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
 ///
 /// Units are returned in a stable order: package (if any) → the rest in
 /// source order.
-pub fn list_units(path: &str, source: &str) -> Vec<CodeUnit> {
-    let Some(lang) = language_for_path(path) else {
+pub fn list_units(languages: &Languages, path: &str, source: &str) -> Vec<CodeUnit> {
+    let Some(lang) = languages.for_path(path) else {
         return Vec::new();
     };
     let mut out = Vec::new();
 
     // Package: path-derived, only when the language declares it as a unit
     // (Go, Java). Named by the file's parent directory.
-    if language::for_language(lang)
-        .unit_kinds
-        .contains(&UnitKind::Package)
-    {
+    if lang.decl().units.contains(&UnitKind::Package) {
         if let Some(pkg) = package_for_path(path) {
             out.push(CodeUnit {
                 kind: UnitKind::Package,
@@ -188,7 +183,11 @@ fn unit_kind(kind: SymbolKind) -> Option<UnitKind> {
 /// Like `analyze_file` but with the language explicitly chosen
 /// (useful when the path doesn't reveal the language, e.g. content
 /// fetched from a git ref into a temp buffer).
-pub fn analyze_with_language(path: &str, source: &str, language: Language) -> Vec<FunctionMetrics> {
+pub fn analyze_with_language(
+    path: &str,
+    source: &str,
+    language: &Language,
+) -> Vec<FunctionMetrics> {
     let Some(tree) = parse(source, language) else {
         return Vec::new();
     };
@@ -228,7 +227,7 @@ const MARKER_KEYWORDS: &[&str] = &["TODO", "FIXME", "HACK", "XXX", "BUG"];
 /// considered (so a `"TODO"` string literal doesn't count), using the
 /// language's own grammar. Returns an empty Vec for unsupported /
 /// unparseable input.
-pub fn markers(source: &str, language: Language) -> Vec<Marker> {
+pub fn markers(source: &str, language: &Language) -> Vec<Marker> {
     let Some(tree) = parse(source, language) else {
         return Vec::new();
     };
@@ -308,28 +307,29 @@ fn clean_comment_line(line: &str) -> String {
 /// with a generic list node like Clojure's `list_lit` — the head
 /// symbol's text is in `spec.function_form_heads`.
 pub fn is_function_node(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
-    if spec.function_kinds.contains(&node.kind()) {
+    if spec.function_kinds.iter().any(|k| k == node.kind()) {
         return true;
     }
-    if !spec.function_form_heads.is_empty() && node.kind() == "list_lit" {
-        if let Some(head) = head_symbol_text(node, src) {
-            return spec.function_form_heads.contains(&head);
-        }
-    }
-    false
+    form_head(node, src, spec)
+        .is_some_and(|head| spec.function_form_heads.iter().any(|h| h == head))
+}
+
+/// A form's head symbol, when `node` is a form of a grammar of generic
+/// forms (`forms:`).
+pub fn form_head<'a>(node: Node<'_>, src: &'a [u8], spec: &LanguageSpec) -> Option<&'a str> {
+    let forms = spec.forms.as_ref()?;
+    (node.kind() == forms.list)
+        .then(|| head_symbol_text(node, src, forms))
+        .flatten()
 }
 
 /// Same shape as `is_function_node` but for decision points.
 fn is_decision_node(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
-    if spec.decision_kinds.contains(&node.kind()) {
+    if spec.decision_kinds.iter().any(|k| k == node.kind()) {
         return true;
     }
-    if !spec.decision_form_heads.is_empty() && node.kind() == "list_lit" {
-        if let Some(head) = head_symbol_text(node, src) {
-            return spec.decision_form_heads.contains(&head);
-        }
-    }
-    false
+    form_head(node, src, spec)
+        .is_some_and(|head| spec.decision_form_heads.iter().any(|h| h == head))
 }
 
 /// Read the text of the first significant symbol child of a
@@ -339,16 +339,16 @@ fn is_decision_node(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
 /// of `sym_lit` (with any leading `^…` metadata as a sibling
 /// `meta_lit` child of the same sym_lit), so we read sym_name's
 /// text rather than sym_lit's full text.
-pub fn head_symbol_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+pub fn head_symbol_text<'a>(node: Node<'_>, src: &'a [u8], forms: &Forms) -> Option<&'a str> {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        match child.kind() {
-            "comment" => continue,
-            "sym_lit" => {
-                return sym_lit_name(child, src);
-            }
-            _ => return None,
+        if child.kind().contains("comment") {
+            continue;
         }
+        if child.kind() == forms.symbol {
+            return sym_lit_name(child, src, forms);
+        }
+        return None;
     }
     None
 }
@@ -356,10 +356,10 @@ pub fn head_symbol_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
 /// Extract the symbol name from a `sym_lit` by reading its
 /// `sym_name` child. Falls back to the sym_lit's own text when
 /// the grammar shape differs.
-fn sym_lit_name<'a>(sym_lit: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+fn sym_lit_name<'a>(sym_lit: Node<'_>, src: &'a [u8], forms: &Forms) -> Option<&'a str> {
     let mut cursor = sym_lit.walk();
     for child in sym_lit.named_children(&mut cursor) {
-        if child.kind() == "sym_name" {
+        if child.kind() == forms.name {
             return child.utf8_text(src).ok();
         }
     }
@@ -396,9 +396,9 @@ fn function_metrics(
 /// [`DocStrategy`]. Used by the `oxplow.doc_coverage` metric.
 fn has_doc_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
     use crate::spec::DocStrategy::*;
-    match spec.doc {
+    match &spec.doc {
         None => false,
-        PrecedingComment(prefixes) => {
+        PrecedingComment { prefixes } => {
             // Climb out of export wrappers (TS/JS `export function …`): the doc
             // comment precedes the `export_statement`, not the inner declaration.
             let mut item = node;
@@ -430,7 +430,7 @@ fn has_doc_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
             }
             false
         }
-        PythonDocstring => {
+        FirstStringStatement => {
             // The function body's first statement is a bare string literal.
             let Some(body) = node.child_by_field_name("body") else {
                 return false;
@@ -446,7 +446,7 @@ fn has_doc_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
                 _ => false,
             }
         }
-        ClojureDocstring => {
+        FormString => {
             // A string literal in the docstring position — a direct child of the
             // `(defn …)` form appearing before the parameter vector.
             let mut idx = 0;
@@ -466,20 +466,20 @@ fn has_doc_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
 fn visibility_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec, name: &str) -> Visibility {
     match spec.visibility {
         VisibilityStrategy::Unknown => Visibility::Unknown,
-        VisibilityStrategy::RustModifier => rust_visibility(node),
-        VisibilityStrategy::TsClassModifier => ts_visibility(node, src),
-        VisibilityStrategy::JavaModifier => java_visibility(node, src),
-        VisibilityStrategy::CppAccessSpecifier => cpp_visibility(node, src),
-        VisibilityStrategy::GoCapitalization => go_visibility(name),
-        VisibilityStrategy::PythonUnderscore => python_visibility(name),
-        VisibilityStrategy::CStatic => c_visibility(node, src),
-        VisibilityStrategy::ClojureForm => clojure_visibility(node, src),
+        VisibilityStrategy::VisibilityModifier => rust_visibility(node),
+        VisibilityStrategy::AccessibilityModifier => ts_visibility(node, src),
+        VisibilityStrategy::ModifiersKeyword => java_visibility(node, src),
+        VisibilityStrategy::AccessSpecifier => cpp_visibility(node, src),
+        VisibilityStrategy::CapitalizedName => go_visibility(name),
+        VisibilityStrategy::UnderscorePrefix => python_visibility(name),
+        VisibilityStrategy::StaticStorage => c_visibility(node, src),
+        VisibilityStrategy::FormMeta => clojure_visibility(node, src, spec),
     }
 }
 
-fn clojure_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
+fn clojure_visibility(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Visibility {
     // `defn-` is the explicit private form.
-    if let Some(head) = head_symbol_text(node, src) {
+    if let Some(head) = form_head(node, src, spec) {
         if head == "defn-" {
             return Visibility::Private;
         }
@@ -491,8 +491,9 @@ fn clojure_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
     // list_lit and check for a meta_lit/old_meta_lit child whose
     // text mentions `:private`.
     let mut cursor = node.walk();
+    let symbol = spec.forms.as_ref().map_or("", |f| f.symbol.as_str());
     for child in node.named_children(&mut cursor) {
-        if child.kind() != "sym_lit" {
+        if child.kind() != symbol {
             continue;
         }
         let mut inner = child.walk();
@@ -685,7 +686,7 @@ fn has_ancestor_kind(node: Node<'_>, kinds: &[&str]) -> bool {
 fn count_parameters(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32 {
     // Clojure: param vector is the first vec_lit child after the
     // head + name (or just after the head for `(fn [x] …)`).
-    if !spec.function_form_heads.is_empty() && node.kind() == "list_lit" {
+    if spec.forms.as_ref().is_some_and(|f| node.kind() == f.list) {
         return clojure_count_parameters(node, src);
     }
     // First try a direct field lookup; falls through to a recursive
@@ -703,7 +704,7 @@ fn count_parameters(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32 {
     let mut cursor = params_node.walk();
     let mut count = 0u32;
     for child in params_node.named_children(&mut cursor) {
-        if spec.parameter_kinds.contains(&child.kind()) {
+        if spec.parameter_kinds.iter().any(|k| k == child.kind()) {
             count += 1;
         }
     }
@@ -780,14 +781,6 @@ fn count_decision_subtree(
         count += count_decision_subtree(child, src, spec, bodies);
     }
     count
-}
-
-/// Convenience: peek at a path's extension to decide whether we
-/// support it. Useful for callers that want to skip read-from-disk
-/// when the language isn't supported anyway.
-pub fn is_supported_path(path: impl AsRef<Path>) -> bool {
-    let p = path.as_ref().to_string_lossy();
-    language_for_path(&p).is_some()
 }
 
 /// How many leading lines of a file count as its "header" for the

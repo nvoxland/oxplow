@@ -1,4 +1,6 @@
 # TypeScript: non-null assertions count.
+# The languages its files are in: their packs.
+requires: [oxplow-typescript]
 when:
   collector: oxplow.ts.non_null_assertions
   files:

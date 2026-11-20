@@ -792,6 +792,7 @@ impl ExtensionActivation {
                     capabilities.apply();
                     svc.vocabulary.swap(vocabulary);
                     svc.models.swap(database.models().clone());
+                    svc.languages.swap(crate::extension::language_set::of(published.extensions()).0);
                     metrics.publish(&svc.metrics);
                     providers.withdraw_maps();
                     adapters

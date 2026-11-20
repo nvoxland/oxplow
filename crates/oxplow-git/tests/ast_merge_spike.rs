@@ -8,7 +8,7 @@
 //! `.context/smart-merge.md`).
 //!
 //! Scope of the spike, deliberately tiny:
-//!   * one language (Rust), parsed via `tree_sitter_rust`;
+//!   * one language (Rust), parsed with its compiled-in grammar;
 //!   * top-level items only (`use`, `fn`, `struct`, …) — exactly the
 //!     "commutative parent" cases Tier-2 targets first;
 //!   * identity = (kind, name) for named items, full text for `use`;
@@ -51,7 +51,7 @@ enum Merge {
 fn top_level_items(src: &str) -> Vec<Item> {
     let mut parser = Parser::new();
     parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .set_language(&oxplow_code_metrics::native_grammar("rust").expect("compiled in"))
         .expect("load rust grammar");
     let tree = parser.parse(src, None).expect("parse");
     let root = tree.root_node();

@@ -1,0 +1,50 @@
+manifest: 2
+name: oxplow-typescript
+namespace: oxplow
+description: "What oxplow knows about TypeScript and JavaScript: their grammars, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses TypeScript and JavaScript."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about TypeScript and JavaScript in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: typescript
+    title: "TypeScript"
+    extensions: [ts]
+    aliases: ["ts"]
+    grammar: { native: typescript }
+    analysis: languages/typescript/analysis.yaml
+    symbols: languages/typescript/symbols.scm
+    lsp: { package: typescript-language-server }
+    units: [class, module]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "function {name}(x: number): number {"
+      branch: ["    if (x === {n}) { return {n}; }"]
+      tail: ["    return 0;", "}"]
+  - id: tsx
+    title: "TSX"
+    extensions: [tsx]
+    lsp_ids: [typescriptreact]
+    grammar: { native: tsx }
+    analysis: languages/tsx/analysis.yaml
+    symbols: languages/tsx/symbols.scm
+    lsp: { package: typescript-language-server }
+    units: [class, module]
+  - id: javascript
+    title: "JavaScript"
+    extensions: [js, mjs, cjs, jsx]
+    aliases: ["js", "jsx"]
+    lsp_ids: [javascriptreact]
+    grammar: { native: javascript }
+    analysis: languages/javascript/analysis.yaml
+    symbols: languages/javascript/symbols.scm
+    lsp: { package: typescript-language-server }
+    units: [class]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "function {name}(x) {"
+      branch: ["    if (x === {n}) { return {n}; }"]
+      tail: ["    return 0;", "}"]

@@ -4,30 +4,29 @@
 //! never *resolved* — `"std::fs"`, `"./Foo"`, `"<stdio.h>"` all flow
 //! through verbatim.
 
-use oxplow_code_metrics::Language;
+use oxplow_code_metrics::ImportStrategy;
 use tree_sitter::Node;
 
 use crate::{lines, ImportEdge, ImportKind};
 
+/// Walk `root` with the walker its language's `imports.strategy` names.
 pub(crate) fn walk(
     root: Node<'_>,
     src: &[u8],
-    language: Language,
+    strategy: ImportStrategy,
     path: &str,
     out: &mut Vec<ImportEdge>,
 ) {
-    match language {
-        Language::Rust => walk_rust(root, src, path, out),
-        Language::TypeScript | Language::Tsx | Language::JavaScript => {
-            walk_js_like(root, src, path, out)
-        }
-        Language::Python => walk_python(root, src, path, out),
-        Language::Go => walk_go(root, src, path, out),
-        Language::Java => walk_java(root, src, path, out),
-        Language::C => walk_c_like(root, src, path, out, /*cpp=*/ false),
-        Language::Cpp => walk_c_like(root, src, path, out, /*cpp=*/ true),
-        Language::Clojure => walk_clojure(root, src, path, out),
-        Language::CSharp => walk_csharp(root, src, path, out),
+    match strategy {
+        ImportStrategy::RustUse => walk_rust(root, src, path, out),
+        ImportStrategy::EsImport => walk_js_like(root, src, path, out),
+        ImportStrategy::PythonImport => walk_python(root, src, path, out),
+        ImportStrategy::GoImport => walk_go(root, src, path, out),
+        ImportStrategy::JavaImport => walk_java(root, src, path, out),
+        ImportStrategy::CInclude => walk_c_like(root, src, path, out, /*cpp=*/ false),
+        ImportStrategy::CppInclude => walk_c_like(root, src, path, out, /*cpp=*/ true),
+        ImportStrategy::ClojureNs => walk_clojure(root, src, path, out),
+        ImportStrategy::CsharpUsing => walk_csharp(root, src, path, out),
     }
 }
 

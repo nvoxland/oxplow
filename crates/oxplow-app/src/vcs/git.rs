@@ -15,9 +15,26 @@ use oxplow_domain::vcs::{
     VcsError, VcsFeatures, VcsWorkspace, WorkspaceStatus,
 };
 
-/// Git, as the VCS provider.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GitProvider;
+/// Git, as the VCS provider. It holds the languages the enabled extensions
+/// declare, for the structural merge it tries on what a merge-like op
+/// leaves conflicted (a provider with none merges by tokens only).
+#[derive(Clone, Default)]
+pub struct GitProvider {
+    languages: crate::extension::language_set::LanguagesHandle,
+}
+
+impl std::fmt::Debug for GitProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GitProvider::default()")
+    }
+}
+
+impl GitProvider {
+    /// Git, merging structurally in the languages `languages` holds.
+    pub fn with_languages(languages: crate::extension::language_set::LanguagesHandle) -> Self {
+        Self { languages }
+    }
+}
 
 /// Git's own shapes for its native reads.
 pub use oxplow_git::{ChangeScopes, CommitRefLabel, RemoteBranchEntry};
@@ -51,10 +68,11 @@ impl GitProvider {
     pub async fn rebase(&self, ws: &Path, onto: &str) -> Result<OpOutcome, VcsError> {
         not_an_option("revision", onto)?;
         let (ws, onto) = (ws.to_path_buf(), onto.to_string());
+        let languages = self.languages.current();
         blocking(move || {
             repo_check(&ws)?;
             let r = oxplow_git::rebase(&ws, &onto).map_err(|e| VcsError::Failed(e.to_string()))?;
-            Ok(with_auto_resolve(&ws, r))
+            Ok(with_auto_resolve(&ws, r, &languages))
         })
         .await
     }
@@ -77,11 +95,12 @@ impl GitProvider {
     pub async fn cherry_pick(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
         not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        let languages = self.languages.current();
         blocking(move || {
             repo_check(&ws)?;
             let r =
                 oxplow_git::cherry_pick(&ws, &rev).map_err(|e| VcsError::Failed(e.to_string()))?;
-            Ok(with_auto_resolve(&ws, r))
+            Ok(with_auto_resolve(&ws, r, &languages))
         })
         .await
     }
@@ -89,10 +108,11 @@ impl GitProvider {
     pub async fn revert(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
         not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        let languages = self.languages.current();
         blocking(move || {
             repo_check(&ws)?;
             let r = oxplow_git::revert(&ws, &rev).map_err(|e| VcsError::Failed(e.to_string()))?;
-            Ok(with_auto_resolve(&ws, r))
+            Ok(with_auto_resolve(&ws, r, &languages))
         })
         .await
     }
@@ -412,9 +432,15 @@ fn cli(r: std::io::Result<oxplow_git::GitOpResult>) -> Result<oxplow_git::GitOpR
 
 /// A merge-like op, then oxplow's smart merge over what it left
 /// conflicted.
-fn with_auto_resolve(ws: &Path, mut r: oxplow_git::GitOpResult) -> OpOutcome {
+fn with_auto_resolve(
+    ws: &Path,
+    mut r: oxplow_git::GitOpResult,
+    languages: &oxplow_code_metrics::Languages,
+) -> OpOutcome {
     if !r.success {
-        r.auto_resolved = oxplow_git::auto_resolve_conflicts(ws).resolved.len() as u32;
+        r.auto_resolved = oxplow_git::auto_resolve_conflicts(ws, languages)
+            .resolved
+            .len() as u32;
     }
     outcome(ws, r)
 }
@@ -817,6 +843,7 @@ impl Vcs for GitProvider {
             not_an_option("branch", &rb.branch)?;
         }
         let ws = ws.to_path_buf();
+        let languages = self.languages.current();
         blocking(move || {
             repo_check(&ws)?;
             let r = match &from {
@@ -824,7 +851,7 @@ impl Vcs for GitProvider {
                 None => oxplow_git::pull(&ws),
             }
             .map_err(|e| VcsError::Failed(e.to_string()))?;
-            Ok(with_auto_resolve(&ws, r))
+            Ok(with_auto_resolve(&ws, r, &languages))
         })
         .await
     }
@@ -850,10 +877,11 @@ impl Vcs for GitProvider {
     async fn merge(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
         not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        let languages = self.languages.current();
         blocking(move || {
             repo_check(&ws)?;
             let r = oxplow_git::merge(&ws, &rev).map_err(|e| VcsError::Failed(e.to_string()))?;
-            Ok(with_auto_resolve(&ws, r))
+            Ok(with_auto_resolve(&ws, r, &languages))
         })
         .await
     }
@@ -888,6 +916,7 @@ impl Vcs for GitProvider {
         choice: ConflictChoice,
     ) -> Result<(), VcsError> {
         let (ws, path) = (ws.to_path_buf(), path.to_string());
+        let languages = self.languages.current();
         blocking(move || {
             repo_check(&ws)?;
             match choice {
@@ -896,7 +925,7 @@ impl Vcs for GitProvider {
                 )
                 .map(|_| ()),
                 ConflictChoice::Auto => {
-                    let report = oxplow_git::auto_resolve_conflicts(&ws);
+                    let report = oxplow_git::auto_resolve_conflicts(&ws, &languages);
                     if report.resolved.contains(&path)
                         || !oxplow_git::list_conflicted_paths(&ws).contains(&path)
                     {
@@ -994,13 +1023,16 @@ mod tests {
         git(ws, &["config", "user.email", "t@example.com"]);
         git(ws, &["config", "user.name", "t"]);
         write_commit(ws, "a\n", "first");
-        assert_eq!(GitProvider.status(ws).await.unwrap().in_progress, None);
+        assert_eq!(
+            GitProvider::default().status(ws).await.unwrap().in_progress,
+            None
+        );
         let head = git(ws, &["rev-parse", "HEAD"]);
         std::fs::write(ws.join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
         let paths = ["cfg.txt".to_string()];
         for status in [
-            GitProvider.status(ws).await.unwrap(),
-            GitProvider.status_of(ws, &paths).await.unwrap(),
+            GitProvider::default().status(ws).await.unwrap(),
+            GitProvider::default().status_of(ws, &paths).await.unwrap(),
         ] {
             assert_eq!(status.in_progress, Some(InProgressOp::Merge));
             assert!(status.entries.is_empty());
@@ -1017,25 +1049,34 @@ mod tests {
             let e = r.expect_err("refused");
             assert!(e.to_string().contains("option"), "{e}");
         };
-        refused(GitProvider.merge(&wt, bad).await.map(|_| ()));
-        refused(GitProvider.rebase(&wt, bad).await.map(|_| ()));
-        refused(GitProvider.cherry_pick(&wt, bad).await.map(|_| ()));
-        refused(GitProvider.revert(&wt, bad).await.map(|_| ()));
+        refused(GitProvider::default().merge(&wt, bad).await.map(|_| ()));
+        refused(GitProvider::default().rebase(&wt, bad).await.map(|_| ()));
         refused(
-            GitProvider
+            GitProvider::default()
+                .cherry_pick(&wt, bad)
+                .await
+                .map(|_| ()),
+        );
+        refused(GitProvider::default().revert(&wt, bad).await.map(|_| ()));
+        refused(
+            GitProvider::default()
                 .blame(&wt, "cfg.txt", Some(bad))
                 .await
                 .map(|_| ()),
         );
-        refused(GitProvider.checkout_branch(&wt, "-b", false).await);
         refused(
-            GitProvider
+            GitProvider::default()
+                .checkout_branch(&wt, "-b", false)
+                .await,
+        );
+        refused(
+            GitProvider::default()
                 .fetch(&wt, Some("--upload-pack=x"))
                 .await
                 .map(|_| ()),
         );
         refused(
-            GitProvider
+            GitProvider::default()
                 .push(
                     &wt,
                     Some(RemoteBranch {
@@ -1086,7 +1127,7 @@ mod tests {
             "ALPHA beta gamma\n",
             "alpha beta GAMMA\n",
         );
-        let out = GitProvider.merge(&wt, "main").await.unwrap();
+        let out = GitProvider::default().merge(&wt, "main").await.unwrap();
         assert_eq!(out.auto_resolved, 1, "{}", out.log);
         assert!(out.conflicts.is_empty(), "{:?}", out.conflicts);
         assert_eq!(
@@ -1103,7 +1144,7 @@ mod tests {
             "let timeout = 20;\n",
             "let timeout = 30;\n",
         );
-        let out = GitProvider.merge(&wt, "main").await.unwrap();
+        let out = GitProvider::default().merge(&wt, "main").await.unwrap();
         assert_eq!(out.auto_resolved, 0);
         assert_eq!(out.conflicts, vec!["cfg.txt".to_string()]);
         assert!(std::fs::read_to_string(wt.join("cfg.txt"))
@@ -1142,7 +1183,7 @@ mod tests {
             &work,
             &["remote", "add", "origin", remote.to_str().unwrap()],
         );
-        let out = GitProvider.publish(&work, None).await.unwrap();
+        let out = GitProvider::default().publish(&work, None).await.unwrap();
         assert!(out.success, "{}", out.log);
         assert_eq!(
             git(&work, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
@@ -1157,7 +1198,7 @@ mod tests {
             "ALPHA beta gamma\n",
             "alpha beta GAMMA\n",
         );
-        let out = GitProvider.rebase(&wt, "main").await.unwrap();
+        let out = GitProvider::default().rebase(&wt, "main").await.unwrap();
         assert_eq!(out.auto_resolved, 1, "{}", out.log);
         assert_eq!(
             std::fs::read_to_string(wt.join("cfg.txt")).unwrap(),
@@ -1171,7 +1212,10 @@ mod tests {
             "alpha beta GAMMA\n",
         );
         let main = git(&p, &["rev-parse", "main"]);
-        let out = GitProvider.cherry_pick(&wt, &main).await.unwrap();
+        let out = GitProvider::default()
+            .cherry_pick(&wt, &main)
+            .await
+            .unwrap();
         assert_eq!(out.auto_resolved, 1, "{}", out.log);
         assert_eq!(conflicted(&wt), 0);
     }

@@ -301,8 +301,12 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                         .into(),
                 ));
             }
-            let starter = crate::MetricStarter::new(p.language.as_deref(), p.glob.as_deref())
-                .map_err(Failure::Usage)?;
+            let starter = crate::MetricStarter::new(
+                &oxplow_app::extension::language_set::shipped(),
+                p.language.as_deref(),
+                p.glob.as_deref(),
+            )
+            .map_err(Failure::Usage)?;
             let made = crate::scaffold_with(&root, kind, name, p.origin.as_deref(), &starter)?;
             let _ = writeln!(out, "created {}", made.dir);
             for f in &made.files {

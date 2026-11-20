@@ -10,7 +10,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_code_metrics::Language;
 use oxplow_db::SqlCell;
 use oxplow_domain::StreamId;
 
@@ -27,7 +26,7 @@ const COLLECTOR: &str = "complex_fns.scan";
 /// A Rust file defining each `(name, branches)` function; the line each
 /// starts on. `branches` of 11 is over the starter's limit of 10.
 fn rust(functions: &[(&str, usize)]) -> (String, Vec<usize>) {
-    source(Language::Rust, functions)
+    source(&oxplow_code_metrics::for_tests::lang("rust"), functions)
 }
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -87,6 +86,7 @@ async fn project(edit: impl FnOnce(&mut Vec<ScaffoldFile>)) -> (Project, Lines) 
     for f in &files {
         write(dir.path(), &f.path, &f.content);
     }
+    crate::test_fixtures::enable_language_packs(dir.path());
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
     crate::test_fixtures::activate_with_problems(&svc).await;
@@ -704,6 +704,7 @@ async fn an_oversized_file_is_reported_as_excluded_not_silently_dropped() {
     for f in extension_files(NAME, None, &MetricStarter::default()) {
         write(dir.path(), &f.path, &f.content);
     }
+    crate::test_fixtures::enable_language_packs(dir.path());
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
     crate::test_fixtures::activate_with_problems(&svc).await;
@@ -745,6 +746,7 @@ async fn limited_project(max: usize) -> (Project, Lines) {
     for f in extension_files(NAME, None, &MetricStarter::default()) {
         write(dir.path(), &f.path, &f.content);
     }
+    crate::test_fixtures::enable_language_packs(dir.path());
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
     crate::test_fixtures::activate_with_problems(&svc).await;

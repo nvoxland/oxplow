@@ -116,6 +116,8 @@ pub struct Collectors<'a> {
     pub changes: Option<std::sync::Arc<dyn oxplow_script::ChangeDiffSource>>,
     /// The shared models a run's `models` / `fields` output writes.
     pub models: crate::models::Models,
+    /// What a script's parsing builtins parse with.
+    pub languages: crate::extension::language_set::LanguagesHandle,
 }
 
 /// The worktree whose `.oxplow/extensions/` declares the collectors: the
@@ -169,6 +171,7 @@ impl<'a> Collectors<'a> {
             trees: Some(std::sync::Arc::new(svc.metrics.clone())),
             changes: Some(svc.change_diffs.clone()),
             models: svc.models.clone(),
+            languages: svc.languages.clone(),
         }
     }
 }
@@ -2022,10 +2025,12 @@ async fn produce(
             }
         }
         let run = run.clone();
-        let mut sources = crate::services::Sources::default().with_ai(
-            ctx.ai.clone(),
-            oxplow_domain::uri::build::collector_uri(&ext.namespace, &spec.id),
-        );
+        let mut sources = crate::services::Sources::default()
+            .with_languages(ctx.languages.current())
+            .with_ai(
+                ctx.ai.clone(),
+                oxplow_domain::uri::build::collector_uri(&ext.namespace, &spec.id),
+            );
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
         }
@@ -2095,6 +2100,7 @@ async fn produce(
 #[derive(Clone)]
 pub struct CollectorRunner {
     pub models: crate::models::Models,
+    pub languages: crate::extension::language_set::LanguagesHandle,
     pub project_dir: PathBuf,
     pub store: Arc<SqliteCollectorStore>,
     pub db: oxplow_db::Database,
@@ -2235,6 +2241,7 @@ impl CollectorRunner {
             trees: Some(std::sync::Arc::new(self.metrics.clone())),
             changes: Some(self.change_diffs.clone()),
             models: self.models.clone(),
+            languages: self.languages.clone(),
         }
     }
 
@@ -2891,6 +2898,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
 
         let report = reviewed_run(&ctx, "my_gh", "gh").await.unwrap();
@@ -3052,6 +3060,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
 
         let list = list_collectors(&ctx).await.unwrap();
@@ -3087,6 +3096,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
         let other = list_collectors(&elsewhere).await.unwrap();
         assert!(
@@ -3630,6 +3640,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
         let report = run_collector(
             &ctx,
@@ -3750,6 +3761,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
         let report = reviewed_run(&ctx, "work", "star").await.unwrap();
         assert_eq!(report.row_counts["kind"], 3);
@@ -3812,6 +3824,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
         let preview = preview_collector(&ctx, "work", "star", None, None)
             .await
@@ -3869,6 +3882,7 @@ pub(crate) mod tests {
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
         script(
             &ext,
@@ -3999,6 +4013,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             trees: None,
             changes: None,
             models: Default::default(),
+            languages: crate::extension::language_set::LanguagesHandle::shipped(),
         };
         assert!(list_collectors(&ctx).await.unwrap()[0].network_enforced);
         reviewed_run(&ctx, "net", "s").await.unwrap();

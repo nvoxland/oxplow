@@ -1,5 +1,7 @@
 # both sides of a duplicate block are facts on their own block, each naming
 # where its copy is (`detail`: path:start-end).
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 when:
   collector: oxplow.duplicate_lines
   files:

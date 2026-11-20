@@ -4,14 +4,15 @@
 //! identifiers/literals normalized (so renames don't break the
 //! match) and import / use / include / package declarations skipped
 //! whole-subtree (so two files that share a few imports don't seed
-//! a fingerprint collision). The hash is salted by `Language::tag()`
+//! a fingerprint collision). The hash is salted by `Language::tag()` (a
+//! hash of its id)
 //! so cross-language structures cannot accidentally collide.
 //!
 //! The same walker is used by every caller. The unit of duplication
 //! detection is "the hash of a subtree" — not a sliding token
 //! window.
 
-use oxplow_code_metrics::{head_symbol_text, Language};
+use oxplow_code_metrics::{form_head, Language};
 use tree_sitter::Node;
 
 /// Result of hashing one subtree.
@@ -28,8 +29,8 @@ pub struct SubtreeHash {
 }
 
 /// Hash one subtree.
-pub fn hash_subtree(root: Node<'_>, src: &[u8], lang: Language) -> SubtreeHash {
-    let mut acc: u64 = 0xcbf29ce484222325 ^ (lang.tag() as u64);
+pub fn hash_subtree(root: Node<'_>, src: &[u8], lang: &Language) -> SubtreeHash {
+    let mut acc: u64 = 0xcbf29ce484222325 ^ lang.tag();
     let mut count: u32 = 0;
     let mut cursor = root.walk();
     walk_hash(&mut cursor, src, lang, &mut acc, &mut count);
@@ -44,7 +45,7 @@ pub fn hash_subtree(root: Node<'_>, src: &[u8], lang: Language) -> SubtreeHash {
 fn walk_hash(
     cursor: &mut tree_sitter::TreeCursor<'_>,
     src: &[u8],
-    lang: Language,
+    lang: &Language,
     acc: &mut u64,
     count: &mut u32,
 ) {
@@ -96,52 +97,24 @@ pub fn is_comment_kind(kind: &str) -> bool {
     )
 }
 
-/// Per-language predicate for nodes whose entire subtree we skip.
-/// Imports / use / include / package directives are noise: they
-/// share lots of structure across unrelated files. Skipping
-/// whole-subtree means whatever the grammar wraps inside (paths,
-/// aliases, brace-lists) contributes nothing to the hash. For
-/// most languages this is a static `node.kind()` check; Clojure
-/// inspects the head symbol of a `list_lit` because every form
-/// shares one node kind.
-pub fn is_skip_node(lang: Language, node: Node<'_>, src: &[u8]) -> bool {
-    let kind = node.kind();
-    match lang {
-        Language::Rust => matches!(kind, "use_declaration" | "extern_crate_declaration"),
-        Language::TypeScript | Language::Tsx | Language::JavaScript => {
-            matches!(kind, "import_statement" | "import_alias")
-        }
-        Language::Python => matches!(
-            kind,
-            "import_statement" | "import_from_statement" | "future_import_statement"
-        ),
-        Language::Go => matches!(
-            kind,
-            "import_declaration" | "import_spec" | "import_spec_list" | "package_clause"
-        ),
-        Language::Java => matches!(kind, "import_declaration" | "package_declaration"),
-        Language::C => matches!(kind, "preproc_include"),
-        Language::Cpp => matches!(
-            kind,
-            "preproc_include" | "using_declaration" | "using_directive"
-        ),
-        Language::CSharp => matches!(kind, "using_directive"),
-        Language::Clojure => {
-            if kind != "list_lit" {
-                return false;
-            }
-            match head_symbol_text(node, src) {
-                Some(head) => matches!(head, "ns" | "require" | "import" | "use"),
-                None => false,
-            }
-        }
+/// Nodes whose entire subtree is skipped: imports, use, include and
+/// package directives are noise (they share structure across unrelated
+/// files). Each language lists them (`duplication.skip_kinds`); a grammar of
+/// generic forms names the forms' heads (`duplication.skip_form_heads`).
+pub fn is_skip_node(lang: &Language, node: Node<'_>, src: &[u8]) -> bool {
+    let spec = lang.spec();
+    let dup = &spec.duplication;
+    if dup.skip_kinds.iter().any(|k| k == node.kind()) {
+        return true;
     }
+    !dup.skip_form_heads.is_empty()
+        && form_head(node, src, spec).is_some_and(|h| dup.skip_form_heads.iter().any(|s| s == h))
 }
 
 /// Coarse token-kind buckets — fold identifiers and literals into
 /// generic placeholders so renames + literal swaps don't break
 /// matches, but keep structural punctuation distinct.
-pub fn normalize_kind(kind: &str) -> &'static str {
+pub fn normalize_kind(kind: &str) -> &str {
     if matches!(
         kind,
         "identifier"
@@ -184,14 +157,5 @@ pub fn normalize_kind(kind: &str) -> &'static str {
     ) {
         return "STR";
     }
-    static_str(kind)
-}
-
-#[inline]
-fn static_str(s: &str) -> &'static str {
-    // SAFETY: `Node::kind()` always returns a `&'static str` produced
-    // by the tree-sitter C grammar tables. The `&str` we receive here
-    // is one of those static strings; only the lifetime annotation is
-    // narrower. Re-extending it back to `'static` is sound.
-    unsafe { std::mem::transmute::<&str, &'static str>(s) }
+    kind
 }

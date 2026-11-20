@@ -58,96 +58,25 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
-use tree_sitter::{Language as TsLanguage, Node, Parser};
+use oxplow_code_metrics::{MergeKey, MergeSpec};
+use tree_sitter::{Node, Parser};
 
-/// The canonical, workspace-wide language identity. The AST merge
-/// front half no longer declares its own enum — it reuses
-/// `oxplow_code_metrics::Language` and keys its `MergeSpec` table off it via
-/// [`merge_spec`], which returns `None` for the canonical variants the merge
-/// tier doesn't support (e.g. `CSharp`). Re-exported so existing call sites
-/// (`crate::ast_merge::Language`, `oxplow_git::MergeLanguage`) keep working.
-pub use oxplow_code_metrics::Language;
+pub use oxplow_code_metrics::{Language, Languages};
 
-/// Map a repo-relative (or any) path to its merge language by extension.
-/// Resolves through the canonical `oxplow_code_metrics::language_for_path`,
-/// then drops any language the merge front half doesn't support (no
-/// [`MergeSpec`]), so e.g. `.cs` ⇒ `None`. `None` ⇒ unsupported, so the AST
-/// tier is skipped and git's markers stand.
-pub fn language_for_path(path: &str) -> Option<Language> {
-    let lang = oxplow_code_metrics::language_for_path(path)?;
-    merge_spec(lang).map(|_| lang)
+/// The language a path merges as: its language when that language has a
+/// merge facet (`merge:` in its analysis.yaml), so a `.cs` file (no facet)
+/// is `None` and keeps git's markers.
+pub fn language_for_path<'a>(languages: &'a Languages, path: &str) -> Option<&'a Language> {
+    languages
+        .for_path(path)
+        .filter(|l| l.spec().merge.is_some())
 }
 
-/// Per-language table of the tree-sitter node names that drive identity.
-/// Modeled on `oxplow-code-metrics`'s `LanguageSpec` kind tables, but
-/// scoped to what top-level-item identity needs rather than complexity
-/// metrics.
-pub struct MergeSpec {
-    /// Node kinds whose identity is their normalized text — imports/use.
-    /// A `use`/`import` *is* what it brings into scope, so two textually
-    /// distinct imports are distinct items regardless of order.
-    pub import_kinds: &'static [&'static str],
-    /// "See-through" wrapper kinds (e.g. TS `export_statement`, Python
-    /// `decorated_definition`): identity is computed from the declaration
-    /// they wrap, while the wrapper's own text/span is still kept so the
-    /// `export `/decorator prefix travels with the item.
-    pub transparent_kinds: &'static [&'static str],
-    /// Field names tried (in order) to descend a transparent wrapper to
-    /// the declaration it wraps.
-    pub inner_decl_fields: &'static [&'static str],
-    /// Field names tried (in order) to find a declaration's identifier.
-    pub name_fields: &'static [&'static str],
-    /// How a non-import item's identity key is computed. Most languages
-    /// use [`KeyStrategy::Generic`] (the `name_fields` path); the C family
-    /// and Clojure need bespoke resolvers. See [`KeyStrategy`].
-    pub key_strategy: KeyStrategy,
-    /// Loader for the bundled tree-sitter grammar.
-    grammar: fn() -> TsLanguage,
-}
-
-/// Per-language identity-key resolution strategy for non-import items.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyStrategy {
-    /// `transparent_kinds` see-through + `name_fields` lookup + Go-receiver
-    /// disambiguation, falling back to `kind + normalized-text`. Used by
-    /// rust/ts/tsx/js/python/go/java.
-    Generic,
-    /// C/C++: functions keyed by their declarator (name + signature, so
-    /// overloads stay distinct), structs/unions/enums/classes/namespaces
-    /// by name, typedefs and globals by their declarator's leaf
-    /// identifier; `template_declaration` is seen through to the wrapped
-    /// declaration. Everything else falls back to `kind + normalized-text`.
-    CFamily,
-    /// Clojure: top-level `(def…/defn…/ns …)` forms keyed by
-    /// `head-symbol + defined-name`; any other form by `kind +
-    /// normalized-text`.
-    Clojure,
-}
-
-impl MergeSpec {
-    fn tree_sitter_language(&self) -> TsLanguage {
-        (self.grammar)()
-    }
-}
-
-/// The [`MergeSpec`] for `lang`, or `None` for canonical languages the AST
-/// merge front half does not support. Their variant exists in the shared
-/// `Language` enum (so identity stays unified) but carries no merge spec —
-/// `C#` is analysed for metrics but never structurally merged here.
-pub fn merge_spec(lang: Language) -> Option<&'static MergeSpec> {
-    Some(match lang {
-        Language::Rust => &RUST,
-        Language::TypeScript => &TYPESCRIPT,
-        Language::Tsx => &TSX,
-        Language::JavaScript => &JAVASCRIPT,
-        Language::Python => &PYTHON,
-        Language::Go => &GO,
-        Language::Java => &JAVA,
-        Language::C => &C,
-        Language::Cpp => &CPP,
-        Language::Clojure => &CLOJURE,
-        Language::CSharp => return None,
-    })
+/// The merge facet of a language, when it has one.
+pub fn merge_spec(lang: &Language) -> Option<&MergeSpec> {
+    lang.analyzable()
+        .then(|| lang.spec().merge.as_ref())
+        .flatten()
 }
 
 /// A top-level declaration, reduced to what the structural merge needs.
@@ -165,10 +94,10 @@ pub struct Item {
 /// Parse `src` as `lang` and return its ordered top-level items, or
 /// `None` if the parse failed (any error/missing node) — never operate
 /// on an untrusted tree.
-pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
+pub fn parse_top_level_items(src: &str, lang: &Language) -> Option<Vec<Item>> {
     let spec = merge_spec(lang)?;
     let mut parser = Parser::new();
-    parser.set_language(&spec.tree_sitter_language()).ok()?;
+    parser.set_language(&lang.tree_sitter_language()).ok()?;
     let tree = parser.parse(src, None)?;
     let root = tree.root_node();
     if root.has_error() {
@@ -208,7 +137,7 @@ pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
 
         let byte_span = start..child.end_byte();
         let text = src[byte_span.clone()].to_string();
-        let key = item_key(child, src, spec);
+        let key = item_key(child, src, spec, lang.spec().forms.as_ref());
         items.push(Item {
             key,
             text,
@@ -250,18 +179,23 @@ fn push_comment_item(items: &mut Vec<Item>, src: &str, start: usize, end: usize)
 const COMMENT_KEY_PREFIX: &str = "#comment::";
 
 /// Compute an item's identity key per the spec's rules.
-fn item_key(node: Node, src: &str, spec: &MergeSpec) -> String {
+fn item_key(
+    node: Node,
+    src: &str,
+    spec: &MergeSpec,
+    forms: Option<&oxplow_code_metrics::Forms>,
+) -> String {
     let kind = node.kind();
 
     // Imports/use: identity is the normalized text (all strategies).
-    if spec.import_kinds.contains(&kind) {
+    if spec.import_kinds.iter().any(|k| k == kind) {
         return format!("import::{}", normalize_ws(&node_text(node, src)));
     }
 
-    match spec.key_strategy {
-        KeyStrategy::Generic => generic_item_key(node, src, spec),
-        KeyStrategy::CFamily => c_family_item_key(node, src),
-        KeyStrategy::Clojure => clojure_item_key(node, src),
+    match spec.key {
+        MergeKey::Named => generic_item_key(node, src, spec),
+        MergeKey::CDeclarator => c_family_item_key(node, src),
+        MergeKey::FormHead => clojure_item_key(node, src, spec, forms),
     }
 }
 
@@ -272,7 +206,7 @@ fn generic_item_key(node: Node, src: &str, spec: &MergeSpec) -> String {
 
     // See through wrappers (export/decorated) to the inner declaration
     // for naming, but key off the *inner* kind+name.
-    let named = if spec.transparent_kinds.contains(&kind) {
+    let named = if spec.transparent_kinds.iter().any(|k| k == kind) {
         inner_decl(node, spec).unwrap_or(node)
     } else {
         node
@@ -374,35 +308,24 @@ fn c_declarator_leaf_name(node: Node) -> Option<Node> {
 /// recognized `def…`/`ns` symbol keys by `head::name`; any other form by
 /// `kind + normalized-text`. Two `defmethod`s on the same multifn collapse
 /// to one key and conservatively bail (DuplicateKeys) — safe, not wrong.
-fn clojure_item_key(node: Node, src: &str) -> String {
-    if node.kind() == "list_lit" {
+fn clojure_item_key(
+    node: Node,
+    src: &str,
+    spec: &MergeSpec,
+    forms: Option<&oxplow_code_metrics::Forms>,
+) -> String {
+    if forms.is_some_and(|f| node.kind() == f.list) {
         let mut cursor = node.walk();
         let values: Vec<Node> = node.children_by_field_name("value", &mut cursor).collect();
         if let (Some(head), Some(name)) = (values.first(), values.get(1)) {
             let head_txt = node_text(*head, src);
-            if CLOJURE_DEF_HEADS.contains(&head_txt.as_str()) {
+            if spec.def_heads.contains(&head_txt) {
                 return format!("{head_txt}::{}", normalize_ws(&node_text(*name, src)));
             }
         }
     }
     format!("{}::{}", node.kind(), normalize_ws(&node_text(node, src)))
 }
-
-/// Clojure head symbols whose form defines a top-level named entity.
-static CLOJURE_DEF_HEADS: &[&str] = &[
-    "def",
-    "defn",
-    "defn-",
-    "defmacro",
-    "defmulti",
-    "defmethod",
-    "defprotocol",
-    "defrecord",
-    "deftype",
-    "definterface",
-    "defonce",
-    "ns",
-];
 
 /// First child reachable through the spec's `inner_decl_fields`.
 fn inner_decl<'a>(node: Node<'a>, spec: &MergeSpec) -> Option<Node<'a>> {
@@ -431,125 +354,6 @@ fn node_text(node: Node, src: &str) -> String {
 fn normalize_ws(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
-
-// ---- Language specs ----
-
-static RUST: MergeSpec = MergeSpec {
-    import_kinds: &["use_declaration", "extern_crate_declaration"],
-    transparent_kinds: &[],
-    inner_decl_fields: &[],
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_rust::LANGUAGE.into(),
-};
-
-// TypeScript / TSX / JavaScript share identity rules; only the grammar
-// (and thus the top-level item kinds the parser yields) differs. A
-// top-level `export ...` is an `export_statement` wrapping the real
-// declaration under the `declaration` field.
-static TS_IMPORT_KINDS: &[&str] = &["import_statement"];
-static TS_TRANSPARENT_KINDS: &[&str] = &["export_statement"];
-static TS_INNER_DECL_FIELDS: &[&str] = &["declaration"];
-
-static TYPESCRIPT: MergeSpec = MergeSpec {
-    import_kinds: TS_IMPORT_KINDS,
-    transparent_kinds: TS_TRANSPARENT_KINDS,
-    inner_decl_fields: TS_INNER_DECL_FIELDS,
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-};
-
-static TSX: MergeSpec = MergeSpec {
-    import_kinds: TS_IMPORT_KINDS,
-    transparent_kinds: TS_TRANSPARENT_KINDS,
-    inner_decl_fields: TS_INNER_DECL_FIELDS,
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
-};
-
-static JAVASCRIPT: MergeSpec = MergeSpec {
-    import_kinds: TS_IMPORT_KINDS,
-    transparent_kinds: TS_TRANSPARENT_KINDS,
-    inner_decl_fields: TS_INNER_DECL_FIELDS,
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_javascript::LANGUAGE.into(),
-};
-
-static PYTHON: MergeSpec = MergeSpec {
-    import_kinds: &[
-        "import_statement",
-        "import_from_statement",
-        "future_import_statement",
-    ],
-    // A decorated def wraps the real `function_definition`/`class_definition`
-    // under the `definition` field; the decorators ride along in the text.
-    transparent_kinds: &["decorated_definition"],
-    inner_decl_fields: &["definition"],
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_python::LANGUAGE.into(),
-};
-
-static GO: MergeSpec = MergeSpec {
-    import_kinds: &["import_declaration"],
-    transparent_kinds: &[],
-    inner_decl_fields: &[],
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_go::LANGUAGE.into(),
-};
-
-// ---- Second-slice languages ----
-
-// Java top-level items are imports + type declarations (methods/fields are
-// nested in a class body — intra-body merge is Tier-1's job, per the
-// design). The generic `name_fields=["name"]` path keys each
-// class/interface/enum/record by its identifier; `package_declaration`
-// falls back to text.
-static JAVA: MergeSpec = MergeSpec {
-    import_kinds: &["import_declaration"],
-    transparent_kinds: &[],
-    inner_decl_fields: &[],
-    name_fields: &["name"],
-    key_strategy: KeyStrategy::Generic,
-    grammar: || tree_sitter_java::LANGUAGE.into(),
-};
-
-// C / C++ use the bespoke `CFamily` key resolver (declarator-based names +
-// signatures). `import_kinds` covers `#include`; everything else is keyed
-// by `c_family_item_key`.
-static C: MergeSpec = MergeSpec {
-    import_kinds: &["preproc_include"],
-    transparent_kinds: &[],
-    inner_decl_fields: &[],
-    name_fields: &[],
-    key_strategy: KeyStrategy::CFamily,
-    grammar: || tree_sitter_c::LANGUAGE.into(),
-};
-
-static CPP: MergeSpec = MergeSpec {
-    import_kinds: &["preproc_include"],
-    transparent_kinds: &[],
-    inner_decl_fields: &[],
-    name_fields: &[],
-    key_strategy: KeyStrategy::CFamily,
-    grammar: || tree_sitter_cpp::LANGUAGE.into(),
-};
-
-// Clojure flattens every parenthesized form to `list_lit`; the bespoke
-// `Clojure` resolver reads the head symbol + defined name. There is no
-// distinct import node (requires live in `ns`), so `import_kinds` is empty.
-static CLOJURE: MergeSpec = MergeSpec {
-    import_kinds: &[],
-    transparent_kinds: &[],
-    inner_decl_fields: &[],
-    name_fields: &[],
-    key_strategy: KeyStrategy::Clojure,
-    grammar: || tree_sitter_clojure_orchard::LANGUAGE.into(),
-};
 
 // ===================================================================
 // Per-item 3-way merge: classify + ordering/reconstruction + re-parse
@@ -598,7 +402,7 @@ pub enum BailReason {
 /// nearest surviving base anchor (ours before theirs on ties). The
 /// reconstruction reuses each item's verbatim byte-span text (no reflow)
 /// and is re-parsed as a guard before being returned.
-pub fn merge_top_level(base: &str, ours: &str, theirs: &str, lang: Language) -> AstMerge {
+pub fn merge_top_level(base: &str, ours: &str, theirs: &str, lang: &Language) -> AstMerge {
     merge_with_reconstruct(base, ours, theirs, lang, reconstruct)
 }
 
@@ -609,7 +413,7 @@ fn merge_with_reconstruct(
     base: &str,
     ours: &str,
     theirs: &str,
-    lang: Language,
+    lang: &Language,
     reconstruct_fn: impl Fn(&[Item]) -> String,
 ) -> AstMerge {
     let (Some(b_items), Some(o_items), Some(t_items)) = (
@@ -804,6 +608,7 @@ fn reconstruct(items: &[Item]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_code_metrics::for_tests::{lang, shipped};
 
     /// Assert `src[item.byte_span] == item.text` for every item — the
     /// span is the authoritative source range.
@@ -845,7 +650,7 @@ mod tests {
         let ours = base.replace("use std::fmt;", "use std::fmt;\nuse std::io;");
         let theirs = base.replace("use std::fmt;", "use std::fmt;\nuse std::net;");
 
-        let AstMerge::Resolved(merged) = merge_top_level(base, &ours, &theirs, Language::Rust)
+        let AstMerge::Resolved(merged) = merge_top_level(base, &ours, &theirs, &lang("rust"))
         else {
             panic!("both sides adding a different import must resolve structurally");
         };
@@ -878,7 +683,7 @@ mod tests {
     #[test]
     fn a_detached_comment_run_is_parsed_as_its_own_item() {
         let src = "// header\n\nuse std::fmt;\n\n// trailing\n";
-        let items = parse_top_level_items(src, Language::Rust).expect("parses");
+        let items = parse_top_level_items(src, &lang("rust")).expect("parses");
         assert_spans_match(src, &items);
         // header, the use, trailing — three items, in source order.
         assert_eq!(items.len(), 3, "got keys {:?}", keys(&items));
@@ -895,7 +700,7 @@ mod tests {
         let base = "# Copyright 2026 ACME Corp.\n\nimport os\n\ndef run():\n    return 1\n";
         let ours = base.replace("import os", "import os\nimport sys");
         let theirs = base.replace("import os", "import os\nimport json");
-        let AstMerge::Resolved(merged) = merge_top_level(base, &ours, &theirs, Language::Python)
+        let AstMerge::Resolved(merged) = merge_top_level(base, &ours, &theirs, &lang("python"))
         else {
             panic!("independent imports must resolve structurally");
         };
@@ -912,7 +717,7 @@ mod tests {
         // The existing behaviour must not regress: no blank line means the
         // comment belongs to the decl and moves with it.
         let src = "/// docs for run\npub fn run() {}\n";
-        let items = parse_top_level_items(src, Language::Rust).expect("parses");
+        let items = parse_top_level_items(src, &lang("rust")).expect("parses");
         assert_eq!(items.len(), 1, "got keys {:?}", keys(&items));
         assert!(items[0].text.contains("/// docs for run"));
         assert!(items[0].text.contains("pub fn run()"));
@@ -920,25 +725,76 @@ mod tests {
 
     #[test]
     fn language_for_path_maps_supported_extensions() {
-        assert_eq!(language_for_path("a/b.rs"), Some(Language::Rust));
-        assert_eq!(language_for_path("x.ts"), Some(Language::TypeScript));
-        assert_eq!(language_for_path("x.tsx"), Some(Language::Tsx));
-        assert_eq!(language_for_path("x.js"), Some(Language::JavaScript));
-        assert_eq!(language_for_path("x.mjs"), Some(Language::JavaScript));
-        assert_eq!(language_for_path("x.jsx"), Some(Language::JavaScript));
-        assert_eq!(language_for_path("x.py"), Some(Language::Python));
-        assert_eq!(language_for_path("x.go"), Some(Language::Go));
+        assert_eq!(
+            language_for_path(&shipped(), "a/b.rs").map(|l| l.name()),
+            Some("rust")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.ts").map(|l| l.name()),
+            Some("typescript")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.tsx").map(|l| l.name()),
+            Some("tsx")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.js").map(|l| l.name()),
+            Some("javascript")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.mjs").map(|l| l.name()),
+            Some("javascript")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.jsx").map(|l| l.name()),
+            Some("javascript")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.py").map(|l| l.name()),
+            Some("python")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.go").map(|l| l.name()),
+            Some("go")
+        );
         // Second-slice languages.
-        assert_eq!(language_for_path("x.java"), Some(Language::Java));
-        assert_eq!(language_for_path("x.c"), Some(Language::C));
-        assert_eq!(language_for_path("x.h"), Some(Language::C));
-        assert_eq!(language_for_path("x.cpp"), Some(Language::Cpp));
-        assert_eq!(language_for_path("x.hpp"), Some(Language::Cpp));
-        assert_eq!(language_for_path("x.clj"), Some(Language::Clojure));
-        assert_eq!(language_for_path("x.cljs"), Some(Language::Clojure));
+        assert_eq!(
+            language_for_path(&shipped(), "x.java").map(|l| l.name()),
+            Some("java")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.c").map(|l| l.name()),
+            Some("c")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.h").map(|l| l.name()),
+            Some("c")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.cpp").map(|l| l.name()),
+            Some("cpp")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.hpp").map(|l| l.name()),
+            Some("cpp")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.clj").map(|l| l.name()),
+            Some("clojure")
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "x.cljs").map(|l| l.name()),
+            Some("clojure")
+        );
         // Genuinely unsupported.
-        assert_eq!(language_for_path("x.txt"), None);
-        assert_eq!(language_for_path("noext"), None);
+        assert_eq!(
+            language_for_path(&shipped(), "x.txt").map(|l| l.name()),
+            None
+        );
+        assert_eq!(
+            language_for_path(&shipped(), "noext").map(|l| l.name()),
+            None
+        );
     }
 
     #[test]
@@ -947,17 +803,20 @@ mod tests {
         // for metrics — but the AST merge front half doesn't support it, so
         // it has no `MergeSpec`, `parse_top_level_items` bails gracefully,
         // and a `.cs` path is never picked up by the merge resolver.
-        assert!(merge_spec(Language::CSharp).is_none());
-        assert!(merge_spec(Language::Rust).is_some());
-        assert!(parse_top_level_items("class C { void M() {} }", Language::CSharp).is_none());
-        assert_eq!(language_for_path("x.cs"), None);
+        assert!(merge_spec(&lang("csharp")).is_none());
+        assert!(merge_spec(&lang("rust")).is_some());
+        assert!(parse_top_level_items("class C { void M() {} }", &lang("csharp")).is_none());
+        assert_eq!(
+            language_for_path(&shipped(), "x.cs").map(|l| l.name()),
+            None
+        );
     }
 
     #[test]
     fn rust_extracts_top_level_items_with_keys() {
         let src = "use std::fmt;\nextern crate foo;\nfn a() {}\nstruct S;\nenum E { A }\n\
                    const K: u8 = 1;\ntrait T {}\nimpl S {}\n";
-        let items = parse_top_level_items(src, Language::Rust).unwrap();
+        let items = parse_top_level_items(src, &lang("rust")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::use std::fmt;"));
@@ -974,7 +833,7 @@ mod tests {
     #[test]
     fn rust_attaches_leading_doc_comment_to_following_item() {
         let src = "/// doc for a\nfn a() {}\n\n// detached\n\nfn b() {}\n";
-        let items = parse_top_level_items(src, Language::Rust).unwrap();
+        let items = parse_top_level_items(src, &lang("rust")).unwrap();
         assert_spans_match(src, &items);
         let a = items.iter().find(|i| i.key == "function_item::a").unwrap();
         assert!(
@@ -994,7 +853,7 @@ mod tests {
     #[test]
     fn rust_bails_on_parse_failure() {
         // Unbalanced brace → tree-sitter produces an ERROR node.
-        assert!(parse_top_level_items("fn a() { ", Language::Rust).is_none());
+        assert!(parse_top_level_items("fn a() { ", &lang("rust")).is_none());
     }
 
     #[test]
@@ -1002,7 +861,7 @@ mod tests {
         let src = "import { x } from 'm';\nfunction f() {}\nclass C {}\n\
                    interface I {}\ntype T = number;\nenum E { A }\n\
                    export function g() {}\nexport class D {}\nconst k = 1;\n";
-        let items = parse_top_level_items(src, Language::TypeScript).unwrap();
+        let items = parse_top_level_items(src, &lang("typescript")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::import { x } from 'm';"));
@@ -1022,7 +881,7 @@ mod tests {
     fn tsx_parses_component_and_keeps_export_identity() {
         let src = "import React from 'react';\n\
                    export function App() { return <div>hi</div>; }\n";
-        let items = parse_top_level_items(src, Language::Tsx).unwrap();
+        let items = parse_top_level_items(src, &lang("tsx")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::import React from 'react';"));
@@ -1032,7 +891,7 @@ mod tests {
     #[test]
     fn javascript_imports_and_functions() {
         let src = "import x from 'm';\nfunction f() {}\nclass C {}\nexport function g() {}\n";
-        let items = parse_top_level_items(src, Language::JavaScript).unwrap();
+        let items = parse_top_level_items(src, &lang("javascript")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::import x from 'm';"));
@@ -1046,7 +905,7 @@ mod tests {
         let src = "import os\nfrom sys import path\n\
                    def f():\n    pass\nclass C:\n    pass\n\
                    @deco\ndef g():\n    pass\n";
-        let items = parse_top_level_items(src, Language::Python).unwrap();
+        let items = parse_top_level_items(src, &lang("python")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::import os"));
@@ -1069,7 +928,7 @@ mod tests {
     #[test]
     fn python_bails_on_parse_failure() {
         // A `def` with no body is a syntax error in Python.
-        assert!(parse_top_level_items("def f(:\n", Language::Python).is_none());
+        assert!(parse_top_level_items("def f(:\n", &lang("python")).is_none());
     }
 
     #[test]
@@ -1080,7 +939,7 @@ mod tests {
                    func (s S) M() {}\n\
                    type S struct{}\n\
                    const K = 1\n";
-        let items = parse_top_level_items(src, Language::Go).unwrap();
+        let items = parse_top_level_items(src, &lang("go")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::import \"fmt\""));
@@ -1101,7 +960,7 @@ mod tests {
         let src = "package p;\nimport java.util.List;\n\
                    class C { int x; void m(int a) {} }\n\
                    interface I {}\nenum E { A }\nrecord R(int a) {}\n";
-        let items = parse_top_level_items(src, Language::Java).unwrap();
+        let items = parse_top_level_items(src, &lang("java")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::import java.util.List;"));
@@ -1118,7 +977,7 @@ mod tests {
         let src = "#include <stdio.h>\nint g = 1;\ntypedef int myint;\n\
                    struct S { int a; };\nint main(void) { return 0; }\n\
                    void foo(int x) {}\n";
-        let items = parse_top_level_items(src, Language::C).unwrap();
+        let items = parse_top_level_items(src, &lang("c")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::#include <stdio.h>"));
@@ -1136,7 +995,7 @@ mod tests {
                    class C {};\nstruct S {};\n\
                    template<typename T> T id(T x) { return x; }\n\
                    void f(int a) {}\nvoid f(double a) {}\n";
-        let items = parse_top_level_items(src, Language::Cpp).unwrap();
+        let items = parse_top_level_items(src, &lang("cpp")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"import::#include <vector>"));
@@ -1154,7 +1013,7 @@ mod tests {
     fn clojure_def_forms_keyed_by_head_and_name() {
         let src = "(ns my.app)\n(def x 1)\n(defn foo [a] a)\n\
                    (defn- bar [] 2)\n(defmacro m [] nil)\n";
-        let items = parse_top_level_items(src, Language::Clojure).unwrap();
+        let items = parse_top_level_items(src, &lang("clojure")).unwrap();
         assert_spans_match(src, &items);
         let k = keys(&items);
         assert!(k.contains(&"ns::my.app"));
@@ -1169,10 +1028,10 @@ mod tests {
         let base = "import a.A;\nclass Base {}\n";
         let ours = "import a.A;\nclass Base {}\nclass Ours {}\n";
         let theirs = "import a.A;\nclass Base {}\nclass Theirs {}\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Java));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("java")));
         assert!(text.contains("class Ours"), "{text}");
         assert!(text.contains("class Theirs"), "{text}");
-        assert!(parse_top_level_items(&text, Language::Java).is_some());
+        assert!(parse_top_level_items(&text, &lang("java")).is_some());
     }
 
     #[test]
@@ -1180,10 +1039,10 @@ mod tests {
         let base = "int shared(void) { return 0; }\n";
         let ours = "int shared(void) { return 0; }\nint ours(void) { return 1; }\n";
         let theirs = "int shared(void) { return 0; }\nint theirs(void) { return 2; }\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::C));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("c")));
         assert!(text.contains("int ours"), "{text}");
         assert!(text.contains("int theirs"), "{text}");
-        assert!(parse_top_level_items(&text, Language::C).is_some());
+        assert!(parse_top_level_items(&text, &lang("c")).is_some());
     }
 
     #[test]
@@ -1191,7 +1050,7 @@ mod tests {
         let base = "int f(void) { return 1; }\n";
         let ours = "int f(void) { return 2; }\n";
         let theirs = "int f(void) { return 3; }\n";
-        match merge_top_level(base, ours, theirs, Language::C) {
+        match merge_top_level(base, ours, theirs, &lang("c")) {
             AstMerge::Conflict(keys) => assert!(
                 keys.iter()
                     .any(|k| k.starts_with("function_definition::f(void)")),
@@ -1206,10 +1065,10 @@ mod tests {
         let base = "#include <a>\nint main() { return 0; }\n";
         let ours = "#include <a>\n#include <b>\nint main() { return 0; }\n";
         let theirs = "#include <a>\n#include <c>\nint main() { return 0; }\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Cpp));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("cpp")));
         assert!(text.contains("#include <b>"), "{text}");
         assert!(text.contains("#include <c>"), "{text}");
-        assert!(parse_top_level_items(&text, Language::Cpp).is_some());
+        assert!(parse_top_level_items(&text, &lang("cpp")).is_some());
     }
 
     #[test]
@@ -1217,10 +1076,10 @@ mod tests {
         let base = "(ns app)\n(defn shared [] 0)\n";
         let ours = "(ns app)\n(defn shared [] 0)\n(defn ours [] 1)\n";
         let theirs = "(ns app)\n(defn shared [] 0)\n(defn theirs [] 2)\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Clojure));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("clojure")));
         assert!(text.contains("(defn ours"), "{text}");
         assert!(text.contains("(defn theirs"), "{text}");
-        assert!(parse_top_level_items(&text, Language::Clojure).is_some());
+        assert!(parse_top_level_items(&text, &lang("clojure")).is_some());
     }
 
     #[test]
@@ -1228,7 +1087,7 @@ mod tests {
         let base = "(defn f [] 1)\n";
         let ours = "(defn f [] 2)\n";
         let theirs = "(defn f [] 3)\n";
-        match merge_top_level(base, ours, theirs, Language::Clojure) {
+        match merge_top_level(base, ours, theirs, &lang("clojure")) {
             AstMerge::Conflict(keys) => {
                 assert!(keys.iter().any(|k| k == "defn::f"), "{keys:?}")
             }
@@ -1238,10 +1097,8 @@ mod tests {
 
     #[test]
     fn empty_source_yields_no_items() {
-        assert!(parse_top_level_items("", Language::Rust)
-            .unwrap()
-            .is_empty());
-        assert!(parse_top_level_items("\n\n", Language::Python)
+        assert!(parse_top_level_items("", &lang("rust")).unwrap().is_empty());
+        assert!(parse_top_level_items("\n\n", &lang("python"))
             .unwrap()
             .is_empty());
     }
@@ -1249,7 +1106,7 @@ mod tests {
     #[test]
     fn ordering_is_source_order() {
         let src = "fn first() {}\nfn second() {}\nfn third() {}\n";
-        let items = parse_top_level_items(src, Language::Rust).unwrap();
+        let items = parse_top_level_items(src, &lang("rust")).unwrap();
         let k = keys(&items);
         assert_eq!(
             k,
@@ -1276,7 +1133,7 @@ mod tests {
         let base = "use std::fmt;\n";
         let ours = "use std::collections::HashMap;\nuse std::fmt;\n";
         let theirs = "use std::fmt;\nuse std::io;\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("rust")));
         // ours-add (front) → base survivor → theirs-add (anchored after).
         assert_eq!(
             text,
@@ -1289,7 +1146,7 @@ mod tests {
         let base = "fn shared() {}\n";
         let ours = "fn shared() {}\nfn from_ours() {}\n";
         let theirs = "fn shared() {}\nfn from_theirs() {}\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("rust")));
         assert!(text.contains("fn from_ours"), "{text}");
         assert!(text.contains("fn from_theirs"), "{text}");
         // Both new fns anchor after the surviving `shared`, ours first.
@@ -1307,7 +1164,7 @@ mod tests {
         let base = "fn a() { 1 }\n";
         let ours = "fn a() { 2 }\n"; // body edit
         let theirs = "fn a() { 1 }\nfn b() {}\n"; // new fn
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("rust")));
         assert!(text.contains("fn a() { 2 }"), "edited body wins: {text}");
         assert!(text.contains("fn b()"), "{text}");
     }
@@ -1317,7 +1174,7 @@ mod tests {
         let base = "fn a() {}\nfn b() {}\n";
         let ours = "fn b() {}\n";
         let theirs = "fn b() {}\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("rust")));
         assert!(!text.contains("fn a()"), "a deleted by both: {text}");
         assert!(text.contains("fn b()"), "{text}");
     }
@@ -1327,7 +1184,7 @@ mod tests {
         let base = "fn calc() { a() }\n";
         let ours = "fn calc() { b() }\n";
         let theirs = "fn calc() { c() }\n";
-        match merge_top_level(base, ours, theirs, Language::Rust) {
+        match merge_top_level(base, ours, theirs, &lang("rust")) {
             AstMerge::Conflict(keys) => {
                 assert!(
                     keys.iter().any(|k| k.starts_with("function_item::calc")),
@@ -1343,7 +1200,7 @@ mod tests {
         let base = "fn keep() {}\n";
         let ours = "fn keep() {}\nfn n() { 1 }\n";
         let theirs = "fn keep() {}\nfn n() { 2 }\n";
-        match merge_top_level(base, ours, theirs, Language::Rust) {
+        match merge_top_level(base, ours, theirs, &lang("rust")) {
             AstMerge::Conflict(keys) => {
                 assert!(
                     keys.iter().any(|k| k.starts_with("function_item::n")),
@@ -1359,7 +1216,7 @@ mod tests {
         let base = "fn a() { 1 }\n";
         let ours = "\n"; // a deleted
         let theirs = "fn a() { 2 }\n"; // a edited
-        match merge_top_level(base, ours, theirs, Language::Rust) {
+        match merge_top_level(base, ours, theirs, &lang("rust")) {
             AstMerge::Conflict(keys) => {
                 assert!(
                     keys.iter().any(|k| k.starts_with("function_item::a")),
@@ -1377,7 +1234,7 @@ mod tests {
         let base = "fn base() {}\n";
         let ours = "fn o_new() {}\nfn base() {}\n";
         let theirs = "fn t_new() {}\nfn base() {}\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("rust")));
         assert_eq!(text, "fn o_new() {}\nfn t_new() {}\nfn base() {}\n");
     }
 
@@ -1388,13 +1245,13 @@ mod tests {
         let base = "use std::fmt;\n";
         let ours = "use std::io;\nuse std::fmt;\n";
         let theirs = "use std::fmt;\nuse std::cmp;\n";
-        let out = merge_with_reconstruct(base, ours, theirs, Language::Rust, |_| {
+        let out = merge_with_reconstruct(base, ours, theirs, &lang("rust"), |_| {
             "fn broken( {\n".to_string()
         });
         assert_eq!(out, AstMerge::Bail(BailReason::ReparseFailed));
         // Sanity: the real reconstructor resolves the same inputs.
         assert!(matches!(
-            merge_top_level(base, ours, theirs, Language::Rust),
+            merge_top_level(base, ours, theirs, &lang("rust")),
             AstMerge::Resolved(_)
         ));
     }
@@ -1405,7 +1262,7 @@ mod tests {
         let ours = "fn a() { "; // unbalanced → parse error
         let theirs = "fn a() {}\nfn b() {}\n";
         assert_eq!(
-            merge_top_level(base, ours, theirs, Language::Rust),
+            merge_top_level(base, ours, theirs, &lang("rust")),
             AstMerge::Bail(BailReason::SideParseFailed)
         );
     }
@@ -1415,7 +1272,7 @@ mod tests {
         let base = "import a from 'a';\n";
         let ours = "import b from 'b';\nimport a from 'a';\n";
         let theirs = "import a from 'a';\nimport c from 'c';\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::TypeScript));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("typescript")));
         assert_eq!(
             text,
             "import b from 'b';\nimport a from 'a';\nimport c from 'c';\n"
@@ -1427,7 +1284,7 @@ mod tests {
         let base = "function a() { return 1; }\n";
         let ours = "function a() { return 2; }\n";
         let theirs = "function a() { return 1; }\nfunction b() {}\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::JavaScript));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("javascript")));
         assert!(text.contains("return 2"), "edited body wins: {text}");
         assert!(text.contains("function b()"), "{text}");
     }
@@ -1437,11 +1294,11 @@ mod tests {
         let base = "def shared():\n    pass\n";
         let ours = "def shared():\n    pass\ndef o():\n    pass\n";
         let theirs = "def shared():\n    pass\ndef t():\n    pass\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Python));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("python")));
         assert!(text.contains("def o():"), "{text}");
         assert!(text.contains("def t():"), "{text}");
         // Reconstruction must itself be valid Python (re-parse guard passed).
-        assert!(parse_top_level_items(&text, Language::Python).is_some());
+        assert!(parse_top_level_items(&text, &lang("python")).is_some());
     }
 
     #[test]
@@ -1449,7 +1306,7 @@ mod tests {
         let base = "def f():\n    return 1\n";
         let ours = "def f():\n    return 2\n";
         let theirs = "def f():\n    return 3\n";
-        match merge_top_level(base, ours, theirs, Language::Python) {
+        match merge_top_level(base, ours, theirs, &lang("python")) {
             AstMerge::Conflict(keys) => {
                 assert!(
                     keys.iter().any(|k| k.starts_with("function_definition::f")),
@@ -1465,13 +1322,13 @@ mod tests {
         let base = "package main\nfunc S() {}\n";
         let ours = "package main\nfunc S() {}\nfunc O() {}\n";
         let theirs = "package main\nfunc S() {}\nfunc T() {}\n";
-        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Go));
+        let text = resolved_text(merge_top_level(base, ours, theirs, &lang("go")));
         assert!(
             text.starts_with("package main"),
             "package stays first: {text}"
         );
         assert!(text.contains("func O()"), "{text}");
         assert!(text.contains("func T()"), "{text}");
-        assert!(parse_top_level_items(&text, Language::Go).is_some());
+        assert!(parse_top_level_items(&text, &lang("go")).is_some());
     }
 }

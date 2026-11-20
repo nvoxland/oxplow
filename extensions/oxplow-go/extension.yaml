@@ -1,0 +1,26 @@
+manifest: 2
+name: oxplow-go
+namespace: oxplow
+description: "What oxplow knows about Go: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Go."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Go in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: go
+    title: "Go"
+    extensions: [go]
+    aliases: ["golang"]
+    grammar: { native: go }
+    analysis: languages/go/analysis.yaml
+    symbols: languages/go/symbols.scm
+    lsp: { package: gopls }
+    units: [class, package]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "func {name}(x int) int {"
+      branch: ["    if x == {n} { return {n} }"]
+      tail: ["    return 0", "}"]

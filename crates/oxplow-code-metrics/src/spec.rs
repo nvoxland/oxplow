@@ -1,602 +1,838 @@
-//! Per-language tree-sitter node-name tables.
+//! A language, as an extension declares it.
 //!
-//! Each `LanguageSpec` says:
-//! - which AST node kinds are function-like syntax (the duplication
-//!   detector's units; definitions come from `languages/<lang>/symbols.scm`),
-//! - which field holds the parameter list and which child kinds count
-//!   as one parameter,
-//! - which AST node kinds count as a "decision point" for cyclomatic
-//!   complexity (one branch per occurrence inside the function body).
+//! Core names no language. Each language is a `languages:` entry of an
+//! extension's manifest (oxplow's language packs, `oxplow-rust` and the
+//! rest, ship them) with its data files: `analysis.yaml` (what this crate's
+//! walkers need: function and decision node kinds, the parameter list,
+//! which visibility and doc strategy, and the optional import, merge and
+//! duplication facets) and `symbols.scm` / `symbols.yaml` (what a file
+//! defines, [`crate::symbols`]). [`Languages`] is the set the enabled
+//! extensions declare, built at each publication; a [`Language`] is a
+//! cheap handle into it.
 //!
-//! Decision-point sets follow McCabe's classic definition: every
-//! `if`, `else if`, `case`, `catch`, `for`, `while`, `&&`, `||`, plus
-//! ternary expressions.
+//! Per-language *behavior* that data can't say (how Rust spells `pub`, how
+//! Python marks a docstring) is a strategy here, chosen by name from
+//! `analysis.yaml`. A language needing a new one is a core change.
+//!
+//! Decision points follow McCabe's classic definition: every `if`,
+//! `else if`, `case`, `catch`, `for`, `while`, `&&`, `||`, plus ternary
+//! expressions, as each language's `decisions.kinds` lists them.
 
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, OnceLock};
+
+use serde::{Deserialize, Serialize};
 use tree_sitter::Language as TsLanguage;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Language {
-    Rust,
-    TypeScript,
-    Tsx,
-    JavaScript,
-    Python,
-    Go,
-    Java,
-    C,
-    Cpp,
-    /// Clojure / ClojureScript / cljc — share the same grammar and
-    /// idioms. tree-sitter-clojure represents every parenthesized
-    /// form as a generic `list_lit`, so function and
-    /// decision-point detection use the head-symbol-text matchers
-    /// (`function_form_heads`, `decision_form_heads`) on
-    /// `LanguageSpec` rather than the static-`node.kind()` arrays
-    /// that suffice for the other ten languages.
-    Clojure,
-    /// C#. Standard `node.kind()`-driven detection like the other
-    /// non-Clojure languages.
-    CSharp,
+use crate::language::UnitKind;
+use crate::symbols::SymbolSpec;
+
+/// How a function's visibility is decided. Each names what it looks at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisibilityStrategy {
+    /// A `visibility_modifier` child whose text starts with `pub` →
+    /// public; a function item without one → private.
+    VisibilityModifier,
+    /// An `accessibility_modifier` child on a class member (`private`,
+    /// `protected`, `public`; a `#name` is private); a class member
+    /// without one → public; a top-level function → public only inside an
+    /// `export_statement`.
+    AccessibilityModifier,
+    /// A `modifiers` child holding `private` / `protected` / `public`.
+    ModifiersKeyword,
+    /// The `access_specifier` before it in its `class_specifier` (default
+    /// private) or `struct_specifier` (default public).
+    AccessSpecifier,
+    /// An uppercase first letter → public.
+    CapitalizedName,
+    /// A leading `_` → private.
+    UnderscorePrefix,
+    /// A `static` storage class → private (file scope).
+    StaticStorage,
+    /// A form whose head is `defn-`, or whose metadata says `:private` →
+    /// private.
+    FormMeta,
+    /// No signal: every function is unknown.
+    Unknown,
 }
 
-pub struct LanguageSpec {
-    /// AST node kinds of function-like syntax, closures included — the
-    /// duplication detector's units (`oxplow-code-dup`). What a file
-    /// *defines* (and so what has metrics) comes from its symbol query
-    /// (`languages/<lang>/symbols.scm`, [`crate::symbols`]).
-    pub function_kinds: &'static [&'static str],
-    /// Field names to try (in order) for the parameter list.
-    pub param_list_fields: &'static [&'static str],
-    /// AST node kinds inside a parameter list that represent one parameter.
-    pub parameter_kinds: &'static [&'static str],
-    /// AST node kinds that increment cyclomatic complexity by 1.
-    pub decision_kinds: &'static [&'static str],
-    /// Strategy used to classify a function's visibility (public /
-    /// private / unknown). The strategy is language-specific because
-    /// each language encodes "private" differently — modifier nodes
-    /// (Java/TS/Rust), name conventions (Python `_foo`, Go
-    /// capitalization), or scope-based (C `static`, TS top-level
-    /// `export`).
-    pub visibility: VisibilityStrategy,
-    /// Form-head matchers for grammars whose AST collapses every
-    /// parenthesized form to a single generic node kind (Clojure's
-    /// `list_lit`). When non-empty, a node whose kind is `list_lit`
-    /// AND whose first symbol child's text is in this list is
-    /// treated as a function in addition to anything in
-    /// `function_kinds`. Most languages leave this empty.
-    pub function_form_heads: &'static [&'static str],
-    /// Same shape as `function_form_heads` but for decision points
-    /// (cyclomatic complexity counter).
-    pub decision_form_heads: &'static [&'static str],
-    /// How a documented function is recognized in this language (for
-    /// `FunctionMetrics::has_doc` → the `oxplow.doc_coverage` metric).
-    pub doc: DocStrategy,
-    /// Loader for the bundled tree-sitter grammar.
-    grammar: fn() -> TsLanguage,
-}
-
-/// How "does this function have documentation?" is decided per language.
-#[derive(Debug, Clone, Copy)]
+/// How a documented function is recognized.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "strategy", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DocStrategy {
-    /// A doc comment immediately precedes the item (skipping any
-    /// attribute/decorator/annotation nodes between). It counts only when its
-    /// text starts with one of these prefixes (`///` etc.) — a plain
-    /// explanatory `//` comment is not a doc comment.
-    PrecedingComment(&'static [&'static str]),
-    /// Python-style: the first statement in the function body is a string
-    /// literal (the docstring).
-    PythonDocstring,
-    /// Clojure-style: a string literal is a direct child of the `(defn …)` form
-    /// (the docstring position, after the name symbol).
-    ClojureDocstring,
-    /// No documentation convention detected for this language — always `false`.
+    /// A comment right before the item (attributes, decorators and
+    /// annotations between are skipped) whose text starts with one of
+    /// `prefixes`: a plain explanatory `//` isn't a doc comment.
+    PrecedingComment { prefixes: Vec<String> },
+    /// The body's first statement is a string literal (a docstring).
+    FirstStringStatement,
+    /// A string literal child of the form before its parameter vector.
+    FormString,
+    /// No documentation convention: always undocumented.
     None,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum VisibilityStrategy {
-    /// Look for a `visibility_modifier` child whose text starts with
-    /// `pub`. Present → public; absent → private.
-    RustModifier,
-    /// Look for an `accessibility_modifier` child on class/method
-    /// nodes (`private`, `protected`, `public`). Present → mapped
-    /// directly. Absent on a method inside a class → public (TS
-    /// default). Absent on a top-level function → check enclosing
-    /// `export_statement` ancestor.
-    TsClassModifier,
-    /// Java-style: look for an `identifier`-typed `modifiers` child
-    /// containing `private`/`protected`/`public`.
-    JavaModifier,
-    /// Walk up to the nearest `class_specifier` and look at the
-    /// preceding `access_specifier` to decide. C++ default is
-    /// private inside a `class`, public inside a `struct`.
-    CppAccessSpecifier,
-    /// Capitalization of the identifier first letter. Uppercase →
-    /// public; lowercase → private.
-    GoCapitalization,
-    /// Leading-underscore convention. Function name starts with `_`
-    /// → private.
-    PythonUnderscore,
-    /// `static` storage class on the function definition → private
-    /// (file-scope). Anything else → public.
-    CStatic,
-    /// All functions reported as Unknown — used for languages where
-    /// no clean signal exists.
-    Unknown,
-    /// Clojure: head sym `defn-` ⇒ Private. A `meta_lit` /
-    /// `old_meta_lit` child whose text contains `:private` ⇒
-    /// Private. Otherwise Public.
-    ClojureForm,
+/// How a file's imports are read (`oxplow-code-deps`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportStrategy {
+    RustUse,
+    EsImport,
+    PythonImport,
+    GoImport,
+    JavaImport,
+    CInclude,
+    CppInclude,
+    ClojureNs,
+    CsharpUsing,
+}
+
+/// How a top-level item's identity is computed for a structural merge
+/// (`oxplow-git`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeKey {
+    /// `transparent_kinds` seen through, then `name_fields`; falls back to
+    /// kind + normalized text.
+    Named,
+    /// A function by its declarator (name and signature, so overloads stay
+    /// apart), a type or namespace by name, a typedef or global by its
+    /// declarator's identifier.
+    CDeclarator,
+    /// A `(def… name …)` form by head and name.
+    FormHead,
+}
+
+/// The node kinds of a grammar where every parenthesized form is one node
+/// kind and a form is told apart by its head symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Forms {
+    /// The kind of every form (`list_lit`).
+    pub list: String,
+    /// The kind of a symbol (`sym_lit`).
+    pub symbol: String,
+    /// The kind of a symbol's name inside it (`sym_name`).
+    pub name: String,
+}
+
+/// The structural-merge facet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MergeSpec {
+    pub key: MergeKey,
+    /// Kinds whose identity is their normalized text (imports).
+    #[serde(default)]
+    pub import_kinds: Vec<String>,
+    /// Wrappers seen through to the declaration they wrap (`export_statement`).
+    #[serde(default)]
+    pub transparent_kinds: Vec<String>,
+    /// Fields tried, in order, to reach a wrapper's declaration.
+    #[serde(default)]
+    pub inner_decl_fields: Vec<String>,
+    /// Fields tried, in order, to find a declaration's name.
+    #[serde(default)]
+    pub name_fields: Vec<String>,
+    /// With `key: form_head`: the heads of a form that defines a named
+    /// top-level entity (`defn`, `ns`).
+    #[serde(default)]
+    pub def_heads: Vec<String>,
+}
+
+/// The duplicate detector's facet: what it skips whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Duplication {
+    /// Node kinds whose subtree is noise (imports, package directives).
+    #[serde(default)]
+    pub skip_kinds: Vec<String>,
+    /// Form heads whose form is skipped (with `forms`).
+    #[serde(default)]
+    pub skip_form_heads: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FunctionsFile {
+    #[serde(default)]
+    kinds: Vec<String>,
+    #[serde(default)]
+    param_list_fields: Vec<String>,
+    #[serde(default)]
+    parameter_kinds: Vec<String>,
+    #[serde(default)]
+    form_heads: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecisionsFile {
+    #[serde(default)]
+    kinds: Vec<String>,
+    #[serde(default)]
+    form_heads: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VisibilityFile {
+    strategy: VisibilityStrategy,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportsFile {
+    strategy: ImportStrategy,
+}
+
+/// `analysis.yaml`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnalysisFile {
+    functions: FunctionsFile,
+    decisions: DecisionsFile,
+    #[serde(default)]
+    forms: Option<Forms>,
+    visibility: VisibilityFile,
+    doc: DocStrategy,
+    #[serde(default)]
+    imports: Option<ImportsFile>,
+    #[serde(default)]
+    duplication: Duplication,
+    #[serde(default)]
+    merge: Option<MergeSpec>,
+}
+
+/// What this crate's walkers know about a language's syntax: its
+/// `analysis.yaml`.
+#[derive(Debug, Clone)]
+pub struct LanguageSpec {
+    /// Node kinds of function-like syntax, closures included: the
+    /// duplication detector's units. What a file *defines* (and so what has
+    /// metrics) comes from its symbol query.
+    pub function_kinds: Vec<String>,
+    /// Fields tried, in order, for the parameter list.
+    pub param_list_fields: Vec<String>,
+    /// Kinds inside a parameter list that are one parameter each.
+    pub parameter_kinds: Vec<String>,
+    /// Kinds that add 1 to cyclomatic complexity.
+    pub decision_kinds: Vec<String>,
+    /// With `forms`: heads of a form that is a function.
+    pub function_form_heads: Vec<String>,
+    /// With `forms`: heads of a form that is a decision point.
+    pub decision_form_heads: Vec<String>,
+    /// For a grammar of generic forms (Clojure's `list_lit`).
+    pub forms: Option<Forms>,
+    pub visibility: VisibilityStrategy,
+    pub doc: DocStrategy,
+    pub imports: Option<ImportStrategy>,
+    pub duplication: Duplication,
+    pub merge: Option<MergeSpec>,
 }
 
 impl LanguageSpec {
-    pub fn tree_sitter_language(&self) -> TsLanguage {
-        (self.grammar)()
+    /// Parse `analysis.yaml`.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let f: AnalysisFile =
+            serde_yaml::from_str(text).map_err(|e| format!("analysis.yaml: {e}"))?;
+        if (!f.functions.form_heads.is_empty() || !f.decisions.form_heads.is_empty())
+            && f.forms.is_none()
+        {
+            return Err(
+                "analysis.yaml: `form_heads` need `forms:` (the list, symbol and name kinds)"
+                    .into(),
+            );
+        }
+        Ok(Self {
+            function_kinds: f.functions.kinds,
+            param_list_fields: f.functions.param_list_fields,
+            parameter_kinds: f.functions.parameter_kinds,
+            decision_kinds: f.decisions.kinds,
+            function_form_heads: f.functions.form_heads,
+            decision_form_heads: f.decisions.form_heads,
+            forms: f.forms,
+            visibility: f.visibility.strategy,
+            doc: f.doc,
+            imports: f.imports.map(|i| i.strategy),
+            duplication: f.duplication,
+            merge: f.merge,
+        })
+    }
+
+    /// Every node kind the file names, for a check against the grammar.
+    pub fn node_kinds(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        out.extend(self.function_kinds.iter().map(String::as_str));
+        out.extend(self.parameter_kinds.iter().map(String::as_str));
+        out.extend(self.decision_kinds.iter().map(String::as_str));
+        out.extend(self.duplication.skip_kinds.iter().map(String::as_str));
+        if let Some(f) = &self.forms {
+            out.extend([f.list.as_str(), f.symbol.as_str(), f.name.as_str()]);
+        }
+        if let Some(m) = &self.merge {
+            out.extend(m.import_kinds.iter().map(String::as_str));
+            out.extend(m.transparent_kinds.iter().map(String::as_str));
+        }
+        out
     }
 }
 
-impl Language {
-    pub fn spec(&self) -> &'static LanguageSpec {
-        match self {
-            Language::Rust => &RUST,
-            Language::TypeScript => &TYPESCRIPT,
-            Language::Tsx => &TSX,
-            Language::JavaScript => &JAVASCRIPT,
-            Language::Python => &PYTHON,
-            Language::Go => &GO,
-            Language::Java => &JAVA,
-            Language::C => &C,
-            Language::Cpp => &CPP,
-            Language::Clojure => &CLOJURE,
-            Language::CSharp => &CSHARP,
-        }
-    }
+/// Where a language's grammar comes from: exactly one of `native` (a
+/// grammar compiled into oxplow, by name, [`native_grammar`]; only for the
+/// extensions that ship with oxplow) and `wasm` (a tree-sitter grammar
+/// compiled to WebAssembly, a file of the extension).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GrammarDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasm: Option<String>,
+}
 
-    /// Convenience for callers (e.g. `oxplow-code-dup`) that need the
-    /// raw tree-sitter grammar without going through `LanguageSpec`.
-    pub fn tree_sitter_language(&self) -> TsLanguage {
-        self.spec().tree_sitter_language()
-    }
+/// The Mason suggestion for a language's server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LspDecl {
+    pub package: String,
+}
 
-    /// Canonical lowercase name — the inverse of [`language_from_name`]
-    /// (round-trips), and the value `source_files()` tags each file with so
-    /// scripts can pass it straight back to `code_metrics`/`markers`.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Language::Rust => "rust",
-            Language::TypeScript => "typescript",
-            Language::Tsx => "tsx",
-            Language::JavaScript => "javascript",
-            Language::Python => "python",
-            Language::Go => "go",
-            Language::Java => "java",
-            Language::C => "c",
-            Language::Cpp => "cpp",
-            Language::Clojure => "clojure",
-            Language::CSharp => "csharp",
-        }
-    }
+/// How the metric scaffold writes a sample function: `function` opens it
+/// (`{name}` is its name), `branch` is repeated once per decision (`{n}` is
+/// its number), `tail` closes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StarterDecl {
+    pub function: String,
+    pub branch: Vec<String>,
+    pub tail: Vec<String>,
+}
 
-    /// Stable u8 tag used as a hash salt so cross-language token
-    /// streams can never collide.
-    pub fn tag(&self) -> u8 {
-        match self {
-            Language::Rust => 1,
-            Language::TypeScript => 2,
-            Language::Tsx => 3,
-            Language::JavaScript => 4,
-            Language::Python => 5,
-            Language::Go => 6,
-            Language::Java => 7,
-            Language::C => 8,
-            Language::Cpp => 9,
-            Language::Clojure => 10,
-            Language::CSharp => 11,
+impl StarterDecl {
+    /// A function named `name` with `branches` decisions, as lines.
+    pub fn function(&self, name: &str, branches: usize) -> Vec<String> {
+        let mut out = vec![self.function.replace("{name}", name)];
+        for n in 1..=branches {
+            out.extend(self.branch.iter().map(|l| l.replace("{n}", &n.to_string())));
         }
+        out.extend(self.tail.iter().cloned());
+        out
     }
 }
 
-/// Resolve a language by name (the string a metric script passes to
-/// `ast_query`). Accepts common aliases; case-insensitive.
-pub fn language_from_name(name: &str) -> Option<Language> {
-    Some(match name.trim().to_ascii_lowercase().as_str() {
-        "rust" | "rs" => Language::Rust,
-        "typescript" | "ts" => Language::TypeScript,
-        "tsx" => Language::Tsx,
-        "javascript" | "js" | "jsx" => Language::JavaScript,
-        "python" | "py" => Language::Python,
-        "go" | "golang" => Language::Go,
-        "java" => Language::Java,
-        "c" => Language::C,
-        "cpp" | "c++" | "cxx" | "cc" => Language::Cpp,
-        "clojure" | "clj" | "cljs" | "cljc" => Language::Clojure,
-        "csharp" | "c#" | "cs" => Language::CSharp,
+/// One `languages:` entry of an extension's manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LanguageDecl {
+    /// The stored name (`rust`): `symbol.language`, the `oxplow.language`
+    /// dimension, what a script passes to `ast_query`.
+    pub id: String,
+    /// The name a person reads (`C++`).
+    pub title: String,
+    /// File extensions it claims, lowercase, no dot.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// Other names scripts may use (`rs`, `c++`).
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// LSP `languageId`s that are this language (`typescriptreact`).
+    #[serde(default)]
+    pub lsp_ids: Vec<String>,
+    /// Its grammar; none for a language oxplow only knows by its server.
+    #[serde(default)]
+    pub grammar: Option<GrammarDecl>,
+    /// Its `analysis.yaml`, a file of the extension (with a grammar).
+    #[serde(default)]
+    pub analysis: Option<String>,
+    /// Its `symbols.scm` (with a grammar); a `symbols.yaml` beside it is
+    /// read too.
+    #[serde(default)]
+    pub symbols: Option<String>,
+    #[serde(default)]
+    pub lsp: Option<LspDecl>,
+    /// The code units it gives beyond functions.
+    #[serde(default)]
+    pub units: Vec<UnitKind>,
+    /// How the metric scaffold writes a sample function (none: no starter).
+    #[serde(default)]
+    pub starter: Option<StarterDecl>,
+}
+
+/// A language's declaration with its files' texts: what an extension's
+/// loader reads, and what the host ships a script worker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LanguageSource {
+    /// The extension that declares it.
+    pub extension: String,
+    /// Whether that extension ships with oxplow (may name a native grammar).
+    pub shipped: bool,
+    pub decl: LanguageDecl,
+    #[serde(default)]
+    pub analysis: Option<String>,
+    #[serde(default)]
+    pub symbols: Option<String>,
+    #[serde(default)]
+    pub symbols_yaml: Option<String>,
+}
+
+impl LanguageSource {
+    /// Read a declaration's files through `read` (a path of the
+    /// extension → its text). A file the declaration names but `read`
+    /// doesn't find is an error.
+    pub fn read(
+        extension: &str,
+        shipped: bool,
+        decl: LanguageDecl,
+        read: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self, String> {
+        let need = |path: &Option<String>| -> Result<Option<String>, String> {
+            match path {
+                None => Ok(None),
+                Some(p) => read(p).map(Some).ok_or_else(|| {
+                    format!(
+                        "language `{}`: `{p}` isn't a file of the extension",
+                        decl.id
+                    )
+                }),
+            }
+        };
+        let analysis = need(&decl.analysis)?;
+        let symbols = need(&decl.symbols)?;
+        let symbols_yaml = decl
+            .symbols
+            .as_deref()
+            .and_then(|p| p.strip_suffix(".scm"))
+            .and_then(|stem| read(&format!("{stem}.yaml")));
+        Ok(Self {
+            extension: extension.into(),
+            shipped,
+            decl,
+            analysis,
+            symbols,
+            symbols_yaml,
+        })
+    }
+}
+
+/// The grammars compiled into oxplow, by the name a shipped language pack's
+/// `grammar: { native: <name> }` gives. The one place in core that names
+/// grammar crates.
+pub fn native_grammar(name: &str) -> Option<TsLanguage> {
+    Some(match name {
+        "rust" => tree_sitter_rust::LANGUAGE.into(),
+        "typescript" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        "tsx" => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        "javascript" => tree_sitter_javascript::LANGUAGE.into(),
+        "python" => tree_sitter_python::LANGUAGE.into(),
+        "go" => tree_sitter_go::LANGUAGE.into(),
+        "java" => tree_sitter_java::LANGUAGE.into(),
+        "c" => tree_sitter_c::LANGUAGE.into(),
+        "cpp" => tree_sitter_cpp::LANGUAGE.into(),
+        "clojure" => tree_sitter_clojure_orchard::LANGUAGE.into(),
+        "csharp" => tree_sitter_c_sharp::LANGUAGE.into(),
         _ => return None,
     })
 }
 
-// Path-extension → language resolution lives in [`crate::language`] now: the
-// per-language `LanguageSupport::extensions` is the single source of truth
-// (`language::language_for_path`). See `.context/language-support.md`.
+/// One language, built: its declaration, its grammar and analysis (when it
+/// has a grammar), its symbol query (compiled on first use).
+pub struct LanguageDef {
+    pub decl: LanguageDecl,
+    pub extension: String,
+    grammar: Option<TsLanguage>,
+    spec: Option<LanguageSpec>,
+    symbols_src: Option<(String, Option<String>)>,
+    symbols: OnceLock<Result<SymbolSpec, String>>,
+    tag: u64,
+    fingerprint: u64,
+}
 
-/// Resolve an LSP `languageId` (the string a language server / editor
-/// uses to label a buffer, e.g. `"typescriptreact"`) to the canonical
-/// analysis [`Language`].
-///
-/// This is the **single bridge** between the LSP namespace — free strings
-/// keyed per session in `oxplow-app/src/lsp_sessions.rs` — and the
-/// static-analysis enum. LSP carries a few ids that [`language_from_name`]
-/// doesn't (`typescriptreact`/`javascriptreact`); everything else delegates
-/// to it. An LSP language with no analysis grammar (e.g. `lua`, `json`,
-/// `yaml`) resolves to `None`, which callers read as "no tree-sitter
-/// analysis for this buffer" — LSP features still work independently.
-pub fn language_from_lsp_id(language_id: &str) -> Option<Language> {
-    match language_id.trim().to_ascii_lowercase().as_str() {
-        "typescriptreact" => Some(Language::Tsx),
-        "javascriptreact" => Some(Language::JavaScript),
-        other => language_from_name(other),
+impl std::fmt::Debug for LanguageDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LanguageDef")
+            .field("id", &self.decl.id)
+            .field("extension", &self.extension)
+            .finish()
     }
 }
 
-// ---- Rust ----
+/// A language: a cheap handle, equal by id.
+#[derive(Clone)]
+pub struct Language(Arc<LanguageDef>);
 
-static RUST: LanguageSpec = LanguageSpec {
-    function_kinds: &["function_item", "closure_expression"],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &["parameter", "self_parameter"],
-    decision_kinds: &[
-        "if_expression",
-        // `else_clause` deliberately excluded — McCabe counts only
-        // condition-bearing branches, so an `if/else if/else` chain
-        // adds 2 (the two ifs), not 4.
-        "match_arm",
-        "while_expression",
-        "for_expression",
-        "loop_expression",
-        "try_expression",
-        // boolean operators (&&, ||) are tokens inside binary_expression,
-        // not their own nodes — skipping for simplicity.
-    ],
-    visibility: VisibilityStrategy::RustModifier,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["///", "//!", "/**"]),
-    grammar: || tree_sitter_rust::LANGUAGE.into(),
-};
+impl std::fmt::Debug for Language {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Language({})", self.0.decl.id)
+    }
+}
 
-// ---- TypeScript / TSX / JavaScript ----
+impl PartialEq for Language {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.decl.id == other.0.decl.id
+    }
+}
+impl Eq for Language {}
+impl Hash for Language {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.decl.id.hash(state)
+    }
+}
 
-static TYPESCRIPT: LanguageSpec = LanguageSpec {
-    function_kinds: JS_FUNCTION_KINDS,
-    param_list_fields: JS_PARAM_FIELDS,
-    parameter_kinds: JS_PARAM_KINDS,
-    decision_kinds: JS_DECISION_KINDS,
-    visibility: VisibilityStrategy::TsClassModifier,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["/**"]),
-    grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-};
-
-static TSX: LanguageSpec = LanguageSpec {
-    function_kinds: JS_FUNCTION_KINDS,
-    param_list_fields: JS_PARAM_FIELDS,
-    parameter_kinds: JS_PARAM_KINDS,
-    decision_kinds: JS_DECISION_KINDS,
-    visibility: VisibilityStrategy::TsClassModifier,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["/**"]),
-    grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
-};
-
-static JAVASCRIPT: LanguageSpec = LanguageSpec {
-    function_kinds: JS_FUNCTION_KINDS,
-    param_list_fields: JS_PARAM_FIELDS,
-    parameter_kinds: JS_PARAM_KINDS,
-    decision_kinds: JS_DECISION_KINDS,
-    visibility: VisibilityStrategy::TsClassModifier,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["/**"]),
-    grammar: || tree_sitter_javascript::LANGUAGE.into(),
-};
-
-static JS_FUNCTION_KINDS: &[&str] = &[
-    "function_declaration",
-    "function_expression",
-    "arrow_function",
-    "method_definition",
-    "generator_function",
-    "generator_function_declaration",
-    "function_signature",
-];
-static JS_PARAM_FIELDS: &[&str] = &["parameters"];
-static JS_PARAM_KINDS: &[&str] = &[
-    "required_parameter",
-    "optional_parameter",
-    "rest_parameter",
-    "identifier",
-    "assignment_pattern",
-    "object_pattern",
-    "array_pattern",
-];
-static JS_DECISION_KINDS: &[&str] = &[
-    "if_statement",
-    // `else_clause` deliberately excluded for the same reason as Rust.
-    "switch_case",
-    "switch_default",
-    "for_statement",
-    "for_in_statement",
-    "while_statement",
-    "do_statement",
-    "catch_clause",
-    "ternary_expression",
-];
-
-// ---- Python ----
-
-static PYTHON: LanguageSpec = LanguageSpec {
-    function_kinds: &["function_definition", "lambda"],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &[
-        "identifier",
-        "default_parameter",
-        "typed_parameter",
-        "typed_default_parameter",
-        "list_splat_pattern",
-        "dictionary_splat_pattern",
-        "tuple_pattern",
-    ],
-    decision_kinds: &[
-        "if_statement",
-        "elif_clause",
-        "for_statement",
-        "while_statement",
-        "try_statement",
-        "except_clause",
-        "with_statement",
-        "conditional_expression",
-        "boolean_operator",
-        "match_statement",
-        "case_clause",
-    ],
-    visibility: VisibilityStrategy::PythonUnderscore,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PythonDocstring,
-    grammar: || tree_sitter_python::LANGUAGE.into(),
-};
-
-// ---- Go ----
-
-static GO: LanguageSpec = LanguageSpec {
-    function_kinds: &["function_declaration", "method_declaration", "func_literal"],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &["parameter_declaration", "variadic_parameter_declaration"],
-    decision_kinds: &[
-        "if_statement",
-        "for_statement",
-        "type_switch_statement",
-        "expression_switch_statement",
-        "type_case",
-        "expression_case",
-        "select_statement",
-        "communication_case",
-    ],
-    visibility: VisibilityStrategy::GoCapitalization,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["//", "/*"]),
-    grammar: || tree_sitter_go::LANGUAGE.into(),
-};
-
-// ---- Java ----
-
-static JAVA: LanguageSpec = LanguageSpec {
-    function_kinds: &[
-        "method_declaration",
-        "constructor_declaration",
-        "lambda_expression",
-    ],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &["formal_parameter", "spread_parameter"],
-    decision_kinds: &[
-        "if_statement",
-        "switch_label",
-        "switch_block_statement_group",
-        "for_statement",
-        "enhanced_for_statement",
-        "while_statement",
-        "do_statement",
-        "catch_clause",
-        "ternary_expression",
-    ],
-    visibility: VisibilityStrategy::JavaModifier,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["/**"]),
-    grammar: || tree_sitter_java::LANGUAGE.into(),
-};
-
-// ---- C ----
-
-static C: LanguageSpec = LanguageSpec {
-    function_kinds: &["function_definition"],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &["parameter_declaration"],
-    decision_kinds: &[
-        "if_statement",
-        "case_statement",
-        "for_statement",
-        "while_statement",
-        "do_statement",
-        "conditional_expression",
-    ],
-    visibility: VisibilityStrategy::CStatic,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["/**", "///", "//!", "/*!"]),
-    grammar: || tree_sitter_c::LANGUAGE.into(),
-};
-
-// ---- C++ ----
-
-static CPP: LanguageSpec = LanguageSpec {
-    function_kinds: &["function_definition", "lambda_expression"],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &["parameter_declaration", "optional_parameter_declaration"],
-    decision_kinds: &[
-        "if_statement",
-        "case_statement",
-        "for_statement",
-        "for_range_loop",
-        "while_statement",
-        "do_statement",
-        "catch_clause",
-        "conditional_expression",
-    ],
-    visibility: VisibilityStrategy::CppAccessSpecifier,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["/**", "///", "//!", "/*!"]),
-    grammar: || tree_sitter_cpp::LANGUAGE.into(),
-};
-
-// ---- Clojure / ClojureScript / cljc ----
-//
-// tree-sitter-clojure flattens every parenthesized form to a
-// generic `list_lit`, so `function_kinds` / `decision_kinds` are
-// empty — detection runs through `function_form_heads` /
-// `decision_form_heads` on the head symbol's text instead.
-
-static CLOJURE: LanguageSpec = LanguageSpec {
-    function_kinds: &[],
-    param_list_fields: &[],
-    parameter_kinds: &[],
-    decision_kinds: &[],
-    visibility: VisibilityStrategy::ClojureForm,
-    function_form_heads: &[
-        "defn",
-        "defn-",
-        "defmacro",
-        "defmethod",
-        "definline",
-        "fn",
-        "fn*",
-        "defprotocol",
-    ],
-    decision_form_heads: &[
-        "if",
-        "if-not",
-        "if-let",
-        "if-some",
-        "when",
-        "when-not",
-        "when-let",
-        "when-some",
-        "cond",
-        "condp",
-        "case",
-        "and",
-        "or",
-        "try",
-    ],
-    doc: DocStrategy::ClojureDocstring,
-    grammar: || tree_sitter_clojure_orchard::LANGUAGE.into(),
-};
-
-// ---- C# ----
-
-static CSHARP: LanguageSpec = LanguageSpec {
-    function_kinds: &[
-        "method_declaration",
-        "constructor_declaration",
-        "destructor_declaration",
-        "operator_declaration",
-        "local_function_statement",
-        "lambda_expression",
-    ],
-    param_list_fields: &["parameters"],
-    parameter_kinds: &["parameter"],
-    decision_kinds: &[
-        "if_statement",
-        // `else` is not condition-bearing — excluded (cf. Rust/JS).
-        "for_statement",
-        "for_each_statement",
-        "while_statement",
-        "do_statement",
-        "case_switch_label",
-        "case_pattern_switch_label",
-        "switch_expression_arm",
-        "catch_clause",
-        "conditional_expression",
-        "when_clause",
-    ],
-    // C# encodes visibility via `modifier` child nodes; no clean
-    // single-signal strategy in the shared enum, so functions report
-    // Unknown (none of the bundled C# metrics filter on visibility).
-    visibility: VisibilityStrategy::Unknown,
-    function_form_heads: &[],
-    decision_form_heads: &[],
-    doc: DocStrategy::PrecedingComment(&["///", "/**"]),
-    grammar: || tree_sitter_c_sharp::LANGUAGE.into(),
-};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lsp_id_bridge_maps_react_variants_and_core_ids() {
-        // LSP-only ids that language_from_name doesn't carry.
-        assert!(matches!(
-            language_from_lsp_id("typescriptreact"),
-            Some(Language::Tsx)
-        ));
-        assert!(matches!(
-            language_from_lsp_id("javascriptreact"),
-            Some(Language::JavaScript)
-        ));
-        // Mixed case / whitespace tolerated.
-        assert!(matches!(
-            language_from_lsp_id("  TypeScriptReact "),
-            Some(Language::Tsx)
-        ));
-        // Core ids delegate to language_from_name.
-        assert!(matches!(language_from_lsp_id("rust"), Some(Language::Rust)));
-        assert!(matches!(
-            language_from_lsp_id("python"),
-            Some(Language::Python)
-        ));
-        // An LSP language with no analysis grammar resolves to None.
-        assert_eq!(language_from_lsp_id("lua"), None);
-        assert_eq!(language_from_lsp_id("yaml"), None);
-        assert_eq!(language_from_lsp_id("unknown-lang"), None);
+impl Language {
+    /// Build one language from its source. A wrong file is an error.
+    pub fn build(source: &LanguageSource) -> Result<Self, String> {
+        let decl = source.decl.clone();
+        let id = &decl.id;
+        let grammar = match decl
+            .grammar
+            .as_ref()
+            .map(|g| (g.native.as_deref(), g.wasm.as_deref()))
+        {
+            None => None,
+            Some((None, None)) | Some((Some(_), Some(_))) => {
+                return Err(format!(
+                    "language `{id}`: `grammar:` names one of `native` and `wasm`"
+                ))
+            }
+            Some((Some(name), None)) => {
+                if !source.shipped {
+                    return Err(format!(
+                        "language `{id}`: `grammar: {{ native: {name} }}` is for the extensions that ship with oxplow; bring a WebAssembly grammar (`grammar: {{ wasm: <file> }}`)"
+                    ));
+                }
+                Some(native_grammar(name).ok_or_else(|| {
+                    format!("language `{id}`: oxplow has no native grammar `{name}`")
+                })?)
+            }
+            Some((None, Some(path))) => {
+                return Err(format!(
+                    "language `{id}`: WebAssembly grammars (`{path}`) aren't loaded yet"
+                ))
+            }
+        };
+        let spec = match (&grammar, &source.analysis) {
+            (Some(g), Some(text)) => {
+                let spec =
+                    LanguageSpec::parse(text).map_err(|e| format!("language `{id}`: {e}"))?;
+                let missing: Vec<&str> = spec
+                    .node_kinds()
+                    .into_iter()
+                    .filter(|k| {
+                        g.id_for_node_kind(k, true) == 0 && g.id_for_node_kind(k, false) == 0
+                    })
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(format!(
+                        "language `{id}`: analysis.yaml names node kinds its grammar doesn't have: {}",
+                        missing.join(", ")
+                    ));
+                }
+                Some(spec)
+            }
+            (Some(_), None) => {
+                return Err(format!(
+                    "language `{id}`: a grammar needs `analysis:` (its analysis.yaml)"
+                ))
+            }
+            (None, Some(_)) => {
+                return Err(format!("language `{id}`: `analysis:` needs a `grammar:`"))
+            }
+            (None, None) => None,
+        };
+        let symbols_src = match (&grammar, &source.symbols) {
+            (Some(_), Some(scm)) => Some((scm.clone(), source.symbols_yaml.clone())),
+            (None, Some(_)) => {
+                return Err(format!("language `{id}`: `symbols:` needs a `grammar:`"))
+            }
+            _ => None,
+        };
+        // FNV-1a of the id: stable across builds and Rust versions (a
+        // pinned test holds the detector's hashes).
+        let tag = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
+            (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        // FNV-1a over everything that decides what the language computes, so
+        // a memo keyed by it is stale the moment a definition changes.
+        let fingerprint = {
+            let decl_text = serde_yaml::to_string(&source.decl).unwrap_or_default();
+            [
+                decl_text.as_str(),
+                source.analysis.as_deref().unwrap_or(""),
+                source.symbols.as_deref().unwrap_or(""),
+                source.symbols_yaml.as_deref().unwrap_or(""),
+            ]
+            .iter()
+            .flat_map(|t| t.bytes().chain(std::iter::once(0xff)))
+            .fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
+                (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+            })
+        };
+        Ok(Language(Arc::new(LanguageDef {
+            fingerprint,
+            extension: source.extension.clone(),
+            decl,
+            grammar,
+            spec,
+            symbols_src,
+            symbols: OnceLock::new(),
+            tag,
+        })))
     }
 
-    #[test]
-    fn lsp_id_bridge_round_trips_canonical_names() {
-        // Every canonical language's own name() must resolve back through
-        // the LSP bridge, so the LSP and analysis namespaces agree on the
-        // core set.
-        for lang in [
-            Language::Rust,
-            Language::TypeScript,
-            Language::Tsx,
-            Language::JavaScript,
-            Language::Python,
-            Language::Go,
-            Language::Java,
-            Language::C,
-            Language::Cpp,
-            Language::Clojure,
-            Language::CSharp,
-        ] {
-            assert!(
-                language_from_lsp_id(lang.name()).is_some(),
-                "lsp bridge dropped canonical name {}",
-                lang.name()
-            );
+    /// Its stored name (`rust`).
+    pub fn name(&self) -> &str {
+        &self.0.decl.id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.0.decl.title
+    }
+
+    pub fn decl(&self) -> &LanguageDecl {
+        &self.0.decl
+    }
+
+    /// The extension that declares it.
+    pub fn extension(&self) -> &str {
+        &self.0.extension
+    }
+
+    /// Its grammar, when it has one (a language known only by its server
+    /// has none).
+    pub fn grammar(&self) -> Option<&TsLanguage> {
+        self.0.grammar.as_ref()
+    }
+
+    /// Whether oxplow can parse it.
+    pub fn analyzable(&self) -> bool {
+        self.0.spec.is_some()
+    }
+
+    /// Its analysis tables. Only an [`analyzable`](Self::analyzable)
+    /// language has them; [`Languages::for_path`] returns no other.
+    pub fn spec(&self) -> &LanguageSpec {
+        self.0
+            .spec
+            .as_ref()
+            .unwrap_or_else(|| panic!("language `{}` has no analysis", self.name()))
+    }
+
+    /// The tree-sitter grammar of an [`analyzable`](Self::analyzable)
+    /// language.
+    pub fn tree_sitter_language(&self) -> TsLanguage {
+        self.grammar()
+            .cloned()
+            .unwrap_or_else(|| panic!("language `{}` has no grammar", self.name()))
+    }
+
+    /// A hash of its id: the duplicate detector's salt, so token streams of
+    /// two languages never collide.
+    pub fn tag(&self) -> u64 {
+        self.0.tag
+    }
+
+    /// A hash of its declaration and files: what a cache of its results is
+    /// keyed by.
+    pub fn fingerprint(&self) -> u64 {
+        self.0.fingerprint
+    }
+
+    /// Its compiled symbol query, compiled on first use.
+    pub(crate) fn symbol_spec(&self) -> Result<&SymbolSpec, String> {
+        self.0
+            .symbols
+            .get_or_init(|| match (&self.0.symbols_src, self.grammar()) {
+                (Some((scm, yaml)), Some(grammar)) => {
+                    SymbolSpec::compile(grammar, scm, yaml.as_deref())
+                }
+                _ => Err("no symbol query".into()),
+            })
+            .as_ref()
+            .map_err(|e| format!("{}: {e}", self.name()))
+    }
+
+    /// Compile its symbol query now, for a check.
+    pub fn check_symbols(&self) -> Result<(), String> {
+        if self.0.symbols_src.is_none() {
+            return Ok(());
         }
+        self.symbol_spec().map(|_| ())
+    }
+}
+
+/// The languages the enabled extensions declare.
+#[derive(Clone, Default)]
+pub struct Languages {
+    all: Vec<Language>,
+    /// What it was built from (the languages that joined), to ship to a
+    /// script worker, which builds its own.
+    sources: Vec<LanguageSource>,
+    by_extension: HashMap<String, usize>,
+    by_name: HashMap<String, usize>,
+    by_lsp_id: HashMap<String, usize>,
+}
+
+impl std::fmt::Debug for Languages {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.all.iter().map(|l| l.name()))
+            .finish()
+    }
+}
+
+/// A language that couldn't join a set, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageProblem {
+    pub extension: String,
+    pub language: String,
+    pub message: String,
+}
+
+impl Languages {
+    /// Build the set from `sources`, in order. A language that doesn't
+    /// build, or whose id, alias, LSP id or file extension an earlier one
+    /// already has, is left out with a problem.
+    pub fn build(sources: &[LanguageSource]) -> (Self, Vec<LanguageProblem>) {
+        let mut out = Self::default();
+        let mut problems = Vec::new();
+        for source in sources {
+            let problem = |message: String| LanguageProblem {
+                extension: source.extension.clone(),
+                language: source.decl.id.clone(),
+                message,
+            };
+            let lang = match Language::build(source) {
+                Ok(l) => l,
+                Err(e) => {
+                    problems.push(problem(e));
+                    continue;
+                }
+            };
+            let decl = lang.decl();
+            let names: Vec<String> = std::iter::once(&decl.id)
+                .chain(&decl.aliases)
+                .map(|n| n.to_ascii_lowercase())
+                .collect();
+            let exts: Vec<String> = decl
+                .extensions
+                .iter()
+                .map(|e| e.to_ascii_lowercase())
+                .collect();
+            let lsp: Vec<String> = decl
+                .lsp_ids
+                .iter()
+                .map(|e| e.to_ascii_lowercase())
+                .collect();
+            let taken = names
+                .iter()
+                .find(|n| out.by_name.contains_key(*n))
+                .map(|n| format!("the name `{n}`"))
+                .or_else(|| {
+                    exts.iter()
+                        .find(|e| out.by_extension.contains_key(*e))
+                        .map(|e| format!("files `.{e}`"))
+                })
+                .or_else(|| {
+                    lsp.iter()
+                        .find(|e| out.by_lsp_id.contains_key(*e))
+                        .map(|e| format!("the LSP id `{e}`"))
+                });
+            if let Some(what) = taken {
+                let other = out
+                    .by_name
+                    .get(&names[0])
+                    .or_else(|| exts.iter().find_map(|e| out.by_extension.get(e)))
+                    .map(|i| out.all[*i].extension().to_string())
+                    .unwrap_or_default();
+                problems.push(problem(format!(
+                    "{what} already belongs to another language{}",
+                    if other.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (from `{other}`)")
+                    }
+                )));
+                continue;
+            }
+            let i = out.all.len();
+            for n in names {
+                out.by_name.insert(n, i);
+            }
+            for e in exts {
+                out.by_extension.insert(e, i);
+            }
+            for e in lsp {
+                out.by_lsp_id.insert(e, i);
+            }
+            out.all.push(lang);
+            out.sources.push(source.clone());
+        }
+        (out, problems)
+    }
+
+    /// What the set was built from: [`Languages::build`] of these is the same
+    /// set.
+    pub fn sources(&self) -> &[LanguageSource] {
+        &self.sources
+    }
+
+    /// Every language, in the order the set was built.
+    pub fn all(&self) -> &[Language] {
+        &self.all
+    }
+
+    /// The language a name (an id or alias, any case) names.
+    pub fn by_name(&self, name: &str) -> Option<&Language> {
+        self.by_name
+            .get(&name.trim().to_ascii_lowercase())
+            .map(|i| &self.all[*i])
+    }
+
+    /// The language an LSP `languageId` names: its declared LSP ids, then
+    /// its names.
+    pub fn by_lsp_id(&self, id: &str) -> Option<&Language> {
+        let id = id.trim().to_ascii_lowercase();
+        self.by_lsp_id
+            .get(&id)
+            .map(|i| &self.all[*i])
+            .or_else(|| self.by_name(&id))
+    }
+
+    /// The language a file is, by its extension, whether or not oxplow can
+    /// parse it.
+    pub fn declared_for_path(&self, path: &str) -> Option<&Language> {
+        let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        let (_, ext) = file.rsplit_once('.')?;
+        self.by_extension
+            .get(&ext.to_ascii_lowercase())
+            .map(|i| &self.all[*i])
+    }
+
+    /// The language oxplow parses a file as: [`declared_for_path`](Self::declared_for_path)
+    /// when it has a grammar.
+    pub fn for_path(&self, path: &str) -> Option<&Language> {
+        self.declared_for_path(path).filter(|l| l.analyzable())
+    }
+
+    /// Whether oxplow parses a file of this path.
+    pub fn is_supported_path(&self, path: impl AsRef<std::path::Path>) -> bool {
+        self.for_path(&path.as_ref().to_string_lossy()).is_some()
+    }
+
+    /// The Mason package suggested for an LSP id's server.
+    pub fn mason_suggestion(&self, lsp_id: &str) -> Option<&str> {
+        self.by_lsp_id(lsp_id)
+            .and_then(|l| l.decl().lsp.as_ref())
+            .map(|l| l.package.as_str())
+    }
+
+    /// The file extensions of the languages whose server is `package`
+    /// (what an installed server matches files by).
+    pub fn lsp_extensions(&self, lsp_id: &str) -> Vec<String> {
+        self.by_lsp_id(lsp_id)
+            .map(|l| l.decl().extensions.clone())
+            .unwrap_or_default()
     }
 }

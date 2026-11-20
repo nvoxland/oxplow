@@ -1,4 +1,6 @@
 # one ratio fact per file: documented public functions over public ones.
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 when:
   collector: oxplow.doc_coverage
   files:

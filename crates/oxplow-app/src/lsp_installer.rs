@@ -62,16 +62,6 @@ struct Manifest {
     entries: HashMap<String, InstalledManifestEntry>,
 }
 
-/// The files an installed server for `language_id` covers: an install has
-/// no configured `extensions`, so they come from the language registry
-/// (`oxplow_code_metrics::language::lsp_extensions`).
-fn installed_extensions(language_id: &str) -> Vec<String> {
-    oxplow_code_metrics::language::lsp_extensions(language_id)
-        .into_iter()
-        .map(str::to_string)
-        .collect()
-}
-
 #[derive(Clone)]
 pub struct LspInstallerService {
     install_root: PathBuf,
@@ -111,7 +101,8 @@ impl LspInstallerService {
                 self.sessions.installed_servers().register(
                     LspServerConfig {
                         language_id: lang.clone(),
-                        extensions: installed_extensions(lang),
+                        // Its language's, read when files are matched.
+                        extensions: vec![],
                         command: entry.binary.to_string_lossy().to_string(),
                         args: vec![],
                     },
@@ -145,7 +136,7 @@ impl LspInstallerService {
             self.sessions.installed_servers().register(
                 LspServerConfig {
                     language_id: lang.clone(),
-                    extensions: installed_extensions(lang),
+                    extensions: vec![],
                     command: entry.binary.to_string_lossy().to_string(),
                     args: vec![],
                 },
@@ -268,7 +259,10 @@ mod tests {
             ai_roles: Default::default(),
             extension_sources: Default::default(),
         }));
-        LspSessionManager::new(cfg)
+        LspSessionManager::new(
+            cfg,
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        )
     }
 
     #[tokio::test]

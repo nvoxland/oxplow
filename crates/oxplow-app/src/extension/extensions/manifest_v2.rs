@@ -283,6 +283,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::agent_contexts::AgentContextFile>>")]
     pub context: Option<Value>,
+    /// Programming languages: each with its grammar, its `analysis.yaml`
+    /// and its symbol query.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<oxplow_code_metrics::LanguageDecl>>")]
+    pub languages: Option<Value>,
     /// External providers: programs implementing a capability, whose
     /// operations its `commands:` declare.
     #[serde(default)]

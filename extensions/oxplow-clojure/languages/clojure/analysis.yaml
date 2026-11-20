@@ -1,0 +1,28 @@
+# Clojure: what oxplow's code analysis knows about its syntax.
+# tree-sitter-clojure flattens every parenthesized form to a generic
+# `list_lit`, so function and decision kinds are empty: detection runs
+# through the head symbol's text (form_heads) instead.
+functions:
+  kinds: []
+  form_heads: [defn, defn-, defmacro, defmethod, definline, fn, fn*, defprotocol]
+decisions:
+  kinds: []
+  form_heads: [if, if-not, if-let, if-some, when, when-not, when-let, when-some, cond, condp, case, and, or, try]
+forms:
+  list: list_lit
+  symbol: sym_lit
+  name: sym_name
+visibility:
+  strategy: form_meta
+doc:
+  strategy: form_string
+imports:
+  strategy: clojure_ns
+duplication:
+  skip_kinds: []
+  skip_form_heads: [ns, require, import, use]
+merge:
+  # No distinct import node (requires live in `ns`), so import_kinds is empty.
+  key: form_head
+  # Heads of a form that defines a named top-level entity.
+  def_heads: [def, defn, defn-, defmacro, defmulti, defmethod, defprotocol, defrecord, deftype, definterface, defonce, ns]

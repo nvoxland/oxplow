@@ -69,6 +69,9 @@ pub struct Hosts<'a> {
     pub scope: Option<&'a mut Serve<'a>>,
     /// `tree.read`'s `change_diff`: answered on this thread.
     pub change_diff: Option<Arc<dyn crate::change_diff::ChangeDiffSource>>,
+    /// The languages the enabled extensions declare, shipped to the worker
+    /// before the run (what the parsing builtins parse with).
+    pub languages: Option<Arc<oxplow_code_metrics::Languages>>,
 }
 
 /// One script run.
@@ -123,6 +126,12 @@ impl<'a> ScriptRun<'a> {
         source: Arc<dyn crate::change_diff::ChangeDiffSource>,
     ) -> Self {
         self.hosts.change_diff = Some(source);
+        self
+    }
+
+    /// Given the languages the parsing builtins parse with.
+    pub fn with_languages(mut self, languages: Arc<oxplow_code_metrics::Languages>) -> Self {
+        self.hosts.languages = Some(languages);
         self
     }
 
@@ -335,6 +344,11 @@ impl ScriptWorkers {
         };
         if let Some(files) = &hosts.tree {
             worker.send_tree(files);
+        }
+        if let Some(languages) = &hosts.languages {
+            worker.send(&ToWorker::Languages {
+                sources: languages.sources().to_vec(),
+            });
         }
         let mut host = Answering {
             ai: hosts.ai,

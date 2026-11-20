@@ -112,7 +112,10 @@ pub struct AnalyzeFunctionsResult {
     pub hunks: Vec<AnalyzedFileHunks>,
 }
 
-pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
+pub fn analyze_files(
+    languages: &oxplow_code_metrics::Languages,
+    files: Vec<AnalyzeFileSpec>,
+) -> AnalyzeFunctionsResult {
     let mut sides: Vec<AnalyzedFileSide> = Vec::new();
     let mut churn: Vec<AnalyzedFileChurn> = Vec::new();
     let mut import_deltas: Vec<ImportDelta> = Vec::new();
@@ -123,12 +126,12 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
         let base_metrics = spec
             .base_content
             .as_deref()
-            .map(|c| analyze_file(&spec.path, c))
+            .map(|c| analyze_file(languages, &spec.path, c))
             .unwrap_or_default();
         let head_metrics = spec
             .head_content
             .as_deref()
-            .map(|c| analyze_file(&spec.path, c))
+            .map(|c| analyze_file(languages, &spec.path, c))
             .unwrap_or_default();
 
         if spec.base_content.is_some() {
@@ -199,8 +202,8 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
 
             // Import delta on this file: both sides' edges, diffed by
             // (kind, module).
-            let base_edges = extract_imports(&spec.path, base);
-            let head_edges = extract_imports(&spec.path, head);
+            let base_edges = extract_imports(languages, &spec.path, base);
+            let head_edges = extract_imports(languages, &spec.path, head);
             let (added, removed) = diff_edges(&base_edges, &head_edges);
             if !added.is_empty() || !removed.is_empty() {
                 import_deltas.push(ImportDelta {
@@ -260,11 +263,14 @@ mod tests {
 
     #[test]
     fn each_side_gets_its_functions() {
-        let r = analyze_files(vec![spec(
-            "src/foo.rs",
-            Some("fn a() {}"),
-            Some("fn a() { if true { 1; } }"),
-        )]);
+        let r = analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![spec(
+                "src/foo.rs",
+                Some("fn a() {}"),
+                Some("fn a() { if true { 1; } }"),
+            )],
+        );
         assert_eq!(r.sides.len(), 2);
         let head = r.sides.iter().find(|s| s.side == "head").unwrap();
         assert_eq!(head.functions.len(), 1);
@@ -273,22 +279,24 @@ mod tests {
 
     #[test]
     fn an_added_file_has_only_a_head_side() {
-        let r = analyze_files(vec![spec(
-            "src/new.py",
-            None,
-            Some("def f(x):\n    return x\n"),
-        )]);
+        let r = analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![spec("src/new.py", None, Some("def f(x):\n    return x\n"))],
+        );
         assert_eq!(r.sides.len(), 1);
         assert_eq!(r.sides[0].side, "head");
     }
 
     #[test]
     fn a_files_added_and_removed_imports_are_its_import_delta() {
-        let r = analyze_files(vec![spec(
-            "crates/oxplow-code-deps/src/lib.rs",
-            Some("use std::fs;\nuse std::io;\nfn a() {}\n"),
-            Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
-        )]);
+        let r = analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![spec(
+                "crates/oxplow-code-deps/src/lib.rs",
+                Some("use std::fs;\nuse std::io;\nfn a() {}\n"),
+                Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
+            )],
+        );
         assert_eq!(r.import_deltas.len(), 1, "{r:?}");
         let delta = &r.import_deltas[0];
         let modules =
@@ -301,7 +309,10 @@ mod tests {
     /// see the file was looked at.
     #[test]
     fn unsupported_languages_get_empty_sides() {
-        let r = analyze_files(vec![spec("README.md", Some("# old"), Some("# new"))]);
+        let r = analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![spec("README.md", Some("# old"), Some("# new"))],
+        );
         assert_eq!(r.sides.len(), 2);
         assert!(r.sides[0].functions.is_empty());
     }
@@ -309,11 +320,14 @@ mod tests {
     #[test]
     fn a_modified_file_gets_its_functions_and_churn() {
         // The head changes alpha's body AND adds beta.
-        let r = analyze_files(vec![spec(
-            "src/x.rs",
-            Some("fn alpha() -> i32 {\n    1\n}\n"),
-            Some("fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n"),
-        )]);
+        let r = analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![spec(
+                "src/x.rs",
+                Some("fn alpha() -> i32 {\n    1\n}\n"),
+                Some("fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n"),
+            )],
+        );
         let side = |name: &str| r.sides.iter().find(|s| s.side == name).unwrap();
         assert!(side("base").functions.iter().any(|f| f.name == "alpha"));
         assert!(side("head").functions.iter().any(|f| f.name == "alpha"));
@@ -329,7 +343,10 @@ mod tests {
 
     #[test]
     fn an_added_file_has_no_churn() {
-        let r = analyze_files(vec![spec("src/new.rs", None, Some("fn brand_new() {}\n"))]);
+        let r = analyze_files(
+            &oxplow_code_metrics::for_tests::shipped(),
+            vec![spec("src/new.rs", None, Some("fn brand_new() {}\n"))],
+        );
         assert!(r.sides[0].functions.iter().any(|f| f.name == "brand_new"));
         assert!(r.churn.is_empty(), "no base content, no before→after churn");
     }

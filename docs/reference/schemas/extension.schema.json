@@ -362,6 +362,17 @@
       },
       "default": null
     },
+    "languages": {
+      "description": "Programming languages: each with its grammar, its `analysis.yaml`\nand its symbol query.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/LanguageDecl"
+      },
+      "default": null
+    },
     "providers": {
       "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
       "type": [
@@ -3695,6 +3706,192 @@
         "id",
         "doc",
         "query"
+      ]
+    },
+    "LanguageDecl": {
+      "description": "One `languages:` entry of an extension's manifest.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The stored name (`rust`): `symbol.language`, the `oxplow.language`\ndimension, what a script passes to `ast_query`.",
+          "type": "string"
+        },
+        "title": {
+          "description": "The name a person reads (`C++`).",
+          "type": "string"
+        },
+        "extensions": {
+          "description": "File extensions it claims, lowercase, no dot.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "aliases": {
+          "description": "Other names scripts may use (`rs`, `c++`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "lsp_ids": {
+          "description": "LSP `languageId`s that are this language (`typescriptreact`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "grammar": {
+          "description": "Its grammar; none for a language oxplow only knows by its server.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GrammarDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "analysis": {
+          "description": "Its `analysis.yaml`, a file of the extension (with a grammar).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "symbols": {
+          "description": "Its `symbols.scm` (with a grammar); a `symbols.yaml` beside it is\nread too.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "lsp": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LspDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "units": {
+          "description": "The code units it gives beyond functions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnitKind"
+          },
+          "default": []
+        },
+        "starter": {
+          "description": "How the metric scaffold writes a sample function (none: no starter).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StarterDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title"
+      ]
+    },
+    "GrammarDecl": {
+      "description": "Where a language's grammar comes from: exactly one of `native` (a\ngrammar compiled into oxplow, by name, [`native_grammar`]; only for the\nextensions that ship with oxplow) and `wasm` (a tree-sitter grammar\ncompiled to WebAssembly, a file of the extension).",
+      "type": "object",
+      "properties": {
+        "native": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wasm": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LspDecl": {
+      "description": "The Mason suggestion for a language's server.",
+      "type": "object",
+      "properties": {
+        "package": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "package"
+      ]
+    },
+    "UnitKind": {
+      "description": "A kind of code \"unit\" a language exposes, beyond the always-present\nfunction: for the list-units navigation surface and the `metric_subject`\nroll-up hierarchy. Declared per language (`units:`).",
+      "oneOf": [
+        {
+          "description": "A function / method / closure (every language has these).",
+          "type": "string",
+          "const": "function"
+        },
+        {
+          "description": "A class-like type: class, struct, record, interface, impl block,\ntrait, enum.",
+          "type": "string",
+          "const": "class"
+        },
+        {
+          "description": "A namespace / module / `mod` / Clojure `ns`.",
+          "type": "string",
+          "const": "module"
+        },
+        {
+          "description": "A package (Go package, Java package): a path-level grouping.",
+          "type": "string",
+          "const": "package"
+        }
+      ]
+    },
+    "StarterDecl": {
+      "description": "How the metric scaffold writes a sample function: `function` opens it\n(`{name}` is its name), `branch` is repeated once per decision (`{n}` is\nits number), `tail` closes it.",
+      "type": "object",
+      "properties": {
+        "function": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tail": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "branch",
+        "tail"
       ]
     },
     "ProviderSpec": {

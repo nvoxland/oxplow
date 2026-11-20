@@ -1,0 +1,19 @@
+manifest: 2
+name: oxplow-java
+namespace: oxplow
+description: "What oxplow knows about Java: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Java."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Java in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: java
+    title: "Java"
+    extensions: [java]
+    grammar: { native: java }
+    analysis: languages/java/analysis.yaml
+    symbols: languages/java/symbols.scm
+    units: [class, package]

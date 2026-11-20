@@ -534,7 +534,8 @@ mod tests {
             .unwrap();
 
         use oxplow_domain::vcs::Vcs as _;
-        let mut oracle = GraphOracle::new(crate::vcs::GitProvider.revision_graph(dir.path()));
+        let mut oracle =
+            GraphOracle::new(crate::vcs::GitProvider::default().revision_graph(dir.path()));
         let (a, b, fa, m) = (a.to_string(), b.to_string(), fa.to_string(), m.to_string());
         let answers =
             oracle.ancestry(&[a.as_str(), b.as_str(), fa.as_str(), m.as_str(), "deadbeef"]);
@@ -557,7 +558,8 @@ mod tests {
         assert_eq!(oracle.commit_time("deadbeef"), None);
         // And a directory that isn't a repo degrades, never errors.
         let not_repo = tempfile::tempdir().unwrap();
-        let mut blind = GraphOracle::new(crate::vcs::GitProvider.revision_graph(not_repo.path()));
+        let mut blind =
+            GraphOracle::new(crate::vcs::GitProvider::default().revision_graph(not_repo.path()));
         assert!(blind.ancestry(&[a.as_str(), b.as_str()]).is_empty());
     }
 

@@ -1,0 +1,24 @@
+# Java: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [method_declaration, constructor_declaration, lambda_expression]
+  param_list_fields: [parameters]
+  parameter_kinds: [formal_parameter, spread_parameter]
+decisions:
+  kinds: [if_statement, switch_label, switch_block_statement_group, for_statement, enhanced_for_statement, while_statement, do_statement, catch_clause, ternary_expression]
+visibility:
+  strategy: modifiers_keyword
+doc:
+  strategy: preceding_comment
+  prefixes: ["/**"]
+imports:
+  strategy: java_import
+duplication:
+  skip_kinds: [import_declaration, package_declaration]
+merge:
+  # Top-level items are imports + type declarations (methods/fields are
+  # nested in a class body: intra-body merge is Tier-1's job). The generic
+  # name_fields path keys each class/interface/enum/record by its
+  # identifier; package_declaration falls back to text.
+  key: named
+  import_kinds: [import_declaration]
+  name_fields: [name]

@@ -14,6 +14,28 @@ pub(crate) fn optional_shipped_disabled() -> String {
         .collect()
 }
 
+/// Turn on, in the project at `dir`, every shipped extension that declares
+/// languages (the language packs): a test of code analysis runs on the
+/// languages a project with them on has. Appends to its
+/// `.oxplow/project.yaml`.
+pub(crate) fn enable_language_packs(dir: &std::path::Path) {
+    use std::io::Write as _;
+    let path = dir.join(".oxplow/project.yaml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .unwrap();
+    for b in crate::bundled_extensions::BUNDLED.iter().filter(|b| {
+        b.file("extension.yaml")
+            .is_some_and(|m| m.lines().any(|l| l.starts_with("languages:")))
+            && !b.required
+    }) {
+        writeln!(f, "\noxplow.extensions.{}.enabled: true", b.name).unwrap();
+    }
+}
+
 /// An extension's errors as the lines a person reads.
 pub(crate) fn shown_errors(ext: &crate::extension::extensions::Extension) -> Vec<String> {
     ext.errors.iter().map(|d| ext.shown(d)).collect()
@@ -236,6 +258,7 @@ pub async fn open_session(
 pub async fn services_with_thread() -> ThreadFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
+    enable_language_packs(dir.path());
     services_with_thread_in(dir).await
 }
 

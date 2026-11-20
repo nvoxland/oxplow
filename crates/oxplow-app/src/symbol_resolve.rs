@@ -94,7 +94,7 @@ async fn at_revision(
         return None;
     };
     let text = String::from_utf8(bytes).ok()?;
-    let found = oxplow_code_metrics::extract(path, &text)
+    let found = oxplow_code_metrics::extract(&svc.languages.current(), path, &text)
         .into_iter()
         .find(|d| d.id == symbol)?;
     Some(SymbolLocation {
@@ -117,6 +117,7 @@ mod tests {
     async fn a_symbol_ref_resolves_now_at_its_version_and_past_a_gone_version() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
+        crate::test_fixtures::enable_language_packs(dir.path());
         let svc = Services::in_memory(dir.path()).await.unwrap();
         let stream = svc.streams.ensure_primary().await.unwrap().id;
         let old = "class Widget:\n    def spin(self): pass\n";

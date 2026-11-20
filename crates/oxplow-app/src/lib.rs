@@ -559,6 +559,9 @@ pub struct Services {
     /// The shared models the enabled extensions declare and fill
     /// (`.context/models.md`).
     pub models: models::Models,
+    /// The programming languages the enabled extensions declare
+    /// (`extension::language_set`), swapped beside `models`.
+    pub languages: extension::language_set::LanguagesHandle,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
@@ -990,7 +993,12 @@ impl Services {
         // (`.context/data-model.md` "snapshot + file_snapshot"). Every
         // worktree shares the repo's object db, so the primary dir serves
         // any stream's OIDs.
-        let vcs: Arc<dyn oxplow_domain::vcs::Vcs> = Arc::new(vcs::GitProvider);
+        // The languages the enabled extensions declare, swapped in at each
+        // publication: the structural merge, code analysis and the LSP
+        // services read them.
+        let languages = extension::language_set::LanguagesHandle::default();
+        let vcs: Arc<dyn oxplow_domain::vcs::Vcs> =
+            Arc::new(vcs::GitProvider::with_languages(languages.clone()));
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
         let snapshot_content = snapshot_content::SnapshotContent::new(
             blobs.clone(),
@@ -1095,7 +1103,7 @@ impl Services {
             ai.clone(),
             oxplow_db::SqliteAiResultStore::new(db.clone()),
         ));
-        let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone(), languages.clone());
         let lsp_installer_svc =
             lsp_installer::LspInstallerService::new(&layout.state_dir, lsp.clone());
         if let Err(e) = futures::executor::block_on(lsp_installer_svc.replay_into_sessions()) {
@@ -1128,7 +1136,7 @@ impl Services {
             stream_store.clone(),
             ref_moves.clone(),
         ));
-        let git = vcs::GitProvider;
+        let git = vcs::GitProvider::with_languages(languages.clone());
         let trees = Arc::new(trees::Trees::new(
             vcs.clone(),
             snapshot_store.clone(),
@@ -1359,7 +1367,8 @@ impl Services {
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         })
-        .with_ai(ai_compute.clone());
+        .with_ai(ai_compute.clone())
+        .with_languages(languages.clone());
         // What an agent's context reads changing: sessions without a
         // prompt hook inject it between turns.
         let (context_changes, _) = tokio::sync::watch::channel(0u64);
@@ -1432,7 +1441,7 @@ impl Services {
         };
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
-            git: vcs::GitProvider,
+            git: vcs::GitProvider::with_languages(languages.clone()),
             worktrees: worktrees.clone(),
             events: event_bus.clone(),
             ref_moves: ref_moves.clone(),
@@ -1581,6 +1590,7 @@ impl Services {
                 .clone()
                 .unwrap_or_else(|| layout.state_dir.join("global")),
             models: models.clone(),
+            languages: languages.clone(),
             project_dir: layout.project_dir.clone(),
             store: collector_store.clone(),
             db: db.clone(),
@@ -1780,6 +1790,7 @@ impl Services {
             providers,
             feeds,
             models,
+            languages,
             page_visit_store,
             usage_store,
             code_quality_store,

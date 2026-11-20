@@ -1,4 +1,6 @@
 # C#: empty catch blocks count.
+# The languages its files are in: their packs.
+requires: [oxplow-csharp]
 when:
   collector: oxplow.csharp.empty_catch
   files:

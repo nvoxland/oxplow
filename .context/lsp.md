@@ -51,20 +51,21 @@ manager owns:
   `shutdown`; the session is removed first, so the pump reports no crash.
 - **Config resolution**: `.oxplow/project.yaml` `lsp.servers[]` first, then the
   Mason-installed registry (`InstalledServers`, carries package
-  name/version). `NoConfig` errors are self-describing — they embed
-  the curated Mason suggestion (`mason_suggestion`, mirrored by
-  `apps/desktop/src/lspSuggestions.ts`; keep the two in sync) and both
-  fix paths (the `oxplow.lsp.install_server` command / yaml entry).
+  name/version). `NoConfig { language, suggestion }` errors are
+  self-describing — they embed the Mason package the language's
+  declaration suggests (`lsp: { package }` in its pack,
+  `LspSessionManager::no_config`) and both fix paths (the
+  `oxplow.lsp.install_server` command / yaml entry). The desktop's
+  `apps/desktop/src/lspSuggestions.ts` still mirrors the suggestions by
+  hand until it reads them from the declared languages.
 
-> **LSP id ↔ analysis `Language` bridge.** The session `language`
-> here is a free string (`languageId`), a separate namespace from the
-> static-analysis `oxplow_code_metrics::Language` enum. The one documented
-> bridge between them is `oxplow_code_metrics::language_from_lsp_id(id)` →
-> `Option<Language>` (handles `typescriptreact`/`javascriptreact`, delegates
-> the rest to `language_from_name`; an LSP language with no analysis grammar
-> resolves to `None`). Use it whenever an LSP buffer needs tree-sitter
-> analysis — don't re-derive the mapping. Part of the unified language-support
-> epic.
+> **LSP id ↔ language.** The session `language` here is a free string
+> (`languageId`). The bridge to the declared languages
+> (`.context/language-support.md`) is `Languages::by_lsp_id(id)`: a
+> language's declared `lsp_ids` (`typescriptreact` is TSX's), then its id
+> and aliases. A language with no grammar (Lua, YAML: foundation declares
+> them) has no analysis. Use it whenever an LSP buffer needs tree-sitter
+> analysis — don't re-derive the mapping.
 
 ## Installer (`crates/oxplow-app/src/lsp_installer.rs`)
 
@@ -120,8 +121,8 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `DocumentSymbol` trees / `SymbolInformation`, `MarkupContent` /
   `MarkedString`, 0-based positions, URIs) to them. A file's language is
   the configured server whose `extensions` cover it — an installed
-  (Mason) server's come from the language registry
-  (`language::lsp_extensions`, set when it is registered)
+  (Mason) server has none and covers its language's (`Languages::lsp_extensions`,
+  read when files are matched, so a pack turned on later counts)
   (`LspSessionManager::language_for_path`); an uncovered file's error
   names the server to install (by the extension's language). Diagnostics
   are what the servers published (`lsp_diagnostic`), not a pull — and

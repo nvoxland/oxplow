@@ -194,7 +194,7 @@ mod tests {
         use oxplow_domain::vcs::Vcs as _;
         crate::snapshot_content::SnapshotContent::new(
             blobs.clone(),
-            crate::vcs::GitProvider.object_store(project),
+            crate::vcs::GitProvider::default().object_store(project),
         )
     }
 

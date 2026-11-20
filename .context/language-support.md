@@ -1,86 +1,96 @@
-# Language support — one cohesive bundle per language
+# Language support — a language is an extension's
 
-Oxplow's understanding of source code is **language-aware**, and everything
-it knows about a language is meant to live in **one cohesive, well-isolated
-place** rather than scattered across crates. This doc is the map of that
-architecture and the rules for changing it.
+Core names no language. Everything oxplow knows about one lives in the
+extension that declares it: a `languages:` entry of its manifest and its
+data files. oxplow's own are its **language packs**, shipped extensions that
+are off by default (`extensions/oxplow-rust`, `oxplow-typescript` (TypeScript,
+TSX, JavaScript), `oxplow-python`, `oxplow-go`, `oxplow-java`, `oxplow-c` (C,
+C++), `oxplow-csharp`, `oxplow-clojure`); a project turns on the ones it uses
+(`oxplow.extensions.oxplow-rust.enabled: true`). Foundation declares the
+languages oxplow knows only by their language servers (Lua, JSON, YAML,
+HTML, CSS, Bash, Ruby, Zig): no grammar, so nothing parses them.
 
-## The registry (source of truth for identity-level facets)
+## A language's declaration
 
-`crates/oxplow-code-metrics/src/language.rs` holds a `LanguageSupport` per
-language and a `registry()` over them. A `LanguageSupport` answers *"what does
-oxplow know about language X?"*:
+```yaml
+languages:
+  - id: rust                      # the stored name: symbol.language, the oxplow.language dimension
+    title: Rust
+    extensions: [rs]
+    aliases: ["rs"]               # other names a script may pass (`ast_query(text, "rs", q)`)
+    lsp_ids: [typescriptreact]    # LSP languageIds that are this language
+    grammar: { native: rust }     # or { wasm: grammars/x.wasm }; none: known by its server only
+    analysis: languages/rust/analysis.yaml
+    symbols: languages/rust/symbols.scm   # + symbols.yaml beside it
+    lsp: { package: rust-analyzer }       # the Mason package to suggest
+    units: [class, module]                # code units beyond functions
+    starter:                              # how the metric scaffold writes a sample function
+      function: "fn {name}(x: i32) -> i32 {"
+      branch: ["    if x == {n} { return {n}; }"]
+      tail: ["    0", "}"]
+```
 
-| Field | Meaning |
-|---|---|
-| `language` | the canonical, workspace-wide `Language` (the single identity — see below) |
-| `display_name` | human-facing name (`"C++"`, `"C#"`) |
-| `extensions` | file extensions it claims — **the single source of truth** for `language::language_for_path` |
-| `lsp_mason_package` | curated Mason LSP server suggestion, if oxplow ships one |
-| `unit_kinds` | the code units `list_units` exposes for it (function / class / module / package); all but package are projections of its extracted definitions |
-| `analysis_spec()` | → its `LanguageSpec` node tables in `spec.rs` |
+- **Parsed** by `extension/extensions/languages.rs` at load: the files are
+  read, the language is built (grammar loaded, every node kind
+  `analysis.yaml` names checked against the grammar, the symbol query
+  compiled), and a wrong one is the extension's error at its line. An id is
+  lowercase letters, digits and `_`.
+- **`grammar: { native: <name> }`** is for the extensions that ship with
+  oxplow only (`oxplow_code_metrics::native_grammar`, the one place in core
+  that names grammar crates). A third party brings a WebAssembly grammar
+  (`wasm:`; loading it is not built yet: such a language is refused, saying so).
+- **`analysis.yaml`** is the data the walkers read
+  (`oxplow_code_metrics::LanguageSpec::parse`):
+  `functions { kinds, param_list_fields, parameter_kinds, form_heads }`,
+  `decisions { kinds, form_heads }`, `forms { list, symbol, name }` (a grammar
+  of generic forms, Clojure's `list_lit`), `visibility { strategy }`,
+  `doc { strategy, prefixes }`, and optional facets `imports { strategy }`,
+  `duplication { skip_kinds, skip_form_heads }`,
+  `merge { key, import_kinds, transparent_kinds, inner_decl_fields, name_fields, def_heads }`.
+  A language without a facet lacks it (C# has no merge).
+- **Strategies** are behavior data can't say, chosen by name, each named for
+  what it looks at: visibility `visibility_modifier | accessibility_modifier
+  | modifiers_keyword | access_specifier | capitalized_name |
+  underscore_prefix | static_storage | form_meta | unknown`; doc
+  `preceding_comment | first_string_statement | form_string | none`; imports
+  `rust_use | es_import | python_import | go_import | java_import | c_include
+  | cpp_include | clojure_ns | csharp_using` (`oxplow-code-deps`); merge key
+  `named | c_declarator | form_head` (`oxplow-git`). A language needing a new
+  one is a core change.
 
-`for_language(lang)` looks up the bundle; `mason_suggestion(language_id)`
-resolves an LSP id through the registry (analysis languages) then the
-`LSP_ONLY` table (lua/json/yaml/…: ids, Mason package, extensions);
-`lsp_extensions(language_id)` answers the files an LSP id covers the same
-way — what an installed (Mason) server matches files by, since it has no
-configured `extensions` ; `language_for_path(path)` scans the
-registry's `extensions`.
+## The set
 
-## One `Language`, several spec tables (the key design rule)
-
-There is **exactly one** `Language` enum in the workspace —
-`oxplow_code_metrics::Language` (`Language`). Every subsystem keys off it. The
-per-language *spec tables* are intentionally **not** unified into one struct,
-because each subsystem needs genuinely different node-kind knowledge; they
-just share the one identity:
-
-| Facet | Where it lives | Why there |
-|---|---|---|
-| Identity (`Language`, `language_from_name`, `language_from_lsp_id`, `name`, `tag`) | `oxplow-code-metrics/src/spec.rs` | the one source of truth; re-exported widely |
-| Registry bundle (extensions, LSP hint, unit kinds, display name) | `oxplow-code-metrics/src/language.rs` | the cross-cutting facets, co-located |
-| Static-analysis tables (`LanguageSpec`: decision kinds, parameters, visibility; function-like syntax for the duplication detector) | `oxplow-code-metrics/src/spec.rs` | drives complexity/markers metrics and `oxplow-code-dup` |
-| Symbol queries (`symbols.scm`, optional `symbols.yaml`) | `oxplow-code-metrics/languages/<lang>/` | data, not code: what a file defines and how each definition is named (see Symbols) |
-| AST-merge tables (`MergeSpec`, `KeyStrategy`) | `oxplow-git/src/ast_merge.rs` (`merge_spec(lang) -> Option<&MergeSpec>`) | merge-specific identity keys; `None` ⇒ language analysed but not merged (e.g. C#) |
-| Import extraction | `oxplow-code-deps` | depends on the code-metrics grammar table |
-| Idiom metrics (`oxplow.<lang>.*` fact collectors of oxplow-foundation) | `extensions/oxplow-foundation/collectors/<lang>/*.star` | need the Starlark runtime; key off `Language` |
-| Editor language id, file icons | `apps/desktop/src/editor-language.ts` (Monaco ids) | renderer-only; Monaco's own id space |
-| LSP suggestion mirror | `apps/desktop/src/lspSuggestions.ts` | hand-mirrored from `language::mason_suggestion` |
-
-The rule: **a language's identity flows through the one `Language` enum; each
-subsystem keeps its own spec table keyed off it.** New cross-cutting facets
-belong on `LanguageSupport`, not in a new per-subsystem map.
-
-## Decision: compiled-in grammars, symbols as data
-
-Grammars are compiled in today: workspace Cargo deps, no dynamic grammar
-loading, no user-authored language definitions. That keeps analysis fast and
-safe (no native-code loading surface) and each language's behavior
-reviewable in-tree.
-
-Symbol extraction is data, not per-language code: a tree-sitter query
-(`symbols.scm`) plus an optional `symbols.yaml`, the same form a language
-contributed later would bring. Grammars from extensions are a planned
-follow-up: tree-sitter grammars compiled to WASM and loaded in a wasmtime
-store, shipped with their own `symbols.scm` / `symbols.yaml`. The
-data-driven extraction is the path there; nothing in `symbols.rs` names a
-language.
-
-### The user-extensibility boundary
-
-Users extend oxplow **without recompiling** along two axes that are *not*
-new languages:
-
-- **Metrics** — an extension's `metrics:` + collectors (the project's own:
-  `.oxplow/extensions/project/`) + a Starlark/jaq script over the
-  `files()`/`ast_query()`/`code_metrics()`/`source_files()`/`markers()`
-  host builtins (see `.context/metrics.md`).
-- **LSP servers** — `.oxplow/project.yaml` `lsp.servers[]` (any `languageId`), or
-  the `oxplow.lsp.install_server` command (see `.context/lsp.md`).
-
-Adding a brand-new language (grammar, complexity, symbols, merge) requires a
-recompile today; that's the trade until grammars load from extensions.
+- **`oxplow_code_metrics::Languages`** is the set the enabled extensions
+  declare; a `Language` is a cheap handle into it (equal by id). `for_path`
+  gives a parseable language, `declared_for_path` any (a server-only one
+  too), `by_name` resolves ids and aliases, `by_lsp_id` LSP ids. A
+  language's symbol query compiles on first use; `tag()` (FNV-1a of its id)
+  salts the duplicate detector's hashes, `fingerprint()` (of its
+  declaration and files) keys the script host's parse memo, so a changed
+  definition is never served stale.
+- **Built** by `extension::language_set::of(extensions)` (foundation, then
+  the shipped extensions in their order, then the rest by name; the first to
+  claim a name, alias, LSP id or file extension keeps it, the later one is
+  left out with a problem) and **swapped** at each publication beside the
+  model registry (`extension_activation`), into `svc.languages`
+  (`LanguagesHandle`). Readers: change analysis, the symbol collector and
+  resolver, the duplicate scan, the metrics service and collector runs, the
+  LSP session manager (an installed server covers its language's files,
+  read when files are matched; the no-server error names the language's
+  `lsp.package`), and `GitProvider` (the structural merge).
+- **The script worker** gets the set's sources in a `{"languages": …}`
+  message before its run and builds its own (`oxplow-script` `ToWorker::Languages`);
+  `ast_query`, `code_metrics`, `markers`, `source_files` and
+  `duplicate_blocks` parse with it. Every run is given it (`Sources::languages`,
+  not a permission).
+- **Offline** (the SDK's metric scaffold), `language_set::shipped()` reads
+  every shipped extension's languages from their embedded files, on or off.
+- **Tests** read the checkout's packs:
+  `oxplow_code_metrics::for_tests::{shipped, lang}`; an oxplow-app test that
+  parses code turns the packs on with
+  `test_fixtures::enable_language_packs(dir)` (`services_with_thread` does).
+  An extension fixture that parses code names its packs in its own
+  `requires:`.
 
 ## Symbols
 
@@ -182,7 +192,7 @@ them read `v_symbol`. See `.context/lsp.md`.
 "List the functions / classes / modules / packages that make sense for a
 language":
 
-- **Tree-sitter (deterministic, offline)** — `oxplow_code_metrics::list_units(path, source)`
+- **Tree-sitter (deterministic, offline)** — `oxplow_code_metrics::list_units(languages, path, source)`
   returns `Vec<CodeUnit>` (`kind` ∈ function/class/module/package, `name`,
   `container_path`, line span). It is a projection of `extract`: the
   function-like, class-like and module definitions, with the definition's
@@ -191,7 +201,7 @@ language":
   to the agent as the fallback of the **`oxplow_code_symbols`** MCP tool (a file no
   language server serves is read live, uncommitted edits included, and the
   answer says `source: tree_sitter`); `v_symbol` holds the captured ones. Works
-  for the 11 bundled languages.
+  for every parseable language of the enabled packs.
 - **LSP (any server-backed language)** — the `oxplow_code_symbols` (a file, preferred
   over the tree-sitter fallback when a server runs) and `oxplow_code_workspace_symbols`
   MCP tools, and definition, references, hover and call hierarchy, answer for
@@ -207,34 +217,25 @@ per-language view is page or agent work.
 
 ## Adding a language (the checklist)
 
-1. **Grammar dep** — add `tree-sitter-<lang>` to the workspace `Cargo.toml`
-   and `crates/oxplow-code-metrics/Cargo.toml`.
-2. **Identity** — add a `Language` variant + arms in `spec.rs`
-   (`spec()`, `name()`, `tag()`, `language_from_name()`); add LSP aliases to
-   `language_from_lsp_id()` if the server uses non-obvious ids.
-3. **Analysis spec** — add a `LanguageSpec` static in `spec.rs` (decision /
-   parameter node kinds, function-like syntax for the duplication detector,
-   a `VisibilityStrategy`).
-4. **Symbols** — add `languages/<lang>/symbols.scm` (and `symbols.yaml` if
-   the language needs it), register them where the built-ins are
-   `include_str!`'d in `symbols.rs`, and add `src/symbols/tests_<lang>.rs`
-   covering kinds, containers, ids, repeats and (for an overloading
-   language) signatures.
-5. **Registry bundle** — add a `LanguageSupport` entry in `language.rs`
-   (display name, extensions, LSP suggestion, unit kinds). The
-   `registry_has_exactly_one_entry_per_language` test enforces coverage.
-6. **Merge (optional)** — if the language should structurally auto-merge, add
-   a `MergeSpec` + `merge_spec` arm in `oxplow-git/src/ast_merge.rs`; omit it
-   and the merge tier simply skips the language (`merge_spec` ⇒ `None`).
-7. **Idiom metrics (optional)** — add `oxplow.<lang>.*` fact-collector scripts under
-   `extensions/oxplow-foundation/collectors/<lang>/` and declare them in its `extension.yaml`.
-8. **Renderer (optional)** — Monaco id / icon in `editor-language.ts`;
-   LSP suggestion mirror in `lspSuggestions.ts`.
+1. **A pack**: an extension with a `languages:` entry (a shipped one in
+   `extensions/oxplow-<pack>/`, added to `BUNDLED`, `build.rs` and the debug
+   `generated` functions in `bundled_extensions.rs`, `namespace: oxplow`).
+2. **Its grammar**: a shipped pack's is a workspace crate named in
+   `native_grammar`; anyone else's is a `.wasm` (not loaded yet).
+3. **`analysis.yaml`**: the node kinds and strategies above (the load check
+   refuses a node kind the grammar doesn't have).
+4. **`symbols.scm`** (and `symbols.yaml`): the captures in "Symbols" below.
+5. **Optional**: `starter:` (the metric scaffold's sample), `lsp:`, the merge
+   and import facets, its idiom metrics (fact collectors), and the Monaco id /
+   icon in `apps/desktop/src/editor-language.ts`.
 
 ## Status
 
-Live: the single `Language` enum, the registry bundle, the LSP symbol surface,
-generic unit listing (`list_units`, behind `oxplow_code_symbols`' fallback), and tree-sitter
-symbols with their index. **Still open:** exercising `unit_kinds` against the
-`metric_subject` roll-up hierarchy so metrics can be grouped by package/module
-in the Metrics Explorer; and grammars from extensions (WASM).
+Live: languages from extensions, the shipped packs with native grammars, the
+LSP symbol surface, generic unit listing, and tree-sitter symbols with their
+index. **Still open** (the change-review plan, milestones 2 to 5): the
+`v_language` dataset and the pack suggestion, a fixture kind for a
+language's analysis with each pack's cases moved into it, a guard that core
+names no language, re-indexing when a pack is turned on, test conventions /
+file kinds / run patterns / report collectors in the packs, and WebAssembly
+grammars (Clojure first).

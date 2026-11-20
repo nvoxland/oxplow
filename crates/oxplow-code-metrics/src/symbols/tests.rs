@@ -2,7 +2,7 @@ use super::*;
 
 /// `(kind, id)` of each definition in `src`, in source order.
 pub(super) fn ids(path: &str, src: &str) -> Vec<(String, String)> {
-    extract(path, src)
+    extract(&crate::for_tests::shipped(), path, src)
         .into_iter()
         .map(|d| (d.kind.as_str().to_string(), d.id))
         .collect()
@@ -16,15 +16,13 @@ pub(super) fn expect(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 #[test]
-fn every_built_in_symbol_query_compiles_against_its_grammar() {
-    for support in crate::registry() {
-        let spec = symbol_spec(support.language);
-        assert!(
-            spec.is_ok(),
-            "{}: {}",
-            support.language.name(),
-            spec.err().unwrap()
-        );
+fn every_shipped_symbol_query_compiles_against_its_grammar() {
+    for language in crate::for_tests::shipped().all() {
+        if !language.analyzable() {
+            continue;
+        }
+        let spec = language.check_symbols();
+        assert!(spec.is_ok(), "{}: {}", language.name(), spec.err().unwrap());
     }
 }
 
@@ -148,7 +146,7 @@ interface Shape { double area(); }
 #[test]
 fn a_definition_records_where_its_name_is_and_its_whole_extent() {
     let src = "struct A;\n\nimpl A {\n    pub fn go(&self) {\n        1;\n    }\n}\n";
-    let go = extract("a.rs", src)
+    let go = extract(&crate::for_tests::shipped(), "a.rs", src)
         .into_iter()
         .find(|d| d.id == "A::go")
         .unwrap();
@@ -161,13 +159,13 @@ fn a_definition_records_where_its_name_is_and_its_whole_extent() {
 
 #[test]
 fn an_unsupported_or_unparseable_file_has_no_definitions() {
-    assert!(extract("notes.txt", "fn a() {}").is_empty());
+    assert!(extract(&crate::for_tests::shipped(), "notes.txt", "fn a() {}").is_empty());
 }
 
 #[test]
 fn a_query_capturing_an_unknown_name_is_refused() {
     let err = SymbolSpec::compile(
-        crate::Language::Rust,
+        &crate::for_tests::lang("rust").tree_sitter_language(),
         "(function_item name: (identifier) @name) @definition.lambda",
         None,
     )
@@ -175,7 +173,7 @@ fn a_query_capturing_an_unknown_name_is_refused() {
     .unwrap();
     assert!(err.contains("`definition.lambda`"), "{err}");
     let err = SymbolSpec::compile(
-        crate::Language::Rust,
+        &crate::for_tests::lang("rust").tree_sitter_language(),
         "(function_item name: (identifier) @title) @definition.function",
         None,
     )

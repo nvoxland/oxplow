@@ -733,7 +733,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn every_page_answer_reaches_what_its_skill_names() {
         let tmp = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(tmp.path())
             .await
             .unwrap();
@@ -801,7 +801,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_page_answer_must_be_named_by_its_skill_and_run() {
         let tmp = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(tmp.path())
             .await
             .unwrap();
@@ -866,7 +866,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_bundled_extensions_answer_their_questions() {
         let tmp = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(tmp.path())
             .await
             .unwrap();

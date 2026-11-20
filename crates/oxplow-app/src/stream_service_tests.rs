@@ -58,7 +58,7 @@ fn service(project: &Path) -> StreamService {
 fn service_over(project: &Path, db: Database) -> StreamService {
     StreamService::new(
         WorkspaceLayout::for_project(project),
-        Arc::new(GitProvider),
+        Arc::new(GitProvider::default()),
         Arc::new(SqliteStreamStore::new(db.clone())),
         Arc::new(SqliteThreadStore::new(db)),
     )

@@ -1,0 +1,39 @@
+manifest: 2
+name: oxplow-c
+namespace: oxplow
+description: "What oxplow knows about C and C++: their grammars, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses C and C++."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about C and C++ in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: c
+    title: "C"
+    extensions: [c, h]
+    grammar: { native: c }
+    analysis: languages/c/analysis.yaml
+    symbols: languages/c/symbols.scm
+    lsp: { package: clangd }
+    units: [class]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "int {name}(int x) {"
+      branch: ["    if (x == {n}) { return {n}; }"]
+      tail: ["    return 0;", "}"]
+  - id: cpp
+    title: "C++"
+    extensions: [cc, cxx, cpp, hpp, hxx]
+    aliases: ["c++", "cxx", "cc"]
+    grammar: { native: cpp }
+    analysis: languages/cpp/analysis.yaml
+    symbols: languages/cpp/symbols.scm
+    lsp: { package: clangd }
+    units: [class, module]
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "int {name}(int x) {"
+      branch: ["    if (x == {n}) { return {n}; }"]
+      tail: ["    return 0;", "}"]

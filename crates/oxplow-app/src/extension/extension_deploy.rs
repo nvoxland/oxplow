@@ -1619,7 +1619,7 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
     }
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let root = dir.path().to_path_buf();
-    crate::vcs::GitProvider
+    crate::vcs::GitProvider::default()
         .init_repository(&root)
         .await
         .map_err(|e| e.to_string())?;

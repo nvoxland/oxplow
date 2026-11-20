@@ -36,7 +36,7 @@ struct Project {
 impl Project {
     async fn new() -> Self {
         let dir = tempfile::tempdir().expect("it works");
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(dir.path())
             .await
             .expect("it works");

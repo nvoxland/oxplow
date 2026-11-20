@@ -1,4 +1,5 @@
 use super::*;
+use crate::for_tests::{lang, shipped};
 
 #[test]
 fn rust_simple_function() {
@@ -7,7 +8,7 @@ fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     assert_eq!(m.len(), 1);
     let f = &m[0];
     assert_eq!(f.name, "add");
@@ -29,7 +30,7 @@ fn classify(x: i32) -> &'static str {
     }
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     assert_eq!(m.len(), 1);
     // base 1 + outer if + else_clause + inner if-as-expression
     assert!(m[0].complexity >= 3, "got {}", m[0].complexity);
@@ -46,7 +47,7 @@ fn classify(x: i32) -> &'static str {
     }
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     assert_eq!(m.len(), 1);
     // 3 match arms = +3
     assert_eq!(m[0].complexity, 4);
@@ -65,7 +66,7 @@ const handler = (req: Request, res: Response) => {
     return res.send("?");
 };
 "#;
-    let m = analyze_file("src/x.ts", src);
+    let m = analyze_file(&shipped(), "src/x.ts", src);
     assert!(!m.is_empty());
     let f = m.iter().find(|f| f.parameter_count == 2).expect("arrow");
     assert!(f.complexity >= 3, "got {}", f.complexity);
@@ -83,7 +84,7 @@ def histogram(items):
             out[it] = 1
     return out
 ";
-    let m = analyze_file("src/x.py", src);
+    let m = analyze_file(&shipped(), "src/x.py", src);
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].name, "histogram");
     assert_eq!(m[0].parameter_count, 1);
@@ -103,7 +104,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(404)
 }
 "#;
-    let m = analyze_file("main.go", src);
+    let m = analyze_file(&shipped(), "main.go", src);
     let f = m.iter().find(|f| f.name == "handle").expect("method");
     assert_eq!(f.parameter_count, 2);
     assert!(f.complexity >= 2);
@@ -120,7 +121,7 @@ class Foo {
     }
 }
 "#;
-    let m = analyze_file("Foo.java", src);
+    let m = analyze_file(&shipped(), "Foo.java", src);
     let f = m.iter().find(|f| f.name == "classify").expect("method");
     assert_eq!(f.parameter_count, 1);
     assert!(f.complexity >= 3);
@@ -128,7 +129,7 @@ class Foo {
 
 #[test]
 fn unsupported_language_returns_empty() {
-    let m = analyze_file("README.md", "# heading");
+    let m = analyze_file(&shipped(), "README.md", "# heading");
     assert!(m.is_empty());
 }
 
@@ -137,9 +138,9 @@ fn extensionless_path_is_not_classified() {
     // Regression: previously a path like "rs" (no extension) was
     // misclassified as Rust because `rsplit('.').next()` returned
     // the whole string.
-    let m = analyze_file("rs", "fn x() {}");
+    let m = analyze_file(&shipped(), "rs", "fn x() {}");
     assert!(m.is_empty());
-    let m = analyze_file("Makefile", "all: foo\n");
+    let m = analyze_file(&shipped(), "Makefile", "all: foo\n");
     assert!(m.is_empty());
 }
 
@@ -152,7 +153,7 @@ int classify(int x) {
     return 0;
 }
 "#;
-    let m = analyze_file("src/x.c", src);
+    let m = analyze_file(&shipped(), "src/x.c", src);
     let f = m.iter().find(|f| f.name == "classify").unwrap_or_else(|| {
         panic!(
             "expected name 'classify', got {:?}",
@@ -171,7 +172,7 @@ int Foo::bar(int x, int y) {
     return y;
 }
 "#;
-    let m = analyze_file("src/x.cpp", src);
+    let m = analyze_file(&shipped(), "src/x.cpp", src);
     let names: Vec<_> = m.iter().map(|f| f.name.as_str()).collect();
     // The qualified id parses as `Foo::bar`; the inner identifier is
     // `bar`. Either is acceptable as long as we don't return the
@@ -203,7 +204,7 @@ fn classify(x: i32) -> &'static str {
     }
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].complexity, 3, "got {}", m[0].complexity);
 }
@@ -216,7 +217,7 @@ impl Foo {
     fn bar(&self) -> i32 { 1 }
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     let bar = m.iter().find(|f| f.name == "bar").expect("method");
     assert_eq!(bar.container_path, vec!["Foo".to_string()]);
 }
@@ -233,7 +234,7 @@ mod outer {
     }
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     let bar = m.iter().find(|f| f.name == "bar").expect("method");
     assert_eq!(
         bar.container_path,
@@ -250,7 +251,7 @@ class Greeter {
     }
 }
 "#;
-    let m = analyze_file("src/x.ts", src);
+    let m = analyze_file(&shipped(), "src/x.ts", src);
     let greet = m.iter().find(|f| f.name == "greet").expect("method");
     assert_eq!(greet.container_path, vec!["Greeter".to_string()]);
 }
@@ -262,7 +263,7 @@ class Greeter:
     def greet(self, name):
         return name
 ";
-    let m = analyze_file("src/x.py", src);
+    let m = analyze_file(&shipped(), "src/x.py", src);
     let greet = m.iter().find(|f| f.name == "greet").expect("method");
     assert_eq!(greet.container_path, vec!["Greeter".to_string()]);
 }
@@ -276,7 +277,7 @@ class Outer {
     }
 }
 "#;
-    let m = analyze_file("Outer.java", src);
+    let m = analyze_file(&shipped(), "Outer.java", src);
     let val = m.iter().find(|f| f.name == "val").expect("method");
     assert_eq!(
         val.container_path,
@@ -287,7 +288,7 @@ class Outer {
 #[test]
 fn top_level_function_has_empty_container_path() {
     let src = "fn add(a: i32, b: i32) -> i32 { a + b }\n";
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     assert_eq!(m.len(), 1);
     assert!(m[0].container_path.is_empty());
 }
@@ -298,7 +299,7 @@ fn rust_visibility_pub_vs_private() {
 pub fn exported() {}
 fn private_fn() {}
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     let exported = m.iter().find(|f| f.name == "exported").unwrap();
     let priv_fn = m.iter().find(|f| f.name == "private_fn").unwrap();
     assert_eq!(exported.visibility, Visibility::Public);
@@ -320,7 +321,7 @@ pub fn undocumented() {}
 #[inline]
 pub fn documented_with_attr() {}
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
     assert!(has("documented"), "/// is a doc comment");
     assert!(!has("plain_comment"), "a plain // is not a doc comment");
@@ -331,7 +332,7 @@ pub fn documented_with_attr() {}
 #[test]
 fn python_has_doc_detects_docstrings() {
     let src = "def documented():\n    \"\"\"A docstring.\"\"\"\n    return 1\n\ndef undocumented():\n    return 1\n";
-    let m = analyze_file("src/x.py", src);
+    let m = analyze_file(&shipped(), "src/x.py", src);
     let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
     assert!(has("documented"));
     assert!(!has("undocumented"));
@@ -346,7 +347,7 @@ export function documented(): void {}
 // plain leading comment
 export function plain(): void {}
 "#;
-    let m = analyze_file("src/x.ts", src);
+    let m = analyze_file(&shipped(), "src/x.ts", src);
     let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
     assert!(has("documented"), "/** */ is JSDoc");
     assert!(!has("plain"), "a plain // is not JSDoc");
@@ -355,7 +356,7 @@ export function plain(): void {}
 #[test]
 fn go_has_doc_counts_any_preceding_comment() {
     let src = "// Documented is documented (Go convention: any preceding comment).\nfunc Documented() {}\n\nfunc Undocumented() {}\n";
-    let m = analyze_file("src/x.go", src);
+    let m = analyze_file(&shipped(), "src/x.go", src);
     let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
     assert!(has("Documented"));
     assert!(!has("Undocumented"));
@@ -370,7 +371,7 @@ class Greeter {
     plain(): void {}
 }
 "#;
-    let m = analyze_file("src/x.ts", src);
+    let m = analyze_file(&shipped(), "src/x.ts", src);
     let secret = m.iter().find(|f| f.name == "secret").unwrap();
     let hello = m.iter().find(|f| f.name == "hello").unwrap();
     let plain = m.iter().find(|f| f.name == "plain").unwrap();
@@ -386,7 +387,7 @@ fn typescript_top_level_export_visibility() {
 export function exported() {}
 function helper() {}
 "#;
-    let m = analyze_file("src/x.ts", src);
+    let m = analyze_file(&shipped(), "src/x.ts", src);
     let exported = m.iter().find(|f| f.name == "exported").unwrap();
     let helper = m.iter().find(|f| f.name == "helper").unwrap();
     assert_eq!(exported.visibility, Visibility::Public);
@@ -401,7 +402,7 @@ def _helper():
 def public():
     pass
 ";
-    let m = analyze_file("src/x.py", src);
+    let m = analyze_file(&shipped(), "src/x.py", src);
     let helper = m.iter().find(|f| f.name == "_helper").unwrap();
     let public = m.iter().find(|f| f.name == "public").unwrap();
     assert_eq!(helper.visibility, Visibility::Private);
@@ -415,7 +416,7 @@ package main
 func Public() {}
 func privateFn() {}
 "#;
-    let m = analyze_file("main.go", src);
+    let m = analyze_file(&shipped(), "main.go", src);
     let pub_fn = m.iter().find(|f| f.name == "Public").unwrap();
     let priv_fn = m.iter().find(|f| f.name == "privateFn").unwrap();
     assert_eq!(pub_fn.visibility, Visibility::Public);
@@ -431,7 +432,7 @@ class Foo {
     int packagePriv() { return 0; }
 }
 "#;
-    let m = analyze_file("Foo.java", src);
+    let m = analyze_file(&shipped(), "Foo.java", src);
     let alpha = m.iter().find(|f| f.name == "alpha").unwrap();
     let beta = m.iter().find(|f| f.name == "beta").unwrap();
     let pkg = m.iter().find(|f| f.name == "packagePriv").unwrap();
@@ -447,7 +448,7 @@ fn c_static_visibility() {
 static int hidden(int x) { return x; }
 int exported(int x) { return x; }
 "#;
-    let m = analyze_file("src/x.c", src);
+    let m = analyze_file(&shipped(), "src/x.c", src);
     let hidden = m.iter().find(|f| f.name == "hidden").unwrap();
     let exported = m.iter().find(|f| f.name == "exported").unwrap();
     assert_eq!(hidden.visibility, Visibility::Private);
@@ -464,7 +465,7 @@ fn outer() {
     let _ = inner(1);
 }
 "#;
-    let m = analyze_file("src/x.rs", src);
+    let m = analyze_file(&shipped(), "src/x.rs", src);
     assert_eq!(
         m.len(),
         2,
@@ -486,7 +487,7 @@ fn clojure_defn_simple() {
 (defn add [a b]
   (+ a b))
 "#;
-    let m = analyze_file("src/demo/core.clj", src);
+    let m = analyze_file(&shipped(), "src/demo/core.clj", src);
     assert_eq!(m.len(), 1, "expected one function, got {m:#?}");
     let f = &m[0];
     assert_eq!(f.name, "add");
@@ -500,7 +501,7 @@ fn clojure_defn_minus_is_private() {
     let src = r#"
 (defn- helper [x] x)
 "#;
-    let m = analyze_file("src/demo.clj", src);
+    let m = analyze_file(&shipped(), "src/demo.clj", src);
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].name, "helper");
     assert_eq!(m[0].visibility, Visibility::Private);
@@ -511,7 +512,7 @@ fn clojure_metadata_private_marker_is_private() {
     let src = r#"
 (defn ^:private secret [x] x)
 "#;
-    let m = analyze_file("src/demo.clj", src);
+    let m = analyze_file(&shipped(), "src/demo.clj", src);
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].name, "secret");
     assert_eq!(m[0].visibility, Visibility::Private);
@@ -526,7 +527,7 @@ fn clojure_branching_increments_complexity() {
     (neg? x) :neg
     :else :zero))
 "#;
-    let m = analyze_file("src/demo.clj", src);
+    let m = analyze_file(&shipped(), "src/demo.clj", src);
     assert_eq!(m.len(), 1);
     assert!(m[0].complexity >= 2, "got {}", m[0].complexity);
 }
@@ -537,7 +538,7 @@ fn clojure_closures_are_not_symbols_and_count_toward_the_enclosing_defn() {
 (defn outer [xs]
   (map (fn [x] (if x 1 2)) xs))
 "#;
-    let m = analyze_file("src/demo.clj", src);
+    let m = analyze_file(&shipped(), "src/demo.clj", src);
     assert_eq!(m.len(), 1, "got {m:#?}");
     assert_eq!(m[0].name, "outer");
     assert_eq!(m[0].parameter_count, 1);
@@ -550,14 +551,14 @@ fn clojure_ignores_non_function_top_level_lists() {
 (def some-data 42)
 (when true (println "side effect"))
 "#;
-    let m = analyze_file("src/demo.clj", src);
+    let m = analyze_file(&shipped(), "src/demo.clj", src);
     assert!(m.is_empty(), "expected no functions, got {m:#?}");
 }
 
 #[test]
 fn markers_rust_line_and_block_comments() {
     let src = "// TODO: fix this\nfn a() {}\n/* FIXME: later\n   HACK: nested */\nfn b() {} // XXX cleanup\n";
-    let m = markers(src, Language::Rust);
+    let m = markers(src, &lang("rust"));
     let kinds: Vec<&str> = m.iter().map(|x| x.kind.as_str()).collect();
     assert_eq!(kinds, vec!["TODO", "FIXME", "HACK", "XXX"]);
     assert_eq!(m[0].line, 1);
@@ -572,7 +573,7 @@ fn markers_rust_line_and_block_comments() {
 fn markers_only_inside_comments_not_string_literals() {
     // "TODO" in a string is not a marker; the comment one is.
     let src = "fn a() {\n    let s = \"TODO not a marker\";\n    // TODO real one\n}\n";
-    let m = markers(src, Language::Rust);
+    let m = markers(src, &lang("rust"));
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].line, 3);
 }
@@ -581,18 +582,18 @@ fn markers_only_inside_comments_not_string_literals() {
 fn markers_word_boundary() {
     // TODONE / mastodon must not match TODO.
     let src = "// TODONE done, not a marker\n// see mastodon\n";
-    assert!(markers(src, Language::Rust).is_empty());
+    assert!(markers(src, &lang("rust")).is_empty());
 }
 
 #[test]
 fn markers_clojure_semicolon_and_csharp() {
     let clj = "; TODO clojure marker\n(defn f [])\n";
-    let cm = markers(clj, Language::Clojure);
+    let cm = markers(clj, &lang("clojure"));
     assert_eq!(cm.len(), 1);
     assert_eq!(cm[0].kind, "TODO");
 
     let cs = "// FIXME csharp\nclass C { }\n";
-    let csm = markers(cs, Language::CSharp);
+    let csm = markers(cs, &lang("csharp"));
     assert_eq!(csm.len(), 1);
     assert_eq!(csm[0].kind, "FIXME");
 }
@@ -609,7 +610,7 @@ mod inner {
 
 fn top() {}
 "#;
-    let units = list_units("src/x.rs", src);
+    let units = list_units(&shipped(), "src/x.rs", src);
     let kinds: Vec<(&str, &str)> = units
         .iter()
         .map(|u| (u.kind.as_str(), u.name.as_str()))
@@ -632,7 +633,7 @@ fn top() {}
 #[test]
 fn list_units_go_emits_package_from_directory() {
     let src = "package foo\n\nfunc Bar() {}\n";
-    let units = list_units("pkg/foo/bar.go", src);
+    let units = list_units(&shipped(), "pkg/foo/bar.go", src);
     // Go declares Package as a unit kind → the file's parent dir.
     let pkg = units
         .iter()
@@ -646,7 +647,7 @@ fn list_units_go_emits_package_from_directory() {
 
 #[test]
 fn list_units_empty_for_unsupported() {
-    assert!(list_units("notes.txt", "TODO not code").is_empty());
+    assert!(list_units(&shipped(), "notes.txt", "TODO not code").is_empty());
 }
 
 #[test]

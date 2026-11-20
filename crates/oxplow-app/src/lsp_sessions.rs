@@ -39,26 +39,21 @@ use oxplow_lsp::{LspError, LspProxy, ServerEvent, SpawnConfig};
 
 #[derive(Debug, Error)]
 pub enum LspSessionError {
-    #[error("{}", no_config_message(.0))]
-    NoConfig(String),
+    /// No server for `language`; `suggestion` is the Mason package its
+    /// language's extension names.
+    #[error("{}", no_config_message(.language, .suggestion.as_deref()))]
+    NoConfig {
+        language: String,
+        suggestion: Option<String>,
+    },
     #[error("lsp: {0}")]
     Lsp(#[from] LspError),
     #[error("lsp not initialized for language `{0}`")]
     NotInitialized(String),
 }
 
-/// Curated language-id → Mason package suggestion. The source of truth is
-/// now the per-language registry in `oxplow-code-metrics`
-/// (`language::mason_suggestion` — analysis languages carry their hint on the
-/// `LanguageSupport` bundle, LSP-only languages fall back to a small table
-/// there). Still mirrored by `apps/desktop/src/lspSuggestions.ts` (keep the
-/// two in sync). Used to make `NoConfig` errors actionable for agents + UI.
-pub fn mason_suggestion(language: &str) -> Option<&'static str> {
-    oxplow_code_metrics::mason_suggestion(language)
-}
-
-fn no_config_message(language: &str) -> String {
-    match mason_suggestion(language) {
+fn no_config_message(language: &str, suggestion: Option<&str>) -> String {
+    match suggestion {
         Some(pkg) => format!(
             "no language server configured for `{language}` — install one via \
              the `oxplow.lsp.install_server` command (a person approves it; suggested Mason \
@@ -244,12 +239,20 @@ pub struct LspSessionManager {
     pending_apply_edits: Arc<Mutex<HashMap<u32, PendingApplyEdit>>>,
     next_apply_edit_token: Arc<std::sync::atomic::AtomicU32>,
     apply_edit_timeout: Duration,
+    /// The languages the enabled extensions declare: what an installed
+    /// server (no configured `extensions`) covers, and the server to
+    /// suggest when none is set up.
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 impl LspSessionManager {
-    pub fn new(config: Arc<std::sync::RwLock<OxplowConfig>>) -> Self {
+    pub fn new(
+        config: Arc<std::sync::RwLock<OxplowConfig>>,
+        languages: crate::extension::language_set::LanguagesHandle,
+    ) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
+            languages,
             config,
             installed: InstalledServers::default(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -285,6 +288,38 @@ impl LspSessionManager {
         let _ = self.events.send(event);
     }
 
+    /// The Mason package suggested for a language's server, from the
+    /// extension that declares the language.
+    pub fn mason_suggestion(&self, language: &str) -> Option<String> {
+        self.languages
+            .current()
+            .mason_suggestion(language)
+            .map(str::to_string)
+    }
+
+    /// The languages the enabled extensions declare.
+    pub fn languages(&self) -> std::sync::Arc<oxplow_code_metrics::Languages> {
+        self.languages.current()
+    }
+
+    /// The error for a language with no server.
+    pub fn no_config(&self, language: &str) -> LspSessionError {
+        LspSessionError::NoConfig {
+            language: language.to_string(),
+            suggestion: self.mason_suggestion(language),
+        }
+    }
+
+    /// The files a server covers: its configured `extensions`, else (an
+    /// installed server has none) its language's.
+    fn covered_extensions(&self, c: &LspServerConfig) -> Vec<String> {
+        if c.extensions.is_empty() {
+            self.languages.current().lsp_extensions(&c.language_id)
+        } else {
+            c.extensions.clone()
+        }
+    }
+
     /// The configured (or installed) language whose extensions cover
     /// `path`, if any.
     pub fn language_for_path(&self, path: &str) -> Option<String> {
@@ -293,7 +328,7 @@ impl LspSessionManager {
             .to_str()?
             .to_string();
         let covers = |c: &LspServerConfig| {
-            c.extensions
+            self.covered_extensions(c)
                 .iter()
                 .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext))
         };
@@ -346,7 +381,7 @@ impl LspSessionManager {
         }
         let server_config = self
             .find_server_config(language)
-            .ok_or_else(|| LspSessionError::NoConfig(language.to_string()))?;
+            .ok_or_else(|| self.no_config(language))?;
 
         let proxy = LspProxy::spawn(SpawnConfig {
             command: server_config.command,
@@ -698,7 +733,7 @@ impl LspSessionManager {
             }
             out.push(LspServerListing {
                 language_id: entry.config.language_id.clone(),
-                extensions: entry.config.extensions.clone(),
+                extensions: self.covered_extensions(&entry.config),
                 command: entry.config.command.clone(),
                 args: entry.config.args.clone(),
                 source: LspServerSource::Installed,
@@ -933,7 +968,10 @@ mod tests {
             .unwrap()
             .lsp_servers
             .push(fake_server_config(language));
-        LspSessionManager::new(cfg)
+        LspSessionManager::new(
+            cfg,
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        )
     }
 
     async fn next_notification(
@@ -955,18 +993,25 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_returns_no_config_when_language_unknown() {
-        let mgr = LspSessionManager::new(empty_config());
+        let mgr = LspSessionManager::new(
+            empty_config(),
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        );
         let err = mgr
             .ensure("s-1", "tsx", std::env::temp_dir())
             .await
             .err()
             .expect("should error");
-        assert!(matches!(err, LspSessionError::NoConfig(ref lang) if lang == "tsx"));
+        assert!(matches!(err, LspSessionError::NoConfig { ref language, .. } if language == "tsx"));
     }
 
     #[test]
     fn no_config_error_is_self_describing() {
-        let err = LspSessionError::NoConfig("rust".into());
+        let err = LspSessionManager::new(
+            empty_config(),
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        )
+        .no_config("rust");
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
         assert!(msg.contains("oxplow.lsp.install_server"), "got: {msg}");
@@ -975,7 +1020,10 @@ mod tests {
 
     #[test]
     fn installed_servers_override_take_effect() {
-        let mgr = LspSessionManager::new(empty_config());
+        let mgr = LspSessionManager::new(
+            empty_config(),
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        );
         mgr.installed_servers().register(
             LspServerConfig {
                 language_id: "rust".into(),
@@ -1000,7 +1048,10 @@ mod tests {
             command: "yaml-rust-analyzer".into(),
             args: vec![],
         });
-        let mgr = LspSessionManager::new(cfg);
+        let mgr = LspSessionManager::new(
+            cfg,
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        );
         mgr.installed_servers().register(
             LspServerConfig {
                 language_id: "rust".into(),
@@ -1328,7 +1379,10 @@ mod tests {
             command: "typescript-language-server".into(),
             args: vec!["--stdio".into()],
         });
-        let mgr = LspSessionManager::new(cfg);
+        let mgr = LspSessionManager::new(
+            cfg,
+            crate::extension::language_set::LanguagesHandle::shipped(),
+        );
         mgr.installed_servers().register(
             LspServerConfig {
                 language_id: "rust".into(),

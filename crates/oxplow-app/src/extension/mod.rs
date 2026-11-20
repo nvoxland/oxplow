@@ -57,4 +57,5 @@ pub mod extension_store;
 #[cfg(test)]
 mod extension_store_services_tests;
 pub mod extensions;
+pub mod language_set;
 mod stray_folder;

@@ -34,12 +34,11 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `oxplow.extension.write_page`) refuses to write into a bundled
       extension.
 
-- **The four shipped extensions.** Two more ship beside the two above, as
-  plumbing only, so later work has a place to land. They are in `BUNDLED`
-  and `build.rs`'s list like the others, are not in `DEFAULT_EXTENSIONS`
-  (off by default; set its `oxplow.extensions.<name>.enabled` scalar to true), and each is a minimal
-  manifest (`manifest: 2`, name, namespace, `intent`, README) with
-  `requires: [oxplow-bundled]`. `requires:` is by extension name, so it
+- **The shipped extensions.** Beside the two above ship oxtask and oxwiki
+  (on by default: they are in `DEFAULT_EXTENSIONS`) and the language packs
+  (off by default; `.context/language-support.md`). All are in `BUNDLED` and `build.rs`'s list; one that is off is turned on
+  with its `oxplow.extensions.<name>.enabled` scalar. oxtask and oxwiki have
+  `requires: [oxplow-bundled]`; a language pack requires nothing. `requires:` is by extension name, so it
   crosses namespaces (`oxtask` and `oxwiki` are not in `oxplow`'s). With
   `oxplow-bundled` off they are held (listed with why), never a boot
   failure. Their sources are in this repo's `extensionSources`.

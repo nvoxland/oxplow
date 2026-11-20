@@ -1,0 +1,20 @@
+# C#: what oxplow's code analysis knows about its syntax.
+functions:
+  kinds: [method_declaration, constructor_declaration, destructor_declaration, operator_declaration, local_function_statement, lambda_expression]
+  param_list_fields: [parameters]
+  parameter_kinds: [parameter]
+decisions:
+  # `else` is not condition-bearing: excluded (as in Rust/JS).
+  kinds: [if_statement, for_statement, while_statement, do_statement, switch_expression_arm, catch_clause, conditional_expression, when_clause]
+# C# encodes visibility via `modifier` child nodes; no clean single-signal
+# strategy exists, so functions report Unknown (no bundled C# metric
+# filters on visibility).
+visibility:
+  strategy: unknown
+doc:
+  strategy: preceding_comment
+  prefixes: ["///", "/**"]
+imports:
+  strategy: csharp_using
+duplication:
+  skip_kinds: [using_directive]

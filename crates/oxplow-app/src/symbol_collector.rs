@@ -71,8 +71,9 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
     let files_api = svc.snapshot_files();
     let mut files = Vec::new();
     let mut capture = SymbolCapture::default();
+    let languages = svc.languages.current();
     for file in changed {
-        let Some(language) = oxplow_code_metrics::language_for_path(&file.path) else {
+        let Some(language) = languages.for_path(&file.path) else {
             continue;
         };
         if file.storage == SnapshotStorage::Deleted {
@@ -142,12 +143,13 @@ pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
         } else {
             Revision::Working
         };
-        let supported = |p: &str| oxplow_code_metrics::language_for_path(p).is_some();
+        let languages = svc.languages.current();
+        let supported = |p: &str| languages.for_path(p).is_some();
         let corpus = svc.trees.corpus(&ws, &rev, supported).await?;
         let files: Vec<FileSymbols> = corpus
             .iter()
             .filter_map(|(path, text)| {
-                let language = oxplow_code_metrics::language_for_path(path)?;
+                let language = languages.for_path(path)?;
                 Some(file_symbols(path, text, language))
             })
             .collect();
@@ -163,7 +165,7 @@ pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
     Ok(filled)
 }
 
-fn file_symbols(path: &str, text: &str, language: oxplow_code_metrics::Language) -> FileSymbols {
+fn file_symbols(path: &str, text: &str, language: &oxplow_code_metrics::Language) -> FileSymbols {
     let rows = oxplow_code_metrics::extract_with_language(text, language)
         .into_iter()
         .map(|d| SymbolRow {
@@ -196,6 +198,7 @@ mod tests {
     async fn fixture() -> (Arc<Services>, tempfile::TempDir, StreamId) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
+        crate::test_fixtures::enable_language_packs(dir.path());
         let svc = Services::in_memory(dir.path()).await.unwrap();
         let stream = svc.streams.ensure_primary().await.unwrap();
         register(&svc);

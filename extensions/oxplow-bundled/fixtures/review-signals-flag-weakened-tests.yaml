@@ -3,6 +3,8 @@
 # high: weakening a test is how an agent makes a failing check pass. Only
 # test files count: a `.skip(1)` or a dropped `.expect()` in other code is
 # no test, and a renamed test keeps the file's count, so it isn't "deleted".
+# The languages its files are in: their packs.
+requires: [oxplow-rust]
 given:
   - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
   - observe: { turn: { prompt: base renamed, write: { path: tests/renamed.rs, body: "#[test]\nfn old_name() {\n    assert!(true);\n}\n" } } }

@@ -42,9 +42,18 @@ pub struct Sources {
     pub ai: Option<(Arc<crate::ai_compute::AiCompute>, String)>,
     /// Where `change_diff` (`tree.read`) reads a change's lines.
     pub changes: Option<Arc<dyn oxplow_script::ChangeDiffSource>>,
+    /// The languages the enabled extensions declare: what the parsing
+    /// builtins (`ast_query`, `code_metrics`, `source_files`, …) parse
+    /// with. Not a permission: every run is given them.
+    pub languages: Option<Arc<oxplow_code_metrics::Languages>>,
 }
 
 impl Sources {
+    pub fn with_languages(mut self, languages: Arc<oxplow_code_metrics::Languages>) -> Self {
+        self.languages = Some(languages);
+        self
+    }
+
     pub fn with_tree(mut self, tree: Trees) -> Self {
         self.tree = Some(tree);
         self
@@ -73,6 +82,8 @@ pub struct Given {
     pub scopes: bool,
     /// What the script declares, and its kind implies.
     pub needs: Vec<String>,
+    /// What the parsing builtins parse with ([`Sources::languages`]).
+    pub languages: Option<Arc<oxplow_code_metrics::Languages>>,
 }
 
 impl std::fmt::Debug for Given {
@@ -103,6 +114,9 @@ impl Given {
         }
         if let Some(changes) = self.changes {
             script_run = script_run.with_change_diff(changes);
+        }
+        if let Some(languages) = self.languages {
+            script_run = script_run.with_languages(languages);
         }
         if let Some(serve) = serve.filter(|_| self.scopes) {
             script_run = script_run.with_scope(serve);
@@ -236,6 +250,7 @@ impl Wanted {
             changes,
             scopes: self.scopes,
             needs: self.needs,
+            languages: sources.languages.clone(),
         })
     }
 

@@ -3779,7 +3779,7 @@ async fn running_snapshots(
             fx.svc.snapshot_store.clone(),
             fx.svc.blobs.clone(),
             project.clone(),
-            std::sync::Arc::new(crate::vcs::GitProvider),
+            std::sync::Arc::new(crate::vcs::GitProvider::default()),
             stream,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),

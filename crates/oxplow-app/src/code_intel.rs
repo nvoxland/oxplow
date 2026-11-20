@@ -59,10 +59,10 @@ impl LspProvider {
     /// server to install, like a missing server's.
     fn language_of(&self, path: &str) -> Result<String, CodeIntelError> {
         self.sessions.language_for_path(path).ok_or_else(|| {
-            match oxplow_code_metrics::language::language_for_path(path) {
-                Some(language) => CodeIntelError::NoProvider(
-                    LspSessionError::NoConfig(language.name().to_string()).to_string(),
-                ),
+            match self.sessions.languages().declared_for_path(path) {
+                Some(language) => {
+                    CodeIntelError::NoProvider(self.sessions.no_config(language.name()).to_string())
+                }
                 None => CodeIntelError::NoProvider(format!(
                     "no language server covers `{path}` — add an lsp.servers entry (with its \
                      `extensions`) to .oxplow/project.yaml, or install one via \
@@ -86,7 +86,7 @@ impl LspProvider {
             .ensure(&stream.to_string(), language, ws.clone())
             .await
             .map_err(|e| match e {
-                e @ LspSessionError::NoConfig(_) => CodeIntelError::NoProvider(e.to_string()),
+                e @ LspSessionError::NoConfig { .. } => CodeIntelError::NoProvider(e.to_string()),
                 e => CodeIntelError::Failed(e.to_string()),
             })?;
         let result = tokio::time::timeout(self.request_timeout, proxy.request(method, params))
@@ -549,6 +549,7 @@ mod tests {
             "\n\nclass Widget:\n    def spin(self): pass\n",
         )
         .unwrap();
+        crate::test_fixtures::enable_language_packs(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.config
             .write()

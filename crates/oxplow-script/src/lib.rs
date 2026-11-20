@@ -723,6 +723,7 @@ mod tests {
     fn facts(script: &str, map: std::collections::HashMap<String, String>) -> Vec<CollectedFact> {
         let hosts = runtime::Hosts {
             tree: Some(TreeHost::new(map)),
+            languages: std::sync::Arc::new(oxplow_code_metrics::for_tests::shipped()),
             ..runtime::Hosts::default()
         };
         runtime::run_starlark_hosted(script, &serde_json::json!({}), &hosts)

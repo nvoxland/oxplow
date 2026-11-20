@@ -1,0 +1,20 @@
+manifest: 2
+name: oxplow-csharp
+namespace: oxplow
+description: "What oxplow knows about C#: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses C#."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about C# in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+languages:
+  - id: csharp
+    title: "C#"
+    extensions: [cs]
+    aliases: ["c#", "cs"]
+    grammar: { native: csharp }
+    analysis: languages/csharp/analysis.yaml
+    symbols: languages/csharp/symbols.scm
+    units: [class, module]

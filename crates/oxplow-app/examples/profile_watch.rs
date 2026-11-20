@@ -673,7 +673,7 @@ async fn main() {
     // 9. What a working-files relist costs: the whole-tree diff, and the
     // VCS's status with the diff of the paths it names.
     if root.join(".git").exists() {
-        let vcs = Arc::new(GitProvider);
+        let vcs = Arc::new(GitProvider::default());
         let trees = Trees::new(
             vcs.clone(),
             store.clone(),

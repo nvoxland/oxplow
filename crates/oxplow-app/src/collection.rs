@@ -4288,7 +4288,7 @@ mod tests {
                     snapshots.clone(),
                     blobs.clone(),
                     project_dir.clone(),
-                    Arc::new(crate::vcs::GitProvider),
+                    Arc::new(crate::vcs::GitProvider::default()),
                     stream.id,
                     1_000_000,
                     oxplow_fs_watch::WorkspaceFilter::default(),
@@ -4298,7 +4298,7 @@ mod tests {
             );
             let captures = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
                 crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
-                    vcs: Arc::new(crate::vcs::GitProvider),
+                    vcs: Arc::new(crate::vcs::GitProvider::default()),
                     snapshot_store: snapshots.clone(),
                     blobs: blobs.clone(),
                     max_file_bytes: 1_000_000,
@@ -4369,9 +4369,12 @@ mod tests {
                 )),
                 crate::snapshot_content::SnapshotContent::new(
                     blobs,
-                    oxplow_domain::vcs::Vcs::object_store(&crate::vcs::GitProvider, &project_dir),
+                    oxplow_domain::vcs::Vcs::object_store(
+                        &crate::vcs::GitProvider::default(),
+                        &project_dir,
+                    ),
                 ),
-                Arc::new(crate::vcs::GitProvider),
+                Arc::new(crate::vcs::GitProvider::default()),
                 Arc::new(RwLock::new(cfg)),
                 crate::metric_engine::MetricEngine::new(oxplow_db::SqliteFactStore::new(
                     db.clone(),
@@ -4380,7 +4383,7 @@ mod tests {
                     crate::metric_visibility::VisibilityResolver::new(
                         SqliteSnapshotStore::new(db.clone()),
                         oxplow_domain::vcs::Vcs::revision_graph(
-                            &crate::vcs::GitProvider,
+                            &crate::vcs::GitProvider::default(),
                             &project_dir,
                         ),
                     ),

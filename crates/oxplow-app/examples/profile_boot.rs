@@ -55,7 +55,7 @@ async fn main() {
             }
         });
         timed(&mut load, || load_extensions(scratch.path()));
-        oxplow_app::vcs::GitProvider
+        oxplow_app::vcs::GitProvider::default()
             .init_repository(dir.path())
             .await
             .unwrap();

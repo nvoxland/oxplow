@@ -106,7 +106,7 @@ mod tests {
             svc.snapshot_store.clone(),
             svc.blobs.clone(),
             root.clone(),
-            std::sync::Arc::new(crate::vcs::GitProvider),
+            std::sync::Arc::new(crate::vcs::GitProvider::default()),
             oxplow_domain::StreamId::new(1),
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),

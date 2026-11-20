@@ -36,7 +36,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use oxplow_code_metrics::{is_function_node, language_for_path, Language};
+use oxplow_code_metrics::{is_function_node, Language, Languages};
 use tree_sitter::Parser;
 
 mod cache;
@@ -102,7 +102,11 @@ impl Default for DupOptions {
 /// should use [`detect_duplicates_scoped`].
 ///
 /// Files in unsupported languages are skipped silently.
-pub fn detect_duplicates<I, P, S>(files: I, opts: DupOptions) -> Vec<DuplicateBlock>
+pub fn detect_duplicates<I, P, S>(
+    languages: &Languages,
+    files: I,
+    opts: DupOptions,
+) -> Vec<DuplicateBlock>
 where
     I: IntoIterator<Item = (P, S)>,
     P: Into<String>,
@@ -111,7 +115,14 @@ where
     let _running = Running::start();
     let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for (path, source) in files {
-        scan_file(&path.into(), source.as_ref(), opts, None, &mut subtrees);
+        scan_file(
+            languages,
+            &path.into(),
+            source.as_ref(),
+            opts,
+            None,
+            &mut subtrees,
+        );
     }
     pair_up(subtrees, opts)
 }
@@ -130,13 +141,14 @@ pub(crate) fn parses() -> usize {
 /// Parse one file and keep its subtrees that are eligible for matching —
 /// all of them, or with `wanted`, only those whose hash is in it.
 fn scan_file(
+    languages: &Languages,
     path: &str,
     source: &str,
     opts: DupOptions,
     wanted: Option<&HashSet<u64>>,
     out: &mut Vec<SubtreeRef>,
 ) {
-    let Some(lang) = language_for_path(path) else {
+    let Some(lang) = languages.for_path(path) else {
         return;
     };
     let mut parser = Parser::new();
@@ -223,6 +235,7 @@ impl Drop for Running {
 ///   so the renderer's "side A is what you're analyzing" convention
 ///   holds.
 pub fn detect_duplicates_scoped<I, P, S>(
+    languages: &Languages,
     files: I,
     scope_paths: &BTreeSet<String>,
     opts: DupOptions,
@@ -243,11 +256,18 @@ where
         .partition(|(p, _): &(String, S)| scope_paths.contains(p));
     let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for (path, source) in &in_scope {
-        scan_file(path, source.as_ref(), opts, None, &mut subtrees);
+        scan_file(languages, path, source.as_ref(), opts, None, &mut subtrees);
     }
     let wanted: HashSet<u64> = subtrees.iter().map(|s| s.hash).collect();
     for (path, source) in &rest {
-        scan_file(path, source.as_ref(), opts, Some(&wanted), &mut subtrees);
+        scan_file(
+            languages,
+            path,
+            source.as_ref(),
+            opts,
+            Some(&wanted),
+            &mut subtrees,
+        );
     }
     scope_blocks(pair_up(subtrees, opts), scope_paths)
 }
@@ -295,6 +315,7 @@ pub struct CachedFile {
 /// a file that isn't is parsed once and kept for the next scan. Reports
 /// the same blocks, plus how many files hit and missed.
 pub fn detect_duplicates_scoped_cached<I>(
+    languages: &Languages,
     files: I,
     scope_paths: &BTreeSet<String>,
     opts: DupOptions,
@@ -311,14 +332,14 @@ where
     let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for file in in_scope {
         let path: Arc<str> = Arc::from(file.path.as_str());
-        if let Some(records) = records_of(file, opts, cache, &mut stats) {
+        if let Some(records) = records_of(languages, file, opts, cache, &mut stats) {
             subtrees.extend(records.iter().map(|r| subtree_of(&path, r)));
         }
     }
     let wanted: HashSet<u64> = subtrees.iter().map(|s| s.hash).collect();
     for file in rest {
         let path: Arc<str> = Arc::from(file.path.as_str());
-        if let Some(records) = records_of(file, opts, cache, &mut stats) {
+        if let Some(records) = records_of(languages, file, opts, cache, &mut stats) {
             subtrees.extend(
                 records
                     .iter()
@@ -345,15 +366,16 @@ fn subtree_of(path: &Arc<str>, r: &Record) -> SubtreeRef {
 /// `file`'s records: from the cache, else parsed (and kept when it has a
 /// content id). `None` for a file in no supported language or unreadable.
 fn records_of(
+    languages: &Languages,
     file: CachedFile,
     opts: DupOptions,
     cache: &DupCache,
     stats: &mut ScanStats,
 ) -> Option<Arc<[Record]>> {
-    let lang = language_for_path(&file.path)?;
+    let lang = languages.for_path(&file.path)?;
     let key = file.key.map(|file| CacheKey {
         file,
-        lang: lang.tag() as u32,
+        lang: lang.tag(),
         min_nodes: opts.min_nodes,
         min_lines: opts.min_lines,
         version: DETECTOR_VERSION,
@@ -365,7 +387,7 @@ fn records_of(
     stats.misses += 1;
     let text = (file.text)()?;
     let mut parsed = Vec::new();
-    scan_file(&file.path, &text, opts, None, &mut parsed);
+    scan_file(languages, &file.path, &text, opts, None, &mut parsed);
     let saturate = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
     let records: Arc<[Record]> = parsed
         .iter()
@@ -410,7 +432,7 @@ struct SubtreeRef {
 /// methods, etc.) so they get their own records.
 fn collect_function_subtrees(
     path: &Arc<str>,
-    lang: Language,
+    lang: &Language,
     root: tree_sitter::Node<'_>,
     src: &[u8],
     opts: DupOptions,
@@ -422,7 +444,7 @@ fn collect_function_subtrees(
 
 fn walk_for_functions(
     path: &Arc<str>,
-    lang: Language,
+    lang: &Language,
     node: tree_sitter::Node<'_>,
     src: &[u8],
     opts: DupOptions,
@@ -450,7 +472,7 @@ fn walk_for_functions(
 /// enough to seed a meaningful match.
 fn record_function(
     path: &Arc<str>,
-    lang: Language,
+    lang: &Language,
     fn_node: tree_sitter::Node<'_>,
     src: &[u8],
     opts: DupOptions,
@@ -476,7 +498,7 @@ fn record_function(
 #[allow(clippy::too_many_arguments)]
 fn collect_subtrees_recursive(
     path: &Arc<str>,
-    lang: Language,
+    lang: &Language,
     node: tree_sitter::Node<'_>,
     src: &[u8],
     fn_byte_start: usize,

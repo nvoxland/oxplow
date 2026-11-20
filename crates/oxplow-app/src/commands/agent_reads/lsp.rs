@@ -166,19 +166,22 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                             .read(Some(stream_id.as_str()), p.path.clone())
                             .await
                             .map_err(failed)?;
-                        let units: Vec<Value> =
-                            oxplow_code_metrics::list_units(&p.path, &file.content)
-                                .iter()
-                                .map(|u| {
-                                    json!({
-                                        "kind": u.kind.as_str(),
-                                        "name": u.name,
-                                        "containerPath": u.container_path,
-                                        "startLine": u.start_line,
-                                        "endLine": u.end_line,
-                                    })
-                                })
-                                .collect();
+                        let units: Vec<Value> = oxplow_code_metrics::list_units(
+                            &svc.languages.current(),
+                            &p.path,
+                            &file.content,
+                        )
+                        .iter()
+                        .map(|u| {
+                            json!({
+                                "kind": u.kind.as_str(),
+                                "name": u.name,
+                                "containerPath": u.container_path,
+                                "startLine": u.start_line,
+                                "endLine": u.end_line,
+                            })
+                        })
+                        .collect();
                         result_of(json!({ "source": "tree_sitter", "symbols": units }))
                     }
                     Err(other) => Err(code_err(other)),
@@ -232,6 +235,7 @@ mod tests {
     async fn project() -> (tempfile::TempDir, std::sync::Arc<crate::Services>, String) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
+        crate::test_fixtures::enable_language_packs(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         let stream = svc.streams.list_streams().await.unwrap()[0].id.to_string();
         (dir, svc, stream)

@@ -4636,6 +4636,7 @@ dependencies = [
 name = "oxplow-code-metrics"
 version = "0.8.0"
 dependencies = [
+ "schemars 1.2.2",
  "serde",
  "serde_yaml",
  "streaming-iterator",
@@ -4888,15 +4889,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tree-sitter",
- "tree-sitter-c",
- "tree-sitter-clojure-orchard",
- "tree-sitter-cpp",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
 ]
 
 [[package]]

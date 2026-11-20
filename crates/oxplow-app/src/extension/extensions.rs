@@ -28,6 +28,7 @@ pub mod descriptors;
 pub mod implementations;
 pub mod imports;
 pub mod jobs;
+pub(crate) mod languages;
 pub mod manifest_v2;
 pub mod public_contracts;
 pub mod replacements;
@@ -400,6 +401,11 @@ pub struct Extension {
     /// What it puts in the coding agent's context (`context:`; valid
     /// ones — invalid ones are in `errors`).
     pub contexts: Vec<agent_contexts::AgentContextDecl>,
+    /// The programming languages it declares (`languages:`; valid ones,
+    /// with their files read — invalid ones are in `errors`).
+    #[serde(skip)]
+    #[specta(skip)]
+    pub languages: Vec<oxplow_code_metrics::LanguageSource>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1817,6 +1823,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         implementations: Vec::new(),
         skills: Vec::new(),
         contexts: Vec::new(),
+        languages: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -2032,6 +2039,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let (declared, errors) =
                 agent_contexts::parse_contexts(v, man, &manifest, ext.configuration.as_ref());
             ext.contexts = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.languages.as_ref() {
+            let (declared, errors) =
+                languages::parse_languages(v, man, &manifest, files, name, origin == "bundled");
+            ext.languages = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {

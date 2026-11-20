@@ -50,7 +50,7 @@ impl HangWatch {
 
 async fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    oxplow_app::vcs::GitProvider
+    oxplow_app::vcs::GitProvider::default()
         .init_repository(dir.path())
         .await
         .unwrap();

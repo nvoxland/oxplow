@@ -205,24 +205,32 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         query: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let value = Hosts::memoized(eval, &["ast_query", language, query], text, || {
-            let matches = oxplow_code_metrics::ast_query(text, language, query)
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let arr: Vec<serde_json::Value> = matches
-                .into_iter()
-                .map(|m| {
-                    serde_json::json!({
-                        "capture": m.capture,
-                        "text": m.text,
-                        "start_row": m.start_row,
-                        "start_col": m.start_col,
-                        "end_row": m.end_row,
-                        "end_col": m.end_col,
+        let languages = Hosts::languages(eval);
+        let lang = Hosts::language(&languages, language)?;
+        let version = lang.fingerprint().to_string();
+        let value = Hosts::memoized(
+            eval,
+            &["ast_query", language, &version, query],
+            text,
+            || {
+                let matches = oxplow_code_metrics::ast_query(&languages, text, language, query)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let arr: Vec<serde_json::Value> = matches
+                    .into_iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "capture": m.capture,
+                            "text": m.text,
+                            "start_row": m.start_row,
+                            "start_col": m.start_col,
+                            "end_row": m.end_row,
+                            "end_col": m.end_col,
+                        })
                     })
-                })
-                .collect();
-            Ok(serde_json::Value::Array(arr))
-        })?;
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
+            },
+        )?;
         Ok(eval.heap().alloc(value))
     }
     /// Per-function code metrics for `text` (the file at `path`) in
@@ -240,11 +248,16 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         path: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let value = Hosts::memoized(eval, &["code_metrics", language, path], text, || {
-            let lang = oxplow_code_metrics::language_from_name(language)
-                .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
-            let fns = oxplow_code_metrics::analyze_with_language(path, text, lang);
-            let arr: Vec<serde_json::Value> = fns
+        let languages = Hosts::languages(eval);
+        let lang = Hosts::language(&languages, language)?;
+        let version = lang.fingerprint().to_string();
+        let value = Hosts::memoized(
+            eval,
+            &["code_metrics", language, &version, path],
+            text,
+            || {
+                let fns = oxplow_code_metrics::analyze_with_language(path, text, lang);
+                let arr: Vec<serde_json::Value> = fns
             .into_iter()
             .map(|m| {
                 let visibility = match m.visibility {
@@ -268,8 +281,9 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                 })
             })
             .collect();
-            Ok(serde_json::Value::Array(arr))
-        })?;
+                Ok(serde_json::Value::Array(arr))
+            },
+        )?;
         Ok(eval.heap().alloc(value))
     }
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
@@ -306,10 +320,11 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let host = Hosts::tree(eval, "source_files")?;
+        let languages = Hosts::languages(eval);
         let mut entries: Vec<(&String, &String)> = host
             .files
             .iter()
-            .filter(|(path, _)| oxplow_code_metrics::is_supported_path(path.as_str()))
+            .filter(|(path, _)| languages.is_supported_path(path.as_str()))
             // Codegen output (generated/ path, do-not-edit header) is
             // not hand-written code — keep it out of the code-shape
             // corpus so a 3k-line bindings file can't dominate the
@@ -320,7 +335,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         let arr: Vec<serde_json::Value> = entries
             .into_iter()
             .filter_map(|(path, text)| {
-                oxplow_code_metrics::language_for_path(path).map(|lang| {
+                languages.for_path(path).map(|lang| {
                     serde_json::json!({ "path": path, "text": text, "language": lang.name() })
                 })
             })
@@ -344,7 +359,9 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             min_lines,
             ..Default::default()
         };
+        let languages = Hosts::languages(eval);
         let arr: Vec<serde_json::Value> = oxplow_code_dup::detect_duplicates(
+            &languages,
             files.into_iter().map(|(p, t)| (p.clone(), t)),
             opts,
         )
@@ -372,9 +389,10 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         language: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let value = Hosts::memoized(eval, &["markers", language], text, || {
-            let lang = oxplow_code_metrics::language_from_name(language)
-                .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
+        let languages = Hosts::languages(eval);
+        let lang = Hosts::language(&languages, language)?;
+        let version = lang.fingerprint().to_string();
+        let value = Hosts::memoized(eval, &["markers", language, &version], text, || {
             let arr: Vec<serde_json::Value> = oxplow_code_metrics::markers(text, lang)
                 .into_iter()
                 .map(|m| serde_json::json!({ "line": m.line, "kind": m.kind, "text": m.text }))
@@ -499,6 +517,11 @@ pub struct Hosts {
     /// Where parse results are shared across runs (a worker's line to its
     /// host); none in process, where every call computes.
     pub parses: Option<std::sync::Arc<dyn ParseMemo>>,
+    /// The languages the enabled extensions declare (shipped to a worker
+    /// before its run): what `ast_query`, `code_metrics`, `markers`,
+    /// `source_files` and `duplicate_blocks` parse with. Empty, every
+    /// language is unknown.
+    pub languages: std::sync::Arc<oxplow_code_metrics::Languages>,
 }
 
 /// A store of parse results shared across runs, keyed by [`parse_key`].
@@ -565,6 +588,30 @@ impl Hosts {
         Self::of(eval)
             .and_then(pick)
             .ok_or_else(|| anyhow::anyhow!(oxplow_domain::service::undeclared(builtin)))
+    }
+
+    /// The run's languages.
+    fn languages(
+        eval: &starlark::eval::Evaluator<'_, '_, '_>,
+    ) -> std::sync::Arc<oxplow_code_metrics::Languages> {
+        Self::of(eval)
+            .map(|h| h.languages.clone())
+            .unwrap_or_default()
+    }
+
+    /// The language `name` names, when oxplow can parse it.
+    fn language<'l>(
+        languages: &'l oxplow_code_metrics::Languages,
+        name: &str,
+    ) -> anyhow::Result<&'l oxplow_code_metrics::Language> {
+        languages
+            .by_name(name)
+            .filter(|l| l.analyzable())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown language \"{name}\": no enabled extension declares it (oxplow's are its language packs, `oxplow-<language>`)"
+                )
+            })
     }
 
     fn tree<'a>(
