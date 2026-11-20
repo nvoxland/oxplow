@@ -35677,5 +35677,47 @@
         "model"
       ]
     }
+  },
+  "change_hunk": {
+    "1": {
+      "columns": [
+        {
+          "name": "change_id",
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File."
+        },
+        {
+          "name": "head_start",
+          "type": "INTEGER",
+          "doc": "First changed line on the head side (1-indexed); NULL for a pure deletion."
+        },
+        {
+          "name": "head_end",
+          "type": "INTEGER",
+          "doc": "Last changed line on the head side, inclusive; NULL for a pure deletion."
+        },
+        {
+          "name": "base_start",
+          "type": "INTEGER",
+          "doc": "First changed line on the base side (1-indexed); NULL for a pure insertion."
+        },
+        {
+          "name": "base_end",
+          "type": "INTEGER",
+          "doc": "Last changed line on the base side, inclusive; NULL for a pure insertion."
+        },
+        {
+          "name": "head_after",
+          "type": "INTEGER",
+          "doc": "For a pure deletion: the head line it sits after (0 = before the first line); NULL otherwise."
+        }
+      ],
+      "key": []
+    }
   }
 }

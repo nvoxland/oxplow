@@ -80,8 +80,8 @@ pub use analytics_stores::{
 };
 pub use capability_store::{CapabilityProvider, SqliteCapabilityStore};
 pub use change_store::{
-    ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow, ChangeResults,
-    ChangeRow, ChangeTestFileRow, SqliteChangeStore,
+    ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeHunkRow, ChangeImportRow,
+    ChangeResults, ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
 pub use collector_store::{
     CollectorRun, EntityColumn, EntityTable, EntityWrite, PendingRun, SqliteCollectorStore,

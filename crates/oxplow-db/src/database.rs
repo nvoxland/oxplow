@@ -2360,6 +2360,38 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
     }
 
+    /// V54 adds the change_hunk table, which goes with its change.
+    #[test]
+    fn v54_adds_change_hunk_that_cascades() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(53))
+            .run(&mut conn)
+            .unwrap();
+        let has = |conn: &Connection| -> bool {
+            conn.query_row(
+                "SELECT count(*) > 0 FROM sqlite_master WHERE name = 'change_hunk'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert!(!has(&conn));
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        assert!(has(&conn));
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             INSERT INTO change (id, stream_id, kind, target, status) VALUES (1, 1, 'working', '', 'pending');
+             INSERT INTO change_hunk (change_id, path, head_start, head_end) VALUES (1, 'a.rs', 1, 2);
+             DELETE FROM change WHERE id = 1;",
+        )
+        .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM change_hunk", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
     /// V53 drops a session's kind and keeps the sessions.
     #[test]
     fn v53_drops_the_session_kind_and_keeps_the_sessions() {

@@ -110,6 +110,17 @@ pub struct ChangeTestFileRow {
     pub skips_after: i64,
 }
 
+/// One changed line range of a file (`v_change_hunk`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChangeHunkRow {
+    pub path: String,
+    pub head_start: Option<i64>,
+    pub head_end: Option<i64>,
+    pub base_start: Option<i64>,
+    pub base_end: Option<i64>,
+    pub head_after: Option<i64>,
+}
+
 /// Everything the producer computed for one change.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChangeResults {
@@ -117,6 +128,7 @@ pub struct ChangeResults {
     pub functions: Vec<ChangeFunctionRow>,
     pub imports: Vec<ChangeImportRow>,
     pub test_files: Vec<ChangeTestFileRow>,
+    pub hunks: Vec<ChangeHunkRow>,
 }
 
 #[derive(Clone)]
@@ -274,7 +286,7 @@ impl SqliteChangeStore {
             .unwrap_or_default();
         self.db
             .transaction(move |tx| {
-                for t in ["change_function", "change_import", "change_test_file"] {
+                for t in ["change_function", "change_import", "change_test_file", "change_hunk"] {
                     tx.execute(&format!("DELETE FROM {t} WHERE change_id = ?1"), [id])
                         .map_err(map_sql_err)?;
                 }
@@ -310,6 +322,16 @@ impl SqliteChangeStore {
                         rusqlite::params![
                             id, t.path, t.tests_before, t.tests_after, t.assertions_before,
                             t.assertions_after, t.skips_before, t.skips_after
+                        ],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                for h in &results.hunks {
+                    tx.execute(
+                        "INSERT INTO change_hunk (change_id, path, head_start, head_end, base_start, base_end, head_after)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        rusqlite::params![
+                            id, h.path, h.head_start, h.head_end, h.base_start, h.base_end, h.head_after
                         ],
                     )
                     .map_err(map_sql_err)?;
@@ -874,6 +896,23 @@ mod tests {
                 start_line: Some(2),
             }],
             test_files: Vec::new(),
+            hunks: vec![
+                ChangeHunkRow {
+                    path: path.into(),
+                    head_start: Some(2),
+                    head_end: Some(3),
+                    base_start: Some(2),
+                    base_end: Some(2),
+                    head_after: None,
+                },
+                ChangeHunkRow {
+                    path: path.into(),
+                    base_start: Some(9),
+                    base_end: Some(9),
+                    head_after: Some(8),
+                    ..Default::default()
+                },
+            ],
         };
         store
             .store_results(c.id, results("a.rs"), Some(3), 10, 1, None)
@@ -917,7 +956,7 @@ mod tests {
             ("done", Some(4), Some(11))
         );
 
-        let sl = SemanticLayer::new(db);
+        let sl = SemanticLayer::new(db.clone());
         let q = |sql: &'static str| {
             let sl = sl.clone();
             async move {
@@ -936,6 +975,14 @@ mod tests {
             q("SELECT module, direction, start_line FROM v_change_import").await,
             json!([["crate::db", "added", 2]])
         );
+        // Re-analysis replaced a.rs's hunks with b.rs's.
+        assert_eq!(
+            q("SELECT path, head_start, head_end, base_start, base_end, head_after FROM v_change_hunk ORDER BY base_start").await,
+            json!([
+                ["b.rs", 2, 3, 2, 2, null],
+                ["b.rs", null, null, 9, 9, 8]
+            ])
+        );
         assert_eq!(
             q("SELECT peer_path, lines FROM v_change_duplicate").await,
             json!([["c.rs", 9]])
@@ -943,6 +990,14 @@ mod tests {
         assert_eq!(
             q("SELECT kind, target, status FROM v_change ORDER BY id").await,
             json!([["commit", "abc", "done"], ["working", "", "pending"]])
+        );
+        db.call(|c| c.execute("DELETE FROM change", []).map(|_| ()))
+            .await
+            .unwrap();
+        assert_eq!(
+            q("SELECT count(*) FROM v_change_hunk").await,
+            json!([[0]]),
+            "hunks go with their change"
         );
     }
 }

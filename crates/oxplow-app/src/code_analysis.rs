@@ -76,6 +76,23 @@ pub struct ImportDelta {
     pub removed: Vec<ImportEdge>,
 }
 
+/// One changed line range of a file; see `churn::Hunk`.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct AnalyzedHunk {
+    pub head_start: Option<u32>,
+    pub head_end: Option<u32>,
+    pub base_start: Option<u32>,
+    pub base_end: Option<u32>,
+    pub head_after: Option<u32>,
+}
+
+/// The changed line ranges of one file.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct AnalyzedFileHunks {
+    pub path: String,
+    pub hunks: Vec<AnalyzedHunk>,
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzeFunctionsResult {
     pub sides: Vec<AnalyzedFileSide>,
@@ -89,12 +106,17 @@ pub struct AnalyzeFunctionsResult {
     /// removed). Files with stable imports are omitted.
     #[serde(default)]
     pub import_deltas: Vec<ImportDelta>,
+    /// One entry per file with changed lines, added and deleted files
+    /// included (a missing side is empty).
+    #[serde(default)]
+    pub hunks: Vec<AnalyzedFileHunks>,
 }
 
 pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
     let mut sides: Vec<AnalyzedFileSide> = Vec::new();
     let mut churn: Vec<AnalyzedFileChurn> = Vec::new();
     let mut import_deltas: Vec<ImportDelta> = Vec::new();
+    let mut hunks: Vec<AnalyzedFileHunks> = Vec::new();
     for spec in files {
         // Run analyze_file once per side (working metrics for churn
         // attribution — we don't want to re-parse).
@@ -122,6 +144,28 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
                 side: "head".into(),
                 functions: to_analyzed(head_metrics.clone()),
             });
+        }
+
+        if spec.base_content.is_some() || spec.head_content.is_some() {
+            let found = crate::churn::diff_hunks(
+                spec.base_content.as_deref().unwrap_or(""),
+                spec.head_content.as_deref().unwrap_or(""),
+            );
+            if !found.is_empty() {
+                hunks.push(AnalyzedFileHunks {
+                    path: spec.path.clone(),
+                    hunks: found
+                        .into_iter()
+                        .map(|h| AnalyzedHunk {
+                            head_start: h.head.map(|r| r.0),
+                            head_end: h.head.map(|r| r.1),
+                            base_start: h.base.map(|r| r.0),
+                            base_end: h.base.map(|r| r.1),
+                            head_after: h.head_after,
+                        })
+                        .collect(),
+                });
+            }
         }
 
         if let (Some(base), Some(head)) =
@@ -170,10 +214,12 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
     sides.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
     churn.sort_by(|a, b| a.path.cmp(&b.path));
     import_deltas.sort_by(|a, b| a.path.cmp(&b.path));
+    hunks.sort_by(|a, b| a.path.cmp(&b.path));
     AnalyzeFunctionsResult {
         sides,
         churn,
         import_deltas,
+        hunks,
     }
 }
 

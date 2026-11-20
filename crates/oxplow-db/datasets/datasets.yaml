@@ -444,6 +444,17 @@
     - { name: "deleted_lines", type: "INTEGER", doc: "Lines deleted inside it." }
     - { name: "modified_lines", type: "INTEGER", doc: "min(added, deleted): edited both ways." }
     - { name: "churn_share", type: "REAL", doc: "Its share of the change's function churn (0–1)." }
+- name: change_hunk
+  version: 1
+  description: "Each changed file's changed line ranges in an analysed change: join line-anchored rows (facts, findings, coverage) to it to keep only what is on changed lines. One row per contiguous changed range, for every file the analysis read (at most 200 files, like change_function)."
+  fields:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "File." }
+    - { name: "head_start", type: "INTEGER", doc: "First changed line on the head side (1-indexed); NULL for a pure deletion." }
+    - { name: "head_end", type: "INTEGER", doc: "Last changed line on the head side, inclusive; NULL for a pure deletion." }
+    - { name: "base_start", type: "INTEGER", doc: "First changed line on the base side (1-indexed); NULL for a pure insertion." }
+    - { name: "base_end", type: "INTEGER", doc: "Last changed line on the base side, inclusive; NULL for a pure insertion." }
+    - { name: "head_after", type: "INTEGER", doc: "For a pure deletion: the head line it sits after (0 = before the first line); NULL otherwise." }
 - name: change_import
   version: 2
   description: "Imports a change added or removed, per importing file, as written (not resolved to a file). (v2: no zones.)"
