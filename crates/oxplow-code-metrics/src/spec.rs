@@ -290,6 +290,24 @@ pub struct GrammarDecl {
     pub native: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wasm: Option<String>,
+    /// Where `wasm` was built from: only `oxplow extension grammar build`
+    /// reads it; oxplow itself never fetches or compiles a grammar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<GrammarSource>,
+}
+
+/// The tree-sitter grammar repository a `wasm` grammar is built from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GrammarSource {
+    /// The git repository (`https://github.com/tree-sitter/tree-sitter-rust`).
+    pub repository: String,
+    /// The commit to build, as a full sha or a tag.
+    pub rev: String,
+    /// The folder of the repository that holds `src/parser.c`, when it
+    /// isn't the root (a repository of several grammars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// The Mason suggestion for a language's server.

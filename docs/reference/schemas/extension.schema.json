@@ -3883,9 +3883,46 @@
             "string",
             "null"
           ]
+        },
+        "source": {
+          "description": "Where `wasm` was built from: only `oxplow extension grammar build`\nreads it; oxplow itself never fetches or compiles a grammar.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GrammarSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "GrammarSource": {
+      "description": "The tree-sitter grammar repository a `wasm` grammar is built from.",
+      "type": "object",
+      "properties": {
+        "repository": {
+          "description": "The git repository (`https://github.com/tree-sitter/tree-sitter-rust`).",
+          "type": "string"
+        },
+        "rev": {
+          "description": "The commit to build, as a full sha or a tag.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The folder of the repository that holds `src/parser.c`, when it\nisn't the root (a repository of several grammars).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "rev"
+      ]
     },
     "LspDecl": {
       "description": "The Mason suggestion for a language's server.",

@@ -2562,7 +2562,7 @@ mod tests {
                 "- id: r\n  records: analysis\n  entry: oxplow:clippy\n  on: {{ run: analysis }}\n  report: {report}\n"
             ))
             .unwrap();
-            parse_collectors(&Declarer::shared("rust", "rust"), &v, &knows)
+            parse_collectors(&Declarer::shared("acme-lint", "acme_lint"), &v, &knows)
         };
         let (out, errors) =
             ok("{ path: { setting: /reports/clippy, default: target/clippy.json } }");

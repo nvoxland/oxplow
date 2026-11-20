@@ -18,6 +18,35 @@ CLI, the agent's `oxplow_validate_extension`, and `extension.write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
+### `extension grammar build`
+
+`oxplow extension grammar build <name|path> [--language <id>]`
+(`crates/oxplow-sdk/src/grammar.rs`) compiles a language's tree-sitter
+grammar to the WebAssembly file its manifest names: each language of the
+extension with `grammar: { wasm: grammars/<x>.wasm, source: { repository, rev,
+path? } }` (`--language` picks one; a named language that lacks either half
+says which). It is the author's tool, run by hand; oxplow never fetches or
+compiles a grammar, and only `build` reads `source`.
+
+- **Fetch**: a shallow clone (`git init`, `remote add`, `fetch --depth 1
+  origin <rev>`, checkout) cached at `<cache>/grammars/<repository
+  hash>/<rev>`; `<cache>` is `$OXPLOW_CACHE_DIR`, else
+  `$XDG_CACHE_HOME/oxplow`, else `~/.cache/oxplow`.
+- **Toolchain**: wasi-sdk's `clang`, `$WASI_SDK_PATH/bin/clang` when set,
+  else release `WASI_SDK_VERSION` (34, Zed's) downloaded with `curl` and
+  `tar` into `<cache>/wasi-sdk/<version>` on first use (macOS, Linux and
+  Windows on x86_64 and arm64).
+- **Compile**, as Zed's `compile_grammar`: `clang -fPIC -shared -Os
+  -Wl,--export=tree_sitter_<name> -Wl,--max-memory=4294967296 -o <wasm> -I
+  <src> <src>/parser.c [<src>/scanner.c]`; no `--target` (wasi-sdk's clang
+  defaults to wasm). `<name>` is the grammar's own: `tree-sitter.json`'s first
+  grammar, else `grammar.js`'s `name:`, else the language id with `-` as `_`.
+  A `scanner.cc` without a `scanner.c` is refused (C++ scanners aren't
+  supported). It prints each step and the size written.
+- **Tests** need no network: flags, cache paths, the `source` parse, the
+  scanner rule; the one end-to-end build runs with
+  `OXPLOW_GRAMMAR_BUILD_E2E=1` and `WASI_SDK_PATH`.
+
 ### Diagnostics
 
 Every problem a load, check, activation or fixture run finds is one

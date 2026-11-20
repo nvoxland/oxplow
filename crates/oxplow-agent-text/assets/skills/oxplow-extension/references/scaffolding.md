@@ -102,3 +102,27 @@ capability, a feature, a scope); a **grant** is what the extension's
 `permissions:` allow, approved when it was deployed. A need is never a
 grant: declaring `needs: [sql.read]` doesn't give a program that scope
 unless `permissions` has `sql: read`; the loader refuses the extension.
+
+## A language pack
+
+A language is an extension's `languages:` entry (`id`, `title`,
+`extensions`, `grammar`, `analysis`, `symbols`, `lsp`, `test_conventions:` …).
+A grammar of your own is a tree-sitter grammar compiled to WebAssembly:
+
+```yaml
+languages:
+  - id: mylang
+    title: MyLang
+    extensions: [my]
+    grammar:
+      wasm: grammars/mylang.wasm
+      source: { repository: "https://github.com/me/tree-sitter-mylang", rev: <full sha>, path: grammar-folder }  # path only when parser.c isn't at the root
+    analysis: languages/mylang/analysis.yaml
+    symbols: languages/mylang/symbols.scm
+```
+
+Build the `.wasm` on your machine with `$OXPLOW_BIN extension grammar build
+<name> [--language mylang]`: it fetches the grammar at `rev`, gets wasi-sdk
+(or uses `WASI_SDK_PATH`) and writes the file named by `wasm`. It needs git
+and network and is never run by oxplow; commit the `.wasm`. A grammar whose
+scanner is C++ (`scanner.cc`) can't be built.
