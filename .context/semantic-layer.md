@@ -197,6 +197,10 @@ file a path is: one row per glob of every enabled extension's `file_kinds:`
 `oxplow.files.kinds` (extension `project-settings`, restated when the
 setting changes and at boot):
 `SELECT DISTINCT kind FROM v_file_kind_rule WHERE glob_match(glob, :path)`.
+`v_language` (V56 `language_decl`: `id`, `title`, `extension`, `enabled`, `analyzable`,
+`extensions`, `aliases`, `lsp_ids`, `lsp_package`, `facets`) lists every language every
+loaded extension declares, on or off, restated with each generation
+(`.context/language-support.md` "`v_language` and the pack suggestion").
 Other URIs are selected from their owning dataset's
 `uri` column (`.context/resources.md` "Using URIs").
 

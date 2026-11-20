@@ -16,7 +16,11 @@ loaders:
              CASE WHEN th.title IS NULL THEN NULL
                   ELSE json_object('kind', 'agent', 'label', th.title,
                                    'uri', uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr' || n.thread_id)) END AS source,
-             n.created_at
+             n.created_at,
+             -- A language-pack notice names the pack it links to: Alerts offers to turn it on.
+             CASE WHEN n.kind = 'oxplow/language-pack' THEN
+               uri_param(substr(n.message, instr(n.message, '(oxplow:') + 1,
+                                instr(n.message, ')') - instr(n.message, '(oxplow:') - 1), 'name') END AS pack
       FROM v_agent_nudge n LEFT JOIN v_thread th ON th.id = n.thread_id
       WHERE n.audience = 'person' AND n.delivered_at IS NULL
       ORDER BY n.id DESC
@@ -39,7 +43,7 @@ view:
     viz: approvals
   - id: notices
     title: Notices
-    description: 'Things oxplow noticed about the work and tells you rather than an agent, such as a hint it muted for an agent after it kept firing. Nothing to do but read: Dismiss one from its right-click, or Clear notices.'
+    description: 'Things oxplow noticed about the work and tells you rather than an agent, such as a hint it muted for an agent after it kept firing. Most need only a read: Dismiss one from its right-click, or Clear notices. A notice about a language pack offers to turn it on.'
     from: notices
     viz: table
     columns:
@@ -56,6 +60,13 @@ view:
       width: 130
     empty: No notices.
     actions:
+    - id: turn-on
+      label: Turn on
+      command: oxplow.extension.enable
+      input:
+        name: '{{row.pack}}'
+      row: true
+      when: pack
     - id: dismiss
       label: Dismiss
       command: oxplow.hint.dismiss

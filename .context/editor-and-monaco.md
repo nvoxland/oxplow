@@ -352,7 +352,8 @@ or Mason-installed server lights up.
 
 When a request fails with "no language server configured", the status
 banner surfaces the self-describing error and `EditorPane` checks
-`apps/desktop/src/lspSuggestions.ts` for a Mason package mapping. If a
+`apps/desktop/src/lspSuggestions.ts` for a Mason package, read from
+`v_language.lsp_package` (by the language's id, alias or LSP id). If a
 suggestion exists, the banner shows an "Install <package>" button that
 calls `installLspPackage` (an IPC into `oxplow-app::lsp_installer`).
 The install runs against the Mason registry

@@ -21,13 +21,20 @@ loaders:
       \ (s.source = 'installed' AND s.package_name IS NOT NULL AND (j.key IS NULL OR j.key = 0)) AS can_remove\nFROM v_lsp_server\
       \ s LEFT JOIN json_each(s.running_streams) j\nORDER BY s.language_id, j.key\n"
   lsp_suggestions:
-    sql: "WITH suggested(language, package) AS (VALUES\n  ('rust', 'rust-analyzer'), ('go', 'gopls'),\n  ('typescript', 'typescript-language-server'),\
-      \ ('javascript', 'typescript-language-server'),\n  ('typescriptreact', 'typescript-language-server'), ('javascriptreact',\
-      \ 'typescript-language-server'),\n  ('python', 'pyright'), ('lua', 'lua-language-server'), ('c', 'clangd'), ('cpp',\
-      \ 'clangd'),\n  ('json', 'json-lsp'), ('yaml', 'yaml-language-server'), ('html', 'html-lsp'), ('css', 'css-lsp'),\n\
-      \  ('bash', 'bash-language-server'), ('shell', 'bash-language-server'),\n  ('ruby', 'ruby-lsp'), ('zig', 'zls'))\nSELECT\
-      \ package, group_concat(language, ', ') AS languages\nFROM suggested\nWHERE language NOT IN (SELECT language_id FROM\
-      \ v_lsp_server)\nGROUP BY package\nORDER BY package\n"
+    sql: |
+      -- The server each declared language suggests (`v_language.lsp_package`), by every
+      -- name an editor may know the language by: its id, aliases and LSP ids. A language
+      -- whose pack is off suggests its server too.
+      WITH suggested(language, package) AS (
+        SELECT l.id, l.lsp_package FROM v_language l WHERE l.lsp_package IS NOT NULL
+        UNION SELECT a.value, l.lsp_package FROM v_language l, json_each(l.aliases) a WHERE l.lsp_package IS NOT NULL
+        UNION SELECT i.value, l.lsp_package FROM v_language l, json_each(l.lsp_ids) i WHERE l.lsp_package IS NOT NULL
+      )
+      SELECT package, group_concat(language, ', ') AS languages
+      FROM (SELECT * FROM suggested ORDER BY language)
+      WHERE language NOT IN (SELECT language_id FROM v_lsp_server)
+      GROUP BY package
+      ORDER BY package
   extensions_credentials:
     sql: "-- A credential is its namespace's: any of its extensions' collectors\n-- may declare it.\nSELECT substr(uri_param(c.collector,\
       \ 'collector'), 1, instr(uri_param(c.collector, 'collector'), '/') - 1) AS namespace,\n       c.name, min(c.collector)\

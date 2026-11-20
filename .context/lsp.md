@@ -56,8 +56,10 @@ manager owns:
   declaration suggests (`lsp: { package }` in its pack,
   `LspSessionManager::no_config`) and both fix paths (the
   `oxplow.lsp.install_server` command / yaml entry). The desktop's
-  `apps/desktop/src/lspSuggestions.ts` still mirrors the suggestions by
-  hand until it reads them from the declared languages.
+  `apps/desktop/src/lspSuggestions.ts` reads the same suggestion from
+  `v_language.lsp_package` (by the language's id, alias or LSP id), and
+  Settings → Extensions' suggested servers list reads it there too: no
+  hand-made mirror is left.
 
 > **LSP id ↔ language.** The session `language` here is a free string
 > (`languageId`). The bridge to the declared languages

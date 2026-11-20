@@ -237,6 +237,26 @@ latest values by **package** (directory) or any per-file `dims_json` key
 slice by dimension is `metric_grid(…, dim)` in SQL; a per-package or
 per-language view is page or agent work.
 
+## `v_language` and the pack suggestion
+
+`v_language` (`language_decl`, V56) lists every language every *loaded*
+extension declares, on or off: `id`, `title`, `extension`, `enabled` (the
+declaring extension is on), `analyzable` (it has a grammar), `extensions`,
+`aliases`, `lsp_ids` (JSON arrays), `lsp_package` and `facets` (JSON:
+`imports`, `merge`, `duplication`, `starter`, each 0 or 1, read from its
+`analysis.yaml`). It is restated whole with each published generation
+(`extension_generation.rs`, from the catalog snapshot, which holds the
+disabled extensions' declarations too), so a pack that is off is listed.
+
+- The desktop's Mason suggestion (`apps/desktop/src/lspSuggestions.ts`)
+  and Settings → Extensions' suggested servers read `lsp_package` there;
+  the hand-made mirrors are gone.
+- Foundation's advisory `language-pack` (`audience: person`, `once_per:
+  row`, on turn end) says once per pack that the project has files in a
+  language whose pack is off (the stream's `v_snapshot_file` paths joined
+  to `v_language.extensions`), with a link to the pack; Alerts' Notices
+  offers **Turn on** (`oxplow.extension.enable { name }`) on such a notice.
+
 ## Test conventions
 
 What makes a test is data, not core's code: an extension's
@@ -288,7 +308,7 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 Live: languages from extensions, the shipped packs with native grammars, the
 LSP symbol surface, generic unit listing, and tree-sitter symbols with their
 index. **Still open** (the change-review plan, milestones 2 to 5): the
-`v_language` dataset and the pack suggestion, a fixture kind for a
+a fixture kind for a
 language's analysis with each pack's cases moved into it, a guard that core
 names no language, one `Parsers` pool,
 test conventions /

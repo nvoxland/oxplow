@@ -1,33 +1,25 @@
-/**
- * Hand-curated mapping from Monaco language id to a Mason-registry
- * package name. Used by the editor's "Install language server"
- * affordance when no LSP is configured for the file's language.
- *
- * Keep this list short — the goal is to cover the obvious defaults,
- * not every Mason package. Users who want something off this list
- * can install via a future "All packages" picker.
- */
-export const SUGGESTIONS: Record<string, string> = {
-  rust: "rust-analyzer",
-  go: "gopls",
-  typescript: "typescript-language-server",
-  javascript: "typescript-language-server",
-  typescriptreact: "typescript-language-server",
-  javascriptreact: "typescript-language-server",
-  python: "pyright",
-  lua: "lua-language-server",
-  c: "clangd",
-  cpp: "clangd",
-  json: "json-lsp",
-  yaml: "yaml-language-server",
-  html: "html-lsp",
-  css: "css-lsp",
-  bash: "bash-language-server",
-  shell: "bash-language-server",
-  ruby: "ruby-lsp",
-  zig: "zls",
-};
+import { querySql } from "./api.js";
 
-export function getSuggestedLspPackage(languageId: string): string | null {
-  return SUGGESTIONS[languageId] ?? null;
+/**
+ * The Mason package to suggest as a language's server when none is
+ * configured, read from `v_language.lsp_package` (the extensions that
+ * declare the language name it): by the editor's language id, which may be
+ * the language's id, one of its aliases or one of its LSP ids
+ * (`typescriptreact`). A language whose pack is off still suggests its
+ * server; `null` when no language declares one.
+ */
+export async function suggestedLspPackage(languageId: string): Promise<string | null> {
+  const res = await querySql(
+    `SELECT lsp_package FROM v_language
+      WHERE lsp_package IS NOT NULL
+        AND (id = ?1
+             OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?1)
+             OR EXISTS (SELECT 1 FROM json_each(lsp_ids) WHERE value = ?1))
+      ORDER BY enabled DESC, extension
+      LIMIT 1`,
+    [languageId],
+    1,
+  );
+  const cell = res.rows[0]?.[0];
+  return typeof cell === "string" ? cell : null;
 }
