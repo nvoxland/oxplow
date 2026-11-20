@@ -948,6 +948,7 @@ fn language_namers() -> BTreeSet<String> {
         "\"cpp\"",
         "\"csharp\"",
         "\"clojure\"",
+        "\"starlark\"",
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {

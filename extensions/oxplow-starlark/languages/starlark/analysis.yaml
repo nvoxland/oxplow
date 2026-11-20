@@ -1,0 +1,13 @@
+# Starlark: what oxplow's code analysis knows about its syntax.
+# The grammar follows Python's. `load(...)` is an ordinary call, so no
+# import strategy reads it.
+functions:
+  kinds: [function_definition, lambda]
+  param_list_fields: [parameters]
+  parameter_kinds: [identifier, default_parameter, typed_parameter, typed_default_parameter, list_splat_pattern, dictionary_splat_pattern, tuple_pattern]
+decisions:
+  kinds: [if_statement, elif_clause, for_statement, conditional_expression, if_clause, boolean_operator]
+visibility:
+  strategy: underscore_prefix
+doc:
+  strategy: first_string_statement

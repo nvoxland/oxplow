@@ -1,6 +1,4 @@
 # TypeScript: console calls count, window.console too.
-# The languages its files are in: their packs.
-requires: [oxplow-typescript]
 when:
   collector: oxplow.ts.console_calls
   files:

@@ -1,6 +1,4 @@
 # TypeScript: @ts-ignore and @ts-expect-error comments count.
-# The languages its files are in: their packs.
-requires: [oxplow-typescript]
 when:
   collector: oxplow.ts.ts_ignore
   files:

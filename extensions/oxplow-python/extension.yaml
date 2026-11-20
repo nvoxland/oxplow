@@ -3,6 +3,7 @@ name: oxplow-python
 namespace: oxplow
 description: "What oxplow knows about Python: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Python."
 engine: ">=0.7"
+permissions: [agent.write]
 intent:
   purpose: >-
     Hold everything oxplow knows about Python in one place, as an
@@ -25,8 +26,21 @@ intent:
     - name: python-imports-keep-dots-of-relative-modules
       input: { language: python }
       expect: each imported module
+    - name: python-pyproject-is-a-dependency-manifest
+      input: { language: python }
+      expect: the file kind a path has
 test_conventions:
   - { id: python-tests, languages: [python], paths: ['**/test_*.py'] }
+file_kinds:
+  - { id: python-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/pyproject.toml', '**/requirements*.txt', '**/setup.py', '**/setup.cfg', '**/Pipfile'] }
+  - { id: python-lockfile, kind: lockfile, label: Lockfile, globs: ['**/poetry.lock', '**/uv.lock', '**/Pipfile.lock'] }
+  - { id: python-lint-config, kind: lint-config, label: Lint config, globs: ['**/ruff.toml', '**/.flake8', '**/mypy.ini', '**/.pylintrc'] }
+  - { id: python-test-harness, kind: test-harness, label: Test harness, globs: ['**/conftest.py', '**/pytest.ini', '**/tox.ini', '**/noxfile.py'] }
+run_patterns:
+  - { id: python-test, kind: test, patterns: ['pytest'] }
+  - { id: python-analysis, kind: analysis, patterns: ['ruff', 'flake8', 'pylint', 'mypy'] }
+skills:
+  - { name: setup-python-reports, file: skills/setup-python-reports/SKILL.md }
 languages:
   - id: python
     title: "Python"

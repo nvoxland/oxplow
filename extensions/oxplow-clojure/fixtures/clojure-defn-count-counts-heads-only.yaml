@@ -1,6 +1,4 @@
 # defn and defn- heads count; a local named defn does not.
-# The languages its files are in: their packs.
-requires: [oxplow-clojure]
 when:
   collector: oxplow.clojure.defn_count
   files:

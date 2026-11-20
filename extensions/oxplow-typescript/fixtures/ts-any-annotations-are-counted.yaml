@@ -1,6 +1,4 @@
 # TypeScript: every `any` annotation counts.
-# The languages its files are in: their packs.
-requires: [oxplow-typescript]
 when:
   collector: oxplow.ts.any_usage
   files:

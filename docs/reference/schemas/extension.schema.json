@@ -3956,6 +3956,14 @@
       "description": "A `run_patterns:` entry as the manifest holds it.",
       "type": "object",
       "properties": {
+        "id": {
+          "description": "Its id within the extension (lowercase letters, digits, dashes);\ndefault `<kind>`. Name it when another extension of your namespace\ndeclares the same kind.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "kind": {
           "description": "`test` or `analysis`.",
           "type": "string"
@@ -3978,6 +3986,14 @@
       "description": "A `file_kinds:` entry as the manifest holds it.",
       "type": "object",
       "properties": {
+        "id": {
+          "description": "Its id within the extension (lowercase letters, digits, dashes);\ndefault `<kind>`. Name it when another extension of your namespace\ndeclares the same kind.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "kind": {
           "description": "The kind: lowercase words joined by dashes (`ci`, `lint-config`).",
           "type": "string"

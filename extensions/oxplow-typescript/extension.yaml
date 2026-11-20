@@ -10,6 +10,27 @@ intent:
     names no language and a project that doesn't use one sees none of it.
   origin: null
   examples:
+    - name: ts-lockfiles-are-lockfiles
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+    - name: ts-snapshots-are-test-harness
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+    - name: ts-tsconfig-is-lint-config
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+    - name: ts-any-annotations-are-counted
+      input: { collector: oxplow.ts.any_usage }
+      expect: the facts the collector records for the files given
+    - name: ts-console-calls-are-counted-including-namespaced-ones
+      input: { collector: oxplow.ts.console_calls }
+      expect: the facts the collector records for the files given
+    - name: ts-ignore-and-expect-error-comments-are-counted
+      input: { collector: oxplow.ts.ts_ignore }
+      expect: the facts the collector records for the files given
+    - name: ts-non-null-assertions-are-counted
+      input: { collector: oxplow.ts.non_null_assertions }
+      expect: the facts the collector records for the files given
     - name: typescript-functions-and-arrow-bindings
       input: { language: typescript }
       expect: the functions a file defines
@@ -91,3 +112,43 @@ languages:
       function: "function {name}(x) {"
       branch: ["    if (x === {n}) { return {n}; }"]
       tail: ["    return 0;", "}"]
+# Commands that mark a shell call as a test or analysis run.
+run_patterns:
+  - { id: ts-test, kind: test, patterns: ['npm test', 'npm run test', 'pnpm test', 'yarn test', 'bun test', jest, vitest] }
+  - { id: ts-analysis, kind: analysis, patterns: [eslint, 'tsc --noemit', 'tsc --noEmit'] }
+# Kinds of file a TypeScript or JavaScript project has.
+file_kinds:
+  - { id: ts-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/package.json'] }
+  - { id: ts-lockfile, kind: lockfile, label: Lockfile, globs: ['**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/bun.lock', '**/bun.lockb'] }
+  - { id: ts-lint-config, kind: lint-config, label: Lint config, globs: ['**/tsconfig*.json', '**/.eslintrc*', '**/eslint.config.*', '**/.prettierrc*', '**/biome.json'] }
+  - { id: ts-test-harness, kind: test-harness, label: Test harness, globs: ['**/jest.config.*', '**/vitest.config.*', '**/playwright.config.*', '**/__snapshots__/**', '**/*.snap'] }
+# What its collectors read: the project's files. The skill is text for the agent.
+permissions: [files.read, agent.write]
+skills:
+  - { name: typescript-setup, file: skills/typescript-setup/SKILL.md }
+configuration:
+  version: 2
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      typescript:
+        type: object
+        additionalProperties: false
+        x-category: testing
+        description: The reports the TypeScript tools write, which oxplow reads.
+        properties:
+          eslintReport: { type: string, default: target/eslint.json, description: "The ESLint report (JSON format) that the analysis run reads, from the project root." }
+collectors:
+  # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
+  - { id: oxplow.ts.any_usage, doc: "Counts the uses of the `any` type in TypeScript files.", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.non_null_assertions, doc: "Counts the non-null assertions in TypeScript files.", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.console_calls, doc: "Counts the `console.*` calls in TypeScript files.", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.ts_ignore, doc: "Counts the `@ts-ignore` and `@ts-expect-error` comments in TypeScript files.", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  # A report: ESLint's JSON findings, read after an analysis run.
+  - { id: oxplow.ts.eslint_report, doc: "Reads the ESLint report after an analysis run.", records: analysis, entry: "oxplow:eslint", report: { path: { setting: /typescript/eslintReport, default: target/eslint.json } }, on: { run: analysis } }
+metrics:
+  - { key: oxplow.ts.any_usage, title: "any usage", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'any_usage')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "Uses of the `any` type.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.any_usage }
+  - { key: oxplow.ts.non_null_assertions, title: "non-null assertions", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'non_null_assertion')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "Non-null assertions (`!`).", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.non_null_assertions }
+  - { key: oxplow.ts.console_calls, title: "console.* calls", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'console_call')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "Calls to `console.*`.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.console_calls }
+  - { key: oxplow.ts.ts_ignore, title: "ts-ignore / ts-expect-error", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'ts_ignore')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "`@ts-ignore` / `@ts-expect-error` suppressions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.ts_ignore }

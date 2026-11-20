@@ -43,6 +43,8 @@ oxplow.extensions.oxplow-bundled-todo.enabled: false
 # This project is Rust and TypeScript: their language packs.
 oxplow.extensions.oxplow-rust.enabled: true
 oxplow.extensions.oxplow-typescript.enabled: true
+# Its extensions' collectors and commands are Starlark.
+oxplow.extensions.oxplow-starlark.enabled: true
 # This repo works on oxplow's own extensions: their sources are the repo's,
 # and a dev build runs them from here.
 oxplow.extensionSources:
@@ -58,3 +60,4 @@ oxplow.extensionSources:
   oxplow-c: extensions/oxplow-c
   oxplow-csharp: extensions/oxplow-csharp
   oxplow-clojure: extensions/oxplow-clojure
+  oxplow-starlark: extensions/oxplow-starlark

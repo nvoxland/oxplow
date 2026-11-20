@@ -1,0 +1,8 @@
+# One for, an if, an elif and a comprehension `if` add 4 to the base 1.
+when:
+  language: starlark
+  path: a.star
+  body: "def walk(items, limit):\n    out = []\n    for x in items:\n        if x > limit:\n            out.append(x)\n        elif x < 0:\n            out.append(0)\n    return [y for y in out if y]\n"
+expect:
+  functions:
+    - { name: walk, parameter_count: 2, complexity: 5 }

@@ -1,0 +1,12 @@
+# A collector-like file: its function and constant are symbols, a `load(...)`
+# line is only a call, and the function has a docstring and one parameter.
+when:
+  language: starlark
+  path: collect.star
+  body: "load(\"//lib.star\", \"helper\")\n\nLIMIT = 10\n\ndef transform(x):\n    \"\"\"Doubles x.\"\"\"\n    if x > LIMIT:\n        return LIMIT\n    return x * 2\n"
+expect:
+  symbols:
+    - { kind: variable, id: LIMIT, line: 3 }
+    - { kind: function, id: transform, line: 5 }
+  functions:
+    - { name: transform, parameter_count: 1, complexity: 2, visibility: public, has_doc: true }

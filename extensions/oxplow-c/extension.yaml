@@ -3,6 +3,7 @@ name: oxplow-c
 namespace: oxplow
 description: "What oxplow knows about C and C++: their grammars, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses C and C++."
 engine: ">=0.7"
+permissions: [agent.write]
 intent:
   purpose: >-
     Hold everything oxplow knows about C and C++ in one place, as an
@@ -34,6 +35,18 @@ intent:
     - name: cpp-includes-and-using
       input: { language: cpp }
       expect: includes and using edges
+    - name: c-cmake-is-a-dependency-manifest
+      input: { language: cpp }
+      expect: the file kind a path has
+file_kinds:
+  - { id: c-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/CMakeLists.txt', '**/conanfile.*', '**/vcpkg.json', '**/meson.build'] }
+  - { id: c-lockfile, kind: lockfile, label: Lockfile, globs: ['**/conan.lock', '**/vcpkg-lock.json'] }
+  - { id: c-lint-config, kind: lint-config, label: Lint config, globs: ['**/.clang-format', '**/.clang-tidy'] }
+run_patterns:
+  - { id: c-test, kind: test, patterns: ['ctest'] }
+  - { id: c-analysis, kind: analysis, patterns: ['clang-tidy'] }
+skills:
+  - { name: setup-c-reports, file: skills/setup-c-reports/SKILL.md }
 languages:
   - id: c
     title: "C"

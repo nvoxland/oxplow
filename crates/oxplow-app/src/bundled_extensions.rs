@@ -121,6 +121,11 @@ mod generated {
         FILES.get_or_init(|| read("oxplow-clojure"))
     }
 
+    pub fn oxplow_starlark() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-starlark"))
+    }
+
     /// `extensions/<name>/`'s files, kept for the life of the process.
     fn read(name: &str) -> Files {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -207,6 +212,12 @@ pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxplow-clojure",
         files: generated::oxplow_clojure,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-starlark",
+        files: generated::oxplow_starlark,
         required: false,
     },
 ];

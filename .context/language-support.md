@@ -10,6 +10,23 @@ C++), `oxplow-csharp`, `oxplow-clojure`); a project turns on the ones it uses
 languages oxplow knows only by their language servers (Lua, JSON, YAML,
 HTML, CSS, Bash, Ruby, Zig): no grammar, so nothing parses them.
 
+## What a pack holds
+
+Beside its `languages:` (below), a pack holds everything about its stack:
+its idiom metrics and their collectors (`oxplow.rust.*`, `oxplow.ts.*`,
+`oxplow.csharp.*`, `oxplow.clojure.*`, on with the pack; the shared measure
+`oxplow.ast_hit` and dimension `oxplow.rule` are foundation's), its
+`test_conventions:`, its `file_kinds:` (dependency manifests, lockfiles,
+lint and test-harness config), its `run_patterns:` (foundation keeps only
+`rspec` and `phpunit`, which no pack covers), report collectors with a
+bundled parser (Rust's clippy, TypeScript's eslint; each path a setting
+with a default), and a setup skill saying how to make the stack write the
+reports oxplow reads. Its `run_patterns:` and `file_kinds:` entries carry
+ids (`rust-test`, `ts-lockfile`): every shipped pack shares the `oxplow`
+namespace. The packs are `oxplow-rust`, `oxplow-typescript`, `oxplow-python`,
+`oxplow-go`, `oxplow-java`, `oxplow-c`, `oxplow-csharp`, `oxplow-clojure` and
+`oxplow-starlark` (Starlark, for extension authors' `.star` files).
+
 ## A language's declaration
 
 ```yaml
@@ -290,6 +307,5 @@ LSP symbol surface, generic unit listing, and tree-sitter symbols with their
 index. **Still open** (the change-review plan, milestones 2 to 5): the
 `v_language` dataset and the pack suggestion, the language set for command, effect and provider
 scripts, holding an extension whose language conflicts, one `Parsers` pool,
-test conventions /
-file kinds / run patterns / report collectors in the packs, and WebAssembly
+and WebAssembly
 grammars (Clojure first).

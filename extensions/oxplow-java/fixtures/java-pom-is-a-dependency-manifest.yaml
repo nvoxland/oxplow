@@ -1,0 +1,4 @@
+# The pack's file kinds: a rule of it matches a path by glob_match.
+requires: [oxplow-java]
+when: { sql: "SELECT DISTINCT kind FROM v_file_kind_rule WHERE extension = 'oxplow-java' AND glob_match(glob, 'svc/pom.xml')" }
+expect: { rows: [{ kind: dependency-manifest }] }

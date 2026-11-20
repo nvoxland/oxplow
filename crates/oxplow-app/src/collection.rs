@@ -2289,7 +2289,18 @@ impl CollectionService {
         if !produced_report && !ran_the_runner && self.mark_nudged(thread, request).await {
             let msg = if reads.unread.is_empty() {
                 let root = self.worktree(thread).await;
-                report_nudge_message(&cfg, !self.report_collectors(&root).is_empty())
+                // A test run's reports are tests and coverage: a linter's
+                // collector (a language pack's clippy) wires none of them.
+                let wired = self.report_collectors(&root).iter().any(|c| {
+                    matches!(
+                        c.spec.records,
+                        Some(
+                            oxplow_config::collectors::Records::Tests
+                                | oxplow_config::collectors::Records::Coverage
+                        )
+                    )
+                });
+                report_nudge_message(&cfg, wired)
             } else {
                 unread_reports_message(&reads.unread)
             };
@@ -3894,18 +3905,29 @@ mod tests {
     use super::*;
     use crate::extension::extensions::run_patterns::parse_run_patterns;
 
-    /// What oxplow-foundation declares for `kind` (`run_patterns:`): the
-    /// patterns a running oxplow matches before a project adds its own.
+    /// What the extensions that ship with oxplow declare for `kind`
+    /// (`run_patterns:`): foundation's and every language pack's, as a
+    /// project with the packs on matches before it adds its own.
     fn foundation(kind: RunKind) -> Vec<String> {
-        let text = include_str!("../../../extensions/oxplow-foundation/extension.yaml");
-        let v: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
-        let (declared, errors) = parse_run_patterns(&v["run_patterns"], "extension.yaml", text);
-        assert!(errors.is_empty(), "{errors:?}");
-        declared
-            .into_iter()
-            .filter(|d| d.kind == kind)
-            .flat_map(|d| d.patterns)
-            .collect()
+        let mut out = Vec::new();
+        for b in crate::bundled_extensions::BUNDLED {
+            let Some(text) = b.file("extension.yaml") else {
+                continue;
+            };
+            let v: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+            if v.get("run_patterns").is_none() {
+                continue;
+            }
+            let (declared, errors) = parse_run_patterns(&v["run_patterns"], "extension.yaml", text);
+            assert!(errors.is_empty(), "{}: {errors:?}", b.name);
+            out.extend(
+                declared
+                    .into_iter()
+                    .filter(|d| d.kind == kind)
+                    .flat_map(|d| d.patterns),
+            );
+        }
+        out
     }
 
     fn with(kind: RunKind, extra: &[String]) -> Vec<String> {
@@ -3914,8 +3936,8 @@ mod tests {
         all
     }
 
-    // The detection tests below read as they always did: the foundation's
-    // patterns, and what a test adds.
+    // The detection tests below read as they always did: the shipped
+    // extensions' patterns, and what a test adds.
     fn detect_test_run(command: &str, extra: &[String]) -> bool {
         super::detect_test_run(command, &with(RunKind::Test, extra))
     }
@@ -4408,6 +4430,8 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             let project_dir = tmp.path().to_path_buf();
             std::fs::create_dir_all(project_dir.join(".oxplow/snapshots")).unwrap();
+            // The language packs on: their run patterns mark `cargo test`.
+            crate::test_fixtures::enable_language_packs(&project_dir);
             let db = Database::in_memory();
             let now = Timestamp::now();
 

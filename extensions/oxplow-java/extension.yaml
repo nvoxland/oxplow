@@ -3,6 +3,7 @@ name: oxplow-java
 namespace: oxplow
 description: "What oxplow knows about Java: its grammar, what code analysis reads (functions, complexity, symbols), and the language server to suggest. Ships with oxplow, off until a project uses Java."
 engine: ">=0.7"
+permissions: [agent.write]
 intent:
   purpose: >-
     Hold everything oxplow knows about Java in one place, as an
@@ -25,8 +26,19 @@ intent:
     - name: java-imports-read-plain-wildcard-and-static-imports
       input: { language: java }
       expect: each imported module
+    - name: java-pom-is-a-dependency-manifest
+      input: { language: java }
+      expect: the file kind a path has
 test_conventions:
   - { id: java-tests, languages: [java], skips: ['@Disabled', '@Ignore'] }
+file_kinds:
+  - { id: java-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/pom.xml', '**/build.gradle', '**/build.gradle.kts', '**/settings.gradle*'] }
+  - { id: java-lockfile, kind: lockfile, label: Lockfile, globs: ['**/gradle.lockfile'] }
+  - { id: java-lint-config, kind: lint-config, label: Lint config, globs: ['**/checkstyle*.xml'] }
+run_patterns:
+  - { id: java-test, kind: test, patterns: ['gradle test', 'mvn test', './gradlew test'] }
+skills:
+  - { name: setup-java-reports, file: skills/setup-java-reports/SKILL.md }
 languages:
   - id: java
     title: "Java"

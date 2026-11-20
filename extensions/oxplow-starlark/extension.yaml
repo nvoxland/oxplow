@@ -1,0 +1,37 @@
+manifest: 2
+name: oxplow-starlark
+namespace: oxplow
+description: "What oxplow knows about Starlark: its grammar, and what code analysis reads (functions, complexity, symbols). Ships with oxplow, off until a project uses Starlark."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Starlark in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+    Agents write oxplow collectors and commands in Starlark, so oxplow
+    reads those files too.
+  origin: null
+  examples:
+    - name: starlark-a-collector-file-and-its-symbols
+      input: { language: starlark }
+      expect: a file's functions, constant and their metrics
+    - name: starlark-private-helpers-and-lambdas
+      input: { language: starlark }
+      expect: visibility of a helper and a record for a lambda
+    - name: starlark-nested-branches-add-to-complexity
+      input: { language: starlark }
+      expect: complexity of loops, ifs, elifs and comprehension filters
+languages:
+  - id: starlark
+    title: "Starlark"
+    extensions: [star, bzl, bazel]
+    aliases: ["bzl"]
+    grammar: { native: starlark }
+    analysis: languages/starlark/analysis.yaml
+    symbols: languages/starlark/symbols.scm
+    units: []
+    # How the metric scaffold writes a sample function.
+    starter:
+      function: "def {name}(x):"
+      branch: ["    if x == {n}:", "        return {n}"]
+      tail: ["    return 0"]

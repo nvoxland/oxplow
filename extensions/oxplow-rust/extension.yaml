@@ -10,6 +10,21 @@ intent:
     names no language and a project that doesn't use one sees none of it.
   origin: null
   examples:
+    - name: rust-cargo-lock-is-a-lockfile
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+    - name: rust-cargo-toml-is-a-dependency-manifest
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+    - name: rust-panic-todo-and-path-qualified-panic-macros-are-counted
+      input: { collector: oxplow.rust.panic_macros }
+      expect: the facts the collector records for the files given
+    - name: rust-unsafe-blocks-are-counted-per-file-and-tagged-with-their-rule
+      input: { collector: oxplow.rust.unsafe_blocks }
+      expect: the facts the collector records for the files given
+    - name: rust-unwrap-and-expect-calls-are-counted
+      input: { collector: oxplow.rust.unwrap_expect_calls }
+      expect: the facts the collector records for the files given
     - name: rust-functions-and-their-symbols
       input: { language: rust }
       expect: a file's definitions, its functions' metrics and its imports
@@ -54,3 +69,40 @@ languages:
       function: "fn {name}(x: i32) -> i32 {"
       branch: ["    if x == {n} { return {n}; }"]
       tail: ["    0", "}"]
+# Commands that mark a shell call as a test or analysis run.
+run_patterns:
+  - { id: rust-test, kind: test, patterns: ['cargo test', 'cargo nextest'] }
+  - { id: rust-analysis, kind: analysis, patterns: ['cargo clippy', 'clippy-driver'] }
+# Kinds of file a Rust project has.
+file_kinds:
+  - { id: rust-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/Cargo.toml'] }
+  - { id: rust-lockfile, kind: lockfile, label: Lockfile, globs: ['**/Cargo.lock'] }
+  - { id: rust-lint-config, kind: lint-config, label: Lint config, globs: ['**/rustfmt.toml', '**/.rustfmt.toml', '**/clippy.toml', '**/.clippy.toml'] }
+# What its collectors read: the project's files. The skill is text for the agent.
+permissions: [files.read, agent.write]
+skills:
+  - { name: rust-setup, file: skills/rust-setup/SKILL.md }
+configuration:
+  version: 2
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      rust:
+        type: object
+        additionalProperties: false
+        x-category: testing
+        description: The reports the Rust tools write, which oxplow reads.
+        properties:
+          clippyReport: { type: string, default: target/clippy.json, description: "The clippy report (JSON) that the analysis run reads, from the project root." }
+collectors:
+  # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
+  - { id: oxplow.rust.unsafe_blocks, doc: "Counts the `unsafe` blocks in Rust files.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unwrap_expect_calls, doc: "Counts the `unwrap` and `expect` calls in Rust files.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.panic_macros, doc: "Counts the `panic!`, `todo!` and similar macros in Rust files.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  # A report: clippy's JSON findings, read after an analysis run.
+  - { id: oxplow.rust.clippy_report, doc: "Reads the clippy report after an analysis run.", records: analysis, entry: "oxplow:clippy", report: { path: { setting: /rust/clippyReport, default: target/clippy.json } }, on: { run: analysis } }
+metrics:
+  - { key: oxplow.rust.unsafe_blocks, title: "unsafe blocks", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'unsafe_block')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: rust, description: "Count of `unsafe` blocks in the codebase.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], target: 0.0, collector: oxplow.rust.unsafe_blocks }
+  - { key: oxplow.rust.unwrap_expect_calls, title: "unwrap / expect calls", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'unwrap_expect')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: rust, description: "Calls to `.unwrap()` / `.expect()` that can panic at runtime.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.rust.unwrap_expect_calls }
+  - { key: oxplow.rust.panic_macros, title: "panic-family macros", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'panic_macro')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: rust, description: "Uses of `panic!` / `unreachable!` / `todo!` and similar panic macros.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.rust.panic_macros }
