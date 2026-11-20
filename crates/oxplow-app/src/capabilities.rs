@@ -213,7 +213,7 @@ pub struct Implementation {
     /// Its logo as a data URI, when its declaration has an `icon:`.
     pub icon: Option<String>,
     /// What its declaration configures (`config:`, checked against its
-    /// built-in's schema): an ACP adapter's command, a provider's base URL.
+    /// built-in's schema): a harness adapter's command, a provider's base URL.
     pub config: Value,
     /// One sentence saying what it is, from its declaration.
     pub description: Option<String>,
@@ -1593,13 +1593,13 @@ mod tests {
         };
         r.set_declared(vec![
             with("claude", serde_json::json!({ "terminal": true })),
-            with("api", serde_json::json!({ "programmatic": true })),
+            with("api", serde_json::json!({ "transcript": true })),
         ]);
         let snap = r.snapshot(&c);
         assert!(snap
             .unmet(&needs(&[
                 "agent_harness",
-                "agent_harness.programmatic",
+                "agent_harness.transcript",
                 "agent_harness.terminal"
             ]))
             .is_empty());

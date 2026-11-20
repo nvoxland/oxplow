@@ -1,7 +1,7 @@
 //! The policy every agent transport enforces: the write guard (isolation
 //! only), with the I/O it needs (the thread, the stream worktrees).
 //! Decisions are transport-neutral: the hook route renders them as
-//! Claude's JSON, and the ACP client as permission answers. The pure rules
+//! Claude's JSON, and the Codex observer as approval answers. The pure rules
 //! live in `oxplow_runtime::policy`. Neither an edit nor a turn's end ever
 //! waits on tracked work (`.context/work-tracking.md`). See
 //! `.context/agent-model.md`.

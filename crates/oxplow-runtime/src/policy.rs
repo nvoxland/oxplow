@@ -2,8 +2,8 @@
 //! tool now? It is isolation only — the write guard (no thread touches
 //! another stream's worktree; a store's row files in a worktree are written by command). It never
 //! asks for tracked work (`.context/work-tracking.md`). The hook route asks
-//! it with Claude-shaped payloads; the ACP client asks it with ACP tool
-//! calls. The answer carries the reason text only; each transport renders
+//! it with Claude-shaped payloads; the Codex observer asks it with Codex
+//! item kinds mapped to tool calls. The answer carries the reason text only; each transport renders
 //! it in its own wire shape. See `.context/agent-model.md` → "Isolation".
 //!
 //! Pure: the facts (the worktrees) are gathered by the caller

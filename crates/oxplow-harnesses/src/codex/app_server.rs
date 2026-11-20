@@ -387,16 +387,11 @@ impl AppServer {
         self.send(json!({"jsonrpc": "2.0", "method": method, "params": params}))
     }
 
-    /// Answer the server's request `id`.
-    pub fn respond(&self, id: &Value, result: Value) -> Result<(), String> {
+    /// Answer the server's request `id`. Only the client's tests answer
+    /// one: an observer answers none (the TUI does).
+    #[cfg(test)]
+    fn respond(&self, id: &Value, result: Value) -> Result<(), String> {
         self.send(json!({"jsonrpc": "2.0", "id": id, "result": result}))
-    }
-
-    /// Refuse the server's request `id`.
-    pub fn refuse(&self, id: &Value, message: &str) -> Result<(), String> {
-        self.send(
-            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": message}}),
-        )
     }
 
     fn send(&self, v: Value) -> Result<(), String> {

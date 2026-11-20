@@ -19,7 +19,7 @@
 //! We read the NEW records since the last turn (offset-tracked via a
 //! persisted per-session cursor that commits with the rows, so we never re-sum
 //! the whole file or double-count across restarts or redeliveries) and persist
-//! one row per turn attributed to the turn it ran in. An ACP turn's
+//! one row per turn attributed to the turn it ran in. A Codex observer turn's
 //! counts ride the event instead ([`TokenUsageService::record_turn`]).
 //! Provenance is `observed`.
 //!
@@ -142,7 +142,7 @@ pub struct TurnRecord {
 enum Counted {
     /// Parsed from the session transcript's new tail (Claude).
     Transcript,
-    /// Reported by the harness with the turn (ACP).
+    /// Reported by the harness with the turn (the Codex observer).
     Reported,
 }
 
@@ -271,7 +271,7 @@ impl TokenUsageService {
         Ok(recorded.last_id)
     }
 
-    /// Record one ACP turn's token counts (from the prompt response), the
+    /// Record one Codex observer turn's token counts (the per-turn report), the
     /// counterpart of [`Self::on_stop`]'s transcript parse. `Ok(None)` when
     /// the thread is gone or the counts are empty.
     /// Keyed by its `agent.turn.ended` (`rec.cause`), so a redelivery
@@ -592,7 +592,7 @@ impl crate::event_pump::AsyncEventConsumer for OtlpTokensConsumer {
 pub const TURN_TOKENS: &str = "token_usage.turns";
 
 /// Counts a turn's tokens when it ends (P3.7): from the counts the turn
-/// reported itself (ACP, `usage` on `agent.turn.ended@2`) or from the
+/// reported itself (the Codex observer, `usage` on `agent.turn.ended@2`) or from the
 /// session transcript's new tail (Claude, `transcript_path`). An async
 /// pump consumer — no transcript parsing in the Stop hook — anchored to
 /// the turn it ran in.
@@ -632,7 +632,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
         };
         if let Some(u) = payload.usage {
             // Rows key on the session; a turn the harness reported counts for
-            // always has one (ACP opens turns with a session id).
+            // always has one (the Codex observer opens turns with a session id).
             let Some(session) = session.as_deref().filter(|s| !s.is_empty()) else {
                 tracing::warn!(
                     turn = turn_id,
@@ -817,7 +817,7 @@ mod tests {
         assert_eq!(capture_turns, vec![Some(turn.value())]);
     }
 
-    /// An ACP turn reports its own counts; they ride its `agent.turn.ended`
+    /// A Codex observer turn reports its own counts; they ride its `agent.turn.ended`
     /// and are counted once, keyed by that event.
     #[tokio::test]
     async fn a_turns_own_usage_is_counted_once() {

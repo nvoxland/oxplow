@@ -99,7 +99,7 @@ pub fn search_path() -> Vec<PathBuf> {
     search_path_in(std::env::var_os("PATH").as_deref(), &extra)
 }
 
-/// [`resolve_program_in`] for any program (an ACP agent's command), on
+/// [`resolve_program_in`] for any program (an agent's command), on
 /// [`search_path`].
 pub fn resolve_program(bin: &str) -> Option<String> {
     oxplow_domain::agent::harness::resolve_program_in(bin, &search_path())

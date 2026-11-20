@@ -60,7 +60,7 @@ pub struct NewAgentTokenUsage {
     /// The turn it was spent in (`agent_turn.id`).
     pub turn_id: Option<i64>,
     /// The `agent.turn.ended` event whose own report these counts came
-    /// from (ACP); a second row for the same cause is not written.
+    /// from (the Codex observer); a second row for the same cause is not written.
     pub cause: Option<String>,
 }
 

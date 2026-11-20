@@ -2360,6 +2360,37 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
     }
 
+    /// V53 drops a session's kind and keeps the sessions.
+    #[test]
+    fn v53_drops_the_session_kind_and_keeps_the_sessions() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(52))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO agent_session (id, thread_id, kind, harness, title, opened_at, updated_at)
+               VALUES (3, 1, 'terminal', 'claude', '', 'a', 'a');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let has_kind: bool = conn
+            .query_row(
+                "SELECT count(*) > 0 FROM pragma_table_info('agent_session') WHERE name = 'kind'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!has_kind);
+        let harness: String = conn
+            .query_row("SELECT harness FROM agent_session WHERE id = 3", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(harness, "claude");
+    }
+
     /// V52 drops the recorded plans' events and keeps the rest.
     #[test]
     fn v52_drops_the_plan_events() {

@@ -16,27 +16,19 @@ use oxplow_app::Services;
 use oxplow_domain::agent::harness::{
     AgentHarness, Endpoints, Launch, LaunchInput, LaunchSpec, SessionIds,
 };
-use oxplow_domain::agent_session::{AgentSession, SessionKind};
+use oxplow_domain::agent_session::AgentSession;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{AgentSessionId, Stream, StreamId, Thread, ThreadId};
 
 use crate::error::IpcError;
 use crate::RpcContext;
 
-/// Whether `session` runs in a terminal oxplow may start: it is open, and
-/// a terminal one.
+/// Whether `session` has a terminal oxplow may start: it is open.
 fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
     if !session.is_open() {
         return Err(IpcError::invalid(format!(
             "agent session {} is closed",
             session.id
-        )));
-    }
-    if session.kind != SessionKind::Terminal {
-        return Err(IpcError::invalid(format!(
-            "agent session {} is a {}, which has no terminal",
-            session.id,
-            session.kind.as_str()
         )));
     }
     Ok(())
@@ -263,7 +255,6 @@ pub async fn open_terminal_session(
                     SessionSpec {
                         session_id,
                         thread_id: thread.id,
-                        agent: harness.title().to_string(),
                         cwd: cwd.clone(),
                     },
                     CodexOpen {
@@ -569,15 +560,14 @@ mod tests {
         );
     }
 
-    /// A closed session has no terminal, and neither does an action.
+    /// A closed session has no terminal.
     #[test]
-    fn a_closed_or_action_session_has_no_terminal() {
-        use oxplow_domain::agent_session::{AgentSession, SessionCloseReason, SessionKind};
+    fn a_closed_session_has_no_terminal() {
+        use oxplow_domain::agent_session::{AgentSession, SessionCloseReason};
         let now = oxplow_domain::Timestamp::from_unix_ms(1);
         let open = AgentSession {
             id: oxplow_domain::AgentSessionId::new(3),
             thread_id: oxplow_domain::ThreadId::new(1),
-            kind: SessionKind::Terminal,
             harness: "claude".into(),
             title: String::new(),
             resume_session_id: String::new(),
@@ -592,12 +582,6 @@ mod tests {
             fork_next: false,
         };
         assert!(super::has_a_terminal(&open).is_ok());
-        let action = AgentSession {
-            kind: SessionKind::Action,
-            ..open.clone()
-        };
-        let err = super::has_a_terminal(&action).unwrap_err();
-        assert!(err.message.contains("action"), "msg: {}", err.message);
         let closed = AgentSession {
             closed_at: Some(now),
             closed_reason: Some(SessionCloseReason::Closed),

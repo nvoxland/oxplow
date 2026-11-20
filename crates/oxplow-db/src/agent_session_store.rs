@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::agent_session::{
-    AgentSession, BindingOrigin, NewAgentSession, SessionCloseReason, SessionKind,
+    AgentSession, BindingOrigin, NewAgentSession, SessionCloseReason,
 };
 use oxplow_domain::stores::AgentSessionStore;
 use oxplow_domain::{AgentSessionId, DomainError, ThreadId, Timestamp};
@@ -13,7 +13,7 @@ use oxplow_domain::{AgentSessionId, DomainError, ThreadId, Timestamp};
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
-const COLUMNS: &str = "id, thread_id, kind, harness, title, resume_session_id, host,
+const COLUMNS: &str = "id, thread_id, harness, title, resume_session_id, host,
                        opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at,
                        native_title, fork_next";
 
@@ -28,7 +28,6 @@ fn invalid(what: &str, value: &str) -> rusqlite::Error {
 }
 
 fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
-    let kind: String = row.get("kind")?;
     let harness: String = row.get("harness")?;
     let opened_at: String = row.get("opened_at")?;
     let closed_at: Option<String> = row.get("closed_at")?;
@@ -38,7 +37,6 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
     Ok(AgentSession {
         id: AgentSessionId::new(row.get("id")?),
         thread_id: ThreadId::new(row.get("thread_id")?),
-        kind: SessionKind::parse(&kind).ok_or_else(|| invalid("kind", &kind))?,
         harness,
         title: row.get("title")?,
         resume_session_id: row.get("resume_session_id")?,
@@ -235,15 +233,9 @@ pub fn insert_tx(
     let at = ts_to_string(now);
     let id = conn
         .query_row(
-            "INSERT INTO agent_session (thread_id, kind, harness, title, opened_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5) RETURNING id",
-            params![
-                new.thread_id.value(),
-                new.kind.as_str(),
-                new.harness.as_str(),
-                new.title,
-                at
-            ],
+            "INSERT INTO agent_session (thread_id, harness, title, opened_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4) RETURNING id",
+            params![new.thread_id.value(), new.harness.as_str(), new.title, at],
             |r| r.get::<_, i64>(0),
         )
         .map_err(map_sql_err)?;
@@ -654,7 +646,6 @@ mod tests {
             at(1),
         )
         .unwrap();
-        assert_eq!(opened.kind, SessionKind::Terminal);
         assert_eq!((opened.opened_at, opened.updated_at), (at(1), at(1)));
         assert!(opened.is_open());
         assert_eq!(get_tx(&conn, opened.id).unwrap(), Some(opened.clone()));
@@ -847,7 +838,7 @@ mod tests {
         ] {
             let s = insert_tx(&conn, &new, at(1)).unwrap();
             let back = get_tx(&conn, s.id).unwrap().unwrap();
-            assert_eq!((back.kind, back.harness), (new.kind, new.harness));
+            assert_eq!(back.harness, new.harness);
         }
     }
 

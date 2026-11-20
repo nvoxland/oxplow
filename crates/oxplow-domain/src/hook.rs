@@ -20,10 +20,10 @@ pub enum HookKind {
     PreToolUse,
     PostToolUse,
     Stop,
-    /// Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane.
+    /// Emitted by the Codex observer when the agent goes away.
     Interrupt,
     /// A harness process started or resumed a session (Claude's command
-    /// hook, Codex's hook, the ACP client). `source: "compact"` is a
+    /// hook, Codex's hook, the Codex observer). `source: "compact"` is a
     /// compaction inside a running session, not a start.
     SessionStart,
     /// A harness session ended — `reason: "clear"` for `/clear`.

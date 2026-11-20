@@ -97,7 +97,7 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
 
 /// What the call is called where a person reads it: its MCP tool, `Delete`
 /// / `Move`, else the agent's name or title for it.
-pub fn label(t: &ToolCall) -> String {
+fn label(t: &ToolCall) -> String {
     if let Some(mcp) = mcp_name(t) {
         return mcp;
     }

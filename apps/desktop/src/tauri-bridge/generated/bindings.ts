@@ -3291,7 +3291,7 @@ export type HookEnvelope = {
 	thread_id: ThreadId | null,
 	stream_id: StreamId | null,
 	/**
-	 *  The agent session it came from (`X-Oxplow-Session`, the ACP host,
+	 *  The agent session it came from (`X-Oxplow-Session`, the Codex observer,
 	 *  the UI's interrupt), when the sender knows it.
 	 */
 	agent_session_id?: AgentSessionId | null,
@@ -3309,11 +3309,11 @@ export type HookEnvelope = {
 export type HookKind =
 /**  Renderer/agent paste, run-command, etc. */
 "user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" |
-/**  Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane. */
+/**  Emitted by the Codex observer when the agent goes away. */
 "interrupt" |
 /**
  *  A harness process started or resumed a session (Claude's command
- *  hook, Codex's hook, the ACP client). `source: "compact"` is a
+ *  hook, Codex's hook, the Codex observer). `source: "compact"` is a
  *  compaction inside a running session, not a start.
  */
 "session_start" |

@@ -535,8 +535,9 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   (`closed_reason='closed'`, their open turns ended with the answer
   'session closed'); every `chat` row became kind `terminal` as closed
   history; the table was rebuilt without `acp_agent` and with `kind IN
-  ('terminal','action')`. The chat machinery's transcript
-  (`chat::transcript::Transcript`) has no table.
+  ('terminal','action')`.
+- **V53 (`kind` dropped):** every session is a harness in a terminal; the
+  `action` kind was never built, so `kind` went (`v_agent_session` v12).
 
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now

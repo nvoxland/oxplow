@@ -16,7 +16,7 @@ pub async fn list_threads(svc: &Services, stream_id: StreamId) -> Result<Vec<Thr
 }
 
 /// The registered agent harnesses, in declaration order, with which the
-/// project enables and which run ACP agents.
+/// project enables and which run in a terminal or as a Codex observer.
 pub async fn list_agent_harnesses(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::harnesses::HarnessListing>, IpcError> {

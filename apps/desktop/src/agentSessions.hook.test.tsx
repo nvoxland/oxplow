@@ -13,8 +13,8 @@ mock.module("./api.js", () => ({
     new Promise((resolve) => {
       resolvers.push(() =>
         resolve({
-          columns: ["uri", "thread_uri", "kind", "harness", "title", "native_title", "display_name", "opened_at"],
-          rows: [[`oxplow:oxplow/agent_session?id=ses_${String(params[0])}`, `oxplow:oxplow/thread?id=${String(params[0])}`, "terminal", "claude", "", "", "", ""]],
+          columns: ["uri", "thread_uri", "harness", "title", "native_title", "display_name", "opened_at"],
+          rows: [[`oxplow:oxplow/agent_session?id=ses_${String(params[0])}`, `oxplow:oxplow/thread?id=${String(params[0])}`, "claude", "", "", "", ""]],
           reads: { datasets: [], tables: [], measures: [] },
         }),
       );

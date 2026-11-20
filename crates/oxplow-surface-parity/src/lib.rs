@@ -146,7 +146,7 @@ pub const MANIFEST: &[Capability] = &[
         "app_version",
         "the version the About box shows",
     ),
-    // Skills for agents that can't load skill files (ACP); the UI has no use for them.
+    // Skills for agents that can't load skill files (a Codex session); the UI has no use for them.
     agent("oxplow_get_skill"),
     // A dry run for an agent writing a source in its worktree.
     agent("oxplow_preview_collector"),

@@ -646,7 +646,7 @@ pub struct Services {
     /// Code intelligence from the language servers (`.context/lsp.md`).
     pub code_intel: Arc<dyn oxplow_domain::code_intel::CodeIntelligence>,
     /// The write guard, shared by every agent transport (the hook route,
-    /// ACP).
+    /// the Codex observer).
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
     /// Recording and prompt context shared by every agent transport.
     pub agent_context: Arc<agent_context::AgentContext>,
@@ -654,7 +654,7 @@ pub struct Services {
     /// (`context_watch`): a session without a prompt hook rebuilds its
     /// context on it.
     pub context_changes: tokio::sync::watch::Sender<u64>,
-    /// Open ACP agent sessions. Sessions get a
+    /// Open Codex observer sessions. Sessions get a
     /// `chat::host::ServicesChatHost` holding `Services` weakly.
     pub chat: Arc<chat::manager::ChatManager>,
     pub lsp_installer: lsp_installer::LspInstallerService,

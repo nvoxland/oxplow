@@ -409,7 +409,7 @@ pub struct TurnEnd<'a> {
     pub outcome: TurnOutcome,
     pub answer: Option<&'a str>,
     pub transcript_path: Option<&'a str>,
-    /// Counts the harness reported with the turn (ACP).
+    /// Counts the harness reported with the turn (the Codex observer).
     pub usage: Option<oxplow_domain::events::schema::TurnUsage>,
     /// The model the turn ran on, when its harness said.
     pub model: Option<&'a str>,

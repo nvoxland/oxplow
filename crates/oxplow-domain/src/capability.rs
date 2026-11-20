@@ -323,7 +323,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "terminal",
             "permission_prompts",
             "resume",
-            "programmatic",
             "transcript",
             "telemetry",
             "runtime_text",

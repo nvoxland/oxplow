@@ -69,7 +69,7 @@
     },
     "TurnUsage": {
       "additionalProperties": false,
-      "description": "A turn's token counts, when the harness reported them with the turn\n(ACP's prompt response). Claude's come from the transcript instead.",
+      "description": "A turn's token counts, when the harness reported them with the turn\n(the Codex observer's per-turn report). Claude's come from the transcript instead.",
       "properties": {
         "cache_read": {
           "format": "uint64",
@@ -155,7 +155,7 @@
           "type": "null"
         }
       ],
-      "description": "Counts reported with the turn (ACP)."
+      "description": "Counts reported with the turn (the Codex observer)."
     }
   },
   "required": [

@@ -25,11 +25,8 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 
 use super::conn::{cap, cap_value};
-use super::conn::{Connection, Incoming, Opened, SubagentChange, TurnEnd, TurnTokens};
-use super::human_prompt::HumanPrompt;
-use super::model::{
-    ChatUpdate, ContextUsage, PlanEntry, PlanStatus, ToolCall, ToolKind, ToolStatus,
-};
+use super::conn::{Connection, Incoming, SubagentChange, TurnEnd, TurnTokens};
+use super::model::{ChatUpdate, ToolCall, ToolKind, ToolStatus};
 
 /// How the thread opens, as the harness's launch says.
 #[derive(Debug, Clone)]
@@ -207,7 +204,7 @@ impl Connection for CodexConnection {
     /// (`.context/agent-model.md` "The sandbox confines Codex to its
     /// worktree"). A new thread is persisted at once, so Codex's TUI can
     /// resume it.
-    async fn open(&self, _cwd: &Path) -> Result<Opened, String> {
+    async fn open(&self, _cwd: &Path) -> Result<String, String> {
         let mut params = self.open.params.clone();
         params["sandbox"] = json!("workspace-write");
         let opened = self
@@ -236,10 +233,7 @@ impl Connection for CodexConnection {
             state.run = thread_run(&opened);
         }
         let _ = self.opened.send(true);
-        Ok(Opened {
-            session_id: thread,
-            preamble: None,
-        })
+        Ok(thread)
     }
 
     /// The thread's name, as Codex's own thread list shows it.
@@ -253,14 +247,6 @@ impl Connection for CodexConnection {
             .map(|_| ())
             .map_err(|e| format!("Codex didn't take the name: {e}"))
     }
-
-    /// The person prompts in Codex's TUI; nothing here sends a turn.
-    fn prompt(&self, _prompt: HumanPrompt) -> Result<(), String> {
-        Err("a Codex session is prompted in Codex's own TUI".into())
-    }
-
-    /// The TUI stops its own turns.
-    fn cancel(&self) {}
 
     /// The daemon takes `thread/inject_items`, and no turn is running.
     fn can_inject(&self) -> bool {
@@ -610,9 +596,8 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
         }
         "item/reasoning/summaryTextDelta" => {
             streamed(p, state);
-            update(ChatUpdate::ThoughtChunk(text_of(p, "delta")))
+            update(ChatUpdate::ThoughtChunk)
         }
-        "turn/plan/updated" => update(ChatUpdate::Plan(plan(p))),
         "thread/tokenUsage/updated" => {
             let total = p.pointer("/tokenUsage/total").and_then(Counts::of);
             let last = p.pointer("/tokenUsage/last").and_then(Counts::of);
@@ -630,15 +615,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 .and_then(Value::as_u64);
             state.run.context_tokens = used.and_then(|n| i64::try_from(n).ok());
             state.run.context_window = size.and_then(|n| i64::try_from(n).ok());
-            match (used, size) {
-                (Some(used), Some(size)) => update(ChatUpdate::Usage(ContextUsage {
-                    used,
-                    size,
-                    cost_amount: None,
-                    cost_currency: None,
-                })),
-                _ => Vec::new(),
-            }
+            Vec::new()
         }
         "turn/started" => {
             state.running = true;
@@ -689,7 +666,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                     run: (state.run != TurnRun::default()).then(|| state.run.clone()),
                 }),
             };
-            vec![Incoming::PromptDone(done)]
+            vec![Incoming::TurnEnded(done)]
         }
         "thread/settings/updated" => {
             let setting = |k: &str| {
@@ -724,22 +701,6 @@ fn text_of(v: &Value, key: &str) -> String {
         .unwrap_or_default()
 }
 
-fn plan(p: &Value) -> Vec<PlanEntry> {
-    p.get("plan")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|step| PlanEntry {
-            content: text_of(step, "step"),
-            status: match step.get("status").and_then(Value::as_str) {
-                Some("completed") => PlanStatus::Completed,
-                Some("inProgress") => PlanStatus::InProgress,
-                _ => PlanStatus::Pending,
-            },
-        })
-        .collect()
-}
-
 /// What one thread item says, started or `done`. Text that arrived as
 /// deltas (its id in `streamed`) isn't repeated when the item completes.
 fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec<ChatUpdate> {
@@ -765,18 +726,14 @@ fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec
             vec![ChatUpdate::AgentChunk(text_of(item, "text"))]
         }
         "reasoning" if done && !was_streamed => {
-            let summary: Vec<String> = item
+            let thought = item
                 .get("summary")
                 .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .map(cap)
-                .collect();
-            if summary.is_empty() {
-                Vec::new()
+                .is_some_and(|s| s.iter().any(|t| t.as_str().is_some()));
+            if thought {
+                vec![ChatUpdate::ThoughtChunk]
             } else {
-                vec![ChatUpdate::ThoughtChunk(summary.join("\n"))]
+                Vec::new()
             }
         }
         "userMessage" | "agentMessage" | "reasoning" | "plan" | "hookPrompt"
@@ -1116,8 +1073,8 @@ mod tests {
             for incoming in on_message(&message, &mut state) {
                 log.push(match incoming {
                     Incoming::TurnStarted(_) => "turn started".to_string(),
-                    Incoming::PromptDone(Ok(end)) => format!("turn ended {}", end.stop_reason),
-                    Incoming::PromptDone(Err(e)) => format!("turn failed {e}"),
+                    Incoming::TurnEnded(Ok(end)) => format!("turn ended {}", end.stop_reason),
+                    Incoming::TurnEnded(Err(e)) => format!("turn failed {e}"),
                     Incoming::Waiting(Some(q)) => format!("waiting {q}"),
                     Incoming::Waiting(None) => "waiting cleared".to_string(),
                     Incoming::Subagent { change, id, .. } => match change {
@@ -1277,7 +1234,7 @@ mod tests {
                 _ => {}
             }
             for incoming in out {
-                if let Incoming::PromptDone(Ok(end)) = incoming {
+                if let Incoming::TurnEnded(Ok(end)) = incoming {
                     ended_on = end.run;
                 }
             }
@@ -1462,7 +1419,7 @@ mod tests {
                         )
                     }
                     Incoming::Waiting(_) => "waiting".into(),
-                    Incoming::PromptDone(_) => "turn done".into(),
+                    Incoming::TurnEnded(_) => "turn done".into(),
                     Incoming::Update(u) => match *u {
                         ChatUpdate::ToolCall(t) if t.kind == ToolKind::Subagent => {
                             format!("collab {}", t.name.unwrap_or_default())
@@ -1526,10 +1483,7 @@ mod tests {
             let incoming = on_message(&message, &mut state);
             let kind = if incoming.iter().any(|i| matches!(i, Incoming::Compacted)) {
                 "compacted"
-            } else if incoming
-                .iter()
-                .any(|i| matches!(i, Incoming::PromptDone(_)))
-            {
+            } else if incoming.iter().any(|i| matches!(i, Incoming::TurnEnded(_))) {
                 "done"
             } else {
                 continue;
@@ -1844,7 +1798,7 @@ mod tests {
         let ends: Vec<&TurnEnd> = got
             .iter()
             .filter_map(|i| match i {
-                Incoming::PromptDone(Ok(end)) => Some(end),
+                Incoming::TurnEnded(Ok(end)) => Some(end),
                 _ => None,
             })
             .collect();
@@ -1883,7 +1837,7 @@ mod tests {
         )
         .remove(0)
         {
-            Incoming::PromptDone(Ok(end)) => end.run,
+            Incoming::TurnEnded(Ok(end)) => end.run,
             _ => panic!("not a turn end"),
         };
         let run = |model: &str, effort: &str| {
@@ -1945,7 +1899,7 @@ mod tests {
             &mut state,
         )
         .remove(0);
-        let Incoming::PromptDone(Ok(end)) = ended else {
+        let Incoming::TurnEnded(Ok(end)) = ended else {
             panic!("not a turn end");
         };
         let run = end.run.unwrap();
@@ -1972,7 +1926,7 @@ mod tests {
             &json!({"threadId": "t", "turn": {"id": "u", "status": "failed", "error": {"message": "quota"}}}),
             &mut state,
         );
-        assert!(matches!(&done[0], Incoming::PromptDone(Err(e)) if e == "quota"));
+        assert!(matches!(&done[0], Incoming::TurnEnded(Err(e)) if e == "quota"));
         let call = tool_call(
             &json!({"type": "mcpToolCall", "id": "m1", "server": "oxplow", "tool": "oxplow_read", "status": "completed", "arguments": {"uri": "oxplow:oxplow/knowledge?id=x&store=oxwiki"}, "result": {"content": []}}),
             "m1".into(),
@@ -2093,7 +2047,7 @@ mod tests {
             &mut state,
         );
         assert!(
-            matches!(&failed[0], Incoming::PromptDone(Err(e)) if e == "usageLimitExceeded: quota")
+            matches!(&failed[0], Incoming::TurnEnded(Err(e)) if e == "usageLimitExceeded: quota")
         );
         let cut = on_notification(
             "turn/completed",
@@ -2101,7 +2055,7 @@ mod tests {
             &mut state,
         );
         assert!(
-            matches!(&cut[0], Incoming::PromptDone(Ok(end)) if end.stop_reason == "interrupted")
+            matches!(&cut[0], Incoming::TurnEnded(Ok(end)) if end.stop_reason == "interrupted")
         );
     }
 

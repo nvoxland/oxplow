@@ -15,35 +15,6 @@ use specta::Type;
 use crate::ids::{AgentSessionId, ThreadId};
 use crate::time::Timestamp;
 
-/// What kind of slot a session is.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionKind {
-    /// A harness in a terminal (a PTY).
-    Terminal,
-    /// A one-shot session on a programmatic surface (not built yet).
-    Action,
-}
-
-impl SessionKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SessionKind::Terminal => "terminal",
-            SessionKind::Action => "action",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "terminal" => Some(SessionKind::Terminal),
-            "action" => Some(SessionKind::Action),
-            _ => None,
-        }
-    }
-}
-
 /// Why a session's slot was closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -79,7 +50,6 @@ impl SessionCloseReason {
 pub struct AgentSession {
     pub id: AgentSessionId,
     pub thread_id: ThreadId,
-    pub kind: SessionKind,
     /// The harness that runs in it: its registry key
     /// (`agent::registry::HarnessRegistry`).
     pub harness: String,
@@ -162,25 +132,18 @@ impl AgentSession {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewAgentSession {
     pub thread_id: ThreadId,
-    pub kind: SessionKind,
     pub harness: String,
     pub title: String,
 }
 
 impl NewAgentSession {
-    /// An untitled `kind` session of `harness` on `thread`.
-    pub fn of(thread_id: ThreadId, kind: SessionKind, harness: impl Into<String>) -> Self {
+    /// An untitled session of `harness` on `thread`.
+    pub fn terminal(thread_id: ThreadId, harness: impl Into<String>) -> Self {
         Self {
             thread_id,
-            kind,
             harness: harness.into(),
             title: String::new(),
         }
-    }
-
-    /// An untitled terminal session of `harness` on `thread`.
-    pub fn terminal(thread_id: ThreadId, harness: impl Into<String>) -> Self {
-        Self::of(thread_id, SessionKind::Terminal, harness)
     }
 }
 
@@ -193,7 +156,6 @@ mod tests {
         AgentSession {
             id: AgentSessionId::new(3),
             thread_id: ThreadId::new(1),
-            kind: SessionKind::Terminal,
             harness: "claude".into(),
             title: title.into(),
             resume_session_id: String::new(),
@@ -229,14 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn kinds_and_reasons_round_trip_their_strings() {
-        for k in [SessionKind::Terminal, SessionKind::Action] {
-            assert_eq!(SessionKind::parse(k.as_str()), Some(k));
-            assert_eq!(
-                serde_json::to_string(&k).unwrap(),
-                format!("\"{}\"", k.as_str())
-            );
-        }
+    fn close_reasons_round_trip_their_strings() {
         for r in [
             SessionCloseReason::Closed,
             SessionCloseReason::ThreadClosed,

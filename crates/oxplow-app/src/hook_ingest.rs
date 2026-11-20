@@ -1,6 +1,6 @@
 //! Hook ingest: where every agent harness's activity enters oxplow.
 //!
-//! Claude/Codex/opencode hooks (via the control plane) and the ACP client
+//! Claude/Codex/opencode hooks (via the control plane) and the Codex observer
 //! all hand a Claude-shaped [`HookEnvelope`] to [`HookIngestService::ingest`].
 //! One envelope is **one transaction** (P3.3): the state it changes
 //! (the thread's resume session, the agent turn) and the `agent.*` events
@@ -18,7 +18,7 @@
 //! - `Stop` / `Interrupt`: closes the open turns (`agent.turn.ended`);
 //!   status Idle / AwaitingUser / Stopped; then the turn-end snapshot.
 //! - `SessionStart` (a harness process starting or resuming a session —
-//!   Claude's command hook, Codex's hook, the ACP client; not a `compact`):
+//!   Claude's command hook, Codex's hook, the Codex observer; not a `compact`):
 //!   closes the turns the previous process left open (`session_restarted`), logs
 //!   `agent.session.started`, status Idle.
 //! - A session id seen for the first time on a thread (on any kind)
@@ -72,7 +72,7 @@ use crate::events::{EventBus, OxplowEvent};
 use oxplow_domain::hook::{CauseBasis, TurnOutcome, TurnRun, TurnSource};
 
 /// The Stop-body key a transport puts a turn's own token counts under
-/// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
+/// (a structured session's per-turn counts, from the Codex observer); they ride `agent.turn.ended@2 { usage }`.
 pub const TURN_USAGE_KEY: &str = "oxplow_turn_usage";
 
 /// What the agent policy decided about a tool call (PreToolUse), carried
@@ -93,7 +93,7 @@ pub struct HookEnvelope {
     pub kind: HookKind,
     pub thread_id: Option<ThreadId>,
     pub stream_id: Option<StreamId>,
-    /// The agent session it came from (`X-Oxplow-Session`, the ACP host,
+    /// The agent session it came from (`X-Oxplow-Session`, the Codex observer,
     /// the UI's interrupt), when the sender knows it.
     #[serde(default)]
     pub agent_session_id: Option<oxplow_domain::AgentSessionId>,
@@ -112,8 +112,8 @@ pub struct HookEnvelope {
     #[serde(default)]
     pub decision: Option<ToolDecision>,
     /// A tool hook's call in oxplow's vocabulary, as the sender mapped it
-    /// (the hook route, with the bearer's harness; the ACP host, by the
-    /// protocol's tool kinds). `None`: the body names no tool, and nothing
+    /// (the hook route, with the bearer's harness; the Codex observer, by the
+    /// protocol's item kinds). `None`: the body names no tool, and nothing
     /// is recorded of it. In-process only: an envelope that crosses a wire
     /// (a person's interrupt) is never a tool hook.
     #[serde(skip)]
@@ -371,8 +371,8 @@ impl HookIngestService {
         Ok(())
     }
 
-    /// Log and announce an agent session's status outside a hook (the ACP
-    /// session's permission cards). `session` resolves as a hook's does.
+    /// Log and announce an agent session's status outside a hook (the Codex
+    /// observer's approval waits). `session` resolves as a hook's does.
     pub async fn set_status(
         &self,
         thread: &ThreadId,
@@ -806,8 +806,8 @@ fn record_tx(
         }
         HookKind::PreToolUse | HookKind::PostToolUse => {
             // The call as its harness mapped it: the sender's reading (the
-            // hook route maps the body by the bearer's harness, the ACP
-            // host by the protocol's tool kinds).
+            // hook route maps the body by the bearer's harness, the Codex
+            // observer by the protocol's item kinds).
             let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
@@ -891,7 +891,7 @@ fn record_tx(
             let end = TurnEnd {
                 answer,
                 transcript_path,
-                // Counts a harness reported with the turn itself (ACP).
+                // Counts a harness reported with the turn itself (the Codex observer).
                 usage: body
                     .get(TURN_USAGE_KEY)
                     .and_then(|u| serde_json::from_value(u.clone()).ok()),

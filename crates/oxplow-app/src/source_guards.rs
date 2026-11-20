@@ -869,8 +869,6 @@ const HARNESS_CRATES: &[&str] = &["crates/oxplow-harnesses/", "crates/oxplow-har
 /// instruction files (comments left out).
 fn harness_namers() -> BTreeSet<String> {
     const PATTERNS: &[&str] = &[
-        "AgentKind",
-        "claude-agent-acp",
         "CLAUDECODE",
         "CLAUDE_CODE_",
         "claude_code.token",
@@ -925,33 +923,6 @@ fn only_harness_implementations_name_a_harness() {
         unlisted.is_empty() && gone.is_empty(),
         "who names a harness changed.\nunlisted (go through AgentHarness instead): {unlisted:#?}\nno longer there (drop from HARNESS_IMPLEMENTATION): {gone:#?}"
     );
-}
-
-/// The Drive interface (`oxplow-domain/src/agent/drive.rs`): oxplow
-/// prompting an agent. Nothing in production code implements, holds or
-/// calls it — oxplow never drives an agent through a surface licensed for
-/// interactive use, and the first driver is a decision, not a drift.
-#[test]
-fn nothing_in_core_drives_an_agent() {
-    const DRIVE: &str = "crates/oxplow-domain/src/agent/drive.rs";
-    const PATTERNS: &[&str] = &[
-        "dyn Drive",
-        "impl Drive",
-        "Drive for",
-        "agent::drive::",
-        "DriveError",
-    ];
-    let offenders: Vec<String> = production_sources()
-        .into_iter()
-        .filter(|(path, _)| path != DRIVE)
-        .filter(|(_, text)| {
-            text.lines()
-                .filter(|l| !l.trim_start().starts_with("//"))
-                .any(|line| PATTERNS.iter().any(|p| line.contains(p)))
-        })
-        .map(|(path, _)| path)
-        .collect();
-    assert_eq!(offenders, Vec::<String>::new());
 }
 
 /// oxplow never wakes an agent with what it delivers

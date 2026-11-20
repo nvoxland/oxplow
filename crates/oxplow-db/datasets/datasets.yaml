@@ -1412,12 +1412,11 @@
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 11
-  description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
+  version: 12
+  description: "Agent sessions: the agent slots a person opened on a thread, each a harness in a terminal. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   fields:
     - { name: "id", type: "INTEGER", doc: "Session id (its URI is `oxplow:oxplow/agent_session?id=ses<id>`)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it's on (v_thread.id)." }
-    - { name: "kind", type: "TEXT", doc: "`terminal` (a harness in a PTY) or `action` (a one-shot session). (v7: `chat` is gone.)" }
     - { name: "harness", type: "TEXT", doc: "What runs in it: `claude`, `codex`, `opencode`, or a harness an extension declares." }
     - { name: "title", type: "TEXT", doc: "What the person called it; empty until renamed." }
     - { name: "resume_session_id", type: "TEXT", doc: "The harness's own session id, to resume it; empty when unknown." }

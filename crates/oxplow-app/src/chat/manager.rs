@@ -1,6 +1,6 @@
-//! Every open chat session, by agent session: a Codex thread's. Holds only each session's command sender and shared view; the
-//! actor (`session.rs`) owns the connection. Events for every session go
-//! out on one broadcast channel.
+//! Every observed session, by agent session: a Codex thread's. Holds only
+//! each session's command sender and shared view; the actor (`session.rs`)
+//! owns the connection.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,33 +8,12 @@ use std::sync::Arc;
 
 use oxplow_domain::AgentSessionId;
 use parking_lot::Mutex;
-use serde::Serialize;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use super::codex::{CodexConnection, CodexOpen};
 use super::conn::{Connection, Incoming};
 use super::host::ChatHost;
-use super::model::ContextUsage;
-use super::session::{Actor, ChatError, ChatEvent, ChatStatus, Command, SessionSpec, SessionView};
-use super::transcript::TranscriptItem;
-
-/// A session as the UI reads it.
-#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatSnapshot {
-    pub agent: String,
-    /// The session's generation: a new one (a Restart) replaces the
-    /// client's transcript instead of merging into it.
-    #[specta(type = oxplow_domain::JsNumber)]
-    pub generation: u64,
-    pub status: ChatStatus,
-    pub usage: Option<ContextUsage>,
-    /// The highest `seq` in the transcript; ask `since` this next time.
-    #[specta(type = oxplow_domain::JsNumber)]
-    pub head_seq: u64,
-    pub items: Vec<TranscriptItem>,
-    pub stderr_tail: Vec<String>,
-}
+use super::session::{Actor, ChatError, Command, SessionSpec, SessionView};
 
 struct Handle {
     commands: mpsc::UnboundedSender<Command>,
@@ -65,7 +44,6 @@ struct Reservation {
 
 pub struct ChatManager {
     sessions: Mutex<HashMap<AgentSessionId, Handle>>,
-    events: broadcast::Sender<ChatEvent>,
     /// Hands out session generations; one per open.
     next_generation: std::sync::atomic::AtomicU64,
 }
@@ -78,21 +56,10 @@ impl Default for ChatManager {
 
 impl ChatManager {
     pub fn new() -> Self {
-        let (events, _) = broadcast::channel(1024);
         Self {
             sessions: Mutex::new(HashMap::new()),
-            events,
             next_generation: std::sync::atomic::AtomicU64::new(1),
         }
-    }
-
-    pub fn subscribe(&self) -> broadcast::Receiver<ChatEvent> {
-        self.events.subscribe()
-    }
-
-    /// Publish an event as a session would (transport tests).
-    pub fn emit_event_for_tests(&self, event: ChatEvent) {
-        let _ = self.events.send(event);
     }
 
     /// Is agent session `session`'s agent running?
@@ -114,7 +81,7 @@ impl ChatManager {
         }
         let generation = self.generation();
         let (tx, rx) = mpsc::unbounded_channel();
-        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, generation)));
+        let view = Arc::new(Mutex::new(SessionView::new(generation)));
         let current = Arc::new(AtomicBool::new(true));
         sessions.insert(
             spec.session_id,
@@ -210,34 +177,15 @@ impl ChatManager {
             ..
         } = reservation;
         let (ready_tx, ready_rx) = oneshot::channel();
-        let actor = Actor::new(spec, host, view.clone(), self.events.clone(), current);
+        let actor = Actor::new(spec, host, view, current);
         let teardown = actor.teardown_handle();
         tokio::spawn(async move {
             actor.run(conn, incoming, cmd_rx, ready_tx).await;
-            teardown
-                .run(Some("the agent connection ended".to_string()))
-                .await;
+            teardown.run().await;
         });
-        Self::ready(ready_rx, &view).await
-    }
-
-    /// Whether the session started: the actor's word, else the agent's
-    /// last stderr lines.
-    async fn ready(
-        ready: oneshot::Receiver<Result<(), ChatError>>,
-        view: &Mutex<SessionView>,
-    ) -> Result<(), ChatError> {
-        match ready.await {
-            Ok(r) => r,
-            Err(_) => {
-                let tail = view.lock().stderr_tail.join("\n");
-                Err(ChatError::Agent(if tail.is_empty() {
-                    "the agent exited during startup".into()
-                } else {
-                    format!("the agent exited during startup:\n{tail}")
-                }))
-            }
-        }
+        ready_rx
+            .await
+            .unwrap_or_else(|_| Err(ChatError::Agent("the agent connection ended".into())))
     }
 
     fn commands(
@@ -252,26 +200,6 @@ impl ChatManager {
             .ok_or(ChatError::NotOpen)
     }
 
-    /// Send what a person typed. The only caller is the UI-only RPC
-    /// command behind the prompt box (the source guard pins this).
-    pub async fn submit_human_prompt(
-        &self,
-        session: &AgentSessionId,
-        text: String,
-    ) -> Result<(), ChatError> {
-        let (reply, rx) = oneshot::channel();
-        self.commands(session)?
-            .send(Command::Prompt { text, reply })
-            .map_err(|_| ChatError::NotOpen)?;
-        rx.await.map_err(|_| ChatError::NotOpen)?
-    }
-
-    pub fn cancel(&self, session: &AgentSessionId) -> Result<(), ChatError> {
-        self.commands(session)?
-            .send(Command::Cancel)
-            .map_err(|_| ChatError::NotOpen)
-    }
-
     /// Name the session's agent conversation (what its own UI lists it
     /// as), when its agent can; the person's rename asks for it.
     pub async fn rename_native(
@@ -284,40 +212,6 @@ impl ChatManager {
             .send(Command::Rename { name, reply })
             .map_err(|_| ChatError::NotOpen)?;
         rx.await.map_err(|_| ChatError::NotOpen)?
-    }
-
-    /// Answer a permission card; `option_id: None` cancels it.
-    pub async fn respond_permission(
-        &self,
-        session: &AgentSessionId,
-        request_id: String,
-        option_id: Option<String>,
-    ) -> Result<(), ChatError> {
-        let (reply, rx) = oneshot::channel();
-        self.commands(session)?
-            .send(Command::Respond {
-                request_id,
-                option_id,
-                reply,
-            })
-            .map_err(|_| ChatError::NotOpen)?;
-        rx.await.map_err(|_| ChatError::NotOpen)?
-    }
-
-    /// The session's state and the items changed after `since`. Also works
-    /// for a session that has stopped (its transcript stays readable).
-    pub fn transcript(&self, session: &AgentSessionId, since: u64) -> Option<ChatSnapshot> {
-        let sessions = self.sessions.lock();
-        let v = sessions.get(session)?.view.lock();
-        Some(ChatSnapshot {
-            agent: v.agent.clone(),
-            generation: v.generation,
-            status: v.status,
-            usage: v.transcript.usage().cloned(),
-            head_seq: v.transcript.head_seq(),
-            items: v.transcript.since(since),
-            stderr_tail: v.stderr_tail.clone(),
-        })
     }
 
     /// Stop the session and its agent process.

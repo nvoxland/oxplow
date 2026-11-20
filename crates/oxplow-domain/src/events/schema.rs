@@ -1009,7 +1009,7 @@ impl EventType for AgentTurnStarted {
 }
 
 /// A turn's token counts, when the harness reported them with the turn
-/// (ACP's prompt response). Claude's come from the transcript instead.
+/// (the Codex observer's per-turn report). Claude's come from the transcript instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TurnUsage {
@@ -1035,7 +1035,7 @@ pub struct AgentTurnEndedV5 {
     /// The harness's session transcript (Claude's `transcript_path`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript_path: Option<String>,
-    /// Counts reported with the turn (ACP).
+    /// Counts reported with the turn (the Codex observer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
     /// The jobs and subagents still running when it ended, when the

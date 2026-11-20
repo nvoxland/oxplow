@@ -3,7 +3,7 @@
 //!
 //! **The command is the slot's lifecycle; the RPC is the process's.**
 //! Opening a session only inserts its row: the UI sees it and starts its
-//! process (a PTY or an ACP agent), and nothing types into it — the
+//! process (a PTY or a Codex observer), and nothing types into it — the
 //! no-automation guards keep that true for a session an agent opened too.
 //! Closing one closes its slot and, once that commits, stops its process
 //! (`SessionProcesses`). Stopping a process alone (`terminate_terminal_session`,
@@ -22,9 +22,7 @@ use oxplow_db::agent_session_store::{
 };
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent_session::BindingOrigin;
-use oxplow_domain::agent_session::{
-    AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
-};
+use oxplow_domain::agent_session::{AgentSession, NewAgentSession, SessionCloseReason};
 use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{AgentSessionId, CommandCall, CommandError, Confirm, ThreadId, Timestamp};
 use schemars::JsonSchema;
@@ -46,9 +44,6 @@ pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 pub struct OpenInput {
     /// The thread (`thr1`).
     pub thread: String,
-    /// `terminal` (the default); an `action` session isn't built yet.
-    #[serde(default)]
-    pub kind: Option<SessionKind>,
     /// What runs in it: a registered, enabled harness, always named.
     pub harness: String,
     /// What to call it.
@@ -152,13 +147,14 @@ fn open_thread(ctx: &TxCtx<'_>, thread: ThreadId) -> Result<(), CommandError> {
     in_own_stream(ctx, thread)
 }
 
-/// The harness and kind a session runs: what was named, checked against
-/// the registered harnesses and the independently enabled ones. Every harness runs in a terminal.
+/// The harness a session runs: what was named, checked against the
+/// registered harnesses and the independently enabled ones. Every harness
+/// runs in a terminal.
 fn choose_agent(
     config: &OxplowConfig,
     harnesses: &HarnessRegistry,
     input: &OpenInput,
-) -> Result<(String, SessionKind), CommandError> {
+) -> Result<String, CommandError> {
     if input.harness.trim().is_empty() {
         return Err(invalid("/harness", "select an agent harness"));
     }
@@ -172,16 +168,10 @@ fn choose_agent(
             format!("agent `{key}` isn't enabled for this project"),
         ));
     }
-    match input.kind.unwrap_or(SessionKind::Terminal) {
-        SessionKind::Action => Err(invalid(
-            "/kind",
-            "an action session has no implementation yet",
-        )),
-        kind => Ok((key, kind)),
-    }
+    Ok(key)
 }
 
-/// `agent_session.open { thread, harness, kind?, title?, resume? }`:
+/// `agent_session.open { thread, harness, title?, resume? }`:
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
 pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
@@ -199,13 +189,12 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
             )?;
             open_thread(ctx, thread)?;
             let cfg = crate::config_service::read_config(&config.config);
-            let (harness, kind) = choose_agent(&cfg, &harnesses, &input)?;
+            let harness = choose_agent(&cfg, &harnesses, &input)?;
             let now = Timestamp::now();
             let session = insert_tx(
                 ctx.conn,
                 &NewAgentSession {
                     thread_id: thread,
-                    kind,
                     harness,
                     title: input.title.unwrap_or_default(),
                 },
@@ -522,7 +511,6 @@ pub fn fork_conversation_op(capabilities: Arc<crate::capabilities::CapabilityReg
                 ctx.conn,
                 &NewAgentSession {
                     thread_id: session.thread_id,
-                    kind: session.kind,
                     harness: session.harness.clone(),
                     title: format!("{} (fork)", named(&session)),
                 },
@@ -663,8 +651,8 @@ mod tests {
         .unwrap();
         let s: AgentSession = serde_json::from_value(out.result).unwrap();
         assert_eq!(
-            (s.kind, s.harness, s.title.as_str()),
-            (SessionKind::Terminal, "claude".to_string(), "review"),
+            (s.harness, s.title.as_str()),
+            ("claude".to_string(), "review"),
             "the first declared harness, with no agents: named"
         );
         assert!(!fx
@@ -859,12 +847,11 @@ mod tests {
             (
                 new.thread_id,
                 new.harness.as_str(),
-                new.kind,
                 new.resume_session_id.as_str(),
                 new.fork_next,
                 new.is_open()
             ),
-            (fx.thread, "claude", source.kind, "c5", true, true)
+            (fx.thread, "claude", "c5", true, true)
         );
         let after = get(&fx, fx.session).await;
         assert_eq!(
@@ -931,7 +918,7 @@ mod tests {
             .transaction(move |tx| {
                 insert_tx(
                     tx,
-                    &NewAgentSession::of(thread, SessionKind::Terminal, "nothing"),
+                    &NewAgentSession::terminal(thread, "nothing"),
                     Timestamp::now(),
                 )
             })
@@ -990,8 +977,6 @@ mod tests {
             .agent_enabled
             .insert("codex".into(), false);
         for (input, field) in [
-            (json!({ "thread": thread, "kind": "action" }), "/kind"),
-            (json!({ "thread": thread, "kind": "chat" }), "/kind"),
             (json!({ "thread": thread, "harness": "codex" }), "/harness"),
             (json!({ "thread": thread, "harness": "nope" }), "/harness"),
             (json!({ "thread": thread, "harness": "acp" }), "/harness"),

@@ -53,7 +53,7 @@ csv = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 specta = { workspace = true }
-# `Unknown` types raw agent JSON as TS `unknown` (chat::model).
+# `Unknown` / `Any` type raw JSON in TS (extension manifests).
 specta-typescript = { workspace = true }
 async-trait = { workspace = true }
 indexmap = "2.14"

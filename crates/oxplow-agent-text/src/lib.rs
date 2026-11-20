@@ -5,7 +5,7 @@
 use oxplow_domain::agent::text::{AgentText, Text};
 
 /// What every agent must know of oxplow, whatever project it's in: oxplow
-/// adds it to the prompt of every session it launches (terminal and ACP),
+/// adds it to the prompt of every session it launches (terminal or Codex observer),
 /// so no project repeats it in its own instruction files. The detail is in
 /// the skills, which load on demand.
 pub const WORKING_IN_OXPLOW: &str = include_str!("../assets/working-in-oxplow.md");

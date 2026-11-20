@@ -1,9 +1,8 @@
-//! Source-scan guard: oxplow never synthesizes agent input. A prompt
-//! reaches a chat session's agent only because a person submitted it, so the
-//! code that can build or send one is pinned here. `HumanPrompt` enforces
-//! the same at the type level; this catches a new path around it (a Codex
-//! `turn/start`, a second builder, a new caller of the submit path).
-//! The TS side has `no-agent-input-automation.test.ts`.
+//! Source-scan guard: oxplow never synthesizes agent input. An observed
+//! Codex session's person prompts in Codex's own TUI; oxplow only injects
+//! context between turns. This catches a path around that (a Codex
+//! `turn/start`, a second injector). The TS side has
+//! `no-agent-input-automation.test.ts`.
 
 #![allow(clippy::unwrap_used)]
 
@@ -96,38 +95,5 @@ fn only_the_codex_connection_injects_context() {
     assert_eq!(
         files_containing(&lines, "\"thread/inject_items\""),
         vec!["crates/oxplow-app/src/chat/codex.rs"]
-    );
-}
-
-#[test]
-fn prompts_are_composed_only_on_the_human_submit_path() {
-    let lines = source_lines();
-    let calls: Vec<&(String, String)> = lines
-        .iter()
-        .filter(|(f, l)| contains_word(l, "compose(") && !f.ends_with("chat/human_prompt.rs"))
-        .collect();
-    assert_eq!(calls.len(), 1, "compose callers: {calls:?}");
-    assert_eq!(calls[0].0, "crates/oxplow-app/src/chat/session.rs");
-    assert!(calls[0].1.contains("human_prompt::compose(&text"));
-}
-
-/// No production code submits a human prompt: the chat view that did is
-/// gone, and a session's person types in the agent's own TUI. The library
-/// keeps the entry point (`ChatManager::submit_human_prompt`) for an
-/// embedded chat to come, called from its tests only.
-#[test]
-fn no_production_code_calls_submit_human_prompt() {
-    let lines = source_lines();
-    let allowed = [
-        // The definition.
-        "crates/oxplow-app/src/chat/manager.rs",
-    ];
-    let hits: Vec<String> = files_containing(&lines, "submit_human_prompt(")
-        .into_iter()
-        .filter(|f| !allowed.contains(&f.as_str()))
-        .collect();
-    assert!(
-        hits.is_empty(),
-        "unexpected submit_human_prompt callers: {hits:?}"
     );
 }

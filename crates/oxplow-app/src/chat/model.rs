@@ -1,11 +1,11 @@
-//! oxplow's own view of what a chat agent says. A connection (`codex.rs`)
-//! is the only module that sees its wire; everything past it (mapping,
-//! transcript, the session, the UI) speaks these.
+//! oxplow's own view of what an observed agent says. A connection
+//! (`codex.rs`) is the only module that sees its wire; everything past it
+//! (mapping, the session) speaks these.
 
 use serde::{Deserialize, Serialize};
 
 /// The tool categories a connection maps its agent's tools onto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {
     Read,
@@ -23,7 +23,7 @@ pub enum ToolKind {
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
     #[default]
@@ -34,7 +34,7 @@ pub enum ToolStatus {
 }
 
 /// One file change a tool call reports. `old_text: None` means a new file.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDiff {
     pub path: String,
@@ -44,7 +44,7 @@ pub struct ToolDiff {
 
 /// A tool call as last reported: the initial `tool_call` with every
 /// `tool_call_update` for its id applied.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCall {
     pub id: String,
@@ -56,9 +56,7 @@ pub struct ToolCall {
     /// Paths from `locations` (absolute, per the protocol).
     pub locations: Vec<String>,
     /// The agent's own JSON for the call; `unknown` to the renderer.
-    #[specta(type = Option<specta_typescript::Unknown>)]
     pub raw_input: Option<serde_json::Value>,
-    #[specta(type = Option<specta_typescript::Unknown>)]
     pub raw_output: Option<serde_json::Value>,
     pub diffs: Vec<ToolDiff>,
     /// Text content blocks (command output, messages).
@@ -122,80 +120,18 @@ impl ToolCall {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum PlanStatus {
-    Pending,
-    InProgress,
-    Completed,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanEntry {
-    pub content: String,
-    pub status: PlanStatus,
-}
-
-/// Context-window occupancy and cumulative cost from `usage_update`. It
-/// drives the context meter only — never token accounting.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ContextUsage {
-    #[specta(type = oxplow_domain::JsNumber)]
-    pub used: u64,
-    #[specta(type = oxplow_domain::JsNumber)]
-    pub size: u64,
-    pub cost_amount: Option<f64>,
-    pub cost_currency: Option<String>,
-}
-
-/// One `session/update`, in oxplow's terms.
+/// One update from the agent, in oxplow's terms: what the observer
+/// records from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatUpdate {
+    /// The person's prompt (its text).
     UserChunk(String),
+    /// The agent's text: the last run of it is the turn's answer.
     AgentChunk(String),
-    ThoughtChunk(String),
+    /// The agent thought: it ends the text before it.
+    ThoughtChunk,
     ToolCall(ToolCall),
     ToolCallUpdate(ToolCallPatch),
-    Plan(Vec<PlanEntry>),
-    Usage(ContextUsage),
-    /// Mode, command, config and info updates: nothing oxplow shows yet.
+    /// Anything else: nothing oxplow records.
     Ignored,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionKind {
-    AllowOnce,
-    AllowAlways,
-    RejectOnce,
-    RejectAlways,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionOption {
-    pub id: String,
-    pub name: String,
-    pub kind: PermissionKind,
-}
-
-/// A `session/request_permission`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PermissionAsk {
-    pub tool: ToolCallPatch,
-    pub options: Vec<PermissionOption>,
-}
-
-/// How a permission request was answered.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(
-    tag = "type",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-pub enum PermissionAnswer {
-    Selected { option_id: String },
-    Cancelled,
 }

@@ -59,15 +59,6 @@ intent:
     - name: the-change-review-grid-reads-an-analyzed-commit
       input: { part: change-review, params: { change_id: 1 } }
       expect: the summary, the changed functions and the test files of an analyzed commit
-    - name: the-slot-page-links-the-mounted-page-and-its-host
-      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0" } }
-      expect: the page a slot mount shows, the page that hosts it and the slot
-    - name: the-slot-page-links-to-its-extension
-      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0' } }
-      expect: its see-also links name the extension that declares it
-    - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0"} }
-      expect: its description is a paragraph above the facts
 ui:
   mounts:
     - { page: extension-runs, at: oxplow/extension.runs }

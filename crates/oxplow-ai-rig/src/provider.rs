@@ -183,10 +183,6 @@ impl ModelProvider for RigProvider {
         &self.id
     }
 
-    fn as_any(&self) -> Option<&dyn std::any::Any> {
-        Some(self)
-    }
-
     fn title(&self) -> &str {
         &self.title
     }

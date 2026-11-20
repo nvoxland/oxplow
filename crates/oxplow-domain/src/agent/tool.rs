@@ -1,7 +1,7 @@
 //! oxplow's own vocabulary for an agent's tool calls
 //! (`.context/agent-model.md` "Tool vocabulary"). Every harness names its
 //! tools its own way — Claude Code's `Edit` and `Bash`, Codex's
-//! `apply_patch` and `shell`, an ACP agent's tool kinds — and maps each
+//! `apply_patch` and `shell`, a Codex thread's item kinds — and maps each
 //! call onto a [`ToolUse`] (`AgentHarness::tool_use`). Core reads only
 //! the [`ToolKind`] and the fields here: the write guard, a turn's
 //! claimed files, the agent's status and test-run collection never name a

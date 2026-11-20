@@ -205,8 +205,8 @@ mod tests {
         svc.db
             .transaction(move |c| {
                 c.execute(
-                    "INSERT INTO agent_session (id, thread_id, kind, harness, opened_at, updated_at)
-                     VALUES (9, ?1, 'terminal', 'claude', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    "INSERT INTO agent_session (id, thread_id, harness, opened_at, updated_at)
+                     VALUES (9, ?1, 'claude', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                     [thread],
                 )
                 .map_err(oxplow_db::map_sql_err)?;

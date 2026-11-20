@@ -46,8 +46,8 @@ pub enum ActivityKind {
     /// A harness session began (`agent.session.started`).
     SessionStarted,
     /// The agent parked on the person (`agent.status.changed{awaiting_user}`:
-    /// a final message ending in a question, a permission prompt, an ACP
-    /// permission card).
+    /// a final message ending in a question, a permission prompt, a Codex
+    /// approval wait).
     AwaitingUser,
     /// A status that ends such a wait (`agent.status.changed`, other states).
     StatusOther,

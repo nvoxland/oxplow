@@ -1,8 +1,9 @@
-//! What a chat session asks of the rest of oxplow: the policy, and the
-//! same recording a terminal agent's hooks get. [`ChatHost`] is the seam
-//! (tests use a recording double); [`ServicesChatHost`] is the real one,
-//! routing through `AgentPolicy`, `AgentContext` and hook ingest so a
-//! chat turn lands in the same tables as a hooked one.
+//! What an observed session asks of the rest of oxplow: the policy, the
+//! context to inject, and the same recording a terminal agent's hooks get.
+//! [`ChatHost`] is the seam (tests use a recording double);
+//! [`ServicesChatHost`] is the real one, routing through `AgentPolicy`,
+//! `AgentContext` and hook ingest so an observed turn lands in the same
+//! tables as a hooked one.
 
 use std::sync::{Arc, Weak};
 
@@ -47,17 +48,15 @@ pub trait ChatHost: Send + Sync + 'static {
     fn context_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
         None
     }
-    async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
-    /// [`Self::turn_started`] for a turn the agent gave its own id.
-    async fn turn_started_as(
+    /// The person's prompt opened a turn (`harness_turn`: the agent's own
+    /// id for it, when it said first).
+    async fn turn_started(
         &self,
         thread: &ThreadId,
         session_id: &str,
         prompt: &str,
-        _harness_turn: Option<&str>,
-    ) {
-        self.turn_started(thread, session_id, prompt).await;
-    }
+        harness_turn: Option<&str>,
+    );
     /// The agent named the turn in flight (after it opened): keep its id.
     async fn turn_identified(&self, _thread: &ThreadId, _session_id: &str, _harness_turn: &str) {}
     /// A tool call began (its request): recorded open until it finishes.
@@ -85,7 +84,7 @@ pub trait ChatHost: Send + Sync + 'static {
     async fn named(&self, thread: &ThreadId, session_id: &str, title: &str);
     /// The agent summarized its context to make room.
     async fn compacted(&self, thread: &ThreadId, session_id: &str);
-    /// A permission card is (or no longer is) waiting on the person.
+    /// The agent waits (or no longer waits) on the person in its own UI.
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>);
     /// A child agent of the session started or finished. Recorded; oxplow
     /// never drives the child.
@@ -111,9 +110,9 @@ pub struct ServicesChatHost {
     stream_id: Option<StreamId>,
     /// The agent session it hosts.
     session: oxplow_domain::AgentSessionId,
-    /// The thread status a permission card interrupted, restored when the
-    /// cards are answered (so a question the thread was waiting on survives
-    /// one).
+    /// The thread status a wait interrupted (an approval in the agent's
+    /// UI), restored when it clears (so a question the thread was waiting
+    /// on survives one).
     before_card: parking_lot::Mutex<Option<(AgentStatusState, Option<String>)>>,
 }
 
@@ -251,11 +250,7 @@ impl ChatHost for ServicesChatHost {
         Some(self.svc.upgrade()?.context_changes.subscribe())
     }
 
-    async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str) {
-        self.turn_started_as(thread, session_id, prompt, None).await;
-    }
-
-    async fn turn_started_as(
+    async fn turn_started(
         &self,
         thread: &ThreadId,
         session_id: &str,
@@ -421,7 +416,7 @@ impl ChatHost for ServicesChatHost {
         let session = Some(self.session);
         let (state, detail) = match question {
             Some(q) => {
-                // Remember what the first card interrupted.
+                // Remember what the first wait interrupted.
                 if self.before_card.lock().is_none() {
                     let now = svc
                         .agent_status_store
@@ -438,7 +433,7 @@ impl ChatHost for ServicesChatHost {
                 // Taken into a local: the guard mustn't live across an await.
                 let before = self.before_card.lock().take();
                 match before {
-                    // The agent had parked on the person before the card.
+                    // The agent had parked on the person before the wait.
                     Some((AgentStatusState::AwaitingUser, detail)) => {
                         (AgentStatusState::AwaitingUser, detail)
                     }

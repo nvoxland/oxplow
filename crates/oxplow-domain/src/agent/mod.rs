@@ -3,11 +3,9 @@
 //! An agent session runs a **harness** (`harness::AgentHarness`): what
 //! launches its process, what its hooks mean. Implementations are declared (`agent_harness` built-ins), many at
 //! once, and looked up by the session's harness key
-//! (`registry::HarnessRegistry`). Driving an agent — oxplow prompting it — is
-//! an interface only (`drive::Drive`): oxplow never drives an agent through
-//! a surface licensed for interactive use.
+//! (`registry::HarnessRegistry`). oxplow never drives an agent: it observes
+//! it, and steers it only through what its harness injects.
 
-pub mod drive;
 pub mod harness;
 pub mod observe;
 pub mod registry;

@@ -18,7 +18,7 @@ loaders:
                    ELSE th.uri = uri('oxplow/thread', 'id', :thread) END
       )
       SELECT ss.uri AS uri, ss.id AS sid, 0 AS sub, '' AS at_key,
-             ss.display_name AS name, ss.harness AS harness, ss.kind AS kind,
+             ss.display_name AS name, ss.harness AS harness,
              coalesce(st.state, CASE WHEN ss.closed_at IS NOT NULL THEN 'closed' ELSE 'idle' END) AS status,
              coalesce(ss.bound_origin, '') AS origin,
              max(coalesce(ss.last_seen_at, ''),
@@ -30,7 +30,7 @@ loaders:
       LEFT JOIN v_agent_session_status st ON st.agent_session_id = ss.id
       UNION ALL
       SELECT sa.uri, sa.agent_session_id, 1, coalesce(sa.started_at, sa.last_activity_at),
-             '    ' || coalesce(sa.kind, 'subagent') || ' ' || sa.id, 'subagent', '',
+             '    ' || coalesce(sa.kind, 'subagent') || ' ' || sa.id, 'subagent',
              sa.state, '', sa.last_activity_at, sa.calls || ' tool calls', ''
       FROM v_subagent sa
       JOIN ss ON ss.id = sa.agent_session_id
@@ -46,8 +46,6 @@ view:
       from: uri
   - key: harness
     label: Harness
-  - key: kind
-    label: Kind
   - key: status
     label: Status
   - key: origin

@@ -307,7 +307,7 @@ mod tests {
     }
 
     /// What every agent must know of oxplow rides in the prompt oxplow
-    /// adds, terminal and ACP alike: no project has to repeat it in its
+    /// adds, terminal or Codex observer alike: no project has to repeat it in its
     /// own instruction files.
     #[test]
     fn every_prompt_carries_how_to_work_in_oxplow() {
@@ -388,7 +388,7 @@ mod tests {
         assert!(without.contains("<session-context>"), "{without}");
     }
 
-    /// A harness that ships no skill files (an ACP agent) gets the skills
+    /// A harness that ships no skill files (a Codex session) gets the skills
     /// indexed in its prompt, fetched with `oxplow_get_skill`; one that ships them
     /// doesn't.
     #[test]

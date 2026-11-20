@@ -24,13 +24,12 @@ the person's terminal for any other status, an empty `202` included, so
 ingest failures and timeouts ack `200 {}` too, with the cause logged
 server-side. Never return a bespoke status from a hook branch.
 
-**Driving is an interface only.** `oxplow_domain::agent::drive::Drive`
-(`programmatic`, `prompt`) is how oxplow or an extension would one day
-prompt an agent, and only on a surface licensed for it (API-funded; a PTY,
-or an agent signed in with a plan, never is). Nothing implements,
-holds or calls it: `source_guards::nothing_in_core_drives_an_agent` fails
-on production code outside `drive.rs` that names it, so the first driver
-is a decision, not a drift.
+**oxplow never drives an agent.** Nothing prompts one on its own: a PTY,
+or an agent signed in with a plan, is licensed for interactive use. The
+unbuilt `Drive` interface, the `action` session kind and the
+`programmatic` harness feature were removed on 2026-11-20 (V53 dropped
+`agent_session.kind`); prompting an agent from oxplow, if it ever comes,
+is a new decision.
 
 ### No synthesized agent terminal input (no automation)
 
@@ -52,9 +51,9 @@ Synthesizing input would be automating the agent CLI, which risks its
 - Terminal input is UI-only: it isn't a command at all (no `/ipc` route,
   no Tauri command, nothing on the MCP surface), so an agent can't type
   at itself or a peer.
-- A chat-library prompt is built only by `chat/human_prompt.rs`
-  `compose`, from a person's submit ("The chat machinery (library)");
-  nothing in production submits one.
+- The Codex observer sends no prompt: the person types in Codex's own
+  TUI, and oxplow only injects context between turns ("The observer
+  machinery").
 - The agent input bus (`agent-input-bus.ts`: a page action's draft, Repair
   with the Agent) carries a person's gesture: the visible pane pastes the
   text. Nothing drags into an agent; what it should read goes in the
@@ -71,8 +70,8 @@ Synthesizing input would be automating the agent CLI, which risks its
   asserts the only production caller of `terminal_sessions.enqueue_input(`
   is the `terminal_input` core (the queue's drain task is the only caller
   of `send`).
-- `chat/guard_tests.rs` pins the chat library's prompt path: no production
-  code calls `submit_human_prompt` ("The chat machinery (library)").
+- `chat/guard_tests.rs`: no production code starts a Codex turn, and
+  context reaches a Codex thread only from `chat/codex.rs`.
 
 ### What we can't do from oxplow hooks
 
@@ -94,7 +93,6 @@ three seams:
 |---|---|---|
 | Launch | The process or thread: its command or Codex thread request, env, runtime files, system prompt, resume | `AgentHarness::launch` → `LaunchSpec::{Pty, CodexAppServer}` ("Launching the agent") |
 | Observe | Hooks, tool calls, transcripts and token telemetry, mapped into oxplow's vocabulary and logged as `agent.*` events | `tool_use`, `prompt`, `subagent`, `turns`, `token_readings`, `render` ("Observing") |
-| Drive | oxplow prompting the agent | `drive::Drive`, an interface nothing implements |
 
 The agent's MCP tools ("The agent's tools") are the one channel the agent
 itself starts.
@@ -649,130 +647,69 @@ page, "Earlier sessions"), which adds the stream's closed sessions and says per 
 reopens, resumes (`agent_session.open { resume }`), switches to a tab or
 does nothing. Nothing is adopted until a person picks a row.
 
-### The chat machinery (a library): tool mapping and transcript
+### The observer machinery (`chat/`)
 
-**Content text is capped** at 64 KiB per block (`conn::MAX_TEXT`, `cap`,
-`cap_value`). A connection turns its agent's traffic into
-`chat/model.rs` types (`ToolCall`, `ToolCallPatch`, `ChatUpdate`,
-`PermissionAsk` / `PermissionAnswer`); `chat/codex.rs` is the one
-production connection.
+oxplow once opened ACP agents as chat sessions with their own view, and
+later ran the in-app Assistant on the same session actor. Both are gone;
+on 2026-11-20 the machinery was cut down to what observing a Codex thread
+needs. It sends the agent nothing but context between turns and a rename
+the person asked for: no prompt, no permission answer, no file request.
+
+- **`chat/conn.rs`** — `Connection` (open → the agent's own id for the
+  conversation, closed, can_inject, inject, rename) and the `Incoming`
+  messages a connection feeds the actor in arrival order: updates, a
+  name, a wait (said or cleared), a compaction, a child agent's start or
+  finish, a child's tool call, a turn's start (the agent's id) and end.
+  Content text is capped at 64 KiB per block (`MAX_TEXT`, `cap`,
+  `cap_value`). `chat/codex.rs` is the one production connection; the
+  tests script their own (`Script` in `session_tests.rs`).
+- **`chat/model.rs`** — oxplow's side of what a connection says:
+  `ToolCall` / `ToolCallPatch` (the kinds Codex's
+  items map onto) and `ChatUpdate` (the person's prompt, the agent's
+  text, a thought, a tool call, a tool update).
+- **`chat/mapping.rs` (pure)** — tool kinds onto oxplow's vocabulary:
+  edit, delete and move → `edit`; read → `read`; search → `search`;
+  execute → `shell` (`rawInput.command` / `cmd`, else the title); fetch →
+  `fetch`; an `mcp__…` title or name → `mcp`; other → `other`; think and
+  switch-mode record nothing. Paths come from `locations`, then the
+  diffs, then path-like `rawInput` keys, deduplicated. The stored
+  `content` is `rawInput`, and once the call finishes
+  `{is_error, …rawOutput}`, so a shell call's `exit_code` survives.
+- **`chat/session.rs`** — one actor task per session owns the connection
+  and records, through `ChatHost`, what a hooked turn records: the session
+  start and the conversation's id; a prompt the person typed in the
+  agent's UI as a `UserPromptSubmit` (only with no turn in flight; a turn
+  that starts with no prompt is nobody's); each tool call at its start
+  (`PreToolUse`) and once at its finish (`PostToolUse`), a finished write
+  also checked against the policy (`check_tool`), so a denial is on the
+  record although the agent's UI approved it; the turn's end (`Stop`)
+  with its tokens, model and effort, and its answer — the agent's last
+  run of text, which a tool call or a thought ends; waits, compaction,
+  child agents and names; `Interrupt` when the agent goes away. A replay
+  (a resumed thread's turns) records nothing but its name. It keeps no
+  transcript: the open tool calls, the answer so far and a few flags.
+- **`chat/manager.rs`** — `Services.chat`: each agent session's command
+  sender and a small shared `SessionView` (generation, the conversation's
+  id, stopped). `open_codex` reserves the session's slot under one lock
+  before connecting, so concurrent opens start one observer; `close`
+  marks it closed at once, and a closed session still winding down is
+  replaced and marked not current, so it records no Interrupt over its
+  successor. `rename_native` and `close` are its only other calls.
+  Closing a thread stops every open session's process through
+  `agent_sessions::SessionProcesses::kill`.
+- **`chat/host.rs`** — `ChatHost`, the seam (tests use a recording
+  double). `ServicesChatHost::new(svc, stream, session)` holds
+  `Weak<Services>` and routes through `AgentPolicy`, `AgentContext` and
+  hook ingest, so an observed turn lands in the same tables as a hooked
+  one.
+- **`chat/guard_tests.rs`** scans the source: no production code starts a
+  Codex turn (`"turn/start"`), and context reaches a Codex thread only from
+  `codex.rs`.
 
 **Gotcha: `serde_json` runs with `preserve_order` workspace-wide** (the
-workspace `Cargo.toml` declares it; the ACP SDK used to switch it on by
-feature unification, and removing the SDK changed the checked-in schemas'
-key order until it was declared). JSON objects serialize in insertion
-order. Anything that needs a stable text form builds it from a `BTreeMap`
-(`metric_cube::dims_key` does), and hashes never hash JSON.
-
-**`chat/mapping.rs` (pure)** maps tool kinds onto oxplow's vocabulary
-(the kinds in `model.rs` are ACP's, kept because Codex's items map onto
-them): edit, delete and move → `edit`; read → `read`; search →
-`search`; execute → `shell` (`rawInput.command` / `cmd`, else the title);
-fetch → `fetch`; an `mcp__…` title or name → `mcp`; other → `other`;
-think and switch-mode record nothing. Paths come from `locations`, then
-the diffs, then path-like `rawInput` keys (`file_path`, `path`,
-`absolute_path`, `notebook_path`, `source`/`destination`,
-`old_path`/`new_path`), deduplicated. The stored `content` is `rawInput`,
-and once the call finishes `{is_error, …rawOutput}`, so a shell call's
-`exit_code` survives.
-
-**`chat/transcript.rs`** is the in-memory conversation (no table). Items:
-user, agent, thought, tool (merged with its updates by call id), plan
-(replaced within a turn), permission, policy-denied, bypass, error. Each
-has a stable `id` and a `seq` bumped from one counter whenever it
-changes; `since(seq)` returns new and changed items, which clients upsert
-by `id`. Chunks of one kind coalesce into the trailing item;
-`usage_update` is state (the context meter), not an item. The ring holds
-2000 items (`DEFAULT_CAP`). A `ToolCall` carries the
-`auditId` of the command run it made, when it made an audited one.
-
-### The chat machinery (a library)
-
-oxplow once opened ACP agents as chat sessions with their own view. That
-product surface is gone, and so is the code that spoke ACP (the SDK, the
-stdio client, the scripted ACP agent): nothing in `crates/oxplow-app/src/chat/`
-speaks ACP. What remains is the **session actor** (`chat/session.rs`)
-and the one connection in production, the **Codex observer**
-(`chat/codex.rs`, "Codex: its TUI on a thread oxplow observes"). The
-actor is written against the `Connection` trait (`chat/conn.rs`: open,
-prompt, cancel, closed, inject, rename; and the `Incoming` messages a
-connection feeds it), so another agent protocol is one more
-implementation.
-
-**Shape.** `Services.chat` (`chat/manager.rs`) holds each agent session's
-command sender and a shared `SessionView` (status, transcript, stderr
-tail), keyed by `AgentSessionId`. One actor task per session owns the
-connection and sees updates, requests and turn end in the order the
-connection sends them. Events for every session share one broadcast
-channel (`ChatEvent`). `open_codex` reserves the session's slot under one
-lock before connecting, so concurrent opens start one observer; `close`
-marks the handle closed at once, and a closed session still winding down
-is replaced and marked not current, so it records no Interrupt over its
-successor. Closing a thread (`oxplow.thread.close`), once committed, stops every open session's process through
-`agent_sessions::SessionProcesses::kill`.
-
-**Host.** `chat/host.rs` `ChatHost` is the seam (tests use a recording
-double). `ServicesChatHost::new(svc, stream, session)` holds `Weak<Services>`
-and the session it hosts, and records what a hooked turn records:
-`SessionStart` plus the resume id on start; `UserPromptSubmit` on the
-person's prompt; `PreToolUse` on every policy check; `PostToolUse` on each
-finished call; `Stop` with the turn's counts (`TURN_USAGE_KEY`), its
-last agent message (`LAST_ASSISTANT_MESSAGE`) and the model and effort
-the observer reports (`turn_run`); `Interrupt` when the agent
-goes away.
-
-**Starting.** A connection's `open` starts the agent's session or
-continues the saved one; what a continued session replays reaches the
-actor before `open` returns and rebuilds the transcript while recording
-nothing (no hooks, no tool rows, no bypass checks, file writes refused).
-`Opened.preamble` is a system prompt the agent had no other way to take;
-it rides ahead of the first prompt only.
-
-**Prompts (the no-automation rule).** `chat/human_prompt.rs` `compose` is
-the only way to make a `HumanPrompt`, and `Connection::prompt` takes
-nothing else. The session calls it only for `Command::Prompt`, which only
-`ChatManager::submit_human_prompt` sends; a second prompt while a turn runs
-is `TurnInFlight`, never queued. The Codex connection refuses a prompt (the person
-types in Codex's own TUI). The session context, advisories and
-waiting nudges ride the person's prompt as a visible leading block
-(behind a disclosure on the user item). `chat/guard_tests.rs` scans the
-source: no production code starts a Codex turn (`"turn/start"`), context
-reaches a Codex thread only from `codex.rs`, `compose(` is called only
-from the session, and no production code calls `submit_human_prompt(`
-outside `chat/manager.rs`.
-
-**Permissions.** Each `Incoming::Permission` asks `AgentPolicy`. A
-deny is answered `reject_once` (or `cancelled` when no reject option
-exists) with a policy-denied item; the model sees only the rejection. An
-allow shows a permission card that waits for the person with no timeout;
-"Always allow" is dropped for writes; the thread is `AwaitingUser`.
-Cancel answers every open card `cancelled`. Cards' "awaiting" is cleared
-before the Stop is ingested, so the Stop decides the status from the
-final message; after the cards, a question the thread already waited on
-survives, else the status is Running inside a turn and Idle outside one.
-**Teardown is one path:** `session::Teardown` cancels unanswered cards,
-adds the error item, records the Interrupt (only while current) and emits
-Stopped/Closed; the actor runs it on a clean exit and the manager task
-again afterwards (a no-op once stopped), so a transport error still ends
-the session.
-
-**File requests and bypass.** `Incoming::WriteFile` / `ReadFile` (a
-connection whose agent asks oxplow to touch files) are policy-checked; a
-deny reaches the agent with its reason. oxplow reads and writes files for
-an agent only inside the session's worktree (paths normalized first;
-relative ones against the cwd). A write-kind call that completes after
-the policy or a person rejected it gets a bypass banner; one that
-completes with no one allowing it, and not every path written through
-`WriteFile`, is checked afterward and bannered if the policy would deny
-it. At turn end, open cards are cancelled and the Stop and tokens
-recorded.
-
-**Tests.** `chat/session_tests.rs` drives the actor with `FakeConn`, an
-in-process `Connection` scripted by `fake:<step>` lines in a prompt (say,
-think, edit, edit-anyway, bypass, fswrite, fsread, bash, tokens, wait,
-crash), and with a Codex thread on a scripted app-server daemon
-(`FakeAppServer`). `ChatManager::open_connection` (test-only) starts a
-session on any `Connection`.
+workspace `Cargo.toml` declares it). JSON objects serialize in insertion
+order. Anything that needs a stable text form builds it from a
+`BTreeMap` (`metric_cube::dims_key` does), and hashes never hash JSON.
 
 ### Codex: its TUI on a thread oxplow observes
 
@@ -1089,8 +1026,8 @@ prompt, Baskets and In other baskets, with the same actions.
 `PendingContext` and changes no state: no baseline moves, no nudge is stamped. `AgentContext::commit` records the blocks as the
 session's baselines and marks its nudges, and runs only once the agent has the text: the hook
 answer for Claude Code and opencode (`prompt_context` is build then
-commit, the answer counting as the success), `conn.prompt` for an ACP
-agent, the daemon's `{}` for an injection. A refused injection commits
+commit, the answer counting as the success), and for a Codex thread
+the daemon's `{}` to the injection. A refused injection commits
 nothing, so the next chance carries it whole.
 
 Pinned by `context_is_injected_between_turns_never_during_one`,
@@ -1100,8 +1037,7 @@ daemon), `a_context_that_was_not_delivered_takes_nothing` and
 `a_recorded_inject_starts_no_turn_and_waits_for_none`
 (`tests/fixtures/codex/inject.jsonl`, recorded on the live daemon),
 `nothing_is_injected_into_a_running_turn`, and the source guard
-`only_the_codex_connection_injects_context` (the drive guards stay:
-`nothing_starts_a_codex_turn`).
+`only_the_codex_connection_injects_context`, and `nothing_starts_a_codex_turn`.
 
 **Pitfalls.** `/new` in the TUI starts a thread with the TUI's own
 config, which oxplow doesn't bind: use Start Fresh.
@@ -1168,12 +1104,12 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   shape is `shared::claude_shaped_tool_use` (Claude, and opencode, whose
   bridge renames its tools to Claude's — but for `apply_patch` with a
   `patchText`). opencode's `apply_patch` → `edit` of every file the
-  patch names (`shared::patch_paths`). An ACP agent's calls and a Codex
-  thread's items are mapped by `chat::mapping` (Codex's onto ACP's tool
-  kinds first, "Codex: its TUI on a thread oxplow observes").
+  patch names (`shared::patch_paths`). A Codex
+  thread's items are mapped by `chat::mapping` ("Codex: its TUI on a
+  thread oxplow observes").
 - **Where.** The hook route maps a PreToolUse / PostToolUse body with the
   bearer's harness before the policy runs and hands the call to the
-  ingest (`HookEnvelope.tool`); the ACP host does the same with its
+  ingest (`HookEnvelope.tool`); the Codex observer does the same with its
   mapping. The ingest maps nothing: it runs in one transaction, and a
   harness's `tool_use` may be a provider's call. A body naming no tool
   records nothing.
@@ -1210,15 +1146,14 @@ thread are told apart.
   `LaunchSpec::Pty.env`, never in the `sh -lc` command), Claude's
   owner-only per-session MCP config (no runtime file every session shares
   holds a bearer), the OTLP exporter's headers
-  (`OTEL_EXPORTER_OTLP_HEADERS`), opencode's `{env:…}` header, an ACP
-  agent's `McpHttp` entry, and a Codex thread's `config.mcp_servers`
+  (`OTEL_EXPORTER_OTLP_HEADERS`), opencode's `{env:…}` header, and a Codex thread's `config.mcp_servers`
   header, sent over the daemon's socket. A bearer is never
   on a command line, which any process can list.
 - **What it protects.** One agent acting as another by naming it. It is
   not a wall between processes of the same OS user, who can read another
   agent's env or owner-only files; agents run as the person, so that
   boundary is the OS's.
-- **In process.** The ACP host and the UI's interrupt build envelopes
+- **In process.** The Codex observer and the UI's interrupt build envelopes
   directly, naming the session.
 - **The actor carries its session.** An MCP call's actor is
   `Actor::Agent { session_id, thread_id, stream_id }`; its audit row
@@ -1273,7 +1208,7 @@ session's context baselines, and `PostCompact` is logged (`agent.context.compact
 
 **Core reads no harness body keys.** What a body means the adapter says,
 in the envelope; `AgentHarness::reading` (Claude and opencode share
-`shared::claude_shaped_reading`; the chat host fills it for Codex and ACP;
+`shared::claude_shaped_reading`; the chat host fills it for Codex;
 a harness that says nothing leaves the default) fills
 `HookEnvelope.reading` (`HookReading`):
 
@@ -1293,7 +1228,7 @@ of these.
 
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared with OTLP exports), in order: the session the sender is (the
-bearer's, the ACP host's, the UI's interrupt's; refused with a warning
+bearer's, the Codex observer's, the UI's interrupt's; refused with a warning
 when it's another thread's); the session whose resume id is the hook's
 harness session id (an open one first); the thread's newest open session,
 one with a turn running first (logged as a warning — every process oxplow
@@ -1385,7 +1320,7 @@ more than the stream would even when it's sometimes wrong.
   Stopped) is logged as `agent.status.changed` when it differs from the
   newest logged one, read in the same transaction (`last_status_tx`). The
   log is the status: a restarted daemon still knows a thread waits on the
-  person. `HookIngestService::set_status` (ACP permission cards) is the
+  person. `HookIngestService::set_status` (the Codex observer's waits) is the
   only other writer. One lock spans each status-deciding transaction and
   its `AgentStatusChanged` emit, so announcements reach the UI in commit
   order; the lock is per thread.
@@ -1401,7 +1336,7 @@ posts under its child's id. Claude Code drops HTTP hooks for
 closes the turns the previous process left open (`session_restarted`), logs
 `agent.session.started` again (`resumed: true` for the resume id) and sets
 Idle, so a turn that died without a Stop reads idle after a restart, not
-stalled. The ACP client posts the same `SessionStart`. **`SessionEnd`**
+stalled. The Codex observer posts the same `SessionStart`. **`SessionEnd`**
 closes the turns that session left open (`session_ended`; an exit
 mid-turn sends no Stop), status Stopped, and leaves other
 sessions' turns alone; it logs `agent.session.ended`, and `reason: clear`
@@ -1470,13 +1405,13 @@ person's run asks first).
   rendered by the hook's harness: the session's (`IngestOutcome.harness`),
   else an empty acknowledgement. Every built-in renders Claude Code's shape
   (`hookSpecificOutput`, `shared::render`), which opencode's bridge speaks
-  too. A chat session's agent (ACP, Codex) gets a permission reject or an
+  too. A Codex thread's agent gets a permission reject or an
   fs error.
 
 ### Isolation
 
 An edit (`kind: edit` — Claude's `Write`/`Edit`/`MultiEdit`/`NotebookEdit`,
-opencode's `apply_patch`, an ACP agent's or a Codex thread's edit, delete
+opencode's `apply_patch`, a Codex thread's edit, delete
 or move) is refused in two places, and nowhere else
 (`crates/oxplow-runtime/src/write_guard.rs`):
 
@@ -1652,8 +1587,8 @@ moreFiles }` (on 2 of 4 Bash calls in `fixtures/claude/hooks.jsonl`);
 `shared::claude_shaped_tool_use` reads `changedFiles` and `files[].filePath`
 into the call's `paths`, so `agent.tool.finished` and the tool-call row
 carry them, and the file-claim consumer claims them with basis
-`reported`. A shell call without the field names no file. Codex, opencode
-and the ACP agents report nothing per shell call.
+`reported`. A shell call without the field names no file. Codex and opencode
+report nothing per shell call.
 
 **Prompt references.** A person's prompt can carry references oxplow
 inserted or the agent's picker wrote: `@<path>`, `[oxplow uri <uri>]`,
@@ -1887,8 +1822,8 @@ don't are context channels, which wait for a turn someone else starts.
 None is cross-thread, visible to the person, and acknowledged.
 
 **Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
-a server prompt or `turn/start` to deliver what it holds: those are Drive
-on an interactive surface ("Key invariant").
+a server prompt or `turn/start` to deliver what it holds: those would
+drive an agent on an interactive surface ("oxplow never drives an agent").
 `source_guards::nothing_wakes_an_agent_with_what_oxplow_delivers` pins
 that no production code names `prompt_async`, Claude Code's channels, or
 its inbox socket (outside the harness that scrubs it from a child's
@@ -2051,7 +1986,7 @@ command, reason or first question) and clears it on the cleared flags or
 (a `Notification`; `permission.replied` becomes a tool-less `PostToolUse`
 that clears the wait). Its `question` tool is posted as `AskUserQuestion`,
 so the wait runs from the call's PreToolUse to its PostToolUse.
-ACP permission cards log it through `set_status`.
+Codex's approvals in its TUI log it through `set_status`.
 
 **`permission_prompts`** means: oxplow learns when the agent waits on a
 permission or a question, and on what. Observe only: nothing answers or
@@ -2089,7 +2024,7 @@ documented hooks, not recorded).
   measures silence from the later of the newest event and the session's
   last PTY output (`output_activity::OutputActivity`, per agent session,
   in memory, stamped by the terminal forwarder for agent panes and by the
-  ACP host); both must go quiet. Since no hook arrives to re-derive,
+  Codex observer); both must go quiet. Since no hook arrives to re-derive,
   `AgentStallWatch` (`agent_stall_watch.rs`, spawned at boot) re-derives
   every open session once a minute and pushes `Stalled`. It raises
   nothing about in-progress tasks: one left in progress while its agent
@@ -2178,8 +2113,8 @@ registered harness's `token_readings` once per export and logs one
 `agent.tokens.reported` event anchored to the turn it measured; the
 `token_usage.otlp` consumer turns it into `oxplow.tokens` facts (cache
 kinds on `oxplow.cache_tokens` / `oxplow.cache_usage`; tokens only, never
-dollars). Claude Code's counter is `claude_code.token.usage`. A chat
-session's tokens (ACP, Codex) ride its Stop instead ("Codex: an
+dollars). Claude Code's counter is `claude_code.token.usage`. A Codex
+observer's tokens ride its Stop instead ("Codex: an
 app-server client"). Details: [metrics.md](./metrics.md)
 "OTEL token tracking".
 
@@ -2198,7 +2133,7 @@ id). Each turn becomes one `agent_token_usage` row (provenance
 **Bootstrap:** with no cursor yet (a fresh daemon, or the first Stop on a
 long transcript) it seeds the cursor at the last complete line and
 records nothing, rather than lumping the whole history into one row; the
-turn in flight at that first Stop goes uncounted. An ACP agent's counts
+turn in flight at that first Stop goes uncounted. The Codex observer's counts
 come on the Stop body instead (`TURN_USAGE_KEY`) and are recorded as one
 row keyed by the event (`agent_token_usage.cause`).
 

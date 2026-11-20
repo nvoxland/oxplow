@@ -1,6 +1,6 @@
 //! The processes behind agent sessions (`.context/agent-model.md`). An
 //! `agent_session` row is the slot a person opened; its process — a PTY
-//! running a harness, or an ACP agent — is started on demand by the UI and
+//! running a harness, or a Codex observer — is started on demand by the UI and
 //! stopped here when its slot closes. Commands own the slot (closing it is
 //! a command); this owns the process.
 
@@ -33,7 +33,7 @@ impl SessionProcesses {
         }
     }
 
-    /// Stop agent session `session`'s process: its ACP agent (closed from
+    /// Stop agent session `session`'s process: its Codex observer (closed from
     /// this moment) or its PTY (killed on the runtime right after), and
     /// retire its bearer. Nothing running is fine — there is nothing to
     /// stop.
