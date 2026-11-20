@@ -395,6 +395,17 @@
       },
       "default": null
     },
+    "test_conventions": {
+      "description": "What makes a file, container or function a test, and what counts as\nan assertion or a skip.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/TestConventionFile"
+      },
+      "default": null
+    },
     "providers": {
       "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
       "type": [
@@ -3991,6 +4002,68 @@
       "required": [
         "kind",
         "globs"
+      ]
+    },
+    "TestConventionFile": {
+      "description": "A `test_conventions:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Lowercase letters, digits and dashes; unique in the extension.",
+          "type": "string"
+        },
+        "languages": {
+          "description": "Language ids it applies to; absent, any file.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "paths": {
+          "description": "Repo-relative globs of test files.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "containers": {
+          "description": "Name patterns (`Test*`, `*Test`) of test containers: classes, modules.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "functions": {
+          "description": "Name patterns (`test_*`) of test functions.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "assertions": {
+          "description": "Regular expressions; each match on a code line is an assertion.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "skips": {
+          "description": "Regular expressions; each match on a code line is a skip.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
       ]
     },
     "ProviderSpec": {

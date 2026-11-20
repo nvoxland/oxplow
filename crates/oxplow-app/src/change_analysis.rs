@@ -31,16 +31,23 @@ pub struct ChangedFile {
     pub untracked: Option<bool>,
 }
 
-/// The project's own test-file conventions (`testing.testPaths`), added to
-/// the built-in ones [`is_test_path`] knows.
-#[derive(Debug, Clone, Default)]
-pub struct TestPaths(Option<globset::GlobSet>);
+/// What makes a test: the enabled extensions' conventions
+/// (`test_conventions:`, [`crate::test_conventions`]) and the project's own
+/// test-file globs (`testing.testPaths`), added to them.
+#[derive(Clone, Default)]
+pub struct TestPaths {
+    conventions: std::sync::Arc<crate::test_conventions::TestConventions>,
+    extra: Option<globset::GlobSet>,
+}
 
 impl TestPaths {
-    /// The globs of `testing.testPaths`. The config load rejects a bad
-    /// glob; one that still reaches here (a config built in memory) is
-    /// dropped rather than failing an analysis.
-    pub fn from_config(globs: &[String]) -> Self {
+    /// The `conventions` and the globs of `testing.testPaths`. The config
+    /// load rejects a bad glob; one that still reaches here (a config built
+    /// in memory) is dropped rather than failing an analysis.
+    pub fn from_config(
+        conventions: std::sync::Arc<crate::test_conventions::TestConventions>,
+        globs: &[String],
+    ) -> Self {
         let mut set = globset::GlobSetBuilder::new();
         let mut any = false;
         for glob in globs {
@@ -52,76 +59,41 @@ impl TestPaths {
                 any = true;
             }
         }
-        Self(any.then(|| set.build().ok()).flatten())
+        Self {
+            conventions,
+            extra: any.then(|| set.build().ok()).flatten(),
+        }
     }
 
-    /// A test file by the built-in conventions or the project's globs.
+    /// A test file by the conventions or the project's globs.
     pub fn is_test(&self, path: &str) -> bool {
-        is_test_path(path)
+        self.conventions.is_test_path(path)
             || self
-                .0
+                .extra
                 .as_ref()
                 .is_some_and(|set| set.is_match(path.replace('\\', "/")))
     }
-}
 
-/// True if `path` looks like a test file by the built-in conventions.
-pub fn is_test_path(path: &str) -> bool {
-    let path = path.replace('\\', "/");
-    let file = path.rsplit('/').next().unwrap_or(&path);
-    // `.test.<ext>` / `.spec.<ext>` with an alphabetic extension.
-    let marked = |marker: &str| {
-        file.rfind('.').is_some_and(|dot| {
-            let ext = &file[dot + 1..];
-            !ext.is_empty()
-                && ext.chars().all(|c| c.is_ascii_alphabetic())
-                && file[..dot].ends_with(marker)
-        })
-    };
-    let in_test_dir = ["test/", "tests/"]
-        .iter()
-        .any(|d| path.starts_with(d) || path.contains(&format!("/{d}")));
-    marked(".test")
-        || marked(".spec")
-        || in_test_dir
-        || (file.starts_with("test_") && (file.ends_with(".py") || file.ends_with(".rs")))
-        || file.ends_with("_test.go")
-        || file.ends_with("_test.clj")
-        || file.ends_with("_test.cljc")
-}
+    /// A test function: in a test file, named like one, or inside a test
+    /// container (`mod tests`, `FooTest`, `foo.bar-test`).
+    pub fn is_test_function(&self, path: &str, name: &str, container: &[String]) -> bool {
+        self.is_test(path)
+            || self.conventions.is_test_function_name(path, name)
+            || container
+                .iter()
+                .any(|c| self.conventions.is_test_container(path, c))
+    }
 
-/// `name` starts with `prefix` followed by an uppercase letter, `_`, or nothing.
-fn prefixed(name: &str, prefix: &str) -> bool {
-    name.strip_prefix(prefix).is_some_and(|rest| {
-        rest.chars()
-            .next()
-            .is_none_or(|c| c.is_ascii_uppercase() || c == '_')
-    })
-}
-
-fn is_test_container(name: &str) -> bool {
-    name == "tests"
-        || name == "test"
-        || name.ends_with("Test")
-        || name.ends_with("Tests")
-        || prefixed(name, "Test")
-        || name.ends_with("-test")
+    /// Assertions and skips in `content`, a file at `path`.
+    pub fn signals(&self, path: &str, content: &str) -> crate::test_conventions::TestSignals {
+        self.conventions.count(path, content)
+    }
 }
 
 /// True if a function is a test: in a test file, named like one, or inside
-/// a test module/class (`mod tests`, `FooTest`, `foo.bar-test`).
+/// a test module/class.
 pub fn is_test_function(path: &str, name: &str, container: &[String], tests: &TestPaths) -> bool {
-    tests.is_test(path)
-        || name.starts_with("test_")
-        || name.strip_prefix("test").is_some_and(|rest| {
-            rest.chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
-        })
-        || prefixed(name, "Test")
-        || prefixed(name, "Benchmark")
-        || prefixed(name, "Example")
-        || container.iter().any(|c| is_test_container(c))
+    tests.is_test_function(path, name, container)
 }
 
 /// One function's base and head versions (either may be absent).
@@ -289,10 +261,10 @@ pub fn test_file_rows(
             .filter(|f| is_test_function(path, &f.name, &f.container_path, tests))
             .count() as i64
     };
-    let signals = |content: &Option<String>| {
+    let signals = |path: &str, content: &Option<String>| {
         content
             .as_deref()
-            .map(crate::test_signals::count)
+            .map(|c| tests.signals(path, c))
             .unwrap_or_default()
     };
     paths
@@ -303,7 +275,7 @@ pub fn test_file_rows(
             if !tests.is_test(path) && tests_before == 0 && tests_after == 0 {
                 return None;
             }
-            let (before, after) = (signals(b), signals(h));
+            let (before, after) = (signals(path, b), signals(path, h));
             Some(oxplow_db::ChangeTestFileRow {
                 path: path.clone(),
                 tests_before,
@@ -646,7 +618,10 @@ fn changed_rows(
         })
         .collect();
     let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-    file_rows(&files, &TestPaths::from_config(&cfg.testing.test_paths))
+    file_rows(
+        &files,
+        &TestPaths::from_config(svc.test_conventions.current(), &cfg.testing.test_paths),
+    )
 }
 
 /// [`refresh_files`] when only `paths` changed: their rows alone, at a cost that
@@ -1406,7 +1381,7 @@ async fn compute(
 ) -> Result<ChangeResults, String> {
     let tests = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        TestPaths::from_config(&cfg.testing.test_paths)
+        TestPaths::from_config(svc.test_conventions.current(), &cfg.testing.test_paths)
     };
     let entries: Vec<_> = svc
         .trees
@@ -1479,9 +1454,19 @@ async fn compute(
 mod tests {
     use super::*;
 
+    /// Every convention oxplow ships (foundation's and the language packs').
+    fn shipped_conventions() -> std::sync::Arc<crate::test_conventions::TestConventions> {
+        std::sync::Arc::new(crate::test_conventions::TestConventions::shipped())
+    }
+
+    /// The shipped conventions and the project's `testing.testPaths`.
+    fn shipped_paths(globs: &[String]) -> TestPaths {
+        TestPaths::from_config(shipped_conventions(), globs)
+    }
+
     /// The built-in conventions alone.
     fn is_test_function(path: &str, name: &str, container: &[String]) -> bool {
-        super::is_test_function(path, name, container, &TestPaths::default())
+        super::is_test_function(path, name, container, &shipped_paths(&[]))
     }
     use crate::code_analysis::{AnalyzedFileChurn, AnalyzedFileSide, AnalyzedFunctionChurn};
 
@@ -1778,11 +1763,11 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            is_test(&TestPaths::default()),
+            is_test(&shipped_paths(&[])),
             [false, false, true, false],
             "without the key"
         );
-        let tests = TestPaths::from_config(&["spec/**".into(), "**/it/**".into()]);
+        let tests = shipped_paths(&["spec/**".into(), "**/it/**".into()]);
         assert_eq!(is_test(&tests), [true, true, true, false]);
         // A function in a project test file is a test function.
         assert!(super::is_test_function(
@@ -1806,7 +1791,7 @@ mod tests {
             "src/foo/bar_test.cljc",
             "test/x.py",
         ] {
-            assert!(is_test_path(p), "{p}");
+            assert!(shipped_conventions().is_test_path(p), "{p}");
         }
         for p in [
             "src/foo.ts",
@@ -1815,7 +1800,7 @@ mod tests {
             "src/latest/x.rs",
             "src/contest.ts",
         ] {
-            assert!(!is_test_path(p), "{p}");
+            assert!(!shipped_conventions().is_test_path(p), "{p}");
         }
     }
 
@@ -1887,7 +1872,7 @@ mod tests {
                 head_content: Some(head.into()),
             }],
         );
-        let r = build_results(&files, &analysis, &TestPaths::default());
+        let r = build_results(&files, &analysis, &shipped_paths(&[]));
         let mut refs: Vec<_> = r
             .functions
             .iter()
@@ -2010,7 +1995,7 @@ mod tests {
                 head_content: Some(head.into()),
             }],
         );
-        let r = build_results(&[], &analysis, &TestPaths::default());
+        let r = build_results(&[], &analysis, &shipped_paths(&[]));
         let got: Vec<_> = r
             .hunks
             .iter()
@@ -2044,7 +2029,7 @@ mod tests {
                 head_content: Some("fn a() {}\nfn c() {}\n".into()),
             }],
         );
-        let r = build_results(&[], &analysis, &TestPaths::default());
+        let r = build_results(&[], &analysis, &shipped_paths(&[]));
         assert_eq!(
             r.hunks,
             vec![ChangeHunkRow {
@@ -2066,7 +2051,7 @@ mod tests {
             deletions: 4,
             ..Default::default()
         }];
-        let r = build_results(&files, &analysis(), &TestPaths::default());
+        let r = build_results(&files, &analysis(), &shipped_paths(&[]));
         let by = |c: &str, n: &str| r.functions.iter().find(|f| f.container == c && f.name == n);
         assert!(
             by("", "alpha").is_none(),
@@ -2130,7 +2115,7 @@ mod tests {
             status: "modified".into(),
             ..Default::default()
         }];
-        let r = build_results(&files, &a, &TestPaths::default());
+        let r = build_results(&files, &a, &shipped_paths(&[]));
         let imports: Vec<(&str, &str, Option<i64>)> = r
             .imports
             .iter()

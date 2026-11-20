@@ -792,7 +792,12 @@ impl ExtensionActivation {
                     capabilities.apply();
                     svc.vocabulary.swap(vocabulary);
                     svc.models.swap(database.models().clone());
-                    svc.languages.swap(crate::extension::language_set::of(published.extensions()).0);
+                    let languages = crate::extension::language_set::of(published.extensions()).0;
+                    svc.test_conventions.swap(crate::test_conventions::TestConventions::of(
+                        published.extensions(),
+                        std::sync::Arc::new(languages.clone()),
+                    ));
+                    svc.languages.swap(languages);
                     metrics.publish(&svc.metrics);
                     providers.withdraw_maps();
                     adapters

@@ -1880,7 +1880,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "test_convention" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -2650,6 +2650,12 @@ export type Extension_Deserialize = {
 	 */
 	fileKinds: FileKindDecl[],
 	/**
+	 *  What makes a file, container or function a test, and what counts as
+	 *  an assertion or a skip (`test_conventions:`; valid ones — invalid
+	 *  ones are in `errors`).
+	 */
+	testConventions: TestConventionDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2827,6 +2833,12 @@ export type Extension_Serialize = {
 	 *  invalid ones are in `errors`).
 	 */
 	fileKinds: FileKindDecl[],
+	/**
+	 *  What makes a file, container or function a test, and what counts as
+	 *  an assertion or a skip (`test_conventions:`; valid ones — invalid
+	 *  ones are in `errors`).
+	 */
+	testConventions: TestConventionDecl[],
 	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
@@ -6456,6 +6468,17 @@ export type TabReport = {
 export type TabReportAnswer = {
 	/**  The runs it reported that the daemon no longer holds for it. */
 	missingRuns: string[],
+};
+
+/**  One `test_conventions:` entry as the extension declares it. */
+export type TestConventionDecl = {
+	id: string,
+	languages: string[],
+	paths: string[],
+	containers: string[],
+	functions: string[],
+	assertions: string[],
+	skips: string[],
 };
 
 /**

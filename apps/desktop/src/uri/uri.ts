@@ -224,6 +224,7 @@ const KEY_PARAM: Record<string, string> = {
   agent_context: "agent_context",
   run_pattern: "run_pattern",
   file_kind: "file_kind",
+  test_convention: "test_convention",
   skill: "skill",
   implementation: "implementation",
   provider: "provider",
@@ -411,7 +412,7 @@ export function collectorUri(owner: string, id: string): string {
  *  (null for a globally named kind) and its id; null for anything else. */
 const CONTRIBUTIONS = new Set([
   "dataset", "measure", "metric", "dimension", "collector", "event_type", "ref_kind", "command", "job",
-  "ai_profile", "effect", "advisory", "agent_context", "run_pattern", "file_kind", "skill", "implementation", "provider", "page", "panel",
+  "ai_profile", "effect", "advisory", "agent_context", "run_pattern", "file_kind", "test_convention", "skill", "implementation", "provider", "page", "panel",
 ]);
 const GLOBAL_CONTRIBUTIONS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);
 

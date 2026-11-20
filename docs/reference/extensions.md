@@ -225,6 +225,7 @@ Settings → Extensions lists each declared reference with Set… and Revoke.
 | `context` | text for the coding agent's context, sent once, then when it changes |  |
 | `run_patterns` | command substrings that mark a shell call as a test or static-analysis run |  |
 | `file_kinds` | what kind of file a path is, by glob: CI, generated, vendored, sensitive, … |  |
+| `test_conventions` | what makes a file, container or function a test, and what counts as an assertion or a skip |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
 | `providers` | an external program implementing a capability, such as the task tracker | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |

@@ -1488,8 +1488,8 @@ oxplow-bundled change cards) only read them.
   - test files (`v_change_test_file`, V83): for each changed file that is
     a test file or has tests on either side (Rust's inline `mod tests`
     counts), test functions plus assertion calls and skip markers
-    before and after (`test_signals::count`, a heuristic across
-    languages; `//` and `#` comment lines don't count, so commenting an
+    before and after (`TestConventions::count`, the enabled extensions'
+    `test_conventions:`, a heuristic across languages; `//` and `#` comment lines don't count, so commenting an
     assertion out lowers the count).
   - hunks (`v_change_hunk`, V54): one row per contiguous changed range of
     each analysed file (the same at most 200 files as functions; an added
