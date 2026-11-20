@@ -1092,8 +1092,9 @@ extension's own declared event types, logged with the run (P9.D2;
   `collector_run` row and `collector.synced@2` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
-- A **report collector** (`records: tests | coverage | analysis`,) is a non-bundled extension's (`Extension::is_own`; the project's, in
-  `.oxplow/extensions/project/`): it parses one `report:` file with a bundled
+- A **report collector** (`records: tests | coverage | analysis`,) is any enabled extension's when it reads with a bundled parser or a sandboxed script, and the
+  own extension's (`Extension::is_own`; the project's, in
+  `.oxplow/extensions/project/`) when it runs a program (`exec`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
   or its own jaq / Starlark / exec script (paths relative to the extension
   folder; `report.path` relative to the project root), on `on: { run: test |
@@ -1141,7 +1142,7 @@ in the capability's dataset and which `oxplow.provider.sync` runs; `env`,
 `credentials`, `network` only on an exec entity collector; `input` only on
 starlark/jaq; exactly one of `entities` / `facts`; `report` only with
 `facts`; a fact collector isn't `exec` unless its extension is own;
-`records:` only on an own extension; `after` and `where` only with `on:`,
+`records:` with an `exec` runtime only on an own extension (`report.path` may be `{ setting, default }`); `after` and `where` only with `on:`,
 whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 

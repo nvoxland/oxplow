@@ -56,8 +56,17 @@ section for the column.
   One declaration, runtime, permissions and run log for "read a report file",
   shared with every other collector (`.context/semantic-layer.md`
   "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
-  `validate_report_collector`): an own extension's only (`Extension::is_own()`, `Declarer.own`;
-  a bundled extension's is refused);
+  `validate_report_collector`): any enabled extension may declare one that reads with a bundled
+  parser or a sandboxed `jaq` / `starlark` script; an `exec` one (a program) stays an own
+  extension's (`Extension::is_own()`, `Declarer.own`), refused in any other;
+  `report.path` is a string, or `{ setting: /reports/clippy, default: target/clippy.json }`
+  naming a string setting of the extension's own `configuration:` (a JSON pointer, checked at load): the
+  path is its effective value (defaults < project < personal) when it has one, else the
+  default, read at run time and still inside the checkout
+  (`CollectionService::report_path`). When two collectors of one run resolve to the same
+  path only one reads it: the extension `project` first, then the checkout's other extensions,
+  then the rest, by name within each; the others are skipped and logged, not errors
+  (`winning_collectors`). Provenance tags are unchanged (`exec:<ids>` only for exec);
   no `input`, `env`, `credentials`, `network`, `after` or `sync`; the
   trigger is `on_run` or `manual`, and an `on_run` matches what it records
   — `tests` / `coverage` on `test`, `analysis` on `analysis` (each
@@ -99,8 +108,8 @@ section for the column.
   program is the reference, and the collector runs a native parser
   (`helpers::lcov_coverage`, in process, one linear pass) that a test holds
   to the program's reading, because the program took seconds on a 12 MB
-  report ([performance.md](./performance.md) "Reading a big lcov"). Any other `entry` is the own extension's `jaq` / `starlark` /
-  `exec` parser (its path relative to the extension folder) (`runtime:`, `report.format` = the host pre-parse). There
+  report ([performance.md](./performance.md) "Reading a big lcov"). Any other `entry` is the extension's `jaq` / `starlark` (or, the own extension's, `exec`)
+  parser (its path relative to the extension folder) (`runtime:`, `report.format` = the host pre-parse). There
   is no format registry: a collector names its parser. A parser writes
   paths as the report has them (`cargo llvm-cov` and eslint write absolute
   ones); `read_report` maps every coverage file and finding path to

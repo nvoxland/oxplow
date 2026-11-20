@@ -1869,7 +1869,7 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "$ref": "#/definitions/RawReportPath"
         },
         "format": {
           "type": [
@@ -1882,6 +1882,31 @@
       "additionalProperties": false,
       "required": [
         "path"
+      ]
+    },
+    "RawReportPath": {
+      "description": "A report's path: a string, or the extension's own setting that holds it\n(`{ setting: /reports/clippy, default: target/clippy.json }`).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setting": {
+              "description": "A JSON pointer to a string setting of the extension's `configuration:`.",
+              "type": "string"
+            },
+            "default": {
+              "description": "The path when the setting has no value.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "setting",
+            "default"
+          ]
+        }
       ]
     },
     "CollectorSync": {

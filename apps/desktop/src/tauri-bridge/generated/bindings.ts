@@ -1880,7 +1880,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -2628,6 +2628,16 @@ export type Extension_Deserialize = {
 	 */
 	contexts: AgentContextDecl[],
 	/**
+	 *  The command substrings it says mark a test or analysis run
+	 *  (`run_patterns:`; valid ones — invalid ones are in `errors`).
+	 */
+	runPatterns: RunPatternDecl[],
+	/**
+	 *  The kinds of file it names by glob (`file_kinds:`; valid ones —
+	 *  invalid ones are in `errors`).
+	 */
+	fileKinds: FileKindDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2796,6 +2806,16 @@ export type Extension_Serialize = {
 	 */
 	contexts: AgentContextDecl[],
 	/**
+	 *  The command substrings it says mark a test or analysis run
+	 *  (`run_patterns:`; valid ones — invalid ones are in `errors`).
+	 */
+	runPatterns: RunPatternDecl[],
+	/**
+	 *  The kinds of file it names by glob (`file_kinds:`; valid ones —
+	 *  invalid ones are in `errors`).
+	 */
+	fileKinds: FileKindDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2919,6 +2939,28 @@ export type FieldValue = boolean | number | null | string;
 /**  A `visible_if` condition: one value or any of several. */
 export type FieldValues = FieldValue[] | FieldValue;
 
+/**  One `file_kinds:` entry as the extension declares it. */
+export type FileKindDecl = {
+	kind: string,
+	globs: string[],
+	label: string | null,
+};
+
+/**
+ *  One of the project's own file-kind rules (`oxplow.files.kinds`): files
+ *  matching `glob` (repo-relative, `/`-separated) are of `kind`
+ *  (`generated`, `ci`, `sensitive`, …, as an extension's `file_kinds:`
+ *  names them), on top of what the enabled extensions declare.
+ */
+export type FileKindRule = {
+	/**  Lowercase letters, digits and dashes. */
+	kind: string,
+	/**  A glob (`literal_separator`, as `testPaths`): `deploy/**`. */
+	glob: string,
+	/**  What a person calls the kind; optional. */
+	label?: string | null,
+};
+
 export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId,
@@ -2963,6 +3005,12 @@ export type FileSnapshot = {
 
 /**  A `file_snapshot` row: one captured file under a snapshot. */
 export type FileSnapshotId = number;
+
+/**  What the project says about its files (`oxplow.files.*`). */
+export type FilesConfig = {
+	/**  `oxplow.files.kinds`: the project's own file-kind rules. */
+	kinds: FileKindRule[],
+};
 
 /**  What a folder's `path` is relative to. */
 export type FolderRoot = string;
@@ -4350,6 +4398,8 @@ export type OxplowConfig = {
 	iconTint: string | null,
 	/**  How the project's tests run (the `testing:` block). */
 	testing: TestingConfig,
+	/**  What the project says about its files (`oxplow.files.*`). */
+	files: FilesConfig,
 	/**  Limits on script workers (the `scripts:` block). */
 	scripts: ScriptsConfig,
 	/**
@@ -5783,8 +5833,17 @@ export type Renderer = {
  *  (`input.report`): a tool's output in the worktree.
  */
 export type ReportInput = {
-	/**  Relative to the project (`target/type-coverage.json`). */
+	/**
+	 *  Relative to the project (`target/type-coverage.json`): the report's
+	 *  path, or its default when `setting` names where the path is set.
+	 */
 	path: string,
+	/**
+	 *  A JSON pointer into the extension's own `configuration:`
+	 *  (`/reports/clippy`): when it has a value (defaults < project <
+	 *  personal) that is the path, else `path`. Absent for a plain path.
+	 */
+	setting?: string | null,
 	/**
 	 *  How it's parsed before the script sees it: `text` (the default),
 	 *  `json`, `xml`, `lcov` or `lines`.
@@ -5942,6 +6001,12 @@ export type RunNode_Serialize = {
 	replacedBy: string | null,
 	/**  An action point node's point and its context, bound. */
 	actionPoint: ActionPointRun | null,
+};
+
+/**  One `run_patterns:` entry as the extension declares it. */
+export type RunPatternDecl = {
+	kind: RunKind,
+	patterns: string[],
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */

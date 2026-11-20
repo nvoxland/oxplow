@@ -3042,6 +3042,31 @@ fn check_config_reads(ext: &mut Extension) {
             }
         }
     }
+    // A report path read from a setting names a string setting of the
+    // extension's own `configuration:`.
+    for spec in &ext.collectors {
+        let Some(pointer) = spec.report.as_ref().and_then(|r| r.setting.as_deref()) else {
+            continue;
+        };
+        let known = ext
+            .configuration
+            .as_ref()
+            .and_then(|declaration| config_key_type(&declaration.schema, pointer));
+        if known != Some("string") {
+            problems.push(
+                Diagnostic::error(
+                    "config.unknown_key",
+                    format!(
+                        "collector `{}`: report setting `{pointer}` isn't a string key of \
+                         `configuration.schema`",
+                        spec.id
+                    ),
+                )
+                .at("extension.yaml", None)
+                .fix("declare it under `properties` with `type: string`"),
+            );
+        }
+    }
     ext.errors.extend(problems);
 }
 
@@ -10391,6 +10416,34 @@ commands:
         );
         assert!(errs.contains("context `broken`"), "{errs}");
         assert!(!errs.contains("context `fine`"), "{errs}");
+    }
+
+    /// A report path read from a setting names a string key of the
+    /// extension's own `configuration:`: another key, or none declared, is
+    /// a load error.
+    #[test]
+    fn a_report_path_setting_names_a_string_key_of_the_configuration() {
+        let collectors = "collectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: { setting: /reports/clippy, default: c.json } }, on: { run: analysis } }\n";
+        let schema = |ty: &str| {
+            format!(
+                "configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      reports:\n        type: object\n        properties:\n          clippy: {{ type: {ty} }}\n"
+            )
+        };
+        let (_d, ext) = load_x(&[], &format!("{}{collectors}", schema("string")));
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        for body in [
+            format!("{}{collectors}", schema("integer")),
+            collectors.to_string(),
+        ] {
+            let (_d, ext) = load_x(&[], &body);
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.message.contains("report setting `/reports/clippy`")),
+                "{body}: {:?}",
+                ext.errors
+            );
+        }
     }
 
     #[test]
