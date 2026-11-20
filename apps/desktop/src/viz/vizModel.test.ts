@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -220,19 +220,6 @@ describe("slugify", () => {
     expect(slugify("Open Tasks by Thread")).toBe("open-tasks-by-thread");
     expect(slugify("  What's  waiting?? ")).toBe("what-s-waiting");
     expect(slugify("---")).toBe("viz");
-  });
-});
-
-describe("rowAssistantContext", () => {
-  test("Ask the Assistant on a row asks about the page it links to, else the row as text", () => {
-    const linked = viz({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
-    expect(rowAssistantContext(linked, ["sha", "subject"], ["abc123", "Fix"])).toEqual({ kind: "page", uri: "oxplow:oxplow/commit?sha=abc123", label: null });
-    expect(rowAssistantContext(viz(), ["id", "title"], [42, "Fix it"])).toEqual({
-      kind: "selection",
-      uri: null,
-      label: null,
-      text: '[oxplow page review/waiting row: id=42, title="Fix it"]',
-    });
   });
 });
 

@@ -805,8 +805,8 @@ tool: open_work              # offered as <namespace>_open_work
     (`ThreadRuntimeRegistry::open_page`).
   - A hidden-but-mounted page can't overwrite the report, because only
     the active page's detail is sent.
-- **Row actions:** right-click a page row → "Ask the Assistant" puts the
-  row in the agent's input.
+- **Row actions:** right-click a page row → "Add to Context" puts the
+  row in the context basket.
 - **What a person can ask:** what pages say they answer
   (`answers:` in a page file; `about` makes it a question on pages for that
   kind of ref; a question is **one line** — a pasted line break is Enter in
@@ -820,9 +820,8 @@ tool: open_work              # offered as <namespace>_open_work
     `catalog-prompts` — grouped by the page's category (else its
     extension), with an Ask row action on `oxplow.agent.draft` — and
     `catalog-config-keys`, with Open Settings as a page action on
-    `oxplow.window.navigate`); the nav bar ☰'s Ask (suggested prompts for
-    the page's resource, `usePromptCatalog` over `v_page_answer`); and
-    `EmptyState`'s prompts (usability.md → "Empty states").
+    `oxplow.window.navigate`). No UI turns `v_page_answer` into
+    suggested prompts now.
 - **No launcher entries.** The manifest has no `launcher:` list. A page is
   a file in `pages/`; a command — one that runs another with fixed input,
   or puts a prompt in the agent's input (over `agent_input.write`

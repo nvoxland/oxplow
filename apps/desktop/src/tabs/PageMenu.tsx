@@ -6,7 +6,6 @@ import type { CSSProperties, MutableRefObject, ReactNode } from "react";
 import { useRef, useState } from "react";
 import { Menu } from "lucide-react";
 
-import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { PagePinMenu, type PagePin } from "../pages/PagePinMenu.js";
@@ -51,7 +50,6 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
 
   const items = pageMenuItems({
     actions,
-    ask: ask ? { askAssistant: () => void askAssistant({ kind: "page", uri: ask.ref, label: label ?? null }) } : undefined,
     context: ask
       ? { add: () => void addToContext({ uri: ask.ref, label }) }
       : undefined,

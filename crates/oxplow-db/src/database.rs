@@ -2228,6 +2228,34 @@ mod tests {
         assert_eq!(versions, vec![4, 4]);
     }
 
+    /// V50 drops `command_audit.via` and keeps the rows.
+    #[test]
+    fn v50_drops_the_command_audit_via_column_and_keeps_the_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(49))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO command_audit (at, command, actor_kind, input_json, outcome, via)
+               VALUES ('2026-11-19T00:00:00Z', 'oxplow.ai.set_role', 'human', '{}', 'ok', 'assistant:ast1');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let has_via: bool = conn
+            .query_row(
+                "SELECT count(*) > 0 FROM pragma_table_info('command_audit') WHERE name = 'via'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!has_via);
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM command_audit", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
     /// V43 drops the zone columns from a change's files and imports and
     /// keeps the rows.
     #[test]

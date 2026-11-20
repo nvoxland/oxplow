@@ -308,7 +308,7 @@ commands:
 
 `extensions/ai_profiles.rs` parses `ai_profiles:` (`id` `[a-z][a-z0-9_]*`
 unique in the extension, `description` ≤ 4096 bytes, `fallback` one of
-the built-in roles `default | summarize | decide | assistant` (optional:
+the built-in roles `default | summarize | decide` (optional:
 `default` when left out; any other's chain ends at `default`), `features` of
 `text | tool_calling | streaming | image`) into `Extension.ai_profiles`
 (`AiProfileDecl`), each a contribution `<ext>/ai_profile/<id>`

@@ -7,10 +7,10 @@ const def = (id: string, title = id): DockPanelDef => ({ id, title, icon: "box",
 
 test("core panels come first in the fixed order, extensions after by title", () => {
   const ordered = orderDockPanels(
-    [def("alerts"), def("assistant"), def("context")],
+    [def("alerts"), def("context")],
     [def("ext:b", "Zed"), def("ext:a", "Alpha")],
   );
-  expect(ordered.map((p) => p.id)).toEqual(["alerts", "assistant", "context", "ext:a", "ext:b"]);
+  expect(ordered.map((p) => p.id)).toEqual(["alerts", "context", "ext:a", "ext:b"]);
 });
 
 test("the core dock panels only shrink", () => {

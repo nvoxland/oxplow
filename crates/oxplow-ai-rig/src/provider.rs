@@ -124,17 +124,6 @@ impl RigProvider {
         Ok((handle, chat))
     }
 
-    /// The handle a caller drives itself (the Assistant): `model` on
-    /// `instance`, streaming-capable, with the instance's key.
-    pub fn completion_model(
-        &self,
-        instance: &ProviderInstance<'_>,
-        model: &str,
-    ) -> Result<DynModel<CompletionOp>, AiError> {
-        self.model(instance, model, self.streaming.clone())
-            .map(|(model, _)| model)
-    }
-
     /// Rig's catalog entry for `model`, for a kind it has one for.
     fn spec(&self, model: &str) -> Option<&'static ModelSpec> {
         let id = self.kind.provider_id()?;

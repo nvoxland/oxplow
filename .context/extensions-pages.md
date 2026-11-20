@@ -641,7 +641,7 @@ left side, an invisible one of the same width where it has none, so rows
 line up without being boxed in (`rowEdge`; Task
 List's urgent and high items). They are never shown as cells.
 
-Every `list`, `table` or `tree` row's menu has Ask the Assistant and Add
+Every `list`, `table` or `tree` row's menu has Add
 to Context (the first page it links to, else the row as text); a row drags
 only where a drag action runs. A table or list is keyboard-driven (`useListNav`: ↑/↓,
 Enter opens the cursor row's first link or runs its first row action;

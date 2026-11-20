@@ -1089,9 +1089,7 @@ it is acted on with is in one place. The ☰'s order is fixed
 out and the ☰ itself hidden when it would be empty:
 
 1. **oxplow's own, always first and in their own order**, so they sit in
-   the same spot on every page: **Ask the Assistant** (`menu-item-page-ask-assistant`, icon `sparkles`: opens the
-   dock's Assistant about the page; the catalog's prompts about the page's kind are the
-   panel's chips), then **Add to Context** (the page's ref and title go in the selected
+   the same spot on every page: **Add to Context** (the page's ref and title go in the selected
    thread's basket; `menu-item-page-add-to-context`), then the page's
    `standard` actions (a page's Refresh when it declares `refresh: true`,
    Copy);
@@ -1278,7 +1276,7 @@ is the Alerts panel's icon.
   Context, an extension panel's `open` else its body page): the header
   draws the open arrow (`OpenPageLink`, "Open <title> page") after the
   title, as a section heading does, and no body draws its own link. Core panels call `registerDockPanel`. Their order is
-  `CORE_ORDER` (alerts, the leftmost icon, then assistant, context). Extension panels with
+  `CORE_ORDER` (alerts, the leftmost icon, then context). Extension panels with
   `dock: true` follow, sorted by title. Their body is the panel's `body`
   page and their badge is its `badge` or `count` page. `useDockPanels()` returns the whole list.
 - **Layout:** the panel is absolute and anchored above the bar, inside the
@@ -1298,9 +1296,7 @@ is the Alerts panel's icon.
   the far right. Its click opens it in place, as a Context row does: the
   whole message, the command and time, a failed operation's captured
   output (read when it opens), and what can be done about it: a decision's
-  Approve / Decline (`InlineConfirm` for a destructive one), a failed
-  operation's Ask the Assistant (`askAssistant` with the error as a
-  selection and a "why did this fail" draft), undelivered events' Retry All /
+  Approve / Decline (`InlineConfirm` for a destructive one), undelivered events' Retry All /
   Discard All (`delivery.retry_all` / `discard_all`, which asks first),
   failed reactions' Retry All (`effect.retry_all`, which asks first), an
   extension problem's Repair with the Agent (`insertIntoAgent`, then the

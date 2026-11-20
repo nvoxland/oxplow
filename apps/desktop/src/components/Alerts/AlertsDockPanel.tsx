@@ -7,8 +7,7 @@
 /// line (cut to fit), ×N, its age, and a × that dismisses it when it can be.
 /// A row's click opens it in place (as the Context panel's): the whole
 /// message, the command and the time, a failed operation's captured output,
-/// and what can be done about it: a decision's Approve / Decline, a failed
-/// operation's Ask the Assistant, undelivered events' Retry All / Discard
+/// and what can be done about it: a decision's Approve / Decline, undelivered events' Retry All / Discard
 /// All, failed reactions' Retry All, an extension problem's Repair with the
 /// Agent; Open (only when it has a page of its own) and Copy. The icon's badge is the same count the bell showed
 /// (`alertsSummary`). The Alerts page is the panel header's arrow.
@@ -21,7 +20,6 @@ import { dismissAllOpErrors, dismissOpError, readOpErrorOutput, type OpError } f
 import { decide, type Proposal } from "../../proposals.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { personCommands } from "../../personCommands.js";
-import { askAssistant } from "../Assistant/assistantSession.js";
 import { dockStore } from "../Dock/dockStore.js";
 import { refFromTabId } from "../../tabs/pageRefs.js";
 import { InlineConfirm } from "../InlineConfirm.js";
@@ -241,22 +239,6 @@ function AlertRowView({
                     Decline
                   </button>
                 </>
-              ) : null}
-              {row.source === "op" ? (
-                <button
-                  type="button"
-                  data-testid="alerts-item-ask"
-                  title="Open the Assistant about this failure"
-                  onClick={() =>
-                    void askAssistant(
-                      { kind: "selection", uri: null, label: row.title, text: [row.title, row.command ? `Command: ${row.command}` : null, whole].filter(Boolean).join("\n\n") },
-                      "Why did this fail, and how do I fix it?",
-                    )
-                  }
-                  style={linkButton}
-                >
-                  Ask the Assistant
-                </button>
               ) : null}
               {row.source === "delivery" ? (
                 <>

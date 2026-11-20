@@ -46,7 +46,7 @@ async function nothingAdded(page: Page) {
     rail.locator('[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:oxplow/"])'),
   ).toHaveCount(0);
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
-  await expect(page.getByTestId("menu-item-page-ask-assistant")).toBeVisible();
+  await expect(page.getByTestId("menu-item-page-add-to-context")).toBeVisible();
   await expect(page.locator('[data-testid^="menu-item-ref-command-"]')).not.toBeVisible();
   await page.keyboard.press("Escape");
 }

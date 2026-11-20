@@ -18,7 +18,6 @@
 
 pub mod ai;
 pub mod app;
-pub mod assistant;
 pub mod background;
 pub mod bus;
 pub mod config;

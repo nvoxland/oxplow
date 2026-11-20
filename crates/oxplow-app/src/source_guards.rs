@@ -158,8 +158,6 @@ fn emitters() -> BTreeSet<(String, String)> {
 #[rustfmt::skip]
 const EMITTERS: &[(&str, &str)] = &[
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
-    // An Assistant session lives in memory: no dataset to re-read.
-    ("AssistantChanged", "crates/oxplow-app/src/assistant/session.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
     // A call to the window (`client_host.rs`): not a change to re-read but
@@ -1424,7 +1422,7 @@ fn pages_take_spec_types_from_the_spec_module() {
 /// and re-export nothing, or put it under a facade such as `extension/`.
 #[test]
 fn the_crate_root_exposes_no_more_modules() {
-    const PUB_MODS: usize = 130;
+    const PUB_MODS: usize = 129;
     let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("lib.rs");
     let count = lib.lines().filter(|l| l.starts_with("pub mod ")).count();

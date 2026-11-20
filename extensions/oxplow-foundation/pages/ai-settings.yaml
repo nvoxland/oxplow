@@ -1,20 +1,17 @@
 title: AI Settings
 label: AI settings
-description: Set up oxplow's AI — the providers models come from, the model each role uses (the Assistant's among them), and this week's calls.
+description: Set up oxplow's AI — the providers models come from, the model each role uses, and this week's calls.
 icon: sparkles
 category: System
-keywords: ai model provider key role assistant default summarize decide settings
+keywords: ai model provider key role default summarize decide settings
 answers:
 - question: Which model does each AI role use, and where does it come from?
-  params: {}
-- question: How do I set up the Assistant?
   params: {}
 - question: Which AI providers are set up?
   params: {}
 params:
-# The provider and role a form's Model suggestions are for (a row's): never drawn.
+# The provider a form's Model suggestions are for (a row's): never drawn.
 - { name: provider, role: view }
-- { name: role, role: view }
 loaders:
   providers:
     sql: |
@@ -70,15 +67,13 @@ loaders:
       WHERE k.capability = 'ai_provider' AND NOT EXISTS (SELECT 1 FROM v_ai_provider p WHERE p.id = k.provider)
       ORDER BY label
   # A Model field's suggestions: one provider's models (a provider's row),
-  # else every provider's, labelled with it. The Assistant's leave out the
-  # ones its catalog says can't call tools. Any model id may still be typed.
+  # else every provider's, labelled with it. Any model id may still be typed.
   models:
     sql: |
       SELECT model AS value,
              CASE WHEN :provider IS NULL THEN provider || ' · ' || model ELSE model END AS label
       FROM v_ai_model
-      WHERE (:provider IS NULL OR provider = :provider)
-        AND (coalesce(:role, '') <> 'assistant' OR tool_calling <> 'unsupported')
+      WHERE :provider IS NULL OR provider = :provider
       ORDER BY provider, model
   calls:
     sql: |
@@ -184,7 +179,7 @@ view:
       - { name: model, label: Model, help: "Pick one as you type, or type its id at that provider." }
       choices:
         provider: oxplow/ai-settings#provider_choices
-        model: { from: oxplow/ai-settings#models, params: { role: '{{row.role}}' }, open: true }
+        model: { from: oxplow/ai-settings#models, open: true }
     - id: use-fallback
       label: Use the Fallback Model
       command: oxplow.ai.set_role

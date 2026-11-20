@@ -476,8 +476,7 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## Menus a page or row gets from extensions
 
-- **Order is fixed.** A page's nav bar's ☰: oxplow's own first (Ask the Assistant, then
-  Add to Context and the standard actions, in their order — the same spot on every page),
+- **Order is fixed.** A page's nav bar's ☰: oxplow's own first (Add to Context and the standard actions, in their order — the same spot on every page),
   then the page's and its extensions' own sorted by label — an action, a
   **command about the page's resource at the top level beside them** (its
   `ui.group` makes no submenu in the ☰), or a submenu by its name that an
@@ -485,7 +484,7 @@ markdown itself, nor edits it in a `<textarea>`.
   (`.context/pages-and-tabs.md` "The nav bar is core's"). Only the
   commands that apply to the ref are in a menu: one with an `about_when`
   its row fails (Reopen Session on an open session) is left out, not
-  greyed. A row's right-click menu: Ask the Assistant, the page's row
+  greyed. A row's right-click menu: Add to Context, the page's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
@@ -1110,13 +1109,11 @@ its right-click menu.
 
 - **Every empty page or section uses `EmptyState`**
   (`components/Prompts/EmptyState.tsx`, P6.D2): a title saying what
-  would be here, one sentence on how it gets here, and 1–3 prompts the
-  person can hand the agent. Each prompt is an Ask — it fills the agent's
-  input and never sends. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
-  agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what needs the person's own hands
-  (typing an AI provider key, approving permissions): say who does it instead. The session
-  picker (the New Session page, a thread with no agent session) offers **no**
-  prompts — there is no agent here yet to hand one to — only the agent
+  would be here and one sentence on how it gets here. It offers no
+  prompts. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
+  agent…" is plain text, and only the empty transcript is an `EmptyState`. Say who does what needs the person's own hands (typing an
+  AI provider key, approving permissions). The session
+  picker (the New Session page, a thread with no agent session) offers only the agent
   choice and Start, which opens the slot and nothing else. Its root
   carries `data-empty-state`, which is how a test tells an `EmptyState`
   from plain copy (`components/Prompts/emptyStates.test.tsx` mounts the
@@ -1260,39 +1257,6 @@ input of the terminal on screen and never sends it; xterm turns every line
 break into Enter, so it collapses line breaks to spaces (`oneLine`), and no
 caller may bypass the bus to write to the terminal.
 
-- **Ask = the Assistant.** Every Ask entry opens the Assistant, the
-  dock's on-the-spot agent (`components/Assistant/`), about what was asked
-  about; nothing goes to a terminal agent. It's on:
-  - the page nav bar's ☰ (**Ask the Assistant**, `menu-item-page-ask-assistant`,
-    icon `sparkles`, first in the menu), for any page whose tab id is a
-    canonical URI (`PageNavigationContext.ask`: `{ ref, streamId }`);
-  - a page row's right-click menu (`rowAssistantContext`: the first page
-    the row links to, else the row as text);
-  - an editor selection and a diff's right-side selection (the selected
-    text, with `oxplow:oxplow/file?path=<path>[&rev=<rev>]#lines=<a>-<b>` as
-    its source). A diff offers it only while its right side names a file
-    (`Diff/diffAsk.ts`, a Monaco context key on the action's precondition);
-    a compare with the clipboard has no Ask action rather than one that does
-    nothing.
-  The catalog's prompts `about` the page's resource (`promptsAbout`) are
-  chips above the panel's prompt box; a chip, an empty state's prompt and
-  the launcher's last row for any typed text (**Ask the Assistant: <text>**)
-  put their question in the box. Nothing in oxplow sends a prompt on its own:
-  only Enter does. The prompt box: Enter sends, Shift+Enter adds a line,
-  Escape stops a running turn (and is not passed on, or the dock would close);
-  a running turn leaves the box read-only, not disabled, so Escape still
-  reaches it. The panel's toolbar (`DockToolbar`): New, the model (a quiet
-  button with its name, opening a menu), **Allow Changes** (a switch, accent
-  while on: it may then change things, each change asking first), Undo This
-  Turn, Continue in… (a menu of the stream's sessions), and at the right
-  what the conversation is about (fixed for it; New starts one about
-  nothing). The transcript: the person's prompts are bubbles, the
-  Assistant's text plain, thinking and tool calls rows that open in place to
-  their text (a call's status and Undo on its line), a permission request a
-  decision row (Allow / Decline), a block or an error a one-line note with
-  its icon. With no model the panel shows only "The Assistant needs a
-  model", **Set Up the Assistant** (foundation's AI Settings page): no toolbar,
-  no input.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   offered with no thread selected too), a
@@ -1307,7 +1271,7 @@ caller may bypass the bus to write to the terminal.
   Context**, with Copy). Every entry wears the basket's `at-sign`
   icon (`MenuItem.icon`), the dock's Context icon, so it reads the same
   everywhere. It opens the Context dock panel with an add card (a dock
-  panel is one of the three kinds of dialog, as Ask the Assistant's): a
+  panel is one of the three kinds of dialog): a
   note and **To**, the basket — This Thread (the selected thread's own), a
   named basket, or + New basket (`oxplow.context.add`, toast with Undo). The next prompt to any
   agent in a thread carries one basket: its own, or the named basket sent

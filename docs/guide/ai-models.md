@@ -2,8 +2,7 @@
 
 Oxplow can call models itself, separately from your coding agents: to
 summarize something, or to answer a quick typed question like "is this diff
-risky?", and the Assistant in the bottom bar's ✦ panel is one of them. You
-set up providers and pick which model does which job on the **AI Settings**
+risky?". You set up providers and pick which model does which job on the **AI Settings**
 page (also **Settings → AI**).
 
 ## Providers
@@ -58,7 +57,6 @@ Oxplow and extensions ask for a role, not a model:
 | `default` | every role without a model of its own, and general reasoning |
 | `summarize` | summaries of sessions, requests and changes |
 | `decide` | typed yes/no, choice and score questions (Jev fits well) |
-| `assistant` | the Assistant; it needs a model that can call tools and stream |
 
 Set **Default** first: every other role without a model of its own uses
 Default's, so one model makes everything work. Give a role its own model

@@ -90,14 +90,6 @@ pub enum OxplowEvent {
         #[specta(type = Option<oxplow_domain::JsNumber>)]
         turn_id: Option<i64>,
     },
-    /// An Assistant session changed (`assistant/`): its transcript, its
-    /// status or its settings. The panel asks `assistant_snapshot { id,
-    /// since }` for what changed. In memory only: no dataset holds it.
-    AssistantChanged {
-        id: String,
-        #[specta(type = oxplow_domain::JsNumber)]
-        seq: u64,
-    },
     /// Published datasets (views) changed: a commit touched a table one of
     /// them reads, directly or through other datasets (P4.6). A page re-runs
     /// when a dataset it read is listed.

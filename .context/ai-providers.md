@@ -101,7 +101,6 @@ oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
 | `default` | every role without a binding of its own; general reasoning: `extract` (a collector's `ai_extract`) |
 | `summarize` | summaries of sessions, requests, changes (`summarize`) |
 | `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`) |
-| `assistant` | the Assistant ("The Assistant" below); needs tool calling and streaming |
 
 **Default is the fallback.** Every built-in role but `default` falls back
 to it while it has no binding of its own (`BuiltinRole::fallback`), so
@@ -110,11 +109,12 @@ only to differ (a cheaper Summarize). An extension's AI profile falls back
 to `default` too unless it names another built-in, whose own chain then
 ends at `default` (`AiConfig::resolve` follows the chain). `default` was
 `main`: `oxplow.ai.roles.main` is a retired setting that says so
-(`core_settings::retired_setting`). A role may need model features
-(`BuiltinRole::features`). Settings shows its `fallback`, and its
-`problem` when its model lacks a feature it needs or its binding forbids
-one. Unbound with an unbound fallback is `RoleNotConfigured`: "no model is
-assigned to the `assistant` role or the `default` role it falls back to".
+(`core_settings::retired_setting`); `oxplow.ai.roles.assistant` is retired
+the same way (the Assistant is gone). Only an AI profile declares
+`features`; a built-in role needs none. Settings shows a role's `fallback`,
+and its `problem` when its binding forbids a feature a profile needs.
+Unbound with an unbound fallback is `RoleNotConfigured`: "no model is
+assigned to the `summarize` role or the `default` role it falls back to".
 
 A role exists only once something asks it. A config naming a role oxplow
 dropped (`fast`, `embed`, `review`: nothing asked them) fails to load,
@@ -126,7 +126,7 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
 An extension declares its own model needs as **AI profiles**
 (`ai_profiles:` in `extension.yaml`, [extensions-jobs.md](./extensions-jobs.md)):
 an id, a description, an optional `fallback` built-in role (`default` when
-left out; `summarize`, `decide` or `assistant` otherwise) and optional
+left out; `summarize` or `decide` otherwise) and optional
 `features` (`text | tool_calling | streaming | image`). So
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
 `Profile { extension, name }`, written as one string (`summarize`,
@@ -357,15 +357,6 @@ left out; `summarize`, `decide` or `assistant` otherwise) and optional
     OpenRouter's Jev models (a model name with `jev`), asked natively at
     `{base}/systemone`. The `decide_native` feature of the declaration is
     the kind's (`openrouter`, `typesafe`).
-  - **For a caller driving a model itself** (the Assistant):
-    `oxplow_ai_rig::completion_model(provider, instance, model)` gives
-    Rig's `DynModel<Completion>` for a declared provider (the registry's
-    `dyn ModelProvider`, found through `ModelProvider::as_any`), and the
-    crate re-exports `rig_core`. Only a Rig kind has one: TypeSafe and
-    the fixture model are refused, naming the provider.
-    `AiService::agent_model(role, choice)` is the app's way in: the
-    person's pick or the role's binding, refused when the binding forbids
-    what the role needs, with the key read for that handle only.
   - **Permission** (decided 2026-10-08). Declaring an AI provider points a
     person's key at the URL it names, so its extension must declare
     `ai.compute` (the loader refuses it otherwise), approved when the
@@ -431,80 +422,10 @@ left out; `summarize`, `decide` or `assistant` otherwise) and optional
   need (`Role`, `ProviderConfig`, `Question`, …), so `oxplow-rpc`,
   `oxplow-tauri-ipc` and `oxplow-mcp` depend only on `oxplow-app`.
 
-## The Assistant (current)
+## The Assistant (removed)
 
-A short-lived agent in oxplow's own panel, for questions and small,
-scoped tasks (`crates/oxplow-app/src/assistant/`, `Services.assistant`).
-It is not an agent session: it never touches the thread's sessions, its
-context basket or its handoffs (it may send one, when the person asks).
-Sessions live in memory by id (`ast<n>`) and are gone on restart.
-
-- **Loop.** Rig's agent (`rig-agent` `=0.45.0`) over the `assistant`
-  role's model (`AiService::agent_model`), or the model the person
-  picked. One prompt runs one turn, up to 16 model calls
-  (`default_max_turns`; Rig's default is one). The history is ours: each
-  finished turn's messages are appended and sent with the next prompt.
-  A prompt during a turn is refused (`TurnInFlight`). Stop drops Rig's
-  stream (the model's connection, and any call it awaits): the transcript
-  keeps what it shows, the history gets nothing of that turn.
-- **Transcript.** `chat/transcript.rs` items, written from the turn's
-  hook (`AgentHook`), not from the stream: Rig reports a tool call on
-  its stream only once it is committed, so live status comes from
-  `on_dispatch` / `on_outcome`; text and thoughts from `on_text_delta`
-  / `on_reasoning_delta`. Each change emits `assistantChanged { id, seq }`;
-  the panel reads `assistant_snapshot { id, since }`.
-- **Tools** (`assistant/tools.rs`). Every bus command the person may run
-  (`CommandBus::list(&Actor::Human)`) that only reads (`View`, `Read`)
-  is a tool of its own, named by its id with `.` → `_`, its summary and
-  input schema the tool's. `oxplow.sql.query`, `oxplow.records.read` and
-  `oxplow.search.find` are among them (left out: `sql.query` when the
-  binding forbids `sql`). With "Allow changes" on, changes (`Record`,
-  `Write`) go through two tools, not one each: `oxplow_find_command`
-  lists them with their input schemas, `oxplow_run_command { command,
-  input }` runs one. Every change as its own tool would be about 200
-  tools and 170 KB of schema per request, and some wires take at most
-  128. A result is cut at 64 KiB, as a job's.
-- **Approval.** A `oxplow_run_command` call adds a permission card and
-  waits in `on_dispatch` for the person's answer (`assistant_answer`):
-  allowed, it runs; declined, it is skipped and the model reads "the
-  person declined". Reads never ask. Stop or close answers every open
-  card `cancelled`.
-- **Runs are the person's.** `Actor::Human`, `confirmed` by the card,
-  through a run that is `acting_through("assistant:<id>")`, so its audit
-  row's `via` names the session ([commands.md](./commands.md) "Acting
-  through"). The run's `audit_id` lands on the tool item (`ToolCall.auditId`,
-  passed from the executor on Rig's tool result context), so the panel
-  undoes a call through the existing undo.
-- **Model calls are recorded.** Each completion is an `ai_call` row
-  (`AiService::record_agent_call`): role `assistant`, caller
-  `assistant:<id>`, its tokens, latency and outcome; the request kept is
-  the conversation and the tools' names.
-- **A picked model keeps the role's `restrict`.** `agent_model` gives a
-  person's pick the `assistant` binding's restrictions (no SQL tool, …), so
-  picking another model doesn't lift what the person forbade for the role.
-- **No model.** `assistant_open` still succeeds; the snapshot's `problem`
-  is `{ kind: no_model }` and a prompt is refused `NO_MODEL`. Picking a
-  model clears it.
-- **System prompt** (`assistant/prompt.rs`): what it is, how its tools
-  work, the stream (id, branch, worktree) and thread, and the opening
-  context (a page's URI, or the selected text and where it came from).
-- **Continue in session.** `assistant_handoff { id, to_thread }` runs
-  `oxplow.handoff.send` from the session's thread with a condensed
-  transcript: the opening context's ref, the person's prompts, each
-  turn's final answer and one line per tool call.
-- **IPC** (UI-only, `oxplow-rpc` `commands/assistant.rs`):
-  `assistant_open { stream, thread?, context? } -> { id }`,
-  `assistant_prompt { id, text }`, `assistant_cancel { id }`,
-  `assistant_set { id, model?, allow_changes? }` (on the wire `model` is
-  a model or `"default"`; `api.ts`'s `assistantSet` maps its `null` to
-  `"default"` and leaves out what it isn't given),
-  `assistant_answer { id, ask, allow }`, `assistant_snapshot { id, since }
-  -> { status, items, seq, model, models, allowChanges, problem }`,
-  `assistant_handoff { id, to_thread }`, `assistant_close { id }`.
-  Errors carry codes `NOT_FOUND`, `BUSY`, `NO_MODEL`, `INVALID`.
-- **Tests** (`assistant/tests.rs`) run the shipped `openai_compatible`
-  kind against `oxplow_ai_fake::mock_sse_rounds_held`, a local stand-in
-  that scripts each request's stream and can hold one open.
+The Assistant was removed (2026-11-19). Its panel was too small to read an
+answer. Add to Context already lets a thread's agent answer about a thing.
 
 ## Recorded computations (current, P5.E1)
 
@@ -618,9 +539,7 @@ surface-parity manifest.
 ## AI Settings (Settings → AI)
 
 One page, foundation's `ai-settings` (`AI Settings`, System), sets up all of
-oxplow's AI; Settings → AI embeds it, Settings' Manage services links it,
-and the Assistant panel's Set Up the Assistant opens it (`aiSettingsRef`):
-the Assistant is one role among the others, so it has no page of its own.
+oxplow's AI; Settings → AI embeds it and Settings' Manage services links it.
 It reads the live models `v_ai_provider`, `v_ai_role`, `v_ai_model` and
 `v_ai_call` and writes with commands (`commands/ai_settings.rs`), anyone's —
 a person's, their agent's, or a page's: `oxplow.ai.set_provider { id?, kind,
@@ -659,9 +578,8 @@ modal masks and never drafts.
   to it (a profile through the built-in it names), so one model set on
   Default serves them all. A row's pencil, or a click, is **Choose Model…** (provider and model;
   Save; the binding's `restrict` kept as it is; the Model suggests every
-  provider's models, labelled with theirs, and for the Assistant only ones
-  whose catalog doesn't say they can't call tools — open choices, any id
-  may be typed). **Use the Fallback Model** unbinds the role, offered only
+  provider's models, labelled with theirs, for every role — open choices,
+  any id may be typed). **Use the Fallback Model** unbinds the role, offered only
   while its fallback has a model, so it never leaves a role with none.
 - **This week's calls:** `v_ai_call` of the last 7 days by role and caller.
 

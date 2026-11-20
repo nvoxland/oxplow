@@ -649,6 +649,9 @@ pub fn retired_setting(key: &str) -> Option<&'static str> {
         "oxplow.ai.roles.main" => Some(
             "use oxplow.ai.roles.default: the main role is now default, the model every role without one uses",
         ),
+        "oxplow.ai.roles.assistant" => {
+            Some("oxplow has no Assistant now: remove it (roles: default, summarize, decide)")
+        }
         "oxplow.newThreadSession" => {
             Some("new threads open the picker; its last choice is remembered in UI state")
         }

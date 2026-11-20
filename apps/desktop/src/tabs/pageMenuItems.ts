@@ -1,6 +1,6 @@
 /// The page nav bar's ☰ menu, as data: everything a page can be acted on
 /// with that isn't how it is navigated, in a fixed order — oxplow's own
-/// first (Ask the Assistant, then Add to Context, then the standard actions, in their order, then See also, the page's related pages), then the page's
+/// first (Add to Context, then the standard actions, in their order, then See also, the page's related pages), then the page's
 /// and its extensions' own sorted by label (an action, a command about the
 /// page's resource — all at the top level, the command's `ui.group` is its
 /// palette heading and its row menu's grouping, not a submenu here — or a
@@ -29,8 +29,6 @@ export type PagePanel = "backlinks" | "outbound" | "pin";
 
 export interface PageMenuSource {
   actions?: readonly PageAction[];
-  /** Ask the Assistant about the page (its suggested prompts are the panel's). */
-  ask?: { askAssistant(): void };
   /** The commands about the page's resource (those the daemon says apply
    *  to it now). */
   commands?: Array<Pick<CommandEntry, "id" | "label" | "run" | "enabled">>;
@@ -70,18 +68,9 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
     run: a.run,
   });
 
-  // oxplow's own: Ask, then the standard actions, always here and in
+  // oxplow's own: Add to Context, then the standard actions, always here and in
   // their own order, so they are in the same spot on every page.
   const standard: MenuItem[] = [];
-  if (source.ask) {
-    standard.push({
-      id: "page-ask-assistant",
-      label: "Ask the Assistant",
-      enabled: true,
-      icon: "sparkles",
-      run: source.ask.askAssistant,
-    });
-  }
   if (source.context) {
     const why = source.context.disabledReason;
     standard.push({

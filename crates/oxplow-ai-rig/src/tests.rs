@@ -17,7 +17,7 @@ use oxplow_ai::parts::{
 use oxplow_ai_fake::{mock, mock_get, mock_sse};
 use serde_json::{json, Value};
 
-use crate::{completion_model, provider, KINDS};
+use crate::provider;
 
 fn shipped(kind: &str, base: Option<&str>) -> std::sync::Arc<dyn ModelProvider> {
     provider(kind, kind, kind, base).expect("a kind")
@@ -610,31 +610,6 @@ async fn a_local_server_lists_the_models_it_has() {
             .collect();
         assert_eq!(ids, ["llama3.2", "qwen3:8b"], "{kind}");
         assert_eq!(catalog.models[0].tool_calling, CapabilitySupport::Unknown);
-    }
-}
-
-/// Every declared provider but TypeSafe yields a Rig model handle from an
-/// instance; one that isn't a Rig kind is refused, naming it.
-#[test]
-fn every_rig_kind_builds_a_model_handle() {
-    let instance = ProviderInstance {
-        id: "p",
-        base_url: Some("http://127.0.0.1:9/v1"),
-        key: Some("k"),
-    };
-    for kind in KINDS {
-        let declared = provider(kind.name, "mine", "Mine", None).unwrap();
-        let built = completion_model(declared.as_ref(), &instance, "some-model");
-        if kind.name == "typesafe" {
-            let Err(err) = built else {
-                panic!("TypeSafe has no handle");
-            };
-            let err = err.to_string();
-            assert!(err.contains("mine"), "{err}");
-        } else {
-            let model = built.unwrap_or_else(|e| panic!("{}: {e}", kind.name));
-            assert_eq!(model.id(), Some("some-model"), "{}", kind.name);
-        }
     }
 }
 

@@ -2513,8 +2513,7 @@
       "enum": [
         "default",
         "summarize",
-        "decide",
-        "assistant"
+        "decide"
       ]
     },
     "FeatureFile": {

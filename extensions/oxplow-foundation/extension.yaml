@@ -962,7 +962,7 @@ commands:
     confirm: always
     example: {"id": "anthropic"}
   - name: ai.set_role
-    summary: "Bind a role (`default`, `summarize`, `decide`, `assistant`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding."
+    summary: "Bind a role (`default`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding."
     scope: ai.settings
     op: set_role
     example: {"role": "summarize", "provider": "anthropic", "model": "claude-haiku-5-5"}

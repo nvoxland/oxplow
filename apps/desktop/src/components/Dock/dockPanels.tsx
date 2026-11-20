@@ -1,5 +1,5 @@
 /// The dock's panels: what each icon in the bar opens. Core registers its
-/// own (Alerts now; the assistant and the context basket join through
+/// own (Alerts now; the context basket joins through
 /// `registerDockPanel`); an extension's `panels:` entry with `dock: true`
 /// joins as a panel whose body is its page. `useDockPanels` is the one list
 /// the bar and the panel read, in a fixed order: core's first (by
@@ -13,7 +13,6 @@ import type { TabRef } from "../../tabs/tabState.js";
 import { alertsRef, contextRef } from "../../tabs/pageRefs.js";
 import { useExtensions } from "../../extensionsStore.js";
 import { panelOpenRef } from "../Panels/panelLayout.js";
-import { AssistantDockBody, useAssistantBadge } from "../Assistant/AssistantDockPanel.js";
 import { ContextDockBody, useContextBadge } from "../Context/ContextDockPanel.js";
 import { AlertsDockBody, useAlertsBadge } from "../Alerts/AlertsDockPanel.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
@@ -49,10 +48,9 @@ export interface DockPanelDef {
 /** Where a core panel sits in the bar. A closed list: it only shrinks
  *  (`dockPanels.test.ts` pins it against `corePanels.golden.json`) — a panel
  *  that isn't core's own is an extension's `panels:` entry with `dock: true`. */
-export const CORE_ORDER = ["alerts", "assistant", "context"];
+export const CORE_ORDER = ["alerts", "context"];
 
 const core: DockPanelDef[] = [
-  { id: "assistant", title: "Assistant", icon: "sparkles", useBadge: useAssistantBadge, Body: AssistantDockBody },
   { id: "context", title: "Context", icon: "at-sign", useBadge: useContextBadge, Body: ContextDockBody, page: contextRef() },
   { id: "alerts", title: "Alerts", icon: "bell", useBadge: useAlertsBadge, Body: AlertsDockBody, page: alertsRef() },
 ];

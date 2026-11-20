@@ -865,7 +865,7 @@ fn sources_here(
 /// The built-in role names `ai.roles` accepts beside extension AI
 /// profiles (`<extension>/<profile>`). Must match
 /// `oxplow_ai::config::BuiltinRole` (a test in oxplow-app checks).
-pub const AI_ROLE_NAMES: [&str; 4] = ["default", "summarize", "decide", "assistant"];
+pub const AI_ROLE_NAMES: [&str; 3] = ["default", "summarize", "decide"];
 
 /// Roles oxplow dropped because nothing asked them (`oxplow_ai`'s
 /// `DROPPED_ROLES`): naming one fails saying so.
@@ -3187,6 +3187,23 @@ dimensions:
         let error = load_project_config(dir.path()).unwrap_err().to_string();
         assert!(
             error.contains("is retired") && error.contains("oxplow.ai.roles.default"),
+            "{error}"
+        );
+    }
+
+    /// The Assistant is gone: a setting still naming its role says so.
+    #[test]
+    fn the_assistant_ai_role_is_retired() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.ai.roles.assistant: { provider: p, model: m }\n",
+        )
+        .unwrap();
+        let error = load_project_config(dir.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("is retired") && error.contains("no Assistant"),
             "{error}"
         );
     }

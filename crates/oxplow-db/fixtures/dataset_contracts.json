@@ -25078,6 +25078,58 @@
       "key": [
         "id"
       ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Audit row id, in run order."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it ran (RFC 3339)."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command id (`oxtask.task.create`)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "What went wrong, for an outcome other than `ok`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran on, if any (v_thread.id)."
+        },
+        {
+          "name": "session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that ran it, if any (v_agent_session.id)."
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "lens": {
@@ -35430,6 +35482,39 @@
           "name": "tool_calling",
           "type": "TEXT",
           "doc": "`supported`, `unsupported` or `unknown`: whether it calls tools (the Assistant needs it)."
+        },
+        {
+          "name": "streaming",
+          "type": "TEXT",
+          "doc": "`supported`, `unsupported` or `unknown`."
+        },
+        {
+          "name": "context_tokens",
+          "type": "INT",
+          "doc": "Its context window in tokens; NULL when unknown."
+        }
+      ],
+      "key": [
+        "provider",
+        "model"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider (`v_ai_provider.id`)."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model's id at that provider, as a role binds it (`claude-sonnet-4-5`)."
+        },
+        {
+          "name": "tool_calling",
+          "type": "TEXT",
+          "doc": "`supported`, `unsupported` or `unknown`: whether it calls tools (an AI profile may need it)."
         },
         {
           "name": "streaming",

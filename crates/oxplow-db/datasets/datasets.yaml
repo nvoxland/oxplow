@@ -1719,7 +1719,7 @@
     - { not_null: capability }
     - { not_null: provider }
 - name: command_audit
-  version: 4
+  version: 5
   key: [id]
   description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, pages and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
   fields:
@@ -1732,7 +1732,6 @@
     - { name: "error", type: "TEXT", doc: "What went wrong, for an outcome other than `ok`." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it ran on, if any (v_thread.id)." }
     - { name: "session_id", type: "INTEGER", doc: "The agent session that ran it, if any (v_agent_session.id)." }
-    - { name: "via", type: "TEXT", doc: "What the actor ran it through, when not directly: `assistant:ast3` for a command the Assistant ran for the person, which they approved. Assistant sessions live in memory, so an id may repeat after a restart. NULL otherwise. (v2)" }
   tests:
     - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
     - { accepted_values: { column: actor_kind, values: [human, agent, page, component, system, effect, job] } }
@@ -2191,13 +2190,13 @@
     - { name: "base_url", type: "TEXT", doc: "Its API base when overridden or required; NULL for the default." }
     - { name: "key_set", type: "INT", doc: "1 when the keychain holds a key for it." }
 - name: ai_model
-  version: 1
+  version: 2
   key: [provider, model]
   description: "Each configured provider's models, from its kind's catalog: a hosted service's from the catalog oxplow ships (no call, no key), a local server's from the server itself when it lists them. A provider whose models aren't known lists none: its model is typed. Read live when a query names it. AI Settings suggests these for a Model."
   fields:
     - { name: "provider", type: "TEXT", doc: "The provider (`v_ai_provider.id`)." }
     - { name: "model", type: "TEXT", doc: "The model's id at that provider, as a role binds it (`claude-sonnet-4-5`)." }
-    - { name: "tool_calling", type: "TEXT", doc: "`supported`, `unsupported` or `unknown`: whether it calls tools (the Assistant needs it)." }
+    - { name: "tool_calling", type: "TEXT", doc: "`supported`, `unsupported` or `unknown`: whether it calls tools (an AI profile may need it)." }
     - { name: "streaming", type: "TEXT", doc: "`supported`, `unsupported` or `unknown`." }
     - { name: "context_tokens", type: "INT", doc: "Its context window in tokens; NULL when unknown." }
 - name: lsp_server

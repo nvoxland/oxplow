@@ -38,21 +38,6 @@
     ]
   },
   {
-    "key": "oxplow.ai.roles.assistant",
-    "title": "AI role assistant",
-    "description": "Provider and model used for this role. Remove the override to inherit.",
-    "category": "ai",
-    "default": null,
-    "secret": false,
-    "order": 0,
-    "ui": {},
-    "owner": "core",
-    "accepts": [
-      25,
-      26
-    ]
-  },
-  {
     "key": "oxplow.ai.roles.decide",
     "title": "AI role decide",
     "description": "Provider and model used for this role. Remove the override to inherit.",

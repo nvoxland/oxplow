@@ -17,9 +17,8 @@ import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
-import { editorContextEntry, selectionUri } from "../agent-context-ref.js";
+import { editorContextEntry } from "../agent-context-ref.js";
 import { addToContext } from "../contextBasket.js";
-import { askAssistant } from "./Assistant/assistantSession.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { fileRef } from "../tabs/pageRefs.js";
 
@@ -494,18 +493,6 @@ export function EditorPane({
         if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
         const text = model.getValueInRange(sel);
         onCompareWithClipboard?.(text, filePath);
-      },
-    },
-    {
-      id: "editor.ask-about",
-      label: "Ask the Assistant",
-      enabled: !!filePath && hasEditorSelection(editorRef.current),
-      run: () => {
-        const editor = editorRef.current;
-        const sel = editor?.getSelection?.();
-        const model = editor?.getModel();
-        if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
-        void askAssistant({ kind: "selection", uri: selectionUri(filePath, sel), text: model.getValueInRange(sel), label: null });
       },
     },
     {

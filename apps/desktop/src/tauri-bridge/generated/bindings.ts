@@ -322,50 +322,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	assistantOpen: (stream: StreamId, thread: string | null, context:
-/**  A page, by its URI. */
-{ kind: "page"; uri: string; label: string | null } |
-/**  Selected text, and where it came from when known. */
-{ kind: "selection"; uri: string | null; text: string; label: string | null } | null) => typedError<AssistantOpened, IpcError_Serialize>(__TAURI_INVOKE("assistant_open", { stream, thread, context })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantPrompt: (id: string, text: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_prompt", { id, text })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantCancel: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_cancel", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantSet: (id: string, dataset: RoleDefault | AssistantModel | null, allowChanges: boolean | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_set", { id, dataset, allowChanges })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantAnswer: (id: string, ask: string, allow: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_answer", { id, ask, allow })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantSnapshot: (id: string, since: number) => typedError<AssistantSnapshot, IpcError_Serialize>(__TAURI_INVOKE("assistant_snapshot", { id, since })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantHandoff: (id: string, toThread: string) => typedError<unknown, IpcError_Serialize>(__TAURI_INVOKE("assistant_handoff", { id, toThread })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	assistantClose: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_close", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listBacklinks: (target: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_backlinks", { target, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1084,67 +1040,6 @@ export type ArgSource =
 /**  A literal value. */
 unknown;
 
-/**  What the Assistant was opened on: a page, or a selection of text. */
-export type AssistantContext =
-/**  A page, by its URI. */
-{ kind: "page"; uri: string; label: string | null } |
-/**  Selected text, and where it came from when known. */
-{ kind: "selection"; uri: string | null; text: string; label: string | null };
-
-/**  A provider's model. */
-export type AssistantModel = {
-	provider: string,
-	model: string,
-};
-
-/**
- *  `assistant_set`'s `model` on the wire: a model, or `"default"` (back to
- *  the `assistant` role's binding). `api.ts`'s `assistantSet` sends
- *  `"default"` for its `model: null`.
- */
-export type AssistantModelChoice = RoleDefault | AssistantModel;
-
-/**  A model the person may pick, as the picker shows it. */
-export type AssistantModelOption = {
-	provider: string,
-	model: string,
-	label: string,
-};
-
-/**  What `assistant_open` answers. */
-export type AssistantOpened = {
-	id: string,
-};
-
-export type AssistantProblem = {
-	kind: AssistantProblemKind,
-	message: string,
-};
-
-/**  Why the Assistant can't answer now. */
-export type AssistantProblemKind =
-/**  No model is bound to the `assistant` role or to Main. */
-"no_model" |
-/**  The model couldn't be used (its key, its provider, a restriction). */
-"model";
-
-/**  A session as the panel reads it: the items changed after `since`. */
-export type AssistantSnapshot = {
-	status: AssistantStatus,
-	/**  Items created or changed after `since`, oldest first; upsert by `id`. */
-	items: TranscriptItem[],
-	/**  The highest `seq` so far: ask `since` it next time. */
-	seq: number,
-	/**  The model a prompt runs on: the person's pick, else the role's. */
-	model: AssistantModel | null,
-	models: AssistantModelOption[],
-	allowChanges: boolean,
-	problem: AssistantProblem | null,
-};
-
-/**  Whether a turn is running. */
-export type AssistantStatus = "idle" | "running";
-
 /**
  *  Whether the handler runs inside the bus's transaction (with the audit
  *  row and `command.executed`), or outside it, against a system the bus
@@ -1312,7 +1207,7 @@ export type Build_Serialize = {
  *  own; an extension's AI profile falls back to Default unless it names
  *  another built-in, whose own chain ends at Default.
  */
-export type BuiltinRole = "default" | "summarize" | "decide" | "assistant";
+export type BuiltinRole = "default" | "summarize" | "decide";
 
 /**  A size in bytes (the blob store's total, say). */
 export type ByteSize = number;
@@ -3646,21 +3541,6 @@ export type ItemAccepts = {
 	store?: StoreFilter | null,
 };
 
-export type ItemBody =
-/**
- *  What the human sent. `context` is the oxplow block attached to it,
- *  shown behind a disclosure.
- */
-{ type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } |
-/**  A permission request waiting on (or answered by) the human. */
-{ type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } |
-/**  oxplow's policy rejected the call without asking the human. */
-{ type: "policy_denied"; toolCallId: string; label: string; reason: string } |
-/**  A write the policy would deny ran without asking first. */
-{ type: "bypass"; toolCallId: string; label: string; reason: string } |
-/**  Something failed: the prompt, the agent process, the protocol. */
-{ type: "error"; message: string };
-
 /**  A host-recognized operation owned by one extension contribution. */
 export type JobDecl = {
 	id: string,
@@ -4541,12 +4421,12 @@ export type OxplowConfig = {
  */
 export type OxplowEvent =
 /**  Background task progress. */
-({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The set of known language servers changed (Mason package
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
-({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -4572,7 +4452,7 @@ agentSessionId: AgentSessionId | null; state: AgentStatusState;
  *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
  *  can show it — `None` for every other transition.
  */
-detail: string | null }) & { actor?: never; client?: never; datasets?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+detail: string | null }) & { actor?: never; client?: never; datasets?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
@@ -4582,19 +4462,13 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
  *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
  *  event in the log; this is the UI / reactor wake-up.
  */
-({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
-/**
- *  An Assistant session changed (`assistant/`): its transcript, its
- *  status or its settings. The panel asks `assistant_snapshot { id,
- *  since }` for what changed. In memory only: no dataset holds it.
- */
-({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
 /**
  *  Published datasets (views) changed: a commit touched a table one of
  *  them reads, directly or through other datasets (P4.6). A page re-runs
  *  when a dataset it read is listed.
  */
-({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  An open page run re-ran (a dataset one of its loaders read changed):
  *  the loaders whose rows differ, for the window that opened it to
@@ -4610,13 +4484,13 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
-({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
@@ -4624,7 +4498,7 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a page re-runs its definition.
  */
-({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A command running on the daemon calls a scope the window
  *  hosts (`client_host.rs`): the window does `scope`'s `op` with
@@ -4638,13 +4512,13 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
  */
 client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
-actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
+({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
 /**
  *  A stream's worktree changed on disk: one event for a burst. The live
  *  datasets over its files refresh in response, and an open editor reads
@@ -4652,12 +4526,12 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  own), or everything it holds when `overflow` says the list is not
  *  whole.
  */
-({ kind: "workspaceChanged"; streamId: StreamId; paths: string[]; overflow: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "workspaceChanged"; streamId: StreamId; paths: string[]; overflow: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -4666,7 +4540,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A sign-in for provider instance `instance`'s credential `name`
  *  finished (P9.B3): its token is in the keychain and the instance
@@ -4680,7 +4554,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  a row waiting on another sign-in of the same credential
  *  ignores it.
  */
-signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
+signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; overflow?: never; paths?: never; scope?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
 
 /**
  *  When an `on:` collector runs after a triggering event. Empty,
@@ -5716,30 +5590,12 @@ export type PartView_Serialize = {
 	choices: PanelChoice_Serialize[],
 };
 
-/**  How a permission request was answered. */
-export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };
-
-export type PermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
-
-export type PermissionOption = {
-	id: string,
-	name: string,
-	kind: PermissionKind,
-};
-
 /**
  *  What an extension may do beyond the baseline. Absent fields grant
  *  nothing. Written (and stored) as the list of [`PERMISSION_IDS`] it
  *  grants.
  */
 export type Permissions = string[];
-
-export type PlanEntry = {
-	content: string,
-	status: PlanStatus,
-};
-
-export type PlanStatus = "pending" | "in_progress" | "completed";
 
 /**  One command at a point, and what it runs with. */
 export type PointCommand = {
@@ -6006,9 +5862,6 @@ export type RoleBinding = {
 	 */
 	restrict?: AiRestriction[],
 };
-
-/**  The `"default"` of [`AssistantModelChoice`]. */
-export type RoleDefault = "default";
 
 export type RoleStatus = {
 	role: string,
@@ -6661,32 +6514,6 @@ export type TileSize = "small" | "wide" | "tall" | "full";
 export type Timestamp = string;
 
 /**
- *  A tool call as last reported: the initial `tool_call` with every
- *  `tool_call_update` for its id applied.
- */
-export type ToolCall = {
-	id: string,
-	title: string,
-	/**  The agent's programmatic tool name, when it sends one. */
-	name: string | null,
-	kind: ToolKind,
-	status: ToolStatus,
-	/**  Paths from `locations` (absolute, per the protocol). */
-	locations: string[],
-	/**  The agent's own JSON for the call; `unknown` to the renderer. */
-	rawInput: unknown | null,
-	rawOutput: unknown | null,
-	diffs: ToolDiff[],
-	/**  Text content blocks (command output, messages). */
-	text: string[],
-	/**
-	 *  The audit row of the command run it made, when it was one that is
-	 *  audited (the Assistant's write tools): what Undo undoes.
-	 */
-	auditId: number | null,
-};
-
-/**
  *  What the agent policy decided about a tool call (PreToolUse), carried
  *  on the envelope so the log records it.
  */
@@ -6694,25 +6521,6 @@ export type ToolDecision = {
 	allowed: boolean,
 	reason: string | null,
 };
-
-/**  One file change a tool call reports. `old_text: None` means a new file. */
-export type ToolDiff = {
-	path: string,
-	oldText: string | null,
-	newText: string,
-};
-
-/**  The tool categories a connection maps its agent's tools onto. */
-export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" |
-/**  The agent drives a child agent (Codex's collab tools). */
-"subagent" | "other";
-
-export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
-
-export type TranscriptItem = {
-	id: number,
-	seq: number,
-} & ItemBody;
 
 /**  When a collector runs by itself. */
 export type Trigger = Trigger_Serialize | Trigger_Deserialize;

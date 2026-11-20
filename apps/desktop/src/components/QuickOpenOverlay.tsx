@@ -34,7 +34,6 @@ import { kindForTabId, PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory } from "./RailHud/sections.js";
-import { askAssistant } from "./Assistant/assistantSession.js";
 import { launcherDirectory, useLauncherCounts } from "./extensionLauncher.js";
 
 interface Props {
@@ -343,7 +342,6 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
       setTimeout(result.entry.run, 0);
       return;
     } else if (result.kind === "file") onOpenFile(result.file.path);
-    else if (result.kind === "ask") void askAssistant(null, result.text);
     else onOpenSearchHit(result.hit);
     onClose();
   }
@@ -525,30 +523,6 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                       )}
                     </span>
                     <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
-                  </button>
-                );
-              }
-              if (result.kind === "ask") {
-                return (
-                  <button type="button"
-                    key="ask"
-                    data-testid="launcher-ask"
-                    data-row-index={index}
-                    {...rowA11y(nav.optionProps(index))}
-                    onClick={() => confirm(result)}
-                    title="Put this question in the Assistant's box (it isn't sent)"
-                    style={{
-                      ...resultStyle,
-                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
-                    }}
-                  >
-                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 11 }}>
-                      ?
-                    </span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      Ask the Assistant: {result.text}
-                    </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>assistant</span>
                   </button>
                 );
               }

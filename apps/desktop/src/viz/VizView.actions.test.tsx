@@ -126,7 +126,7 @@ test("rows are focusable and open their menu from the keyboard, in every row com
   const row = getByTestId("viz-row-0");
   expect(row.tabIndex).toBe(0);
   fireEvent.keyDown(row, { key: "F10", shiftKey: true });
-  expect(queryByTestId("menu-item-ask-about-row")).not.toBeNull();
+  expect(queryByTestId("menu-item-add-row-to-context")).not.toBeNull();
   expect(queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
   unmount();
 

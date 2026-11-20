@@ -1,6 +1,5 @@
 /**
- * The URI a selection in an editor or a diff names, for Ask the Assistant
- * and Add to Context (`.context/usability.md` "Add to Context").
+ * The URI a selection in an editor or a diff names, for Add to Context (`.context/usability.md` "Add to Context").
  */
 
 import { fileLinesUri, fileUri } from "./uri/uri.js";

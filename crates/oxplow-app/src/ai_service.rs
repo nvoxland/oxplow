@@ -542,27 +542,11 @@ impl AiService {
         };
         let mut roles: Vec<RoleStatus> = Vec::new();
         for builtin in BuiltinRole::ALL {
-            let mut row = status(
+            roles.push(status(
                 Role::Builtin(builtin),
                 builtin.description().to_string(),
                 None,
-            );
-            if let Some(binding) = row
-                .effective
-                .clone()
-                .filter(|_| !builtin.features().is_empty())
-            {
-                let who = format!("the `{}` role", builtin.name());
-                row.problem = match forbidden_features(&who, builtin.features(), &binding) {
-                    Some(forbidden) => Some(forbidden),
-                    None => self
-                        .capabilities_unpinned(&row.role)
-                        .await
-                        .ok()
-                        .and_then(|snapshot| missing_features(&who, builtin.features(), &snapshot)),
-                };
-            }
-            roles.push(row);
+            ));
         }
         let mut declared: Vec<&AiProfile> = profiles.iter().collect();
         declared.sort_by_key(|p| p.role());
@@ -1237,63 +1221,6 @@ impl AiService {
         .await?
     }
 
-    /// What an agent loop the caller drives itself (the Assistant) runs
-    /// on: `choice` when the person picked one (a configured provider's
-    /// model), else `role`'s binding. Refused when its binding forbids
-    /// what `role` needs (tool calling, streaming) or its provider isn't a
-    /// kind Rig speaks. Its key is read now, for this handle only.
-    pub async fn agent_model(
-        &self,
-        role: BuiltinRole,
-        choice: Option<&RoleBinding>,
-    ) -> Result<AgentModel, AiServiceError> {
-        self.read_generation(async {
-            let (provider, binding) = match choice {
-                Some(choice) => {
-                    let config = self.config()?;
-                    let provider = config
-                        .providers
-                        .iter()
-                        .find(|p| p.id == choice.provider)
-                        .cloned()
-                        .ok_or_else(|| {
-                            AiServiceError::Config(format!(
-                                "AI provider `{}` isn't set up (Settings → AI)",
-                                choice.provider
-                            ))
-                        })?;
-                    // A picked model is still the role's: the person's
-                    // restrictions on the role's binding bind it too.
-                    let restrict = self
-                        .resolve(&Role::Builtin(role))
-                        .map(|(_, b)| b.restrict)
-                        .unwrap_or_default();
-                    (
-                        provider,
-                        RoleBinding {
-                            restrict,
-                            ..choice.clone()
-                        },
-                    )
-                }
-                None => self.resolve(&Role::Builtin(role))?,
-            };
-            let who = format!("the `{}` role", role.name());
-            if let Some(problem) = forbidden_features(&who, role.features(), &binding) {
-                return Err(AiServiceError::Config(problem));
-            }
-            let model_provider = self.provider_of(&provider)?;
-            let key = self.key(&provider)?;
-            let handle = oxplow_ai_rig::completion_model(
-                model_provider.as_ref(),
-                &instance(&provider, key.as_deref()),
-                &binding.model,
-            )?;
-            Ok(AgentModel { binding, handle })
-        })
-        .await?
-    }
-
     /// Each configured provider's models, from its catalog (`v_ai_model`):
     /// in provider order, then the catalog's. No key is read; a provider
     /// whose catalog is unknown, or can't be read, lists none.
@@ -1323,89 +1250,6 @@ impl AiService {
             Ok(out)
         })
         .await?
-    }
-
-    /// The models a person may pick for `role`: every role's binding, then
-    /// each configured provider's catalog, leaving out a model its catalog
-    /// says can't call tools when `role` needs that. No key is read.
-    pub async fn model_choices(
-        &self,
-        role: BuiltinRole,
-    ) -> Result<Vec<RoleBinding>, AiServiceError> {
-        use oxplow_ai::capabilities::{CapabilitySupport, ModelFeature};
-        self.read_generation(async {
-            let config = self.config()?;
-            let profiles = self.profiles();
-            let mut out: Vec<RoleBinding> = Vec::new();
-            let mut push = |binding: RoleBinding| {
-                if !out
-                    .iter()
-                    .any(|b| b.provider == binding.provider && b.model == binding.model)
-                {
-                    out.push(binding);
-                }
-            };
-            for builtin in BuiltinRole::ALL {
-                if let Some((_, binding)) = config.resolve(&Role::Builtin(builtin), &profiles) {
-                    push(RoleBinding::new(&binding.provider, &binding.model));
-                }
-            }
-            let needs_tools = role.features().contains(&ModelFeature::ToolCalling);
-            for provider in &config.providers {
-                let Ok(model_provider) = self.provider_of(provider) else {
-                    continue;
-                };
-                let Ok(catalog) = model_provider
-                    .discover_models(&instance(provider, None))
-                    .await
-                else {
-                    continue;
-                };
-                for model in catalog.models {
-                    if needs_tools && model.tool_calling == CapabilitySupport::Unsupported {
-                        continue;
-                    }
-                    if let Some(name) = model.model {
-                        push(RoleBinding::new(&provider.id, name));
-                    }
-                }
-            }
-            Ok(out)
-        })
-        .await?
-    }
-
-    /// Record a model call an agent loop the caller drives made (the
-    /// Assistant's, through Rig): every call is a row in `ai_call`, like
-    /// the ones this service makes. Its row id; `None` when recording
-    /// failed, which is logged.
-    pub async fn record_agent_call(&self, call: AgentCall<'_>) -> Option<i64> {
-        let (input_tokens, output_tokens, response, error) = match call.outcome {
-            Ok((input, output, response)) => (input, output, Some(response), None),
-            Err(error) => (0, 0, None, Some(error.to_string())),
-        };
-        let row = NewAiCall {
-            role: call.role.to_string(),
-            provider: call.binding.provider.clone(),
-            model: call.binding.model.clone(),
-            caller: call.caller.to_string(),
-            input_tokens,
-            output_tokens,
-            latency_ms: call.started.elapsed().as_millis() as i64,
-            ok: error.is_none(),
-            error,
-            input_hash: None,
-            request: call.request,
-            response,
-            run_id: None,
-        };
-        match self.calls.record(row).await {
-            Ok(id) => Some(id),
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to record an AI call");
-                None
-            }
-        }
     }
 
     /// The stored key entry, whatever URL it's bound to.
@@ -1746,27 +1590,6 @@ impl Bound {
     }
 }
 
-/// One model call of an agent loop, as [`AiService::record_agent_call`]
-/// records it.
-pub struct AgentCall<'a> {
-    pub role: &'a Role,
-    /// Who asked (`assistant:ast3`).
-    pub caller: &'a str,
-    pub binding: &'a RoleBinding,
-    pub started: Instant,
-    /// What it was sent, as the record keeps it.
-    pub request: serde_json::Value,
-    /// Its tokens in and out and its reply, or why it failed.
-    pub outcome: Result<(i64, i64, serde_json::Value), &'a str>,
-}
-
-/// A model an agent loop drives ([`AiService::agent_model`]): Rig's
-/// handle, and the binding it is.
-pub struct AgentModel {
-    pub binding: RoleBinding,
-    pub handle: oxplow_ai_rig::DynModel<oxplow_ai_rig::Completion>,
-}
-
 /// Typed payloads retain optional counts and provenance. The numeric
 /// aggregates include only provider-observed usage and are zero for missing
 /// or non-observed values.
@@ -2078,18 +1901,11 @@ mod tests {
         let names: Vec<String> = st.roles.iter().map(|r| r.role.to_string()).collect();
         assert_eq!(
             names,
-            [
-                "default",
-                "summarize",
-                "decide",
-                "assistant",
-                "acme/review",
-                "gone/old"
-            ]
+            ["default", "summarize", "decide", "acme/review", "gone/old"]
         );
-        let assistant = &st.roles[3];
-        assert_eq!(assistant.fallback, Some(BuiltinRole::Default));
-        let profile = &st.roles[4];
+        let decide = &st.roles[2];
+        assert_eq!(decide.fallback, Some(BuiltinRole::Default));
+        let profile = &st.roles[3];
         assert_eq!(profile.description, "Reviews things.");
         assert_eq!(profile.namespace.as_deref(), Some("acme"));
         assert_eq!(profile.fallback, Some(BuiltinRole::Summarize));
@@ -2104,7 +1920,7 @@ mod tests {
             BuiltinRole::Summarize.description()
         );
         assert_eq!(
-            st.roles[5].problem.as_deref(),
+            st.roles[4].problem.as_deref(),
             Some("no active extension declares the AI profile `gone/old`")
         );
     }
@@ -3215,7 +3031,7 @@ mod typed_tests {
         assert!(err.to_string().contains(needs), "{err}");
         assert!(fx.seen.lock().unwrap().is_empty());
         let st = fx.svc.settings().await.unwrap();
-        assert_eq!(st.roles[4].problem.as_deref(), Some(needs));
+        assert_eq!(st.roles[3].problem.as_deref(), Some(needs));
         // The built-in role it falls back to has no such need.
         fx.svc
             .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &text_request("hi"))
@@ -3234,38 +3050,6 @@ mod typed_tests {
                 }),
             )
             .unwrap();
-    }
-
-    /// A model the person picks for the Assistant is still under the
-    /// `assistant` binding's `restrict`: the pick doesn't lift it (here, no
-    /// SQL tool).
-    #[tokio::test]
-    async fn a_picked_model_obeys_the_roles_restrictions() {
-        use oxplow_domain::ai::AiRestriction;
-        let fx = fixture("openai_compatible", None, typed_reply("observed")).await;
-        let pick = RoleBinding::new("openai_compatible", "other");
-        let free = fx
-            .svc
-            .agent_model(BuiltinRole::Assistant, Some(&pick))
-            .await
-            .unwrap();
-        assert!(!free.binding.forbids(AiRestriction::Sql));
-        fx.svc
-            .set_role(
-                &Role::ASSISTANT,
-                Some(RoleBinding {
-                    restrict: [AiRestriction::Sql].into_iter().collect(),
-                    ..RoleBinding::new(fx.svc.config().unwrap().providers[0].id.clone(), "m")
-                }),
-            )
-            .unwrap();
-        let picked = fx
-            .svc
-            .agent_model(BuiltinRole::Assistant, Some(&pick))
-            .await
-            .unwrap();
-        assert_eq!(picked.binding.model, "other");
-        assert!(picked.binding.forbids(AiRestriction::Sql));
     }
 
     /// A person's restriction on a binding refuses a typed request needing

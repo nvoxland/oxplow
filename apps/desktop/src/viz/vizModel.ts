@@ -24,7 +24,6 @@ import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, knowled
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import type { AssistantContext } from "../components/Assistant/assistantApi.js";
 import { knowledgeOf, parseUri, requestUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
@@ -587,13 +586,6 @@ export function rowRef(viz: VizConfig, columns: string[], row: SqlCell[]): strin
 export function rowMention(id: string, columns: string[], row: SqlCell[]): string {
   const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
   return `[oxplow page ${id} row: ${fields}] `;
-}
-
-/** Ask the Assistant about a viz row: the first page the row links to,
- *  or — a row that links nowhere — the row itself as text (a viz mention). */
-export function rowAssistantContext(viz: VizConfig, columns: string[], row: SqlCell[]): AssistantContext {
-  const c = rowContext(viz, columns, row);
-  return "uri" in c ? { kind: "page", uri: c.uri, label: null } : { kind: "selection", uri: null, text: c.text, label: null };
 }
 
 /** Add to Context on a viz row: the first page the row links to, else

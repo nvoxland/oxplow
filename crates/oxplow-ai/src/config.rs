@@ -26,15 +26,13 @@ pub enum BuiltinRole {
     Default,
     Summarize,
     Decide,
-    Assistant,
 }
 
 impl BuiltinRole {
-    pub const ALL: [BuiltinRole; 4] = [
+    pub const ALL: [BuiltinRole; 3] = [
         BuiltinRole::Default,
         BuiltinRole::Summarize,
         BuiltinRole::Decide,
-        BuiltinRole::Assistant,
     ];
 
     pub fn name(self) -> &'static str {
@@ -42,7 +40,6 @@ impl BuiltinRole {
             BuiltinRole::Default => "default",
             BuiltinRole::Summarize => "summarize",
             BuiltinRole::Decide => "decide",
-            BuiltinRole::Assistant => "assistant",
         }
     }
 
@@ -52,15 +49,6 @@ impl BuiltinRole {
         match self {
             BuiltinRole::Default => None,
             _ => Some(BuiltinRole::Default),
-        }
-    }
-
-    /// What its model must support.
-    pub fn features(self) -> &'static [crate::capabilities::ModelFeature] {
-        use crate::capabilities::ModelFeature;
-        match self {
-            BuiltinRole::Assistant => &[ModelFeature::ToolCalling, ModelFeature::Streaming],
-            _ => &[],
         }
     }
 
@@ -77,10 +65,6 @@ impl BuiltinRole {
             }
             BuiltinRole::Summarize => "Summaries of sessions and changes",
             BuiltinRole::Decide => "Typed yes/no, choice and score questions (e.g. Jev)",
-            BuiltinRole::Assistant => {
-                "The Assistant: questions and small tasks in its panel (needs tool calling and \
-                 streaming)"
-            }
         }
     }
 }
@@ -103,7 +87,6 @@ impl Role {
     pub const DEFAULT: Role = Role::Builtin(BuiltinRole::Default);
     pub const SUMMARIZE: Role = Role::Builtin(BuiltinRole::Summarize);
     pub const DECIDE: Role = Role::Builtin(BuiltinRole::Decide);
-    pub const ASSISTANT: Role = Role::Builtin(BuiltinRole::Assistant);
 
     /// A role as a person writes it in `global.yaml` or `project.yaml`: a
     /// built-in name or `<namespace>/<profile>`.
@@ -114,7 +97,7 @@ impl Role {
         if DROPPED_ROLES.contains(&text) {
             return Err(format!(
                 "oxplow has no `{text}` role: nothing asked it; remove it (roles: default, \
-                 summarize, decide, assistant, or an extension's AI profile as `<namespace>/<name>`)"
+                 summarize, decide, or an extension's AI profile as `<namespace>/<name>`)"
             ));
         }
         match text.split_once('/') {
@@ -125,7 +108,7 @@ impl Role {
                 })
             }
             _ => Err(format!(
-                "unknown role `{text}` (roles: default, summarize, decide, assistant, or an \
+                "unknown role `{text}` (roles: default, summarize, decide, or an \
                  extension's AI profile as `<namespace>/<name>`)"
             )),
         }
@@ -146,7 +129,7 @@ impl Role {
             });
         }
         Err(format!(
-            "`{text}` isn't a role: name `default`, `summarize`, `decide`, `assistant` or one of this \
+            "`{text}` isn't a role: name `default`, `summarize`, `decide` or one of this \
              extension's `ai_profiles` by its id"
         ))
     }
@@ -429,7 +412,7 @@ impl AiConfig {
     }
 
     /// The provider and binding `role` uses, if it's configured: its own
-    /// binding, else its fallback's (a profile's, the Assistant's Main). A profile none of
+    /// binding, else its fallback's (Default, or a profile's own). A profile none of
     /// `profiles` declares resolves to nothing, bound or not.
     pub fn resolve(
         &self,
@@ -600,15 +583,14 @@ roles:
 
     /// Every role but Default uses its own binding when it has one, else
     /// Default's: setting Default makes every role work. Default falls
-    /// back to nothing. The Assistant needs a model that calls tools and
-    /// streams.
+    /// back to nothing.
     #[test]
     fn every_role_falls_back_to_default() {
         let only_default: AiConfig = serde_yaml::from_str(
             "providers:\n  - { id: anthropic, kind: anthropic }\nroles:\n  default: { provider: anthropic, model: claude-sonnet-5-5 }\n",
         )
         .unwrap();
-        for role in [Role::SUMMARIZE, Role::DECIDE, Role::ASSISTANT] {
+        for role in [Role::SUMMARIZE, Role::DECIDE] {
             assert_eq!(
                 only_default.resolve(&role, &[]).unwrap().1.model,
                 "claude-sonnet-5-5",
@@ -617,29 +599,18 @@ roles:
         }
         let mut own = cfg();
         own.roles.insert(
-            Role::ASSISTANT,
+            Role::DECIDE,
             RoleBinding::new("openai_compatible", "qwen3:14b"),
         );
         assert_eq!(
-            own.resolve(&Role::ASSISTANT, &[]).unwrap().1.model,
+            own.resolve(&Role::DECIDE, &[]).unwrap().1.model,
             "qwen3:14b"
         );
-        for role in [
-            BuiltinRole::Summarize,
-            BuiltinRole::Decide,
-            BuiltinRole::Assistant,
-        ] {
+        for role in [BuiltinRole::Summarize, BuiltinRole::Decide] {
             assert_eq!(role.fallback(), Some(BuiltinRole::Default));
         }
         assert_eq!(BuiltinRole::Default.fallback(), None);
-        assert_eq!(
-            BuiltinRole::Assistant.features(),
-            &[
-                crate::capabilities::ModelFeature::ToolCalling,
-                crate::capabilities::ModelFeature::Streaming
-            ]
-        );
-        assert!(AiConfig::default().resolve(&Role::ASSISTANT, &[]).is_none());
+        assert!(AiConfig::default().resolve(&Role::DECIDE, &[]).is_none());
     }
 
     /// A profile's named fallback is followed, and its chain still ends at

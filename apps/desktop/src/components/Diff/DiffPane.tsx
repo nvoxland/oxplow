@@ -5,7 +5,6 @@ import type { Revision } from "../../revision.js";
 import { selectionUri } from "../../agent-context-ref.js";
 import { addToContext } from "../../contextBasket.js";
 import { diffAskTarget } from "./diffAsk.js";
-import { askAssistant } from "../Assistant/assistantSession.js";
 import { useMonacoViewState } from "../useMonacoViewState.js";
 
 export interface DiffSpec {
@@ -95,22 +94,6 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
       // clipboard) has no ref, so the action isn't there at all.
       const modified = editor.getModifiedEditor();
       askableRef.current = modified.createContextKey("oxplow.diffAskable", diffAskTarget(specRef.current) !== null);
-      modified.addAction({
-        id: "oxplow.askAbout",
-        label: "Ask the Assistant",
-        contextMenuGroupId: "navigation",
-        precondition: "editorHasSelection && oxplow.diffAskable",
-        run: (ed: {
-          getSelection(): { startLineNumber: number; endLineNumber: number; endColumn: number; isEmpty(): boolean } | null;
-          getModel(): { getValueInRange(range: unknown): string } | null;
-        }) => {
-          const target = diffAskTarget(specRef.current);
-          const sel = ed.getSelection();
-          const model = ed.getModel();
-          if (!sel || sel.isEmpty() || !model || !target) return;
-          void askAssistant({ kind: "selection", uri: selectionUri(target.path, sel, target.rev), text: model.getValueInRange(sel), label: null });
-        },
-      });
       modified.addAction({
         id: "oxplow.addToContext",
         label: "Add Selection to Context",

@@ -489,7 +489,7 @@ script can ask for "the model that reviews" without naming one:
 ai_profiles:
   - id: review                      # [a-z][a-z0-9_]*, unique in the extension
     description: Reviews a request's evidence.   # at most 4096 bytes
-    fallback: summarize             # default (when left out) | summarize | decide | assistant
+    fallback: summarize             # default (when left out) | summarize | decide
     features: [tool_calling]        # optional: text | tool_calling | streaming | image
 ```
 

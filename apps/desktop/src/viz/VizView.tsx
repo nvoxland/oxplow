@@ -49,7 +49,6 @@ import {
   markParts,
   limitRows,
   lineSeries,
-  rowAssistantContext,
   rowContext,
   rowDepth,
   rowEdge,
@@ -79,7 +78,6 @@ import {
   type TreeNode,
   sourceValue,
 } from "./vizModel.js";
-import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
 import { useContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
@@ -763,12 +761,6 @@ function RowsBody({
     return refOffersFor(ref).then((entries) => [...base, ...refCommandMenuItems(entries)]);
   };
   const rowBase = (row: SqlCell[]): MenuItem[] => [
-    {
-      id: "ask-about-row",
-      label: "Ask the Assistant",
-      enabled: true,
-      run: () => void askAssistant(rowAssistantContext(viz, result.columns, row)),
-    },
     {
       id: "add-row-to-context",
       label: "Add to Context",

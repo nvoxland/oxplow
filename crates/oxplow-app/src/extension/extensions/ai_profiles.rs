@@ -54,7 +54,6 @@ enum FallbackFile {
     Default,
     Summarize,
     Decide,
-    Assistant,
 }
 
 /// What a bound model must support.
@@ -181,7 +180,6 @@ pub fn parse_ai_profiles(
                     FallbackFile::Default => BuiltinRole::Default,
                     FallbackFile::Summarize => BuiltinRole::Summarize,
                     FallbackFile::Decide => BuiltinRole::Decide,
-                    FallbackFile::Assistant => BuiltinRole::Assistant,
                 },
                 features,
             });
@@ -194,8 +192,7 @@ pub fn parse_ai_profiles(
 /// `features` values say what is allowed.
 fn fields_error(serde: &str) -> String {
     if serde.contains("unknown variant") && serde.contains("summarize") {
-        "ai profile `fallback` is `default`, `summarize`, `decide` or `assistant` (left out: `default`)"
-            .into()
+        "ai profile `fallback` is `default`, `summarize` or `decide` (left out: `default`)".into()
     } else if serde.contains("unknown variant") {
         "ai profile `features` are `text`, `tool_calling`, `streaming` or `image`".into()
     } else {
@@ -249,7 +246,7 @@ mod tests {
         let cases = [
             (
                 "ai_profiles:\n  - { id: a, description: x, fallback: big }\n",
-                "`fallback` is `default`, `summarize`, `decide` or `assistant`",
+                "`fallback` is `default`, `summarize` or `decide`",
             ),
             (
                 "ai_profiles:\n  - { id: a, description: x, fallback: default, features: [telepathy] }\n",

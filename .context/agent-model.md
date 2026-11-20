@@ -684,10 +684,7 @@ has a stable `id` and a `seq` bumped from one counter whenever it
 changes; `since(seq)` returns new and changed items, which clients upsert
 by `id`. Chunks of one kind coalesce into the trailing item;
 `usage_update` is state (the context meter), not an item. The ring holds
-2000 items (`DEFAULT_CAP`). The Assistant (`assistant/`,
-[ai-providers.md](./ai-providers.md) "The Assistant") keeps its
-conversation in the same `Transcript` and the same `ToolCall` and
-permission items; it is not an agent session. A `ToolCall` carries the
+2000 items (`DEFAULT_CAP`). A `ToolCall` carries the
 `auditId` of the command run it made, when it made an audited one.
 
 ### The chat machinery (a library)
@@ -1048,8 +1045,7 @@ by `the_context_basket_reaches_the_next_prompt_once` and
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
 and its stream from `setSelectedThread`): every add opens the **Context
-dock panel** (`dockStore.open("context")`, as Ask the Assistant opens its
-panel) with an add card on top (`components/Context/ContextAddCard.tsx`):
+dock panel** (`dockStore.open("context")`) with an add card on top (`components/Context/ContextAddCard.tsx`):
 what is being added by its name (`contextTitle.ts`: the label, else its
 page's title from the one title cache — an agent session's display name —
 else a file's path and lines; never a raw URI, and a title found is sent

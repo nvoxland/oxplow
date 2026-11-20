@@ -29,10 +29,7 @@ export type QuickOpenResult =
   | { kind: "page"; entry: PageDirectoryEntry }
   | { kind: "command"; entry: CommandEntry }
   | { kind: "file"; file: WorkspaceIndexedFile }
-  | { kind: "hit"; hit: SearchHit }
-  /** "Ask the Assistant: <text>" — puts what was typed in the Assistant's box
-   *  (never sent). Last in every search. */
-  | { kind: "ask"; text: string };
+  | { kind: "hit"; hit: SearchHit };
 
 /// The commands search offers: those that can run now — one that can't
 /// (nothing for it to act on) is left out rather than advertised. Every
@@ -98,8 +95,6 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
     }
     case "hit":
       return r.hit.title.toLowerCase() === q || (keyOf(r.hit.uri) ?? "").toLowerCase() === q;
-    case "ask":
-      return false;
   }
 }
 
@@ -115,8 +110,6 @@ function resultKey(r: QuickOpenResult): string {
       return fileUri(r.file.path);
     case "hit":
       return `hit:${r.hit.uri}:${r.hit.stream_id ?? ""}`;
-    case "ask":
-      return "ask";
   }
 }
 
@@ -206,7 +199,6 @@ export function buildQuickOpenResults(input: {
     ...restFiles.slice(0, MAX_FILE_ROWS),
     ...restHits.slice(0, MAX_HIT_ROWS),
   ];
-  results.push({ kind: "ask", text: input.query.trim() });
   const truncated =
     Math.max(0, restFiles.length - MAX_FILE_ROWS) + Math.max(0, restHits.length - MAX_HIT_ROWS);
   return { results, truncated };

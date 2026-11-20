@@ -148,8 +148,8 @@ test("a row opens in place to the whole message, and a failure's × dismisses it
 });
 
 // What can be done about an alert is in its row: undelivered events are
-// retried from it, and a failure asks the Assistant about itself.
-test("undelivered events retry from their row, and a failure asks the Assistant", async () => {
+// retried from it.
+test("undelivered events retry from their row", async () => {
   opErrorRows = [pushFailed];
   const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
   fireEvent.click(view.getByTestId("dock-alerts"));
@@ -158,9 +158,6 @@ test("undelivered events retry from their row, and a failure asks the Assistant"
   fireEvent.click(delivery);
   fireEvent.click(view.getAllByTestId("alerts-item-retry")[0]!);
   await waitFor(() => expect(ran).toContainEqual(["oxplow.delivery.retry_all", {}]));
-  fireEvent.click(view.getAllByTestId("alerts-panel-item")[1]!);
-  fireEvent.click(view.getByTestId("alerts-item-ask"));
-  await waitFor(() => expect(dockStore.get().open).toBe("assistant"));
 });
 
 // Clear All is on the toolbar. It puts away what a person can put
