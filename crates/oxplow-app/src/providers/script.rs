@@ -73,6 +73,8 @@ pub struct ScriptEndpoint {
     root: PathBuf,
     /// Where `tree.read` reads: the stream's worktree as it is now.
     trees: Arc<dyn crate::services::TreeSource>,
+    /// The published language set its parsing builtins use.
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 impl ScriptEndpoint {
@@ -84,6 +86,7 @@ impl ScriptEndpoint {
         catalog: &Arc<ExtensionCatalog>,
         root: &std::path::Path,
         trees: &Arc<dyn crate::services::TreeSource>,
+        languages: &crate::extension::language_set::LanguagesHandle,
     ) -> Option<Self> {
         let script = decl.script.as_ref()?;
         let local = oxplow_domain::contribution::implementation_local(&decl.capability, &decl.id);
@@ -108,6 +111,7 @@ impl ScriptEndpoint {
             catalog: catalog.clone(),
             root: root.to_path_buf(),
             trees: trees.clone(),
+            languages: languages.clone(),
         })
     }
 
@@ -171,7 +175,7 @@ impl Endpoint for ScriptEndpoint {
         let _watch = crate::run_context::watch_authority(&run);
         // `tree.read` is the stream's worktree as it is now; a script that
         // doesn't use it is given no tree.
-        let sources = crate::services::Sources::default()
+        let sources = crate::services::Sources::new(self.languages.current())
             .with_tree(crate::services::Trees::From(self.trees.clone()));
         let given = crate::services::prepare(&run, &self.text, &self.needs, &sources)
             .await
@@ -290,6 +294,7 @@ impl ProviderRegistry {
                     &self.deps.catalog,
                     &self.deps.project_dir,
                     &trees,
+                    &self.deps.languages,
                 ) else {
                     continue;
                 };

@@ -455,6 +455,7 @@ fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Answers)> {
 /// version that reacts to it.
 async fn effect_outputs(
     layer: &crate::sql_gateway::SqlGateway,
+    languages: &std::sync::Arc<oxplow_code_metrics::Languages>,
     before: Option<&Version<'_>>,
     after: &Version<'_>,
     effect: &mut EffectImpact,
@@ -512,11 +513,12 @@ async fn effect_outputs(
         let run = |layer: &crate::sql_gateway::SqlGateway,
                    decl: &Option<crate::effects::EffectDecl>,
                    vocabulary: &oxplow_domain::vocabulary::Vocabulary| {
-            let (layer, decl, event, answers) = (
+            let (layer, decl, event, answers, languages) = (
                 layer.clone(),
                 decl.clone(),
                 event.view(vocabulary).map(|v| v.to_json()),
                 answers.clone(),
+                languages.clone(),
             );
             async move {
                 let layer = &layer;
@@ -536,8 +538,16 @@ async fn effect_outputs(
                     return None;
                 }
                 Some(
-                    match crate::effects::dry_run(layer, &decl, &decl.script, event, &answers, None)
-                        .await
+                    match crate::effects::dry_run(
+                        layer,
+                        &decl,
+                        &decl.script,
+                        event,
+                        &answers,
+                        None,
+                        languages,
+                    )
+                    .await
                     {
                         Ok(crate::effects::Reaction::Skip(why)) => Composes {
                             commands: Vec::new(),
@@ -1310,6 +1320,7 @@ fn side_vocabulary(
 /// the latest events it'd run on — run on each version.
 async fn collector_outputs(
     layer: &crate::sql_gateway::SqlGateway,
+    languages: &std::sync::Arc<oxplow_code_metrics::Languages>,
     before: Option<&Version<'_>>,
     after: &Version<'_>,
     impact: &mut CollectorImpact,
@@ -1344,7 +1355,7 @@ async fn collector_outputs(
     };
     if !spec.runtime.is_derived() {
         if let crate::collector_runner::DryRun::NotRun(why) =
-            dry_run_collector(layer, &spec, None, None, None).await
+            dry_run_collector(layer, &spec, None, None, None, languages.clone()).await
         {
             impact.not_run = Some(why);
         }
@@ -1396,12 +1407,13 @@ async fn collector_outputs(
                    spec: &Option<CollectorSpec>,
                    script: &Option<String>,
                    vocabulary: &oxplow_domain::vocabulary::Vocabulary| {
-            let (layer, spec, script, rows, event) = (
+            let (layer, spec, script, rows, event, languages) = (
                 layer.clone(),
                 spec.clone(),
                 script.clone(),
                 rows.clone(),
                 event.as_ref().map(|e| e.view(vocabulary)),
+                languages.clone(),
             );
             async move {
                 let spec = spec?;
@@ -1410,9 +1422,9 @@ async fn collector_outputs(
                         crate::collector_runner::DryRun::Failed(format!("its event: {e}"))
                     }
                     Some(Ok(view)) => {
-                        dry_run_collector(&layer, &spec, script, Some(&view), rows).await
+                        dry_run_collector(&layer, &spec, script, Some(&view), rows, languages).await
                     }
-                    None => dry_run_collector(&layer, &spec, script, None, rows).await,
+                    None => dry_run_collector(&layer, &spec, script, None, rows, languages).await,
                 };
                 ran(run).ok()
             }
@@ -1660,10 +1672,11 @@ pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -
 /// collectors and providers only compared.
 pub async fn impact(
     layer: &crate::sql_gateway::SqlGateway,
+    languages: &std::sync::Arc<oxplow_code_metrics::Languages>,
     before: Option<Version<'_>>,
     after: Version<'_>,
 ) -> ImpactReport {
-    impact_within(layer, before, after, REVIEW_DEADLINE).await
+    impact_within(layer, languages, before, after, REVIEW_DEADLINE).await
 }
 
 /// How long a review spends running scripts (collectors' and effects' dry
@@ -1673,6 +1686,7 @@ pub const REVIEW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(
 /// [`impact`], running scripts for at most `deadline`.
 pub async fn impact_within(
     layer: &crate::sql_gateway::SqlGateway,
+    languages: &std::sync::Arc<oxplow_code_metrics::Languages>,
     before: Option<Version<'_>>,
     after: Version<'_>,
     deadline: std::time::Duration,
@@ -1785,7 +1799,7 @@ pub async fn impact_within(
         &after.extension.collectors,
     );
     for c in &mut collectors {
-        if collector_outputs(layer, before.as_ref(), &after, c, deadline).await
+        if collector_outputs(layer, languages, before.as_ref(), &after, c, deadline).await
             == DryRuns::OutOfTime
         {
             out_of_time.push(format!("collector {}", c.id));
@@ -1798,7 +1812,9 @@ pub async fn impact_within(
         &after.extension.effects,
     );
     for e in &mut effects {
-        if effect_outputs(layer, before.as_ref(), &after, e, deadline).await == DryRuns::OutOfTime {
+        if effect_outputs(layer, languages, before.as_ref(), &after, e, deadline).await
+            == DryRuns::OutOfTime
+        {
             out_of_time.push(format!("effect {}", e.id));
         }
     }
@@ -2103,6 +2119,7 @@ mod tests {
         );
         let report = impact(
             &layer,
+            &Default::default(),
             Some(Version {
                 extension: &before,
                 read: &none,
@@ -2147,6 +2164,7 @@ mod tests {
         );
         let report = impact(
             &layer,
+            &Default::default(),
             Some(Version {
                 extension: &before,
                 read: &none,
@@ -2181,6 +2199,7 @@ mod tests {
         // A first install: everything is added.
         let fresh = impact(
             &layer,
+            &Default::default(),
             None,
             Version {
                 extension: &after,
@@ -2222,6 +2241,7 @@ mod tests {
         let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
+            &Default::default(),
             None,
             Version {
                 extension: &ext,
@@ -2484,6 +2504,7 @@ mod tests {
         );
         let report = impact(
             &layer,
+            &Default::default(),
             Some(Version {
                 extension: &eb,
                 read: &rb,
@@ -2546,6 +2567,7 @@ mod tests {
         let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
+            &Default::default(),
             Some(Version {
                 extension: &eb,
                 read: &rb,
@@ -2603,6 +2625,7 @@ mod tests {
         let started = std::time::Instant::now();
         let report = impact_within(
             &layer,
+            &Default::default(),
             None,
             Version {
                 extension: &ext,
@@ -2711,6 +2734,7 @@ mod tests {
         let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
+            &Default::default(),
             Some(Version {
                 extension: &eb,
                 read: &rb,
@@ -2789,6 +2813,7 @@ mod tests {
         let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
+            &Default::default(),
             None,
             Version {
                 extension: &ext,
@@ -2845,6 +2870,7 @@ mod tests {
         let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
+            &Default::default(),
             Some(Version {
                 extension: &eb,
                 read: &rb,

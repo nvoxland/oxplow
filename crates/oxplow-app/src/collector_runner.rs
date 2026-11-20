@@ -708,6 +708,7 @@ pub async fn dry_run_collector(
     script: Option<String>,
     event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
+    languages: std::sync::Arc<oxplow_code_metrics::Languages>,
 ) -> DryRun {
     if !spec.runtime.is_derived() {
         return DryRun::NotRun(match spec.runtime {
@@ -720,7 +721,14 @@ pub async fn dry_run_collector(
     };
     let run = crate::run_context::for_dry_run()
         .within(crate::extension::extension_commands::COMMAND_SCRIPT_BUDGET);
-    let given = match given(spec, &run, &script, &crate::services::Sources::default()).await {
+    let given = match given(
+        spec,
+        &run,
+        &script,
+        &crate::services::Sources::new(languages),
+    )
+    .await
+    {
         Ok(given) => given,
         Err(e) => return DryRun::Failed(e),
     };
@@ -845,8 +853,12 @@ pub async fn given(
             .await
             .map_err(|e| format!("collector `{}`: {e}", spec.id)),
         _ => Ok(crate::services::Given {
+            tree: None,
+            ai: None,
+            changes: None,
+            scopes: false,
             needs,
-            ..Default::default()
+            languages: sources.languages.clone(),
         }),
     }
 }
@@ -2025,12 +2037,10 @@ async fn produce(
             }
         }
         let run = run.clone();
-        let mut sources = crate::services::Sources::default()
-            .with_languages(ctx.languages.current())
-            .with_ai(
-                ctx.ai.clone(),
-                oxplow_domain::uri::build::collector_uri(&ext.namespace, &spec.id),
-            );
+        let mut sources = crate::services::Sources::new(ctx.languages.current()).with_ai(
+            ctx.ai.clone(),
+            oxplow_domain::uri::build::collector_uri(&ext.namespace, &spec.id),
+        );
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
         }
@@ -3534,7 +3544,15 @@ pub(crate) mod tests {
                     &|_| true,
                 );
                 assert!(errors.is_empty(), "{errors:?}");
-                match dry_run_collector(&svc.sql, &specs[0], Some(script.into()), None, None).await
+                match dry_run_collector(
+                    &svc.sql,
+                    &specs[0],
+                    Some(script.into()),
+                    None,
+                    None,
+                    svc.languages.current(),
+                )
+                .await
                 {
                     DryRun::Output(out) => out.entities["seen"][0].clone(),
                     other => panic!("{other:?}"),

@@ -175,9 +175,26 @@ pub struct Calls<'a> {
     answers: BTreeMap<String, VecDeque<Value>>,
     /// The database was busy answering: the run is retried, not failed.
     busy: Option<String>,
+    /// The language set a command script's parsing builtins use: the run
+    /// that serves script calls gives it ([`Calls::with_languages`]).
+    languages: Option<std::sync::Arc<oxplow_code_metrics::Languages>>,
 }
 
 impl<'a> Calls<'a> {
+    /// The language set the script this serves parses with.
+    pub fn with_languages(
+        mut self,
+        languages: std::sync::Arc<oxplow_code_metrics::Languages>,
+    ) -> Self {
+        self.languages = Some(languages);
+        self
+    }
+
+    /// The set given with [`Calls::with_languages`].
+    pub fn languages(&self) -> Option<&std::sync::Arc<oxplow_code_metrics::Languages>> {
+        self.languages.as_ref()
+    }
+
     pub fn new(run: &'a RunContext, needs: &'a [String], read: Box<Reader<'a>>) -> Self {
         Self {
             needs,
@@ -191,6 +208,7 @@ impl<'a> Calls<'a> {
             services: None,
             answers: BTreeMap::new(),
             busy: None,
+            languages: None,
         }
     }
 
@@ -787,7 +805,7 @@ mod tests {
                 ),
                 json!({}),
                 None,
-                &crate::services::Sources::default(),
+                &crate::services::Sources::new(Default::default()),
             )
             .await;
             if total > SQL_READ_ROW_CAP {
@@ -835,7 +853,7 @@ mod tests {
             &script,
             json!({}),
             None,
-            &crate::services::Sources::default(),
+            &crate::services::Sources::new(Default::default()),
         )
         .await
         .unwrap();
@@ -854,7 +872,7 @@ mod tests {
             unordered,
             json!({}),
             None,
-            &crate::services::Sources::default(),
+            &crate::services::Sources::new(Default::default()),
         )
         .await
         .unwrap();
@@ -873,7 +891,7 @@ mod tests {
             big,
             json!({}),
             None,
-            &crate::services::Sources::default(),
+            &crate::services::Sources::new(Default::default()),
         )
         .await
         .unwrap_err();
@@ -963,7 +981,7 @@ mod tests {
                 &script,
                 json!({}),
                 None,
-                &crate::services::Sources::default(),
+                &crate::services::Sources::new(Default::default()),
             )
             .await;
             if let Err(e) = &out {

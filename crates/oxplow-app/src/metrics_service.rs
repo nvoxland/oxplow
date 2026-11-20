@@ -2232,11 +2232,17 @@ impl MetricsService {
         files: Arc<HashMap<String, String>>,
     ) -> Result<crate::services::Given, String> {
         let FactRunner::Starlark(script) = runner else {
-            return Ok(crate::services::Given::default());
+            return Ok(crate::services::Given {
+                tree: None,
+                ai: None,
+                changes: None,
+                scopes: false,
+                needs: Vec::new(),
+                languages: self.languages.current(),
+            });
         };
-        let mut sources = crate::services::Sources::default()
-            .with_tree(crate::services::Trees::Fixed(files))
-            .with_languages(self.languages.current());
+        let mut sources = crate::services::Sources::new(self.languages.current())
+            .with_tree(crate::services::Trees::Fixed(files));
         if let Some(ai) = &self.ai {
             sources = sources.with_ai(
                 ai.clone(),

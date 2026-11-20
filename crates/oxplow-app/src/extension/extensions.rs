@@ -1671,6 +1671,7 @@ pub async fn extension_changes_between(
         };
         let impact = impact_between(
             &svc.sql,
+            &svc.languages.current(),
             &svc.extension_catalog,
             ws,
             before.as_ref().map(|t| ReviewSide {
@@ -1710,6 +1711,7 @@ pub struct ReviewSide<'a> {
 /// gets its check's errors.
 pub async fn impact_between(
     layer: &crate::sql_gateway::SqlGateway,
+    languages: &std::sync::Arc<oxplow_code_metrics::Languages>,
     catalog: &crate::extension::extension_catalog::ExtensionCatalog,
     root: &Path,
     mut before: Option<ReviewSide<'_>>,
@@ -1732,6 +1734,7 @@ pub async fn impact_between(
     let no_runs = crate::pages::checks::PageChecks::new();
     crate::extension::extension_impact::impact(
         layer,
+        languages,
         before
             .as_ref()
             .map(|b| crate::extension::extension_impact::Version {

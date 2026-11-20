@@ -34,7 +34,7 @@ pub enum Trees {
 
 /// What a caller can give its scripts: each service a script may be
 /// allowed is built from these.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Sources {
     pub tree: Option<Trees>,
     /// A model, asked as the caller named here (`oxplow:oxplow/collector?collector=<owner>/<id>`),
@@ -44,14 +44,21 @@ pub struct Sources {
     pub changes: Option<Arc<dyn oxplow_script::ChangeDiffSource>>,
     /// The languages the enabled extensions declare: what the parsing
     /// builtins (`ast_query`, `code_metrics`, `source_files`, …) parse
-    /// with. Not a permission: every run is given them.
-    pub languages: Option<Arc<oxplow_code_metrics::Languages>>,
+    /// with. Not a permission: every run is given them, so a caller names
+    /// the set when it makes its sources ([`Sources::new`]).
+    pub languages: Arc<oxplow_code_metrics::Languages>,
 }
 
 impl Sources {
-    pub fn with_languages(mut self, languages: Arc<oxplow_code_metrics::Languages>) -> Self {
-        self.languages = Some(languages);
-        self
+    /// Sources with nothing to give but the language `languages` (the
+    /// published set, `svc.languages.current()`), which every run gets.
+    pub fn new(languages: Arc<oxplow_code_metrics::Languages>) -> Self {
+        Self {
+            tree: None,
+            ai: None,
+            changes: None,
+            languages,
+        }
     }
 
     pub fn with_tree(mut self, tree: Trees) -> Self {
@@ -71,7 +78,6 @@ impl Sources {
 }
 
 /// What a script's run was given.
-#[derive(Default)]
 pub struct Given {
     pub tree: Option<Tree>,
     pub ai: Option<Arc<dyn oxplow_script::AiOracle>>,
@@ -83,7 +89,7 @@ pub struct Given {
     /// What the script declares, and its kind implies.
     pub needs: Vec<String>,
     /// What the parsing builtins parse with ([`Sources::languages`]).
-    pub languages: Option<Arc<oxplow_code_metrics::Languages>>,
+    pub languages: Arc<oxplow_code_metrics::Languages>,
 }
 
 impl std::fmt::Debug for Given {
@@ -115,9 +121,7 @@ impl Given {
         if let Some(changes) = self.changes {
             script_run = script_run.with_change_diff(changes);
         }
-        if let Some(languages) = self.languages {
-            script_run = script_run.with_languages(languages);
-        }
+        script_run = script_run.with_languages(self.languages);
         if let Some(serve) = serve.filter(|_| self.scopes) {
             script_run = script_run.with_scope(serve);
         }
@@ -254,8 +258,12 @@ impl Wanted {
         })
     }
 
-    /// The hosts for a caller with no tree or model to give: its scopes.
-    pub fn scopes_only(self) -> Result<Given, String> {
+    /// The hosts for a caller with no tree or model to give: its scopes,
+    /// and the language set every run gets.
+    pub fn scopes_only(
+        self,
+        languages: Arc<oxplow_code_metrics::Languages>,
+    ) -> Result<Given, String> {
         if let Some(builtin) = self.tree.or(self.changes) {
             return Err(unavailable(builtin, "tree.read"));
         }
@@ -266,9 +274,12 @@ impl Wanted {
             return Err(unavailable(builtin, "ai.discover"));
         }
         Ok(Given {
+            tree: None,
+            ai: None,
+            changes: None,
             scopes: self.scopes,
             needs: self.needs,
-            ..Given::default()
+            languages,
         })
     }
 }
@@ -567,15 +578,20 @@ mod tests {
             &r,
             FILES,
             &needs(&["tree.read"]),
-            &Sources::default().with_tree(Trees::Fixed(tree.clone())),
+            &Sources::new(Default::default()).with_tree(Trees::Fixed(tree.clone())),
         )
         .await
         .unwrap();
         assert_eq!(given.tree, Some(tree));
         assert!(given.ai.is_none() && !given.scopes);
-        let err = prepare(&r, FILES, &needs(&["tree.read"]), &Sources::default())
-            .await
-            .unwrap_err();
+        let err = prepare(
+            &r,
+            FILES,
+            &needs(&["tree.read"]),
+            &Sources::new(Default::default()),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             err,
             "`files()`: `tree.read` isn't available where this script runs"
@@ -623,5 +639,74 @@ mod tests {
     fn a_service_outside_the_grant_is_refused() {
         let err = decide(&run(Mode::External, &[]), FILES, &needs(&["tree.read"])).unwrap_err();
         assert_eq!(err, "`files()` was refused `tree.read`: not declared");
+    }
+
+    /// The script `ast_query`s Rust text and says how many functions it found.
+    const PARSES_RUST: &str = "def transform(x):\n    return {\"skip\": str(len(ast_query(\"fn a() {}\\nfn b() {}\\n\", \"rust\", \"(function_item) @f\")))}\n";
+
+    /// Every path that builds a script run's services gives it the language
+    /// set: an effect's script (`effects::run_over`) parses Rust when the
+    /// set has it, and the same script is refused when the set is empty.
+    #[tokio::test]
+    async fn a_script_run_parses_with_the_set_its_sources_name() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let run = |languages: std::sync::Arc<oxplow_code_metrics::Languages>| {
+            let layer = layer.clone();
+            async move {
+                crate::effects::run_over(
+                    &layer,
+                    &crate::run_context::for_dry_run(),
+                    &[],
+                    PARSES_RUST,
+                    serde_json::json!({}),
+                    None,
+                    &Sources::new(languages),
+                )
+                .await
+            }
+        };
+        let shipped = std::sync::Arc::new(crate::extension::language_set::shipped());
+        assert_eq!(
+            run(shipped).await.unwrap(),
+            crate::effects::Reaction::Skip("2".into())
+        );
+        let none = run(Default::default()).await;
+        assert!(
+            none.as_ref().is_err() || none == Ok(crate::effects::Reaction::Skip("0".into())),
+            "no language set parses nothing: {none:?}"
+        );
+    }
+
+    /// A collector's dry run (a review's) parses with the set it is given.
+    #[tokio::test]
+    async fn a_collectors_dry_run_parses_with_the_set_it_is_given() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let v: serde_yaml::Value = serde_yaml::from_str(
+            "- { id: parse, runtime: starlark, entry: p.star, on: start, sync: replace, entities: [{ name: n, key: k, columns: { k: int } }] }",
+        )
+        .unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            &oxplow_config::collectors::Declarer::own("x"),
+            &v,
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let script = "def transform(input):\n    return {\"entities\": {\"n\": [{\"k\": len(ast_query(\"fn a() {}\\n\", \"rust\", \"(function_item) @f\"))}]}}\n";
+        let shipped = std::sync::Arc::new(crate::extension::language_set::shipped());
+        match crate::collector_runner::dry_run_collector(
+            &layer,
+            &specs[0],
+            Some(script.into()),
+            None,
+            None,
+            shipped,
+        )
+        .await
+        {
+            crate::collector_runner::DryRun::Output(out) => {
+                assert_eq!(out.entities["n"][0]["k"], 1)
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

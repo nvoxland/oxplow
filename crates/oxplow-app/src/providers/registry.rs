@@ -177,6 +177,8 @@ pub struct HostDeps {
     /// Each stream's worktree: where a script implementation's `tree.read`
     /// reads.
     pub captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// The published language set a script implementation parses with.
+    pub languages: crate::extension::language_set::LanguagesHandle,
 }
 
 /// Whose an instance is (P9.B2).

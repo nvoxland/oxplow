@@ -1158,8 +1158,15 @@ fn run_script_fn(
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Value, oxplow_domain::CommandError> {
     let run = calls.run().clone();
+    let languages =
+        calls
+            .languages()
+            .cloned()
+            .ok_or_else(|| oxplow_domain::CommandError::Failed {
+                message: "the script failed: no language set was given to its run".into(),
+            })?;
     let given = crate::services::decide(&run, script, calls.needs())
-        .and_then(crate::services::Wanted::scopes_only)
+        .and_then(|wanted| wanted.scopes_only(languages))
         .map_err(|message| oxplow_domain::CommandError::Failed {
             message: format!("the script failed: {message}"),
         })?;
@@ -1184,6 +1191,7 @@ fn run_script_fn(
 /// compose more than once.
 pub fn extension_command(
     bus: &std::sync::Arc<crate::commands::CommandBus>,
+    languages: &crate::extension::language_set::LanguagesHandle,
     extension: &str,
     decl: &ExtensionCommand,
 ) -> Result<crate::commands::Command, oxplow_domain::CommandError> {
@@ -1246,6 +1254,7 @@ pub fn extension_command(
     let has_finish = oxplow_script::runtime::top_level_defs(&decl.name, &script)
         .is_ok_and(|defs| defs.iter().any(|d| d == "finish"));
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
+    let (languages, finish_languages) = (languages.clone(), languages.clone());
     let source = oxplow_domain::uri::build::command_uri(&decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
         move |composing: &crate::commands::compose::Composing<'_>,
@@ -1255,8 +1264,9 @@ pub fn extension_command(
             // metric functions included), on the run's activation pin.
             let (sql, runtime) = (composing.sql, composing.runtime);
             let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(run, q)));
-            let mut calls =
-                crate::scope_calls::Calls::new(run, &needs, read).with_host(Some(sql), runtime);
+            let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
+                .with_host(Some(sql), runtime)
+                .with_languages(languages.current());
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
@@ -1292,7 +1302,7 @@ pub fn extension_command(
     // A script that defines `finish` has it called once its steps landed.
     let finish: Option<std::sync::Arc<crate::commands::compose::Finisher>> =
         has_finish.then(|| {
-            let (script, needs) = (finish_script, decl.needs.clone());
+            let (script, needs, languages) = (finish_script, decl.needs.clone(), finish_languages);
             std::sync::Arc::new(
                 move |composing: Option<&crate::commands::compose::Composing<'_>>,
                       run: &oxplow_domain::run::RunContext,
@@ -1308,14 +1318,16 @@ pub fn extension_command(
                                     .into(),
                             ))
                         });
-                        let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
+                        let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
+                            .with_languages(languages.current());
                         return finish_calls(&script, input.clone(), steps, &mut calls);
                     };
                     let (sql, runtime) = (composing.sql, composing.runtime);
                     let read =
                         Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(run, q)));
                     let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
-                        .with_host(Some(sql), runtime);
+                        .with_host(Some(sql), runtime)
+                        .with_languages(languages.current());
                     finish_calls(&script, input.clone(), steps, &mut calls)
                 },
             ) as std::sync::Arc<crate::commands::compose::Finisher>
@@ -1329,6 +1341,9 @@ pub fn extension_command(
 /// test's, `oxplow-dev`'s), which never activates. Services register them
 /// at activation, from foundation's active deployment.
 pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
+    // Only commands over a scope's operation are built here: no script
+    // runs, so no language set is read.
+    let languages = crate::extension::language_set::LanguagesHandle::default();
     for b in crate::bundled_extensions::BUNDLED
         .iter()
         .filter(|b| b.required)
@@ -1350,7 +1365,7 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
                 CommandHandler::Scope { scope, op } => bus.op(scope, op).is_some(),
                 CommandHandler::Script { .. } | CommandHandler::Provider { .. } => false,
             })
-            .map(|d| extension_command(bus, b.name, d).expect("it builds"))
+            .map(|d| extension_command(bus, &languages, b.name, d).expect("it builds"))
             .collect();
         bus.register_namespace(
             oxplow_domain::OXPLOW_NAMESPACE,
@@ -1464,6 +1479,8 @@ impl StagedExtensionCommands {
 /// coordinates commands only, not the database or other extension registries.
 pub struct ExtensionCommands {
     bus: std::sync::Arc<crate::commands::CommandBus>,
+    /// The published language set a command's script parses with.
+    languages: crate::extension::language_set::LanguagesHandle,
     catalog: std::sync::Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     root: std::path::PathBuf,
     /// What's registered, by namespace: the extension and its commands.
@@ -1473,11 +1490,13 @@ pub struct ExtensionCommands {
 impl ExtensionCommands {
     pub fn new(
         bus: &std::sync::Arc<crate::commands::CommandBus>,
+        languages: crate::extension::language_set::LanguagesHandle,
         catalog: std::sync::Arc<crate::extension::extension_catalog::ExtensionCatalog>,
         root: std::path::PathBuf,
     ) -> Self {
         Self {
             bus: bus.clone(),
+            languages,
             catalog,
             root,
             registered: tokio::sync::Mutex::default(),
@@ -1715,7 +1734,7 @@ impl ExtensionCommands {
                             })
                             .guarded(live.clone())
                     });
-                extension_command(&self.bus, extension, decl)
+                extension_command(&self.bus, &self.languages, extension, decl)
                     .map(|c| c.of_contribution(named))
                     .map_err(|e| format!("`{}`: {e}", decl.name))
             })
@@ -1804,7 +1823,15 @@ async fn check_example(
     ex: &CommandExample,
     schema_of: CommandSchemas<'_>,
 ) -> Result<(), String> {
-    let decided = dry_run(layer, cmd, &ex.input, &ex.answers, schema_of).await?;
+    let decided = dry_run(
+        layer,
+        cmd,
+        &ex.input,
+        &ex.answers,
+        schema_of,
+        layer.languages(),
+    )
+    .await?;
     match (decided, &ex.refused) {
         (Composed::Refused(why), Some(want)) if why.contains(want.as_str()) => Ok(()),
         (Composed::Refused(why), Some(want)) => {
@@ -1846,6 +1873,7 @@ pub async fn dry_run(
     input: &Value,
     answers: &BTreeMap<String, Vec<Value>>,
     registry: CommandSchemas<'_>,
+    languages: std::sync::Arc<oxplow_code_metrics::Languages>,
 ) -> Result<Composed, String> {
     let CommandHandler::Script { script, .. } = &cmd.handler else {
         return Err(format!(
@@ -1859,7 +1887,9 @@ pub async fn dry_run(
     let decided = tokio::task::spawn_blocking(move || {
         let run = crate::run_context::for_dry_run();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&run, &needs, read).with_answers(&answers);
+        let mut calls = crate::scope_calls::Calls::new(&run, &needs, read)
+            .with_answers(&answers)
+            .with_languages(languages);
         compose_calls(&script, input, &mut calls)
     })
     .await
@@ -2610,6 +2640,40 @@ mod tests {
             "{:?}",
             v.warnings
         );
+    }
+
+    /// A command's script parses with the published language set: with the
+    /// Rust pack on, `ast_query(text, "rust", q)` finds the function.
+    #[tokio::test]
+    async fn a_command_script_parses_with_the_published_languages() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        write_ext(
+            fx._dir.path(),
+            "my-parse",
+            "  - name: parse.count
+    summary: Count the functions.
+    access: read
+    input_schema: { type: object, additionalProperties: false }
+    entry: handlers/count.star
+",
+            &[(
+                "handlers/count.star",
+                "def transform(x):\n    found = ast_query(\"fn a() {}\\nfn b() {}\\n\", \"rust\", \"(function_item) @f\")\n    return {\"commands\": [], \"result\": {\"functions\": len(found)}}\n",
+            )],
+        );
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_parse.parse.count",
+                json!({}),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["result"], json!({ "functions": 2 }));
     }
 
     // ---- B2: the handler and the reconciler ----

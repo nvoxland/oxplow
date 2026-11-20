@@ -950,7 +950,12 @@ impl Services {
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation =
             Arc::new(extension::extension_activation::ExtensionActivation::new());
+        // The languages the enabled extensions declare, swapped in at each
+        // publication: the structural merge, code analysis and the LSP
+        // services read them.
+        let languages = extension::language_set::LanguagesHandle::default();
         let sql = sql_gateway::SqlGateway::new(db.clone())
+            .with_languages(languages.clone())
             .with_vocabulary(vocabulary.clone())
             .with_activation(extension_activation.clone());
         let event_bus = EventBus::new();
@@ -995,10 +1000,6 @@ impl Services {
         // (`.context/data-model.md` "snapshot + file_snapshot"). Every
         // worktree shares the repo's object db, so the primary dir serves
         // any stream's OIDs.
-        // The languages the enabled extensions declare, swapped in at each
-        // publication: the structural merge, code analysis and the LSP
-        // services read them.
-        let languages = extension::language_set::LanguagesHandle::default();
         let vcs: Arc<dyn oxplow_domain::vcs::Vcs> =
             Arc::new(vcs::GitProvider::with_languages(languages.clone()));
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
@@ -1512,6 +1513,7 @@ impl Services {
                 events: event_bus.clone(),
                 capabilities: capabilities.clone(),
                 captures: snapshot_captures.clone(),
+                languages: languages.clone(),
             },
             &commands,
             vec![
@@ -1556,6 +1558,7 @@ impl Services {
             .expect("provider.sync's op registers");
         let extension_commands = Arc::new(extension::extension_commands::ExtensionCommands::new(
             &commands,
+            languages.clone(),
             extension_catalog.clone(),
             layout.project_dir.clone(),
         ));

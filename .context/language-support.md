@@ -88,7 +88,7 @@ languages:
 - **Built** by `extension::language_set::of(extensions)` (foundation, then
   the shipped extensions in their order, then the rest by name; the first to
   claim a name, alias, LSP id or file extension keeps it, the later one is
-  left out, its problem logged (it should hold the extension; not yet)) and
+  left out) and
   **swapped** at each publication beside the
   model registry (`extension_activation`), into `svc.languages`
   (`LanguagesHandle`). Readers: change analysis, the symbol collector and
@@ -96,13 +96,23 @@ languages:
   LSP session manager (an installed server covers its language's files,
   read when files are matched; the no-server error names the language's
   `lsp.package`), and `GitProvider` (the structural merge).
+- **A conflict holds the later extension.** `descriptors::check_catalog`
+  runs the set's build over the loaded extensions
+  (`hold_language_conflicts`); a language whose name, alias, LSP id or file
+  extension an earlier extension's holds is a `language.conflict` error of
+  its extension, naming the earlier, and is taken out of it, so the
+  extension is held and listed with why like any cross-extension conflict.
 - **The script worker** gets the set's sources in a `{"languages": …}`
   message before its run and builds its own (`oxplow-script` `ToWorker::Languages`);
   `ast_query`, `code_metrics`, `markers`, `source_files` and
-  `duplicate_blocks` parse with it. Collector and fact-collector runs are
-  given it (`Sources::languages`, not a permission); command, effect and
-  provider scripts are not yet (there a parsing builtin says the language is
-  unknown).
+  `duplicate_blocks` parse with it. Every script run is given it, not as a
+  permission: `Sources::new(languages)` takes the set in its constructor
+  (collector, fact-collector, effect, provider-implementation and review
+  dry runs) and `Calls::with_languages` gives a command script its own
+  (`Wanted::scopes_only(languages)`); a command's composer and a provider
+  endpoint hold the `LanguagesHandle`, so a run reads the set published now,
+  and the gateway (`SqlGateway::languages`) carries it for `extension
+  check` examples.
 - **Every shipped language, on or off**: `language_set::shipped()` /
   `shipped_once()` read them from the embedded files. The metric scaffold
   offers them (online and in the SDK; the extension it writes `requires:`
@@ -305,7 +315,6 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 Live: languages from extensions, the shipped packs with native grammars, the
 LSP symbol surface, generic unit listing, and tree-sitter symbols with their
 index. **Still open** (the change-review plan, milestones 2 to 5): the
-`v_language` dataset and the pack suggestion, the language set for command, effect and provider
-scripts, holding an extension whose language conflicts, one `Parsers` pool,
-and WebAssembly
+`v_language` dataset and the pack suggestion, one `Parsers` pool, and
+WebAssembly
 grammars (Clojure first).

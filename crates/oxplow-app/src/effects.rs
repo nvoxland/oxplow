@@ -362,6 +362,7 @@ pub async fn dry_run(
     event: serde_json::Value,
     answers: &BTreeMap<String, Vec<serde_json::Value>>,
     registry: Option<crate::extension::extensions::CommandSchemas<'_>>,
+    languages: std::sync::Arc<oxplow_code_metrics::Languages>,
 ) -> Result<Reaction, String> {
     let run = oxplow_domain::run::RunContext::core(
         oxplow_domain::Actor::System,
@@ -374,7 +375,7 @@ pub async fn dry_run(
         script,
         event,
         Some(answers),
-        &crate::services::Sources::default(),
+        &crate::services::Sources::new(languages),
     )
     .await?;
     if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
