@@ -174,6 +174,51 @@ fn diff_line_numbers(base: &str, head: &str) -> (Vec<u32>, Vec<u32>) {
     (added, deleted)
 }
 
+/// One contiguous changed range of a file. Lines are 1-indexed and
+/// inclusive. A pure deletion has no head range and `head_after` is the
+/// head line it sits after (0 = before the first line); a pure insertion
+/// has no base range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hunk {
+    pub head: Option<(u32, u32)>,
+    pub base: Option<(u32, u32)>,
+    pub head_after: Option<u32>,
+}
+
+/// The changed ranges of `head` against `base`, in file order. Adjacent
+/// deleted and inserted lines are one hunk.
+pub fn diff_hunks(base: &str, head: &str) -> Vec<Hunk> {
+    let diff = TextDiff::from_lines(base, head);
+    let mut hunks = Vec::new();
+    // The open hunk: base range and head range as half-open 0-indexed.
+    let mut open: Option<(std::ops::Range<usize>, std::ops::Range<usize>)> = None;
+    let mut close = |open: &mut Option<(std::ops::Range<usize>, std::ops::Range<usize>)>| {
+        if let Some((b, h)) = open.take() {
+            hunks.push(Hunk {
+                head: (!h.is_empty()).then(|| (h.start as u32 + 1, h.end as u32)),
+                base: (!b.is_empty()).then(|| (b.start as u32 + 1, b.end as u32)),
+                head_after: h.is_empty().then_some(h.start as u32),
+            });
+        }
+    };
+    for op in diff.ops() {
+        let (tag, b, h) = op.as_tag_tuple();
+        if tag == similar::DiffTag::Equal {
+            close(&mut open);
+            continue;
+        }
+        match &mut open {
+            Some((ob, oh)) => {
+                ob.end = b.end;
+                oh.end = h.end;
+            }
+            None => open = Some((b, h)),
+        }
+    }
+    close(&mut open);
+    hunks
+}
+
 /// Walk `intervals` (sorted by start_line) and return the index of
 /// the first one whose `[start, end]` range contains `line`.
 fn locate_interval(intervals: &[(u32, u32, usize)], line: u32) -> Option<usize> {
@@ -220,6 +265,52 @@ mod tests {
             visibility: Visibility::Unknown,
             has_doc: false,
         }
+    }
+
+    #[test]
+    fn hunks_are_the_contiguous_changed_ranges() {
+        // Modify line 2, delete line 4 (c), insert after the last line.
+        let base = "a\nb\nc\nd\ne\n";
+        let head = "a\nB\nc\ne\nf\n";
+        let hunks = diff_hunks(base, head);
+        assert_eq!(
+            hunks,
+            vec![
+                Hunk {
+                    head: Some((2, 2)),
+                    base: Some((2, 2)),
+                    head_after: None
+                },
+                Hunk {
+                    head: None,
+                    base: Some((4, 4)),
+                    head_after: Some(3)
+                },
+                Hunk {
+                    head: Some((5, 5)),
+                    base: None,
+                    head_after: None
+                },
+            ]
+        );
+        assert!(diff_hunks("a\n", "a\n").is_empty());
+        // Added file: one insertion; deleted file: one deletion before line 1.
+        assert_eq!(
+            diff_hunks("", "x\ny\n"),
+            vec![Hunk {
+                head: Some((1, 2)),
+                base: None,
+                head_after: None
+            }]
+        );
+        assert_eq!(
+            diff_hunks("x\ny\n", ""),
+            vec![Hunk {
+                head: None,
+                base: Some((1, 2)),
+                head_after: Some(0)
+            }]
+        );
     }
 
     #[test]

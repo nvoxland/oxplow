@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeImportRow, ChangeResults};
+use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeHunkRow, ChangeImportRow, ChangeResults};
 
 use crate::code_analysis::{
     analyze_files, AnalyzeFileSpec, AnalyzeFunctionsResult, AnalyzedFunction,
@@ -229,7 +229,27 @@ pub fn build_results(
         functions,
         imports,
         test_files: Vec::new(),
+        hunks: hunk_rows(analysis),
     }
+}
+
+/// One row per changed range of every analysed file (at most
+/// `MAX_ANALYZED_FILES`, the files the analysis read).
+fn hunk_rows(analysis: &AnalyzeFunctionsResult) -> Vec<ChangeHunkRow> {
+    analysis
+        .hunks
+        .iter()
+        .flat_map(|f| {
+            f.hunks.iter().map(|h| ChangeHunkRow {
+                path: f.path.clone(),
+                head_start: h.head_start.map(i64::from),
+                head_end: h.head_end.map(i64::from),
+                base_start: h.base_start.map(i64::from),
+                base_end: h.base_end.map(i64::from),
+                head_after: h.head_after.map(i64::from),
+            })
+        })
+        .collect()
 }
 
 /// The stored row of each changed file: its status and line counts and
@@ -1915,7 +1935,64 @@ mod tests {
                 ],
             }],
             import_deltas: vec![],
+            hunks: vec![],
         }
+    }
+
+    #[test]
+    fn hunks_cover_an_insertion_a_deletion_and_a_modification() {
+        let base = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n";
+        // b modified (line 2), c deleted, e inserted at the end.
+        let head = "fn a() {}\nfn b2() {}\nfn d() {}\nfn e() {}\n";
+        let analysis =
+            crate::code_analysis::analyze_files(vec![crate::code_analysis::AnalyzeFileSpec {
+                path: "src/lib.rs".into(),
+                base_content: Some(base.into()),
+                head_content: Some(head.into()),
+            }]);
+        let r = build_results(&[], &analysis, &TestPaths::default());
+        let got: Vec<_> = r
+            .hunks
+            .iter()
+            .map(|h| {
+                (
+                    h.path.as_str(),
+                    h.head_start,
+                    h.head_end,
+                    h.base_start,
+                    h.base_end,
+                    h.head_after,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("src/lib.rs", Some(2), Some(2), Some(2), Some(3), None),
+                ("src/lib.rs", Some(4), Some(4), None, None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pure_deletion_is_anchored_after_a_head_line() {
+        let analysis =
+            crate::code_analysis::analyze_files(vec![crate::code_analysis::AnalyzeFileSpec {
+                path: "src/lib.rs".into(),
+                base_content: Some("fn a() {}\nfn b() {}\nfn c() {}\n".into()),
+                head_content: Some("fn a() {}\nfn c() {}\n".into()),
+            }]);
+        let r = build_results(&[], &analysis, &TestPaths::default());
+        assert_eq!(
+            r.hunks,
+            vec![ChangeHunkRow {
+                path: "src/lib.rs".into(),
+                base_start: Some(2),
+                base_end: Some(2),
+                head_after: Some(1),
+                ..Default::default()
+            }]
+        );
     }
 
     #[test]

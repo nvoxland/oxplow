@@ -887,7 +887,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_dashboard`, `v_dashboard_item` | user dashboards and their tiles (V80) |
 | `v_terminal` | a stream's terminals: shells in its worktree, with the `uri` their PTY is keyed by (V106) |
 | `v_request_metric_delta`, `v_request_observation` | per request and stream, how each metric moved over the request's window (`crossing`) and the test runs, diff coverage and analysis its turns made, stored by the `request_analysis` asset (collection.md "A request's analysis"); `seq` runs oldest first, so the highest is the latest: every reader takes `ORDER BY seq DESC` as newest. Diff coverage is the request's start snapshot against the snapshot of the run's capture (collection.md) |
-| `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
+| `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_hunk`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
 | `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, the requests that worked on the task and made the commit), for every store's tasks. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `turn_id` is the capture's own: the turn of the tool call that ran it, which puts the run in that turn's request. A run that only reported counts (`oxplow.test.record_run`) has no cases |
@@ -1459,6 +1459,14 @@ oxplow-bundled change cards) only read them.
     before and after (`test_signals::count`, a heuristic across
     languages; `//` and `#` comment lines don't count, so commenting an
     assertion out lowers the count).
+  - hunks (`v_change_hunk`, V54): one row per contiguous changed range of
+    each analysed file (the same at most 200 files as functions; an added
+    or deleted file is one hunk). `head_start`/`head_end` and
+    `base_start`/`base_end` are 1-indexed and inclusive. A pure deletion
+    has no head range: `head_after` is the head line it sits after (0 =
+    before line 1). A pure insertion has no base range. Join a line-anchored
+    row (fact, finding, coverage line) to it to keep what is on changed
+    lines. Replaced with the rest of the change's results.
 - **Duplicates** come later: a background whole-tree scan scoped to the
   changed files (`duplication_scan::DuplicationRecorder`) stores
   `v_change_duplicate` — only while the analysis it belongs to is still

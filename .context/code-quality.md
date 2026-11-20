@@ -249,6 +249,12 @@ signature-changed / body-changed functions; a file's review priority is
 oxplow-bundled's dataset `change_interest` over those rows (P7.B5); see
 [semantic-layer.md](./semantic-layer.md) → "Change analysis".
 
+The result also carries `hunks`: for every file with either side
+present, the contiguous changed line ranges (`churn::diff_hunks`, a
+`similar` line diff; an added or deleted file is one hunk). The change
+analyzer stores them as `v_change_hunk`; see
+[semantic-layer.md](./semantic-layer.md) → "Change analysis".
+
 The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
 — one entry per file where both `base_content` and
 `head_content` were supplied. Each rollup has `file_added` /
