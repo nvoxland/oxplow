@@ -1,0 +1,105 @@
+title: Review
+description: What to look at in one analysed change, worst first. Every review signal (oxplow-bundled's and other extensions') on one list, grouped by file, beside what the change was asked to do.
+label: Review
+params:
+- name: change_id
+  label: Change
+answers:
+- {"question":"What should I look at first in this change?","params":{"change_id":1}}
+- {"question":"Did the agent weaken any tests?","params":{"change_id":1}}
+loaders:
+  change:
+    sql: |
+      -- What the change was asked to do, from what made it: a request's or a
+      -- turn's prompt, a commit's message.
+      WITH f AS (
+        SELECT count(*) AS n, coalesce(sum(additions), 0) AS a, coalesce(sum(deletions), 0) AS d
+        FROM v_change_file WHERE change_id = :change_id
+      )
+      SELECT c.id AS change_id, c.kind, c.status,
+             CASE c.kind
+               WHEN 'request' THEN (SELECT r.prompt FROM v_request r WHERE r.id = CAST(c.target AS INTEGER))
+               WHEN 'turn' THEN (SELECT t.prompt FROM v_agent_turn t WHERE t.id = CAST(c.target AS INTEGER))
+               WHEN 'commit' THEN (SELECT m.subject || CASE WHEN m.body = '' THEN '' ELSE char(10, 10) || m.body END
+                                   FROM v_commit m WHERE m.sha = c.target)
+               WHEN 'working' THEN 'Uncommitted changes.'
+             END AS asked,
+             CASE c.kind WHEN 'request' THEN 'A request' WHEN 'turn' THEN 'A turn' WHEN 'commit' THEN 'A commit'
+                         WHEN 'working' THEN 'Uncommitted changes' ELSE 'A range' END AS what,
+             printf('%d file%s · +%d −%d', f.n, CASE f.n WHEN 1 THEN '' ELSE 's' END, f.a, f.d) AS size,
+             CASE c.status WHEN 'failed' THEN 'Failed: ' || coalesce(c.error, 'unknown error')
+                           WHEN 'done' THEN 'Done' ELSE 'Analyzing…' END AS analysis,
+             c.base_revision, c.head_revision
+      FROM v_change c, f WHERE c.id = :change_id
+  look_here:
+    sql: |
+      -- One row per file with a `high` or `medium` signal: worst first,
+      -- then by the file's look-here-first score. `info` signals only order.
+      WITH s AS (SELECT * FROM v_oxplow_review_signal WHERE change_id = :change_id),
+      f AS (
+        SELECT path,
+               min(CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END) AS rank,
+               json_group_array(json_object('text', title, 'hint', why))
+                 FILTER (WHERE severity IN ('high', 'medium')) AS signals
+        FROM s GROUP BY path
+      )
+      SELECT f.path,
+             CASE f.rank WHEN 1 THEN 'high' ELSE 'medium' END AS severity,
+             CASE f.rank WHEN 1 THEN 'danger' ELSE 'warning' END AS tone,
+             f.signals, c.id AS change_id, c.base_revision, c.head_revision
+      FROM f JOIN v_change c ON c.id = :change_id
+      LEFT JOIN v_oxplow_change_interest i ON i.change_id = c.id AND i.path = f.path
+      WHERE f.rank <= 2
+      ORDER BY f.rank, coalesce(i.interest, 0) DESC, f.path
+  by_area:
+    sql: |
+      SELECT area,
+             count(*) FILTER (WHERE severity = 'high') AS high,
+             count(*) FILTER (WHERE severity = 'medium') AS medium,
+             count(*) FILTER (WHERE severity = 'info') AS info
+      FROM v_oxplow_review_signal WHERE change_id = :change_id
+      GROUP BY area
+      ORDER BY CASE area WHEN 'tests' THEN 1 WHEN 'verification' THEN 2 WHEN 'dependencies' THEN 3
+                         WHEN 'code' THEN 4 WHEN 'scope' THEN 5 WHEN 'history' THEN 6 ELSE 7 END, area
+rail:
+  title: About
+  from: change
+  viz: detail
+  columns:
+  - { key: what, label: What }
+  - { key: size, label: Size }
+  - { key: analysis, label: Analysis }
+view:
+  stack:
+  - id: asked
+    title: Asked
+    description: What the change was asked to do. Judge the change against it, not only on its own.
+    from: change
+    viz: markdown
+    markdown: { text: asked }
+    empty: Nothing says what this change was for.
+  - id: look-here
+    title: Look Here
+    description: The files with something worth a look, worst first. Open a row for each signal and its line.
+    from: look_here
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link: { kind: diff-at, from: path, base: base_revision, head: head_revision }
+      expand: change-review-file
+    - { key: severity, label: Severity, format: badge, tone: tone }
+    - { key: signals, label: Why, format: items }
+    empty: Nothing stands out in this change.
+  - id: by-area
+    title: By Area
+    description: How many signals each area gave. `info` signals are context; they order the files above.
+    from: by_area
+    viz: table
+    columns:
+    - { key: area, label: Area }
+    - { key: high, label: High }
+    - { key: medium, label: Medium }
+    - { key: info, label: Info }
+    empty: No signals.
+  - slot: sections

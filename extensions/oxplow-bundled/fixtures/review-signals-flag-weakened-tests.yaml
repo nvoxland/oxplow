@@ -1,0 +1,18 @@
+# The review's `tests` signals: a test the change deleted, a test file that
+# now asserts less, and a test newly skipped. Each is high: weakening a test
+# is how an agent makes a failing check pass.
+given:
+  - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: weaken, write: { path: tests/it.rs, body: "#[test]\n#[ignore]\nfn a() {\n    assert_eq!(1, 1);\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: weaken }, bind: weaken }
+  - observe: { analyze: { kind: commit, sha: $weaken.rev } }
+when:
+  sql: SELECT source, area, signal, severity, path, title, why FROM v_oxplow_review_signal WHERE change_id = 1 ORDER BY signal
+expect:
+  rows:
+    - { source: oxplow/review_signal_tests, area: tests, signal: fewer-assertions, severity: high, path: tests/it.rs, title: Fewer assertions, why: "This file has 3 → 1 assertions." }
+    - { source: oxplow/review_signal_tests, area: tests, signal: skip-added, severity: high, path: tests/it.rs, title: Test skipped, why: "This file has 0 → 1 skip marker." }
+    - { source: oxplow/review_signal_tests, area: tests, signal: test-deleted, severity: high, path: tests/it.rs, title: "Test `b` deleted", why: The change removes this test. }

@@ -120,6 +120,28 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   (`v_page_visit.duration_ms`). Cache reads are kept out of every "fresh"
   sum: on a long session they are most of the prompt, and a sum with them
   hides where tokens really went. Fixtures: `dashboards-*`, `usage-*`.
+- **The change review** (`pages/change-review.yaml`, "Review", param
+  `change_id`). One page per analysed change: what it was asked to do
+  (a request's or turn's prompt, a commit's message), then **Look Here**,
+  one row per file with a `high` or `medium` signal, worst first, then by
+  `v_oxplow_change_interest`; each row expands to `change-review-file`
+  (its signals by line). **By Area** counts signals per `area`, and a
+  `sections` slot takes other extensions' sections.
+  - The signals are the open dataset `review_signal`
+    (`v_oxplow_review_signal`: `change_id, source, area, signal, severity,
+    path, line, end_line, title, why, uri`). Any extension adds rows with a
+    dataset that says `adds_to: oxplow/review_signal` (semantic-layer.md
+    "Open datasets"). bundled's own sources: `review_signal_tests` (test
+    deleted, fewer assertions, skip added; `high`) and `review_signal_api`
+    (public signature changed, public function removed; `medium`).
+  - `severity`: `high` and `medium` show in Look Here; `info` only orders
+    files and counts in By Area.
+  - The brief (`parts/change-review-brief.yaml`) is one line at the start
+    of the Changes, commit and Uncommitted Changes pages' `sections`
+    slots: "**3 high** · 2 files to look at · Open Review".
+  - Fixtures: `review-signals-*`, `the-review-page-*`. A commit's message
+    in a fixture needs `observe: { commit: { sha, subject } }` (the
+    indexer doesn't run there).
 - **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`. What deviated and Struggled

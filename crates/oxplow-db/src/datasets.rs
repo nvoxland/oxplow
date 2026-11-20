@@ -79,6 +79,16 @@ pub struct DatasetDecl {
     /// Guidance for an agent reading the dataset. Not part of the contract.
     #[serde(default)]
     pub ai_context: Option<AiContext>,
+    /// Other extensions' datasets may add rows to it (`adds_to:`): its
+    /// view is its own rows `UNION ALL` theirs, each with these fields.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
+    /// The open dataset this one adds its rows to, named as a `ref()`
+    /// names one (`<namespace>/<name>`). Its fields must have the open
+    /// dataset's names, in order; it still publishes as its own view too. Naming one that
+    /// isn't published (its extension is off) joins nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adds_to: Option<String>,
 }
 
 /// A dataset's freshness policy beyond the default (computed on read):
@@ -772,6 +782,8 @@ pub fn join_sources(
                     tests: Vec::new(),
                     materialize: None,
                     ai_context: None,
+                    open: false,
+                    adds_to: None,
                     deprecated: Vec::new(),
                 },
                 file: format!("{dir}/{}", d.file),
@@ -2148,6 +2160,15 @@ fn pass(
             }
         }
     }
+    // Open datasets: each contributor (`adds_to:`) becomes an input of the
+    // dataset it adds to, unioned in when that publishes.
+    let unions = wire_open_datasets(
+        &mut resolved,
+        &namespaces(extensions),
+        &owners,
+        &core,
+        &mut errors,
+    );
     // Publish in dependency order; a dataset reading one that didn't compile
     // doesn't either.
     let now = ts_to_string(oxplow_domain::Timestamp::now());
@@ -2163,8 +2184,11 @@ fn pass(
     while !pending.is_empty() {
         let mut progressed = false;
         let mut waiting = Vec::new();
-        for (ext, m) in pending {
-            if let Some(bad) = m.refs.iter().find(|r| failed.contains(*r)) {
+        for (ext, mut m) in pending {
+            // What it unions is optional: a contributor that failed is left out.
+            let joins = unions.get(&m.view);
+            let joined = |r: &String| joins.is_some_and(|j| j.contains(r));
+            if let Some(bad) = m.refs.iter().find(|r| failed.contains(*r) && !joined(r)) {
                 push(
                     &mut errors,
                     &ext,
@@ -2172,11 +2196,12 @@ fn pass(
                 );
                 failed.insert(m.view.clone());
                 progressed = true;
-            } else if m
-                .refs
-                .iter()
-                .all(|r| !in_pass.contains(r) || done.contains(r))
-            {
+            } else if m.refs.iter().all(|r| {
+                !in_pass.contains(r) || done.contains(r) || (joined(r) && failed.contains(r))
+            }) {
+                if let Some(joins) = joins {
+                    union_contributors(&mut m, joins, &done);
+                }
                 tx.execute_batch("SAVEPOINT extension_dataset")
                     .map_err(map_sql_err)?;
                 match publish(tx, &m, &ext, &now, mode) {
@@ -2279,6 +2304,127 @@ fn pass(
     Ok(CheckedDatasets { errors, views })
 }
 
+/// Each extension's namespace, by extension name.
+fn namespaces(extensions: &[ExtensionDatasets]) -> HashMap<String, String> {
+    extensions
+        .iter()
+        .map(|e| (e.extension.clone(), e.namespace.clone()))
+        .collect()
+}
+
+/// Connect each contributor (`adds_to:`) to the open dataset it names (its
+/// fields the same names in the same order): the
+/// open dataset reads it (so it publishes after it, and its lineage names
+/// it), and the returned map lists each open view's contributors. A
+/// contributor whose fields aren't the open dataset's, or whose target isn't
+/// open, is its extension's error and joins nothing; a target that names no
+/// dataset (its owner is off) joins nothing silently.
+fn wire_open_datasets(
+    resolved: &mut [(String, Resolved<'_>)],
+    namespace_of: &HashMap<String, String>,
+    owners: &HashMap<String, String>,
+    core: &HashMap<String, String>,
+    errors: &mut BTreeMap<String, Vec<String>>,
+) -> HashMap<String, Vec<String>> {
+    // By name, in order: the open dataset's own SQL types the union's
+    // columns, and each contributor's own contract checks its types.
+    let field_list = |fields: &[DatasetField]| -> Vec<String> {
+        fields.iter().map(|f| f.name.clone()).collect()
+    };
+    let open: HashMap<String, Vec<String>> = resolved
+        .iter()
+        .filter(|(_, m)| m.source.decl.open)
+        .map(|(_, m)| (m.view.clone(), field_list(&m.source.decl.fields)))
+        .collect();
+    let mut unions: HashMap<String, Vec<String>> = HashMap::new();
+    for (ext, m) in resolved.iter() {
+        let Some(target) = m.source.decl.adds_to.as_deref() else {
+            continue;
+        };
+        let ns = namespace_of
+            .get(ext)
+            .map(String::as_str)
+            .unwrap_or_default();
+        let Some(view) = ref_target(ns, target.trim(), owners, core) else {
+            continue; // its owner isn't on: nothing to add to
+        };
+        let Some(wanted) = open.get(&view) else {
+            push(
+                errors,
+                ext,
+                format!(
+                    "{}: adds to `{view}`, which isn't open (its owner declares `open: true` to take rows)",
+                    m.source.file
+                ),
+            );
+            continue;
+        };
+        let have = field_list(&m.source.decl.fields);
+        if &have != wanted {
+            let show = |f: &[String]| f.join(", ");
+            push(
+                errors,
+                ext,
+                format!(
+                    "{}: adds to `{view}`, but its fields are ({}), not ({})",
+                    m.source.file,
+                    show(&have),
+                    show(wanted)
+                ),
+            );
+            continue;
+        }
+        unions.entry(view).or_default().push(m.view.clone());
+    }
+    for (_, m) in resolved.iter_mut() {
+        if let Some(joins) = unions.get_mut(&m.view) {
+            joins.sort();
+            m.refs.extend(joins.iter().cloned());
+        }
+    }
+    unions
+}
+
+/// Make an open dataset's SQL its own rows `UNION ALL` each contributor's
+/// that published (`done`); a contributor that failed leaves its lineage.
+fn union_contributors(m: &mut Resolved<'_>, joins: &[String], done: &BTreeSet<String>) {
+    let cols = m
+        .source
+        .decl
+        .fields
+        .iter()
+        .map(|f| quote(&f.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // A compound SELECT types each column from its arms, so the union's
+    // types would depend on who adds to it: the open dataset's own field
+    // types decide them (`CAST`), and an untyped field stays untyped (`+`).
+    let typed = m
+        .source
+        .decl
+        .fields
+        .iter()
+        .map(|f| {
+            let name = quote(&f.name);
+            if f.sql_type.trim().is_empty() {
+                format!("+{name} AS {name}")
+            } else {
+                format!("CAST({name} AS {}) AS {name}", f.sql_type)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut sql = format!("SELECT {cols} FROM ({})", m.sql);
+    for view in joins {
+        if done.contains(view) {
+            sql.push_str(&format!(" UNION ALL SELECT {cols} FROM {}", quote(view)));
+        } else {
+            m.refs.remove(view);
+        }
+    }
+    m.sql = format!("SELECT {typed} FROM ({sql})");
+}
+
 fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: String) {
     errors
         .entry(extension.to_string())
@@ -2354,6 +2500,8 @@ mod tests {
                 deprecated: vec![],
                 materialize: None,
                 ai_context: None,
+                open: false,
+                adds_to: None,
             },
             file: format!("datasets/{name}.sql"),
             sql: sql.into(),
@@ -3537,6 +3685,138 @@ mod tests {
         assert!(table_exists(&conn, "m_v_acme_busy"));
         publish(&mut conn, &[]).unwrap();
         assert!(!table_exists(&conn, "m_v_acme_busy"));
+    }
+
+    /// An open dataset (`open: true`) is its own rows plus the rows of every
+    /// dataset that `adds_to:` it: other extensions add rows to a list one
+    /// extension owns. A contributor with other columns, or one that
+    /// doesn't compile, is its own extension's error and is left out of the
+    /// union; the open dataset still publishes. `adds_to:` a dataset that
+    /// isn't open is an error; one that names no dataset (its owner is off)
+    /// joins nothing.
+    #[test]
+    fn an_open_dataset_unions_the_datasets_that_add_to_it() {
+        let mut conn = fresh();
+        let open = |mut m: DatasetSource| {
+            m.decl.open = true;
+            m
+        };
+        let adds_to = |mut m: DatasetSource, target: &str| {
+            m.decl.adds_to = Some(target.into());
+            m
+        };
+        let errors = publish(
+            &mut conn,
+            &[
+                ext_in(
+                    "own",
+                    "own",
+                    vec![
+                        open(source(
+                            "signal",
+                            "SELECT 'own' AS src, 1 AS n",
+                            &["src", "n"],
+                        )),
+                        source("closed", "SELECT 1 AS n", &["n"]),
+                    ],
+                ),
+                ext_in(
+                    "add",
+                    "add",
+                    vec![adds_to(
+                        source("mine", "SELECT 'add' AS src, 2 AS n", &["src", "n"]),
+                        "own/signal",
+                    )],
+                ),
+                ext_in(
+                    "wrong",
+                    "wrong",
+                    vec![
+                        adds_to(
+                            source("cols", "SELECT 'wrong' AS other", &["other"]),
+                            "own/signal",
+                        ),
+                        adds_to(
+                            source("broken", "SELECT nope FROM nowhere", &["src", "n"]),
+                            "own/signal",
+                        ),
+                        adds_to(source("shut", "SELECT 3 AS n", &["n"]), "own/closed"),
+                        adds_to(source("gone", "SELECT 4 AS n", &["n"]), "off/signal"),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+        assert!(errors["own"].is_empty(), "{errors:?}");
+        assert!(errors["add"].is_empty(), "{errors:?}");
+        let wrong = errors["wrong"].join("\n");
+        assert!(
+            wrong.contains("cols.sql: adds to `v_own_signal`, but its fields are"),
+            "{wrong}"
+        );
+        assert!(wrong.contains("broken.sql"), "{wrong}");
+        assert!(
+            wrong.contains("shut.sql: adds to `v_own_closed`, which isn't open"),
+            "{wrong}"
+        );
+        assert!(!wrong.contains("gone.sql"), "{wrong}");
+        assert_eq!(errors["wrong"].len(), 3, "{wrong}");
+        let rows: Vec<(String, i64)> = conn
+            .prepare("SELECT src, n FROM v_own_signal ORDER BY n")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows, vec![("own".into(), 1), ("add".into(), 2)]);
+        // Its lineage names what it unions, so a materialized one recomputes
+        // when a contributor's inputs change.
+        let inputs: String = conn
+            .query_row(
+                "SELECT group_concat(input) FROM dataset_input WHERE view = 'v_own_signal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inputs, "v_add_mine");
+        // A check (temp views) unions the same way.
+        let checked = conn
+            .unchecked_transaction()
+            .map(|tx| {
+                let c = check_extensions(
+                    &tx,
+                    &[
+                        ext_in(
+                            "own",
+                            "own",
+                            vec![open(source(
+                                "signal",
+                                "SELECT 'own' AS src, 1 AS n",
+                                &["src", "n"],
+                            ))],
+                        ),
+                        ext_in(
+                            "add",
+                            "add",
+                            vec![adds_to(
+                                source("mine2", "SELECT 'add' AS src, 2 AS n", &["src", "n"]),
+                                "own/signal",
+                            )],
+                        ),
+                    ],
+                    &[],
+                )
+                .unwrap();
+                tx.rollback().unwrap();
+                c
+            })
+            .unwrap();
+        let union = checked
+            .views
+            .iter()
+            .find(|v| v.name == "v_own_signal")
+            .expect("checked");
+        assert!(union.sql.contains("v_add_mine2"), "{}", union.sql);
     }
 
     /// A dataset is named by its extension's namespace, not its name:

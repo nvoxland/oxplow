@@ -315,6 +315,25 @@ namespace"). Inside one:
 - `source()` reads only its namespace's `ext__<namespace>__*` tables —
   oxplow's data comes through `ref()`.
 
+**Open datasets** (`open: true` / `adds_to:`). An extension's dataset may say
+`open: true`: other extensions' datasets then add rows to it with `adds_to:
+<namespace>/<name>`, and its view is its own rows `UNION ALL` each
+contributor's (`datasets::wire_open_datasets`, `union_contributors`). One
+extension owns a list that many fill: oxplow-bundled's `review_signal` (the
+change review's signals) is the first.
+- A contributor's fields have the open dataset's names, in the same order;
+  it still publishes as its own view. The open dataset's own field types
+  type the union's columns (`CAST`, or `+col` to keep one untyped): a
+  compound SELECT would otherwise type each column from whoever adds to it.
+- The open dataset reads each contributor (`dataset_input`), so it
+  publishes after them and a materialized one recomputes when theirs move.
+- A contributor whose fields differ, or whose target isn't open, is its own
+  extension's error and joins nothing. One that fails to compile is left
+  out; the open dataset still publishes (a broken third-party contributor
+  never takes the list down). An `adds_to:` that names no published
+  dataset (its owner is off) joins nothing and is no error, so a
+  contributor needs no `requires:` on the owner.
+
 A check (`datasets::check_extensions`, P7.C6) runs the same pass with temp
 views, standing an empty view in for each declared entity that hasn't
 synced, and hands back what it created for the check's other queries to

@@ -1,0 +1,26 @@
+title: Review
+description: One line on what the change's review found, with a link to its Review page.
+params:
+- name: change_id
+loaders:
+  brief:
+    sql: |
+      WITH s AS (
+        SELECT count(*) FILTER (WHERE severity = 'high') AS high,
+               count(DISTINCT path) FILTER (WHERE severity IN ('high', 'medium')) AS files
+        FROM v_oxplow_review_signal WHERE change_id = :change_id
+      )
+      SELECT CASE
+               WHEN c.status = 'failed' THEN 'The analysis of this change failed.'
+               WHEN c.status <> 'done' THEN 'Analyzing this change…'
+               WHEN s.files = 0 THEN 'Nothing stands out.'
+               ELSE CASE WHEN s.high > 0 THEN printf('**%d high** · ', s.high) ELSE '' END
+                    || printf('%d file%s to look at', s.files, CASE s.files WHEN 1 THEN '' ELSE 's' END)
+             END
+             || ' · [Open Review](' || uri('oxplow/page', 'page', 'change-review', 'change_id', c.id) || ')' AS text
+      FROM v_change c, s WHERE c.id = :change_id
+view:
+  from: brief
+  viz: markdown
+  markdown: { text: text }
+  empty: This change hasn't been analysed.

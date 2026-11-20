@@ -1,0 +1,23 @@
+title: File Signals
+description: Every review signal for one file of a change, by line, each with its evidence.
+params:
+- name: change_id
+- name: path
+loaders:
+  signals:
+    sql: |
+      SELECT s.title, s.why, s.severity, s.line, s.source, s.uri, s.path, c.base_revision, c.head_revision
+      FROM v_oxplow_review_signal s JOIN v_change c ON c.id = s.change_id
+      WHERE s.change_id = :change_id AND s.path = :path
+      ORDER BY CASE s.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, s.line, s.title
+view:
+  from: signals
+  viz: table
+  columns:
+  - key: title
+    label: Signal
+    link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+  - { key: why, label: Why }
+  - { key: severity, label: Severity }
+  - { key: source, label: From }
+  empty: No signals for this file.

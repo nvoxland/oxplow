@@ -1859,6 +1859,8 @@ mod tests {
                 deprecated: Vec::new(),
                 materialize: None,
                 ai_context: None,
+                open: false,
+                adds_to: None,
             },
             file: format!("datasets/{name}.sql"),
             sql: sql.into(),
