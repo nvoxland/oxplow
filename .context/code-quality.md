@@ -249,6 +249,10 @@ signature-changed / body-changed functions; a file's review priority is
 oxplow-bundled's dataset `change_interest` over those rows (P7.B5); see
 [semantic-layer.md](./semantic-layer.md) → "Change analysis".
 
+A collector reads the same hunks with their lines through `change_diff`
+(`change_diff.rs`; [extensions-jobs.md](./extensions-jobs.md) "Reading a
+change"), and follows a stored analysis with `on: [change.analyzed]`.
+
 The result also carries `hunks`: for every file with either side
 present, the contiguous changed line ranges (`churn::diff_hunks`, a
 `similar` line diff; an added or deleted file is one hunk). The change

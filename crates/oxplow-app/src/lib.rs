@@ -31,6 +31,7 @@ pub mod capabilities;
 #[cfg(test)]
 mod catalog_datasets_tests;
 pub mod change_analysis;
+pub mod change_diff;
 pub mod change_reactor;
 pub mod chat;
 pub mod churn;
@@ -617,6 +618,8 @@ pub struct Services {
     /// Stored change analysis (`v_change*`) and its producer state.
     pub change_store: Arc<oxplow_db::SqliteChangeStore>,
     pub change_analyzer: Arc<change_analysis::ChangeAnalyzer>,
+    /// Reads an analysed change's changed lines (`change_diff`).
+    pub change_diffs: Arc<change_diff::ChangeDiffReader>,
     /// Runs extension advisories for the hooks (see `advisories`).
     pub advisories: Arc<advisories::AdvisoryRunner>,
     pub request_analysis_store: Arc<oxplow_db::SqliteRequestAnalysisStore>,
@@ -1565,7 +1568,14 @@ impl Services {
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         });
+        let change_diffs = Arc::new(change_diff::ChangeDiffReader::new(
+            db.clone(),
+            change_store.clone(),
+            trees.clone(),
+            worktrees.clone(),
+        ));
         let collector_runner = collector_runner::CollectorRunner {
+            change_diffs: change_diffs.clone(),
             global_dir: machine
                 .config_dir
                 .clone()
@@ -1799,6 +1809,7 @@ impl Services {
             advisories,
             change_store,
             change_analyzer: Arc::new(change_analysis::ChangeAnalyzer::default()),
+            change_diffs,
             collection,
             token_usage_store,
             token_usage,

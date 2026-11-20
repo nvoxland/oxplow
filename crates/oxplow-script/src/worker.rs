@@ -65,6 +65,9 @@ pub struct Given {
     pub ai: bool,
     #[serde(default)]
     pub scope: bool,
+    /// `change_diff`: answered by the host (`tree.read`).
+    #[serde(default)]
+    pub change_diff: bool,
 }
 
 /// What the host sends.
@@ -99,6 +102,8 @@ pub enum CallKind {
     Scope,
     /// `ai_<id>(…)`: `classify`, `score`, `summarize`, `extract`.
     Ai,
+    /// `change_diff(change_id, paths)`: args `{change_id, paths}`.
+    ChangeDiff,
     /// The host's parse results, shared across runs: `get { key }` answers
     /// the JSON text stored under `key` (or null), `put { key, value }`
     /// stores it. Answered by the host itself, never by the caller.
@@ -317,6 +322,20 @@ impl crate::runtime::ParseMemo for RemoteParses {
     }
 }
 
+/// The changes, as the worker's `change_diff` builtin sees them: each call
+/// crosses to the host, which reads the change's two sides.
+struct RemoteChanges(Arc<Mutex<Line>>);
+
+impl crate::change_diff::ChangeDiffSource for RemoteChanges {
+    fn change_diff(&self, change_id: i64, paths: Option<Vec<String>>) -> Result<Value, String> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).call(
+            CallKind::ChangeDiff,
+            "change_diff",
+            serde_json::json!({ "change_id": change_id, "paths": paths }),
+        )
+    }
+}
+
 /// The model, as the worker's `ai_*` builtins see it: each call crosses to
 /// the host, which asks its oracle (with the run's clock paused).
 struct RemoteOracle(Arc<Mutex<Line>>);
@@ -442,6 +461,9 @@ fn run(
             .ai
             .then(|| crate::ai::AiHost::new(Arc::new(RemoteOracle(line.clone())))),
         parses: Some(Arc::new(RemoteParses(line.clone()))),
+        change_diff: given.change_diff.then(|| {
+            crate::change_diff::ChangeDiffHost::new(Arc::new(RemoteChanges(line.clone())))
+        }),
         scope: given.scope.then(|| {
             let line = line.clone();
             crate::scope::ScopeHost::new(Box::new(move |id, args| {

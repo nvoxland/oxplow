@@ -51,6 +51,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "ui",
     "file",
     "terminal",
+    "change",
     // No events: the request and response bodies of oxplow's own model
     // calls (`ai_call`) are kept under it in `event_content`.
     "ai",
@@ -184,6 +185,7 @@ impl EventSchemaRegistry {
         r.register::<RefDrifted>().expect("core type registers");
         r.register::<ThreadClosed>().expect("core type registers");
         r.register::<StreamArchived>().expect("core type registers");
+        r.register::<ChangeAnalyzed>().expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
             .expect("core type registers");
         r.register::<ContributionEnabled>()
@@ -1792,6 +1794,41 @@ impl EventType for ThreadClosed {
     type Payload = ThreadClosedV1;
 }
 
+/// `change.analyzed@1`: a change's analysis results were stored (phase
+/// `files`) or its duplicate scan was stored (phase `duplicates`). An
+/// analysis whose inputs didn't move logs nothing. A collector that
+/// follows changes (`on: [change.analyzed]`, `where: { phase: files }`)
+/// runs on it, anchored to the stream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeAnalyzedV1 {
+    /// The change (`v_change.id`).
+    pub change_id: i64,
+    /// `commit`, `turn`, `request`, `working` or `range`.
+    pub kind: String,
+    /// The sha, turn or request id, `<base>..<head>`; '' for the working tree.
+    pub target: String,
+    /// The stream (`v_change.stream_id`).
+    pub stream_id: i64,
+    /// The older side (`working`, `snap:<id>`, `git:<sha>`); absent for a
+    /// root commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_revision: Option<String>,
+    /// The newer side, spelled like `base_revision`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_revision: Option<String>,
+    /// `files` when the analysis is stored, `duplicates` when its
+    /// duplicate scan is.
+    pub phase: String,
+}
+
+pub struct ChangeAnalyzed;
+impl EventType for ChangeAnalyzed {
+    const TYPE: &'static str = "change.analyzed";
+    const V: u32 = 1;
+    type Payload = ChangeAnalyzedV1;
+}
+
 /// `stream.archived@1`: a stream was archived (`oxplow.stream.archive`):
 /// its threads' sessions ended and its working copy may be gone; what its
 /// threads were working on goes back to nobody.
@@ -1864,6 +1901,7 @@ mod tests {
                 ("agent.turn.ended", 5),
                 ("agent.turn.started", 3),
                 ("capability.switched", 3),
+                ("change.analyzed", 1),
                 ("code.diagnostics.changed", 2),
                 ("collector.synced", 2),
                 ("command.approved", 2),

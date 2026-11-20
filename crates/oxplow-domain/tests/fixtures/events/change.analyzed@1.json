@@ -1,0 +1,9 @@
+{
+  "change_id": 7,
+  "kind": "commit",
+  "target": "abc1234",
+  "stream_id": 1,
+  "base_revision": "git:9f8e7d6",
+  "head_revision": "git:abc1234",
+  "phase": "files"
+}

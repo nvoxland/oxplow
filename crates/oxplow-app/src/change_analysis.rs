@@ -1022,6 +1022,7 @@ async fn analyze(
             svc.change_store
                 .store_results(row.id, results, snapshot_id, events_to, elapsed_ms, from)
                 .await?;
+            log_analyzed(&svc.event_log_store, &svc.change_store, row.id, "files").await;
             spawn_duplicates(svc, row.id, events_to, &root, &dup_head, changed);
         }
         Err(e) => {
@@ -1117,6 +1118,45 @@ async fn events_to(svc: &crate::Services) -> Result<i64, oxplow_domain::DomainEr
         .await
 }
 
+/// Log `change.analyzed` for a change whose `phase` was just stored: what
+/// follows changes (a collector on `change.analyzed`) runs on it. A failed
+/// write is logged, not raised: the analysis is stored either way.
+async fn log_analyzed(
+    events: &oxplow_db::SqliteEventLogStore,
+    store: &oxplow_db::SqliteChangeStore,
+    change_id: i64,
+    phase: &str,
+) {
+    use oxplow_domain::events::schema::{ChangeAnalyzed, ChangeAnalyzedV1};
+    let row = match store.get(change_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(change_id, %error, "reading a change to log it analyzed failed");
+            return;
+        }
+    };
+    let env = oxplow_domain::Envelope::typed::<ChangeAnalyzed>(
+        "system",
+        &ChangeAnalyzedV1 {
+            change_id,
+            kind: row.kind.clone(),
+            target: row.target.clone(),
+            stream_id: row.stream_id,
+            base_revision: row.base_revision.as_ref().map(ToString::to_string),
+            head_revision: row.head_revision.as_ref().map(ToString::to_string),
+            phase: phase.to_string(),
+        },
+    )
+    .with_anchors(oxplow_domain::events::Anchors {
+        stream_id: Some(oxplow_domain::StreamId::new(row.stream_id)),
+        ..Default::default()
+    });
+    if let Err(error) = events.append(env).await {
+        tracing::warn!(change_id, %error, "logging change.analyzed failed");
+    }
+}
+
 /// Find duplicated blocks between the changed files and anything else in
 /// the tree at `head`, in the background (it parses the whole tree), then
 /// store them if the analysis they belong to (`events_to`) is still the
@@ -1144,6 +1184,7 @@ fn spawn_duplicates(
     }
     let recorder = crate::duplication_scan::DuplicationRecorder::new(svc);
     let store = svc.change_store.clone();
+    let events = svc.event_log_store.clone();
     let analyzer = svc.change_analyzer.clone();
     tokio::spawn(async move {
         while let Some((change_id, job)) = analyzer.dup_queue.next() {
@@ -1179,8 +1220,10 @@ fn spawn_duplicates(
                 })
                 .collect();
             // A newer analysis of this change supersedes these findings.
-            if let Err(error) = store.store_duplicates(change_id, rows, job.events_to).await {
-                tracing::warn!(change_id, %error, "storing duplicates failed");
+            match store.store_duplicates(change_id, rows, job.events_to).await {
+                Ok(true) => log_analyzed(&events, &store, change_id, "duplicates").await,
+                Ok(false) => {}
+                Err(error) => tracing::warn!(change_id, %error, "storing duplicates failed"),
             }
         }
     });
@@ -2516,6 +2559,71 @@ mod tests {
                 t.tables
             );
         }
+    }
+
+    /// One `change.analyzed` per stored analysis and one per stored
+    /// duplicate scan; a rerun whose inputs didn't move logs none.
+    #[tokio::test]
+    async fn a_stored_analysis_and_its_duplicate_scan_each_log_change_analyzed() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "change");
+        let target = || ChangeTarget::Commit {
+            sha: sha.clone(),
+            stream_id: None,
+        };
+        let c = ensure_change(&f.svc, target()).await.unwrap();
+        let phases = || async {
+            f.svc
+                .db
+                .read(|c| {
+                    let mut st = c
+                        .prepare(
+                            "SELECT json_extract(payload, '$.phase'), json_extract(payload, '$.change_id'),
+                                    json_extract(payload, '$.kind'), json_extract(payload, '$.stream_id')
+                             FROM event_log WHERE type = 'change.analyzed' ORDER BY seq",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = st
+                        .query_map([], |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, i64>(1)?,
+                                r.get::<_, String>(2)?,
+                                r.get::<_, i64>(3)?,
+                            ))
+                        })
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        for _ in 0..200 {
+            if phases().await.len() == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let want = vec![
+            ("files".to_string(), c.id, "commit".to_string(), c.stream_id),
+            (
+                "duplicates".to_string(),
+                c.id,
+                "commit".to_string(),
+                c.stream_id,
+            ),
+        ];
+        assert_eq!(phases().await, want);
+        refresh_change(&f.svc, target()).await.unwrap();
+        ensure_change(&f.svc, target()).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(phases().await, want, "an unchanged rerun logs nothing");
     }
 
     #[tokio::test]

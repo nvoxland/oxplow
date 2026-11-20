@@ -494,6 +494,8 @@ pub struct Hosts {
     pub tree: Option<TreeHost>,
     pub ai: Option<crate::ai::AiHost>,
     pub scope: Option<crate::scope::ScopeHost>,
+    /// `change_diff` (`tree.read`): a change's changed lines, from the host.
+    pub change_diff: Option<crate::change_diff::ChangeDiffHost>,
     /// Where parse results are shared across runs (a worker's line to its
     /// host); none in process, where every call computes.
     pub parses: Option<std::sync::Arc<dyn ParseMemo>>,
@@ -597,6 +599,7 @@ pub(crate) fn run_starlark_inner(
     let globals = GlobalsBuilder::extended_by(&[LibraryExtension::Json])
         .with(collect_helpers)
         .with(crate::ai::ai_builtins)
+        .with(crate::change_diff::change_diff_builtins)
         .with(crate::scope::scope_builtins)
         .with(crate::uri::uri_builtins)
         .build();

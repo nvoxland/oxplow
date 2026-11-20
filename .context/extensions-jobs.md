@@ -326,6 +326,25 @@ profile (`oxplow_sdk::profile_lines`: bound, or falling back), and
 `check` warns when the binding serving a profile forbids a feature it
 declares (`profile_warnings`, a person's `restrict:`).
 
+## Reading a change
+
+`change_diff(change_id, paths=None)` (`tree.read`, so the collector declares
+`needs: [tree.read]` and its extension holds `files.read`) returns the changed
+lines of an analysed change: `[{path, status, hunks: [{head_start, head_end,
+base_start, base_end, head_after, added: [{line, text}], removed: [{line,
+text}]}]}]`, the ranges of `v_change_hunk` with the text of their lines. The
+files are the change's stored ones (`v_change_file`, so a request's own files),
+limited to `paths`; each side is read through `Trees` as the analyzer reads it
+(`change_diff.rs`). A call reads at most 200 files and 2 MB of text; past
+either it fails naming the limit (it never truncates), and `paths` asks for
+fewer. The worker asks its host across the line (`CallKind::ChangeDiff`), as
+an `ai_*` call does.
+
+A change-triggered entity collector replaces its rows for one change without a
+scoped replace: `sync: upsert`, its script reads its entity's current keys
+with `scope("sql.read", …)` (`needs: [sql.read]`) and returns the ones it no
+longer produces in `deleted`.
+
 ## Triggers for observers
 
 Part of the shared-models work ([models.md](./models.md)). A store's

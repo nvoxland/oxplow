@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`change.analyzed@1`: a change's analysis results were stored (phase\n`files`) or its duplicate scan was stored (phase `duplicates`). An\nanalysis whose inputs didn't move logs nothing. A collector that\nfollows changes (`on: [change.analyzed]`, `where: { phase: files }`)\nruns on it, anchored to the stream.",
+  "properties": {
+    "base_revision": {
+      "description": "The older side (`working`, `snap:<id>`, `git:<sha>`); absent for a\nroot commit.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "change_id": {
+      "description": "The change (`v_change.id`).",
+      "format": "int64",
+      "type": "integer"
+    },
+    "head_revision": {
+      "description": "The newer side, spelled like `base_revision`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "description": "`commit`, `turn`, `request`, `working` or `range`.",
+      "type": "string"
+    },
+    "phase": {
+      "description": "`files` when the analysis is stored, `duplicates` when its\nduplicate scan is.",
+      "type": "string"
+    },
+    "stream_id": {
+      "description": "The stream (`v_change.stream_id`).",
+      "format": "int64",
+      "type": "integer"
+    },
+    "target": {
+      "description": "The sha, turn or request id, `<base>..<head>`; '' for the working tree.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "change_id",
+    "kind",
+    "target",
+    "stream_id",
+    "phase"
+  ],
+  "title": "ChangeAnalyzedV1",
+  "type": "object"
+}
