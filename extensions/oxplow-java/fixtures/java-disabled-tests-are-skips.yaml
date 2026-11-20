@@ -1,0 +1,13 @@
+# The Java pack's test conventions: `@Disabled` and `@Ignore` are skips; a `*Test` class holds tests (foundation's).
+requires: [oxplow-java]
+given:
+  - observe: { turn: { prompt: base, write: { path: README.md, body: "base\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: add the test file, write: { path: src/Util.java, body: "class UtilTest {\n    void helper() {\n        assertTrue(true);\n    }\n\n    @Disabled\n    void other() {}\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/Util.java] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the test file }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the test file } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, tests_after, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: src/Util.java, tests_after: 2, assertions_after: 1, skips_after: 1 }] }

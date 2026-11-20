@@ -9,6 +9,8 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+test_conventions:
+  - { id: python-tests, languages: [python], paths: ['**/test_*.py'] }
 languages:
   - id: python
     title: "Python"

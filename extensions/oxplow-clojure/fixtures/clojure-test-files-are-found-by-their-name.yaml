@@ -1,0 +1,13 @@
+# The Clojure pack's test conventions: `*_test.clj` is a test file.
+requires: [oxplow-clojure]
+given:
+  - observe: { turn: { prompt: base, write: { path: README.md, body: "base\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: add the test file, write: { path: src/util_test.clj, body: "(ns util-test)\n\n(defn helper []\n  (assert true))\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/util_test.clj] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the test file }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the test file } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, tests_after, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: src/util_test.clj, tests_after: 1, assertions_after: 1, skips_after: 0 }] }

@@ -1,0 +1,12 @@
+# Foundation's test conventions hold in any language: `*.test.*` is a test file, `expect(` an assertion, `.skip` a skip.
+given:
+  - observe: { turn: { prompt: base, write: { path: README.md, body: "base\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: add the test file, write: { path: src/widget.test.ts, body: "it('a', () => {\n  expect(1).toBe(1);\n  it.skip('b', () => {});\n});\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/widget.test.ts] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the test file }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the test file } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, tests_after, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: src/widget.test.ts, tests_after: 0, assertions_after: 1, skips_after: 1 }] }

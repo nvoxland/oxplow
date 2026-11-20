@@ -160,9 +160,9 @@ mod subagent_tests;
 pub mod symbol_collector;
 pub mod symbol_resolve;
 pub mod terminal_sessions;
+pub mod test_conventions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
-pub mod test_signals;
 pub mod thread_checkpoint;
 pub mod token_usage;
 pub mod tool_call_reactors;
@@ -562,6 +562,8 @@ pub struct Services {
     /// The programming languages the enabled extensions declare
     /// (`extension::language_set`), swapped beside `models`.
     pub languages: extension::language_set::LanguagesHandle,
+    /// What the enabled extensions say makes a test (`test_conventions:`).
+    pub test_conventions: test_conventions::TestConventionsHandle,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
@@ -1797,6 +1799,7 @@ impl Services {
             feeds,
             models,
             languages,
+            test_conventions: Default::default(),
             page_visit_store,
             usage_store,
             code_quality_store,

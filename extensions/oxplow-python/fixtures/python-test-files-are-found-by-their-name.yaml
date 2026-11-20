@@ -1,0 +1,13 @@
+# The Python pack's test conventions: `test_*.py` is a test file.
+requires: [oxplow-python]
+given:
+  - observe: { turn: { prompt: base, write: { path: README.md, body: "base\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: add the test file, write: { path: pkg/test_util.py, body: "def helper():\n    assert 1 == 1\n    assert True\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [pkg/test_util.py] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the test file }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the test file } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, tests_after, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: pkg/test_util.py, tests_after: 1, assertions_after: 2, skips_after: 0 }] }

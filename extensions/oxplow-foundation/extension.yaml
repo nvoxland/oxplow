@@ -22,6 +22,14 @@ file_kinds:
   - { kind: vendored, label: Vendored, globs: ['vendor/**', 'third_party/**', '**/node_modules/**'] }
   - { kind: migration, label: Migration, globs: ['**/migrations/**'] }
   - { kind: sensitive, label: Sensitive, globs: ['**/auth/**', '**/*secret*', '**/*credential*', '**/crypto/**', '**/.env*'] }
+# What makes a test, anywhere (the language packs add their own conventions).
+test_conventions:
+  - id: tests
+    paths: ['**/*.test.*', '**/*.spec.*', 'test/**', '**/test/**', 'tests/**', '**/tests/**']
+    containers: [tests, test, '*Test', '*Tests', Test, 'Test_*', 'Test[A-Z]*', '*-test']
+    functions: ['test_*', 'test[A-Z]*', Test, 'Test_*', 'Test[A-Z]*', Benchmark, 'Benchmark_*', 'Benchmark[A-Z]*', Example, 'Example_*', 'Example[A-Z]*']
+    assertions: ['\b(?:\w+_)?assert', '\bexpect\(']
+    skips: ['\.(?:skip|skipif|skipIf|skipUnless|todo)\b', '\b(?:xit|xdescribe|xtest)\(']
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a page can
@@ -838,6 +846,11 @@ resources:
     label: File kind
     params: { file_kind: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: file-text
+  - name: test_convention
+    description: "What makes a file, container or function a test, and what counts as an assertion or a skip."
+    label: Test convention
+    params: { test_convention: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: check-square
   - name: implementation
     description: "One way to provide a capability, such as a task tracker or an agent."
     label: Implementation

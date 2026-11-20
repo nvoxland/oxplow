@@ -802,6 +802,10 @@ impl ExtensionActivation {
                             p.message
                         );
                     }
+                    svc.test_conventions.swap(crate::test_conventions::TestConventions::of(
+                        published.extensions(),
+                        std::sync::Arc::new(languages.clone()),
+                    ));
                     if svc.languages.publish(languages) {
                         // The symbol index follows the set (a pack turned on
                         // or off, possibly while oxplow was off).

@@ -38,6 +38,7 @@ pub mod schema;
 pub mod shared_models;
 pub mod skills;
 pub mod storage;
+pub mod test_conventions;
 use crate::pages::schema::PageKind;
 use crate::pages::spec::{
     action_templates, edit_column, label_refs, param_problem, FormMode, FormSpec, LabelFrom,
@@ -414,6 +415,10 @@ pub struct Extension {
     /// The kinds of file it names by glob (`file_kinds:`; valid ones —
     /// invalid ones are in `errors`).
     pub file_kinds: Vec<file_kinds::FileKindDecl>,
+    /// What makes a file, container or function a test, and what counts as
+    /// an assertion or a skip (`test_conventions:`; valid ones — invalid
+    /// ones are in `errors`).
+    pub test_conventions: Vec<test_conventions::TestConventionDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1834,6 +1839,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         languages: Vec::new(),
         run_patterns: Vec::new(),
         file_kinds: Vec::new(),
+        test_conventions: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -2066,6 +2072,32 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let (declared, errors) = file_kinds::parse_file_kinds(v, man, &manifest);
             ext.file_kinds = declared;
             ext.errors.extend(errors);
+        }
+        if let Some(v) = m.test_conventions.as_ref() {
+            let (declared, errors) = test_conventions::parse_test_conventions(v, man, &manifest);
+            ext.errors.extend(errors);
+            // A language no extension of oxplow's or this one declares: its
+            // pack may be off, or the name mistyped.
+            let lines = manifest_v2::item_lines(&manifest, "test_conventions");
+            for (i, d) in declared.iter().enumerate() {
+                for language in &d.languages {
+                    if !ext.languages.iter().any(|l| l.decl.id == *language)
+                        && !test_conventions::shipped_language_ids().contains(language)
+                    {
+                        ext.errors.push(
+                            Diagnostic::warning(
+                                "test_conventions.unknown_language",
+                                format!(
+                                    "test convention `{}`: no extension declares the language `{language}`; it applies once one does",
+                                    d.id
+                                ),
+                            )
+                            .at("extension.yaml", lines.get(i).copied()),
+                        );
+                    }
+                }
+            }
+            ext.test_conventions = declared;
         }
         if let Some(v) = m.implementations.as_ref() {
             let (declared, errors) = implementations::parse_implementations(
@@ -3799,6 +3831,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.contexts.clear();
     ext.run_patterns.clear();
     ext.file_kinds.clear();
+    ext.test_conventions.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
     ext.measures.clear();
@@ -10460,6 +10493,32 @@ commands:
                 ext.errors
             );
         }
+    }
+
+    /// A test convention naming a language no extension declares is a
+    /// warning at its line (the pack may be off), not an error.
+    #[test]
+    fn a_test_convention_for_an_unknown_language_is_a_warning() {
+        let (_d, ext) = load_x(
+            &[],
+            "test_conventions:\n  - { id: known, languages: [go], paths: ['**/*_test.go'] }\n  - { id: odd, languages: [cobol], paths: ['**/*.cbl'] }\n",
+        );
+        let issues: Vec<_> = ext
+            .errors
+            .iter()
+            .map(|d| (d.severity, d.code.as_str(), d.line))
+            .collect();
+        assert_eq!(
+            issues,
+            [(
+                oxplow_domain::diagnostic::Severity::Warning,
+                "test_conventions.unknown_language",
+                Some(7)
+            )],
+            "{:?}",
+            ext.errors
+        );
+        assert_eq!(ext.test_conventions.len(), 2, "both still load");
     }
 
     #[test]

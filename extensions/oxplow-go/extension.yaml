@@ -9,6 +9,12 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+test_conventions:
+  - id: go-tests
+    languages: [go]
+    paths: ['**/*_test.go']
+    assertions: ['\bt\.(?:Error|Errorf|Fatal|Fatalf)\b', '\brequire\.[A-Z]']
+    skips: ['\bt\.(?:Skip|Skipf|SkipNow)\b']
 languages:
   - id: go
     title: "Go"

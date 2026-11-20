@@ -850,6 +850,7 @@
     "agent_context",
     "run_pattern",
     "file_kind",
+    "test_convention",
     "skill",
     "implementation",
     "provider",

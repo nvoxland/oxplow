@@ -227,6 +227,36 @@ latest values by **package** (directory) or any per-file `dims_json` key
 slice by dimension is `metric_grid(…, dim)` in SQL; a per-package or
 per-language view is page or agent work.
 
+## Test conventions
+
+What makes a test is data, not core's code: an extension's
+`test_conventions:` (`{ id, languages?, paths?, containers?, functions?,
+assertions?, skips? }`; `extension/extensions/test_conventions.rs`).
+oxplow-foundation declares the rules that hold in any language (`*.test.*`
+and `*.spec.*` files, `test/` and `tests/` folders, `Test*` / `*Test` /
+`*-test` containers, `test_*` / `Test*` / `Benchmark*` / `Example*`
+functions, `assert*` and `expect(` assertions, `.skip` / `.todo` / `xit(`
+skips); each pack declares its own (Rust `test_*.rs` and `#[ignore`, Python
+`test_*.py`, Go `*_test.go` with `t.Error*`, `t.Fatal*`, `require.<Name>`
+and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
+
+- `languages` limits a convention to files of those language ids (a file's
+  language is the one `languages:` gives its path); absent, any file. An id
+  nobody declares is a warning at the entry's line (the pack may be off).
+- `paths` are globs, as `oxplow.testing.testPaths` (`*` stays in a folder,
+  `**` crosses). `containers` and `functions` are name patterns matched
+  against a whole name: `*`, `?` and `[A-Z]`, so `Test*`'s "followed by an
+  uppercase letter, `_` or nothing" is `Test`, `Test_*`, `Test[A-Z]*`.
+  `assertions` and `skips` are regular expressions; every match on a code
+  line counts once (a span two conventions both match counts once), and line
+  comments (`//`, `#` lines but not `#[attribute]`) are left out.
+- A bad glob, name pattern or regex is an error at the entry's line.
+- **The engine is core's** (`crate::test_conventions`): `TestConventions`
+  is built from the enabled extensions at each publication, swapped into
+  `svc.test_conventions` beside `svc.languages`, and read by change analysis
+  (`TestPaths`, which adds `oxplow.testing.testPaths`); a manifest is never
+  read per file. A pack that is off contributes nothing.
+
 ## Adding a language (the checklist)
 
 1. **A pack**: an extension with a `languages:` entry (a shipped one in
@@ -237,7 +267,9 @@ per-language view is page or agent work.
 3. **`analysis.yaml`**: the node kinds and strategies above (the load check
    refuses a node kind the grammar doesn't have).
 4. **`symbols.scm`** (and `symbols.yaml`): the captures in "Symbols" above.
-5. **Optional**: `starter:` (the metric scaffold's sample), `lsp:`, the merge
+5. **Its test conventions**: `test_conventions:` (a test-file name, the
+   assertion and skip forms), with a fixture in the pack.
+6. **Optional**: `starter:` (the metric scaffold's sample), `lsp:`, the merge
    and import facets, its idiom metrics (fact collectors), and the Monaco id /
    icon in `apps/desktop/src/editor-language.ts`.
 

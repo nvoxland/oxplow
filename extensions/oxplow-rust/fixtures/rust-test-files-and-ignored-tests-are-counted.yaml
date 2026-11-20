@@ -1,0 +1,13 @@
+# The Rust pack's test conventions: `test_*.rs` is a test file and `#[ignore` a skip.
+requires: [oxplow-rust]
+given:
+  - observe: { turn: { prompt: base, write: { path: README.md, body: "base\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: add the test file, write: { path: src/test_util.rs, body: "pub fn helper() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[ignore]\npub fn other() {}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/test_util.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the test file }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the test file } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, tests_after, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: src/test_util.rs, tests_after: 2, assertions_after: 2, skips_after: 1 }] }

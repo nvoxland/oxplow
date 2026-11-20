@@ -297,6 +297,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::file_kinds::FileKindFile>>")]
     pub file_kinds: Option<Value>,
+    /// What makes a file, container or function a test, and what counts as
+    /// an assertion or a skip.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::test_conventions::TestConventionFile>>")]
+    pub test_conventions: Option<Value>,
     /// External providers: programs implementing a capability, whose
     /// operations its `commands:` declare.
     #[serde(default)]

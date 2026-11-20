@@ -272,6 +272,19 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         );
         out.push(d);
     }
+    for (i, t) in ext.test_conventions.iter().enumerate() {
+        let mut d = new(ContributionKind::TestConvention, &t.id, RunsOn::Query);
+        d.source = item("test_conventions", i);
+        d.description = Some(format!(
+            "test conventions for {}",
+            if t.languages.is_empty() {
+                "any file".to_string()
+            } else {
+                t.languages.join(", ")
+            }
+        ));
+        out.push(d);
+    }
     // An implementation is chosen by `<capability>/<id>`.
     for i in &ext.implementations {
         let mut d = new(
@@ -645,6 +658,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::AiProfile => ext.ai_profiles.retain(|x| x.id != local),
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
         ContributionKind::AgentContext => ext.contexts.retain(|x| x.id != local),
+        ContributionKind::TestConvention => ext.test_conventions.retain(|x| x.id != local),
         ContributionKind::FileKind => {
             let mut seen: std::collections::HashMap<String, usize> = Default::default();
             ext.file_kinds.retain(|k| {

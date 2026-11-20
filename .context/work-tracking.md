@@ -222,9 +222,9 @@ or operational limits, not a view of what good work is:
   `testing.runPatterns`), and the report freshness window.
 - The report-less-run nudge: collection telling the agent its run wrote
   no report it could read.
-- Which paths and functions are tests (`change_analysis::is_test_path`,
-  `is_test_function`) and the assertion and skip counting
-  (`test_signals`): conventions the change analysis records as columns.
+- Which paths and functions are tests, and the assertion and skip counting
+  (`test_conventions`, declared by extensions: language-support.md "Test
+  conventions"): conventions the change analysis records as columns.
 - Function metrics, clone detection and its `min_lines` / `min_nodes`
   floors, diff-coverage math, `threshold_state`.
 - Advisory muting after three deliveries, stall detection (15 / 5
