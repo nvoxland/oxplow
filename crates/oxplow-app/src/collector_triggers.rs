@@ -465,6 +465,181 @@ mod tests {
         );
     }
 
+    /// `change.analyzed` is a core type a collector can follow: its
+    /// `where` picks the phase, its input binds the stream the event is
+    /// anchored to, and its script reads the payload.
+    #[tokio::test]
+    async fn a_collector_follows_change_analyzed_by_phase() {
+        use oxplow_domain::events::schema::{ChangeAnalyzed, ChangeAnalyzedV1};
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let collectors = "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [change.analyzed]\n    where: { phase: files }\n    input: \"SELECT :stream_id AS sid, :event_seq AS ev\"\n    sync: upsert\n    entities:\n      - { name: seen, key: ev, columns: { ev: int, sid: int, change: int, phase: text } }\n";
+        let script = "def transform(input):\n    p = input[\"event\"][\"payload\"]\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"sid\": r[\"sid\"], \"change\": p[\"change_id\"], \"phase\": p[\"phase\"]} for r in input[\"rows\"]]}}\n";
+        let problems = extension(&fx.svc, collectors, &[("seen.star", script)]).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
+        assert_eq!(
+            rows(
+                &fx.svc,
+                "SELECT event_type, v FROM v_event_type WHERE event_type = 'change.analyzed'"
+            )
+            .await,
+            json!([["change.analyzed", 1]])
+        );
+        let mut seqs = Vec::new();
+        for phase in ["files", "duplicates"] {
+            let env = oxplow_domain::Envelope::typed::<ChangeAnalyzed>(
+                "system",
+                &ChangeAnalyzedV1 {
+                    change_id: 9,
+                    kind: "commit".into(),
+                    target: "abc".into(),
+                    stream_id: 1,
+                    base_revision: None,
+                    head_revision: Some("git:abc".into()),
+                    phase: phase.into(),
+                },
+            )
+            .with_anchors(oxplow_domain::events::Anchors {
+                stream_id: Some(oxplow_domain::StreamId::new(1)),
+                ..Default::default()
+            });
+            let id = env.id.clone();
+            fx.svc.event_log_store.append(env).await.unwrap();
+            let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();
+            consumer.handle(&ev).await.unwrap();
+            seqs.push(ev.seq);
+        }
+        assert_eq!(
+            rows(&fx.svc, "SELECT ev, sid, change, phase FROM v_work_seen").await,
+            json!([[seqs[0], 1, 9, "files"]]),
+            "the duplicates phase doesn't match the `where`"
+        );
+    }
+
+    /// A collector on `change.analyzed` reads the change's changed lines
+    /// with `change_diff` (`tree.read`, which needs `files.read`): the
+    /// added and removed lines, numbered. Without the permission or the
+    /// `needs` it is refused at the script.
+    #[tokio::test]
+    async fn a_collector_reads_a_changes_lines_with_change_diff() {
+        use oxplow_domain::events::schema::{ChangeAnalyzed, ChangeAnalyzedV1};
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("a.txt"), "one\nTWO\nthree\nfour\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "change");
+        let change = crate::change_analysis::ensure_change(
+            &fx.svc,
+            crate::change_analysis::ChangeTarget::Commit {
+                sha,
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let script = "def transform(input):\n    out = []\n    for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"]):\n        for h in f[\"hunks\"]:\n            for l in h[\"added\"]:\n                out.append({\"ev\": l[\"line\"], \"what\": \"+\" + l[\"text\"]})\n            for l in h[\"removed\"]:\n                out.append({\"ev\": 100 + l[\"line\"], \"what\": \"-\" + l[\"text\"]})\n    return {\"entities\": {\"line\": out}}\n";
+        let collector = |needs: &str| {
+            format!(
+                "  - id: lines\n    runtime: starlark\n    entry: lines.star\n    on: [change.analyzed]\n    sync: upsert\n{needs}    entities:\n      - {{ name: line, key: ev, columns: {{ ev: int, what: text }} }}\n"
+            )
+        };
+        let install = |permissions: &str, needs: &str| {
+            let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/work");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                format!(
+                    "manifest: 2\nname: work\nintent: {{ purpose: t, origin: null, examples: [] }}\npermissions: {permissions}\ncollectors:\n{}",
+                    collector(needs)
+                ),
+            )
+            .unwrap();
+            std::fs::write(dir.join("lines.star"), script).unwrap();
+        };
+        let event = || {
+            let env = oxplow_domain::Envelope::typed::<ChangeAnalyzed>(
+                "system",
+                &ChangeAnalyzedV1 {
+                    change_id: change.id,
+                    kind: change.kind.clone(),
+                    target: change.target.clone(),
+                    stream_id: change.stream_id,
+                    base_revision: None,
+                    head_revision: None,
+                    phase: "files".into(),
+                },
+            )
+            .with_anchors(oxplow_domain::events::Anchors {
+                stream_id: Some(oxplow_domain::StreamId::new(change.stream_id)),
+                ..Default::default()
+            });
+            let svc = fx.svc.clone();
+            async move {
+                let id = env.id.clone();
+                svc.event_log_store.append(env).await.unwrap();
+                svc.event_log_store.get(id).await.unwrap().unwrap()
+            }
+        };
+        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
+
+        install("[files.read]", "    needs: [tree.read]\n");
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        consumer.handle(&event().await).await.unwrap();
+        assert_eq!(
+            rows(&fx.svc, "SELECT ev, what FROM v_work_line ORDER BY ev").await,
+            json!([[2, "+TWO"], [4, "+four"], [102, "-two"]])
+        );
+
+        // A re-run replaces this change's rows without a scoped replace: the
+        // script reads the entity's old keys with `sql.read` and tombstones
+        // the ones it no longer produces.
+        let again = "def transform(input):\n    old = scope(\"sql.read\", {\"sql\": \"SELECT ev FROM v_work_line\"})\n    out = [{\"ev\": l[\"line\"], \"what\": l[\"text\"]} for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"]) for h in f[\"hunks\"] for l in h[\"added\"] if l[\"line\"] != 2]\n    keep = [r[\"ev\"] for r in out]\n    return {\"entities\": {\"line\": out}, \"deleted\": {\"line\": [r[\"ev\"] for r in old if r[\"ev\"] not in keep]}}\n";
+        std::fs::write(
+            fx.svc
+                .layout
+                .project_dir
+                .join(".oxplow/extensions/work/lines.star"),
+            again,
+        )
+        .unwrap();
+        install(
+            "[files.read, sql.read]",
+            "    needs: [tree.read, sql.read]\n",
+        );
+        std::fs::write(
+            fx.svc
+                .layout
+                .project_dir
+                .join(".oxplow/extensions/work/lines.star"),
+            again,
+        )
+        .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        consumer.handle(&event().await).await.unwrap();
+        assert_eq!(
+            rows(&fx.svc, "SELECT ev, what FROM v_work_line ORDER BY ev").await,
+            json!([[4, "four"]])
+        );
+
+        // Declared, but the extension holds no `files.read`: refused.
+        install("[process.run]", "    needs: [tree.read]\n");
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(
+            format!("{problems:?}").contains("needs `files.read` in `permissions:`"),
+            "refused at load: {problems:?}"
+        );
+        // Permitted, but the collector doesn't declare `tree.read`.
+        install("[files.read]", "");
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(
+            format!("{problems:?}").contains("change_diff()"),
+            "refused at load: {problems:?}"
+        );
+    }
+
     /// A paced collector doesn't run as its event arrives: it's
     /// recorded pending (the latest event wins) and runs once its pacing
     /// allows, for that event, then clears.

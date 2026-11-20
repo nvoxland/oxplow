@@ -124,8 +124,9 @@ pub const SERVICES: &[ServiceSpec] = &[
         scope: "tree.read",
         title: "Read the captured tree",
         summary: "The files of the snapshot the run is anchored to, with their syntax, \
-                  metrics and duplicate blocks.",
-        builtins: &["files", "source_files", "duplicate_blocks"],
+                  metrics and duplicate blocks; `change_diff(change_id, paths?)` gives an \
+                  analysed change's hunks with their added and removed lines.",
+        builtins: &["files", "source_files", "duplicate_blocks", "change_diff"],
         modes: ALL,
     },
     ServiceSpec {

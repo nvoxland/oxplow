@@ -111,6 +111,9 @@ pub struct Collectors<'a> {
     /// Where a script that reads the tree (`tree.read`) reads it; `None`
     /// in tests that read none.
     pub trees: Option<std::sync::Arc<dyn crate::services::TreeSource>>,
+    /// Where `change_diff` (`tree.read`) reads a change's lines; `None`
+    /// in tests that read none.
+    pub changes: Option<std::sync::Arc<dyn oxplow_script::ChangeDiffSource>>,
     /// The shared models a run's `models` / `fields` output writes.
     pub models: crate::models::Models,
 }
@@ -164,6 +167,7 @@ impl<'a> Collectors<'a> {
             catalog: &svc.extension_catalog,
             ai: svc.ai_compute.clone(),
             trees: Some(std::sync::Arc::new(svc.metrics.clone())),
+            changes: Some(svc.change_diffs.clone()),
             models: svc.models.clone(),
         }
     }
@@ -2025,6 +2029,9 @@ async fn produce(
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
         }
+        if let Some(changes) = &ctx.changes {
+            sources = sources.with_changes(changes.clone());
+        }
         let output = match given(&spec, &run, &script, &sources).await {
             Ok(given) => {
                 let input = RunInput {
@@ -2102,6 +2109,8 @@ pub struct CollectorRunner {
     pub collection: crate::collection::CollectionService,
     /// The fact engine, which runs the collectors that record facts.
     pub metrics: crate::metrics_service::MetricsService,
+    /// Reads a change's lines for `change_diff`.
+    pub change_diffs: Arc<crate::change_diff::ChangeDiffReader>,
 }
 
 /// What a store's command just wrote: its own SQLite file, or a file in
@@ -2224,6 +2233,7 @@ impl CollectorRunner {
             catalog: &self.catalog,
             ai: self.ai.clone(),
             trees: Some(std::sync::Arc::new(self.metrics.clone())),
+            changes: Some(self.change_diffs.clone()),
             models: self.models.clone(),
         }
     }
@@ -2879,6 +2889,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
 
@@ -3039,6 +3050,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
 
@@ -3073,6 +3085,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
         let other = list_collectors(&elsewhere).await.unwrap();
@@ -3615,6 +3628,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
         let report = run_collector(
@@ -3734,6 +3748,7 @@ pub(crate) mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
         let report = reviewed_run(&ctx, "work", "star").await.unwrap();
@@ -3795,6 +3810,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
         let preview = preview_collector(&ctx, "work", "star", None, None)
@@ -3851,6 +3867,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
         script(
@@ -3980,6 +3997,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            changes: None,
             models: Default::default(),
         };
         assert!(list_collectors(&ctx).await.unwrap()[0].network_enforced);

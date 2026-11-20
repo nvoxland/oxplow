@@ -40,11 +40,18 @@ pub struct Sources {
     /// A model, asked as the caller named here (`oxplow:oxplow/collector?collector=<owner>/<id>`),
     /// each answer recorded on the run.
     pub ai: Option<(Arc<crate::ai_compute::AiCompute>, String)>,
+    /// Where `change_diff` (`tree.read`) reads a change's lines.
+    pub changes: Option<Arc<dyn oxplow_script::ChangeDiffSource>>,
 }
 
 impl Sources {
     pub fn with_tree(mut self, tree: Trees) -> Self {
         self.tree = Some(tree);
+        self
+    }
+
+    pub fn with_changes(mut self, changes: Arc<dyn oxplow_script::ChangeDiffSource>) -> Self {
+        self.changes = Some(changes);
         self
     }
 
@@ -59,6 +66,8 @@ impl Sources {
 pub struct Given {
     pub tree: Option<Tree>,
     pub ai: Option<Arc<dyn oxplow_script::AiOracle>>,
+    /// `change_diff`, read through the run's path bounds.
+    pub changes: Option<Arc<dyn oxplow_script::ChangeDiffSource>>,
     /// Its `scope(…)` calls are served, each decided as it
     /// is called against `needs` (`scope_calls::Calls`).
     pub scopes: bool,
@@ -71,6 +80,7 @@ impl std::fmt::Debug for Given {
         f.debug_struct("Given")
             .field("tree", &self.tree.as_ref().map(|t| t.len()))
             .field("ai", &self.ai.is_some())
+            .field("changes", &self.changes.is_some())
             .field("scopes", &self.scopes)
             .field("needs", &self.needs)
             .finish()
@@ -91,6 +101,9 @@ impl Given {
         if let Some(ai) = self.ai {
             script_run = script_run.with_ai(ai);
         }
+        if let Some(changes) = self.changes {
+            script_run = script_run.with_change_diff(changes);
+        }
         if let Some(serve) = serve.filter(|_| self.scopes) {
             script_run = script_run.with_scope(serve);
         }
@@ -104,6 +117,8 @@ impl Given {
 pub struct Wanted {
     /// The builtin that wants the tree, a model.
     tree: Option<&'static str>,
+    /// `change_diff`, which `tree.read` allows and reads a change, not the tree.
+    changes: Option<&'static str>,
     ai: Option<&'static str>,
     ai_discover: Option<&'static str>,
     scopes: bool,
@@ -136,6 +151,7 @@ pub fn decide(run: &RunContext, script: &str, needs: &[String]) -> Result<Wanted
             continue;
         }
         let slot = match scope {
+            "tree.read" if builtin == "change_diff" => &mut wanted.changes,
             "tree.read" => &mut wanted.tree,
             "ai.compute" => &mut wanted.ai,
             "ai.discover" => &mut wanted.ai_discover,
@@ -184,6 +200,19 @@ impl Wanted {
                 tree
             }
         });
+        let changes: Option<Arc<dyn oxplow_script::ChangeDiffSource>> =
+            match (self.changes, &sources.changes) {
+                (None, _) => None,
+                (Some(_), Some(source)) => Some(if run.has_path_bounds() {
+                    Arc::new(crate::change_diff::Bounded {
+                        inner: source.clone(),
+                        run: run.clone(),
+                    })
+                } else {
+                    source.clone()
+                }),
+                (Some(builtin), None) => return Err(unavailable(builtin, "tree.read")),
+            };
         let ai_scope = if self.ai.is_some() {
             "ai.compute"
         } else {
@@ -204,6 +233,7 @@ impl Wanted {
         Ok(Given {
             tree,
             ai,
+            changes,
             scopes: self.scopes,
             needs: self.needs,
         })
@@ -211,7 +241,7 @@ impl Wanted {
 
     /// The hosts for a caller with no tree or model to give: its scopes.
     pub fn scopes_only(self) -> Result<Given, String> {
-        if let Some(builtin) = self.tree {
+        if let Some(builtin) = self.tree.or(self.changes) {
             return Err(unavailable(builtin, "tree.read"));
         }
         if let Some(builtin) = self.ai {

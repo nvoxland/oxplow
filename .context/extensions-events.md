@@ -83,6 +83,18 @@ event_types:
       upcast: event_types/merged.star      # required past v1: transform({from_v, payload}) → the v2 payload
 ```
 
+**`change.analyzed@1`** is a core type (namespace `change`): a change's
+analysis was stored (`phase: files`) or its duplicate scan was
+(`phase: duplicates`). The payload is `change_id`, `kind`, `target`,
+`stream_id`, `base_revision`, `head_revision` (spelled `working`, `snap:<id>`,
+`git:<sha>`) and `phase`; the event is anchored to the stream, so a
+collector's `input` SQL binds `:stream_id`. It is logged by
+`change_analysis` right after the results are stored, one per stored
+analysis and one per stored duplicate scan; a rerun whose inputs didn't move
+(`change.analyzed_from`) stores nothing and logs nothing. A collector follows
+it with `on: [change.analyzed]` and `where: { phase: files }`, and reads the
+changed lines with `change_diff` ([extensions-jobs.md](./extensions-jobs.md) "Reading a change").
+
 **Every kind is stable.** What makes an event kind safe to
 promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a

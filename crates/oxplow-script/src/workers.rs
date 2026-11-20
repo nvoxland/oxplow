@@ -67,6 +67,8 @@ pub struct Hosts<'a> {
     pub ai: Option<Arc<dyn AiOracle>>,
     /// The scopes (`sql.read`), answered on this thread.
     pub scope: Option<&'a mut Serve<'a>>,
+    /// `tree.read`'s `change_diff`: answered on this thread.
+    pub change_diff: Option<Arc<dyn crate::change_diff::ChangeDiffSource>>,
 }
 
 /// One script run.
@@ -112,6 +114,15 @@ impl<'a> ScriptRun<'a> {
     /// Given a model (`ai.compute`).
     pub fn with_ai(mut self, oracle: Arc<dyn AiOracle>) -> Self {
         self.hosts.ai = Some(oracle);
+        self
+    }
+
+    /// Given `change_diff` (`tree.read`), answered by `source`.
+    pub fn with_change_diff(
+        mut self,
+        source: Arc<dyn crate::change_diff::ChangeDiffSource>,
+    ) -> Self {
+        self.hosts.change_diff = Some(source);
         self
     }
 
@@ -320,6 +331,7 @@ impl ScriptWorkers {
             tree: hosts.tree.is_some(),
             ai: hosts.ai.is_some(),
             scope: hosts.scope.is_some(),
+            change_diff: hosts.change_diff.is_some(),
         };
         if let Some(files) = &hosts.tree {
             worker.send_tree(files);
@@ -327,6 +339,7 @@ impl ScriptWorkers {
         let mut host = Answering {
             ai: hosts.ai,
             scope: hosts.scope,
+            change_diff: hosts.change_diff,
         };
         worker.send(&ToWorker::Run {
             engine,
@@ -490,6 +503,7 @@ impl Drop for Slot<'_> {
 struct Answering<'a> {
     ai: Option<Arc<dyn AiOracle>>,
     scope: Option<&'a mut Serve<'a>>,
+    change_diff: Option<Arc<dyn crate::change_diff::ChangeDiffSource>>,
 }
 
 impl Answering<'_> {
@@ -498,6 +512,18 @@ impl Answering<'_> {
             CallKind::Scope => match &mut self.scope {
                 Some(serve) => serve(id, args),
                 None => Err(oxplow_domain::service::undeclared("scope")),
+            },
+            CallKind::ChangeDiff => match &self.change_diff {
+                Some(source) => {
+                    let paths = args
+                        .get("paths")
+                        .filter(|p| !p.is_null())
+                        .map(|p| serde_json::from_value::<Vec<String>>(p.clone()))
+                        .transpose()
+                        .map_err(|e| format!("`paths` isn't a list of strings: {e}"))?;
+                    source.change_diff(args["change_id"].as_i64().unwrap_or_default(), paths)
+                }
+                None => Err(oxplow_domain::service::undeclared("change_diff")),
             },
             CallKind::Parse => Err("a parse call is answered by the workers".into()),
             CallKind::Ai => match &self.ai {

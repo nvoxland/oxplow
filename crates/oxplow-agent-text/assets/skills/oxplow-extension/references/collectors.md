@@ -120,7 +120,8 @@ and summary):
 - `sql.read`: `scope("sql.read", {sql, params?, page?})`, read-only SQL
   over the `v_*` datasets.
 - `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
-  snapshot's files. A fact collector has it without declaring it.
+  snapshot's files; `change_diff(change_id, paths?)`, an analysed change's
+  hunks with their added and removed lines (at most 200 files and 2 MB a call). A fact collector has it without declaring it.
 - `ai.compute`: the `ai_*` builtins. The extension declares `ai.compute`. An
   entity collector that calls one has it without declaring it.
 - `ai.discover`: `scope("ai.discover", {role})` says whether a model
