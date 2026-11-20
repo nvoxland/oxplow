@@ -360,6 +360,13 @@ pub(crate) mod test_support {
         git(&["config", "user.name", "test"]);
         git(&["config", "user.email", "test@example.com"]);
         git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+        // The language packs on, as in a project with code in them.
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            oxplow_app::extension::language_set::every_pack_on_yaml(),
+        )
+        .unwrap();
         let ctx = crate::RpcContext {
             services: Services::in_memory(dir.path()).await.unwrap(),
             plugin_runtime: None,

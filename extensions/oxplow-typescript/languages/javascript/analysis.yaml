@@ -2,7 +2,8 @@
 functions:
   kinds: [function_declaration, function_expression, arrow_function, method_definition, generator_function, generator_function_declaration]
   param_list_fields: [parameters]
-  parameter_kinds: [identifier, assignment_pattern, object_pattern, array_pattern]
+  # A rest parameter (`...args`) is a `rest_pattern` in this grammar.
+  parameter_kinds: [identifier, assignment_pattern, object_pattern, array_pattern, rest_pattern]
 decisions:
   # `else_clause` deliberately excluded for the same reason as Rust.
   kinds: [if_statement, switch_case, switch_default, for_statement, for_in_statement, while_statement, do_statement, catch_clause, ternary_expression]

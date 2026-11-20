@@ -294,6 +294,13 @@ impl LspSessionManager {
         self.languages
             .current()
             .mason_suggestion(language)
+            .or_else(|| {
+                // A shipped pack that is off still names its server.
+                crate::extension::language_set::shipped_once()
+                    .mason_suggestion(language)
+                    .map(str::to_string)
+                    .map(|s| Box::leak(s.into_boxed_str()) as &str)
+            })
             .map(str::to_string)
     }
 
@@ -313,10 +320,17 @@ impl LspSessionManager {
     /// The files a server covers: its configured `extensions`, else (an
     /// installed server has none) its language's.
     fn covered_extensions(&self, c: &LspServerConfig) -> Vec<String> {
-        if c.extensions.is_empty() {
-            self.languages.current().lsp_extensions(&c.language_id)
+        if !c.extensions.is_empty() {
+            return c.extensions.clone();
+        }
+        // An installed server serves its language whether or not the pack
+        // that analyses it is on: a language only a shipped pack that is
+        // off declares still names its files.
+        let enabled = self.languages.current().lsp_extensions(&c.language_id);
+        if enabled.is_empty() {
+            crate::extension::language_set::shipped_once().lsp_extensions(&c.language_id)
         } else {
-            c.extensions.clone()
+            enabled
         }
     }
 

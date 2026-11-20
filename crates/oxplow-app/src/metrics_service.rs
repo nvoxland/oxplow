@@ -322,8 +322,8 @@ pub struct MetricsService {
     /// What a fact collector that declares `ai.compute` asks. `None` in
     /// tests that don't wire it: such a collector is refused the dataset.
     ai: Option<Arc<crate::ai_compute::AiCompute>>,
-    /// What a fact collector's parsing builtins parse with. A test service
-    /// without one gets the shipped packs' (`Default`: none).
+    /// What a fact collector's parsing builtins parse with (`Default`:
+    /// none; the app wires the enabled extensions' set).
     languages: crate::extension::language_set::LanguagesHandle,
 }
 

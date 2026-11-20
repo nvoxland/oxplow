@@ -40,6 +40,16 @@ pub fn of(extensions: &[Extension]) -> (Languages, Vec<LanguageProblem>) {
 /// not, read from their embedded files: what the SDK offers offline (the
 /// metric scaffold's starters) when no project is running.
 pub fn shipped() -> Languages {
+    shipped_once().as_ref().clone()
+}
+
+/// [`shipped`], built once per process: the embedded files never change.
+pub fn shipped_once() -> Arc<Languages> {
+    static SET: std::sync::OnceLock<Arc<Languages>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| Arc::new(build_shipped())).clone()
+}
+
+fn build_shipped() -> Languages {
     let mut sources = Vec::new();
     for b in crate::bundled_extensions::BUNDLED {
         let Some(manifest) = b.file("extension.yaml") else {
@@ -66,9 +76,28 @@ pub fn shipped() -> Languages {
     Languages::build(&sources).0
 }
 
+/// The project settings that turn on every shipped language pack (an
+/// extension that ships with oxplow, may be turned off, and declares
+/// languages), as `project.yaml` lines: for a test that parses code.
+#[doc(hidden)]
+pub fn every_pack_on_yaml() -> String {
+    crate::bundled_extensions::BUNDLED
+        .iter()
+        .filter(|b| {
+            !b.required
+                && b.file("extension.yaml")
+                    .is_some_and(|m| m.lines().any(|l| l.starts_with("languages:")))
+        })
+        .map(|b| format!("oxplow.extensions.{}.enabled: true\n", b.name))
+        .collect()
+}
+
 /// The set the app reads, swapped whole when what runs changes.
 #[derive(Clone, Default)]
-pub struct LanguagesHandle(Arc<RwLock<Arc<Languages>>>);
+pub struct LanguagesHandle(
+    Arc<RwLock<Arc<Languages>>>,
+    Arc<std::sync::atomic::AtomicBool>,
+);
 
 impl LanguagesHandle {
     pub fn current(&self) -> Arc<Languages> {
@@ -85,5 +114,14 @@ impl LanguagesHandle {
 
     pub fn swap(&self, languages: Languages) {
         *self.0.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(languages);
+    }
+
+    /// [`swap`](Self::swap), saying whether what is indexed by the set needs
+    /// restating: its first publication, or a set whose fingerprint moved.
+    pub fn publish(&self, languages: Languages) -> bool {
+        let moved = self.current().fingerprint() != languages.fingerprint();
+        let first = !self.1.swap(true, std::sync::atomic::Ordering::SeqCst);
+        self.swap(languages);
+        first || moved
     }
 }

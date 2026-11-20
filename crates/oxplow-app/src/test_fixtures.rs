@@ -27,13 +27,12 @@ pub(crate) fn enable_language_packs(dir: &std::path::Path) {
         .append(true)
         .open(&path)
         .unwrap();
-    for b in crate::bundled_extensions::BUNDLED.iter().filter(|b| {
-        b.file("extension.yaml")
-            .is_some_and(|m| m.lines().any(|l| l.starts_with("languages:")))
-            && !b.required
-    }) {
-        writeln!(f, "\noxplow.extensions.{}.enabled: true", b.name).unwrap();
-    }
+    writeln!(
+        f,
+        "\n{}",
+        crate::extension::language_set::every_pack_on_yaml()
+    )
+    .unwrap();
 }
 
 /// An extension's errors as the lines a person reads.

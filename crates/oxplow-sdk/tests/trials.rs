@@ -43,6 +43,7 @@ impl Project {
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/triage");
         copy_dir(&example, &dir.path().join(".oxplow/extensions/triage"));
+        common::enable_required_shipped(dir.path());
         Self {
             dir,
             secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),

@@ -996,8 +996,11 @@ async fn analyze(
         // for (a forced rerun, a request's head now its end snapshot of the
         // same tree). Otherwise results of another head (a request analyzed
         // while running, now finished) are stale however they were computed.
+        // Known inputs that differ (a language pack turned on, a new build)
+        // are stale too, however it was asked for.
         let same_inputs = from.is_some() && row.analyzed_from == from;
-        if row.status == "done" && (same_inputs || (!head_moved && !force)) {
+        let other_inputs = from.is_some() && row.analyzed_from.is_some() && !same_inputs;
+        if row.status == "done" && (same_inputs || (!head_moved && !force && !other_inputs)) {
             return Ok(row);
         }
         st.running.insert(row.id);
@@ -1052,8 +1055,8 @@ async fn analyze(
 
 /// What analyzing `base` → `head` (limited to `only`) is computed from:
 /// this build, each side's tree (a snapshot by its `tree_hash`, a working
-/// tree by its stream's latest snapshot's, a VCS revision by itself) and
-/// the own files. `None` when a side's tree can't be named — it's then
+/// tree by its stream's latest snapshot's, a VCS revision by itself), the
+/// own files and the language set's fingerprint. `None` when a side's tree can't be named — it's then
 /// never taken as unchanged.
 async fn analyzed_from(
     svc: &crate::Services,
@@ -1096,6 +1099,9 @@ async fn analyzed_from(
             "base": base,
             "head": head,
             "own": own,
+            // The languages it parsed with: a pack turned on, off or edited
+            // is new input.
+            "languages": format!("{:016x}", svc.languages.current().fingerprint()),
         })
         .to_string(),
     ))
@@ -2505,6 +2511,48 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(live.head_revision, Some(Revision::Working));
+    }
+
+    #[tokio::test]
+    async fn a_commit_is_analyzed_again_when_its_languages_change() {
+        // Analyzed with no language pack on, a commit has files and no
+        // functions; turning the Rust pack on is new input, so the same
+        // commit is analyzed again and its functions appear.
+        let f = crate::test_fixtures::services_with_thread().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "change");
+        let shipped = f.svc.languages.current();
+        f.svc
+            .languages
+            .swap(oxplow_code_metrics::Languages::default());
+        let target = || ChangeTarget::Commit {
+            sha: sha.clone(),
+            stream_id: None,
+        };
+        let before = ensure_change(&f.svc, target()).await.unwrap();
+        let fns = |id| {
+            let svc = f.svc.clone();
+            async move {
+                rows(
+                    &svc,
+                    "SELECT name FROM v_change_function WHERE change_id = ?1 ORDER BY name",
+                    id,
+                )
+                .await
+            }
+        };
+        assert_eq!(fns(before.id).await, serde_json::json!([]));
+        f.svc.languages.swap((*shipped).clone());
+        let after = ensure_change(&f.svc, target()).await.unwrap();
+        assert_eq!(after.id, before.id);
+        assert_eq!(
+            fns(after.id).await,
+            serde_json::json!([["fresh"], ["grow"]])
+        );
     }
 
     #[tokio::test]

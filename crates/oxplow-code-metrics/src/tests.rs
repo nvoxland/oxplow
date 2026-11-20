@@ -694,3 +694,32 @@ fn ordinary_source_is_not_generated() {
         "fn edge() {}\n"
     ));
 }
+
+/// C#'s `foreach` and each `switch` case group count toward complexity
+/// (the grammar names them `foreach_statement` and `switch_section`).
+#[test]
+fn csharp_foreach_and_switch_cases_count_toward_complexity() {
+    let src = r#"
+class A {
+    int F(int[] xs, int k) {
+        foreach (var x in xs) { }
+        switch (k) {
+            case 1: return 1;
+            case 2: return 2;
+            default: return 0;
+        }
+    }
+}
+"#;
+    let m = analyze_file(&shipped(), "A.cs", src);
+    let f = m.iter().find(|f| f.name == "F").expect("F");
+    // 1 + foreach + three case groups.
+    assert_eq!(f.complexity, 5, "{m:?}");
+}
+
+/// A JavaScript rest parameter (`...rest`) is a parameter.
+#[test]
+fn javascript_rest_parameters_are_counted() {
+    let m = analyze_file(&shipped(), "a.js", "function f(a, ...rest) { return a; }\n");
+    assert_eq!(m[0].parameter_count, 2, "{m:?}");
+}

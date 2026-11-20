@@ -19,7 +19,7 @@ languages:
     extensions: [rs]
     aliases: ["rs"]               # other names a script may pass (`ast_query(text, "rs", q)`)
     lsp_ids: [typescriptreact]    # LSP languageIds that are this language
-    grammar: { native: rust }     # or { wasm: grammars/x.wasm }; none: known by its server only
+    grammar: { native: rust }     # or { wasm: grammars/x.wasm }; leave it out for a language known only by its server
     analysis: languages/rust/analysis.yaml
     symbols: languages/rust/symbols.scm   # + symbols.yaml beside it
     lsp: { package: rust-analyzer }       # the Mason package to suggest
@@ -71,7 +71,8 @@ languages:
 - **Built** by `extension::language_set::of(extensions)` (foundation, then
   the shipped extensions in their order, then the rest by name; the first to
   claim a name, alias, LSP id or file extension keeps it, the later one is
-  left out with a problem) and **swapped** at each publication beside the
+  left out, its problem logged (it should hold the extension; not yet)) and
+  **swapped** at each publication beside the
   model registry (`extension_activation`), into `svc.languages`
   (`LanguagesHandle`). Readers: change analysis, the symbol collector and
   resolver, the duplicate scan, the metrics service and collector runs, the
@@ -81,10 +82,15 @@ languages:
 - **The script worker** gets the set's sources in a `{"languages": …}`
   message before its run and builds its own (`oxplow-script` `ToWorker::Languages`);
   `ast_query`, `code_metrics`, `markers`, `source_files` and
-  `duplicate_blocks` parse with it. Every run is given it (`Sources::languages`,
-  not a permission).
-- **Offline** (the SDK's metric scaffold), `language_set::shipped()` reads
-  every shipped extension's languages from their embedded files, on or off.
+  `duplicate_blocks` parse with it. Collector and fact-collector runs are
+  given it (`Sources::languages`, not a permission); command, effect and
+  provider scripts are not yet (there a parsing builtin says the language is
+  unknown).
+- **Every shipped language, on or off**: `language_set::shipped()` /
+  `shipped_once()` read them from the embedded files. The metric scaffold
+  offers them (online and in the SDK; the extension it writes `requires:`
+  its language's pack), and an installed language server covers its
+  language's files and keeps its Mason suggestion while the pack is off.
 - **Tests** read the checkout's packs:
   `oxplow_code_metrics::for_tests::{shipped, lang}`; an oxplow-app test that
   parses code turns the packs on with
@@ -95,12 +101,12 @@ languages:
 ## Symbols
 
 A symbol is a definition in a file. Oxplow extracts them itself with
-tree-sitter, in every bundled language; the language servers are not
+tree-sitter, in every parseable language of the enabled packs; the language servers are not
 involved (see "Language servers" below).
 
 ### The data files
 
-Per language, under `crates/oxplow-code-metrics/languages/<lang>/`:
+Per language, files of the pack that declares it (`languages/<id>/`):
 
 - `symbols.scm` — a tree-sitter query whose captures mark definitions.
 - `symbols.yaml` (optional) — Rust: `trait_container` (how a trait impl's
@@ -108,7 +114,7 @@ Per language, under `crates/oxplow-code-metrics/languages/<lang>/`:
   knobs `name_fields` and `name_kinds` (where a parameter's name sits, so the
   signature keeps only types).
 
-Both are `include_str!`'d. The loader (`SymbolSpec::compile`) refuses a
+The loader (`SymbolSpec::compile`) refuses a
 capture outside this vocabulary and an unknown yaml key.
 
 | capture | meaning |
@@ -125,7 +131,7 @@ Kinds (`SymbolKind`, one vocabulary for every language): function, method,
 constructor, class, struct, enum, enum_member, interface, trait, type,
 field, constant, variable, module, namespace, macro.
 
-`oxplow_code_metrics::extract(path, source) -> Vec<Definition>`; a
+`oxplow_code_metrics::extract(languages, path, source) -> Vec<Definition>`; a
 `Definition` is `{ kind, name, container, signature, id, name_line/col,
 start/end line/col }`. Per-language tests are under
 `crates/oxplow-code-metrics/src/symbols/` (`tests_<lang>.rs`; Rust, Python and Java in `tests.rs`).
@@ -162,8 +168,14 @@ file as the snapshot captured it (the working tree when snapshots keep no
 contents, "Track changes only"), extracts, and restates the file; a deleted
 file drops out. There is no server and no budget. A `symbol_capture` row per
 snapshot records `files_collected` and `files_failed` (content unreadable at
-the snapshot). At boot, `symbol_collector::backfill` fills an empty index
-from each live stream's latest snapshot. Columns: `.context/data-model.md`.
+the snapshot). A deleted file drops out whatever its language.
+`symbol_collector::backfill` keeps the index in line with the language set:
+the set's fingerprint is kept in `symbol_index_state` (V57), and when the
+index is empty or was filled with another set (a pack turned on or off,
+while oxplow ran or not) it drops the symbols of languages no longer in
+the set and restates every file from each live stream's latest snapshot.
+The first publication at boot and each one that changes the set run it
+(`extension_activation`). Columns: `.context/data-model.md`.
 
 ### Resolving a ref
 
@@ -224,7 +236,7 @@ per-language view is page or agent work.
    `native_grammar`; anyone else's is a `.wasm` (not loaded yet).
 3. **`analysis.yaml`**: the node kinds and strategies above (the load check
    refuses a node kind the grammar doesn't have).
-4. **`symbols.scm`** (and `symbols.yaml`): the captures in "Symbols" below.
+4. **`symbols.scm`** (and `symbols.yaml`): the captures in "Symbols" above.
 5. **Optional**: `starter:` (the metric scaffold's sample), `lsp:`, the merge
    and import facets, its idiom metrics (fact collectors), and the Monaco id /
    icon in `apps/desktop/src/editor-language.ts`.
@@ -236,6 +248,8 @@ LSP symbol surface, generic unit listing, and tree-sitter symbols with their
 index. **Still open** (the change-review plan, milestones 2 to 5): the
 `v_language` dataset and the pack suggestion, a fixture kind for a
 language's analysis with each pack's cases moved into it, a guard that core
-names no language, re-indexing when a pack is turned on, test conventions /
+names no language, the language set for command, effect and provider
+scripts, holding an extension whose language conflicts, one `Parsers` pool,
+test conventions /
 file kinds / run patterns / report collectors in the packs, and WebAssembly
 grammars (Clojure first).

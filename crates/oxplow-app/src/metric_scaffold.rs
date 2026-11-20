@@ -170,6 +170,9 @@ pub fn extension_files(
     let collector = format!("{ns}.scan");
     let title = title_case(name);
     let sample = Sample::new(starter, &measure, &area);
+    // The pack that declares the starter's language: without it nothing
+    // parses the files.
+    let pack = starter.language.extension().to_string();
 
     let mut manifest = extensions::scaffold_manifest(&extensions::ManifestScaffold {
         name,
@@ -181,7 +184,8 @@ pub fn extension_files(
         example_expect: "one fact per file with functions over the limit, in its area",
     });
     manifest.push_str(&format!(
-        "# Its collector reads the project's code.\n\
+        "# Its collector reads the project's code, in a language its pack declares.\n\
+         requires: [{pack}]\n\
          permissions: [files.read]\n\
          measures:\n\
          \x20 # One fact per file: how many of its functions are over the limit. `per-path`\n\

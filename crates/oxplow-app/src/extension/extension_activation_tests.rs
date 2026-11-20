@@ -296,11 +296,15 @@ async fn the_documented_examples_activate() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     // Some examples build on oxplow-bundled's models and oxtask, which are
-    // on by default; oxwiki isn't needed.
+    // on by default, and on the language packs (off by default); oxwiki
+    // isn't needed.
     std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
     std::fs::write(
         dir.path().join(".oxplow/project.yaml"),
-        "oxplow.extensions.oxwiki.enabled: false\n",
+        format!(
+            "oxplow.extensions.oxwiki.enabled: false\n{}",
+            crate::extension::language_set::every_pack_on_yaml()
+        ),
     )
     .unwrap();
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");

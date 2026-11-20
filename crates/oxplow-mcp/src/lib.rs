@@ -672,7 +672,8 @@ mod tests {
     }
 
     async fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
-        boot_with_config("").await
+        // The language packs on, as in a project with code in them.
+        boot_with_config(&oxplow_app::extension::language_set::every_pack_on_yaml()).await
     }
 
     /// `boot().await` with `project_yaml` written to `.oxplow/project.yaml`

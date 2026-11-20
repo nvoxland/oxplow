@@ -792,7 +792,32 @@ impl ExtensionActivation {
                     capabilities.apply();
                     svc.vocabulary.swap(vocabulary);
                     svc.models.swap(database.models().clone());
-                    svc.languages.swap(crate::extension::language_set::of(published.extensions()).0);
+                    let (languages, problems) =
+                        crate::extension::language_set::of(published.extensions());
+                    for p in &problems {
+                        tracing::warn!(
+                            extension = %p.extension,
+                            language = %p.language,
+                            "language left out: {}",
+                            p.message
+                        );
+                    }
+                    if svc.languages.publish(languages) {
+                        // The symbol index follows the set (a pack turned on
+                        // or off, possibly while oxplow was off).
+                        let svc = svc.clone();
+                        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                            rt.spawn(async move {
+                                match crate::symbol_collector::backfill(&svc).await {
+                                    Ok(0) => {}
+                                    Ok(n) => tracing::info!(files = n, "symbol index restated"),
+                                    Err(error) => {
+                                        tracing::warn!(%error, "symbol index restate failed")
+                                    }
+                                }
+                            });
+                        }
+                    }
                     metrics.publish(&svc.metrics);
                     providers.withdraw_maps();
                     adapters

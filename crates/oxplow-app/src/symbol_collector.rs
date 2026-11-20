@@ -73,17 +73,22 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
     let mut capture = SymbolCapture::default();
     let languages = svc.languages.current();
     for file in changed {
-        let Some(language) = languages.for_path(&file.path) else {
-            continue;
-        };
+        // A deleted file drops out whatever its language: one whose pack is
+        // off now still has the rows it was indexed with.
         if file.storage == SnapshotStorage::Deleted {
             files.push(FileSymbols {
+                language: languages
+                    .for_path(&file.path)
+                    .map(|l| l.name().to_string())
+                    .unwrap_or_default(),
                 path: file.path,
-                language: language.name().into(),
                 rows: None,
             });
             continue;
         }
+        let Some(language) = languages.for_path(&file.path) else {
+            continue;
+        };
         let bytes = if keeps_contents {
             files_api
                 .read_file_at_snapshot(snapshot, &file.path)
@@ -113,13 +118,27 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
         .await
 }
 
-/// Fill an empty index (a new database, or one a migration cleared) from
-/// each live stream's latest snapshot: every file of a supported language
-/// in that snapshot's tree, recorded as that snapshot's collection.
+/// Bring the index in line with the language set: when the index is empty
+/// (a new database, one a migration cleared) or was filled with another set
+/// (a pack turned on or off, a language edited, possibly while oxplow was
+/// off), drop the symbols of languages no longer in it and restate every
+/// file of a parseable language from each live stream's latest snapshot.
+/// Boot runs it, and so does each publication that changes the set.
 pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
-    if !svc.symbol_store.is_empty().await? {
+    let languages = svc.languages.current();
+    let fingerprint = format!("{:016x}", languages.fingerprint());
+    let empty = svc.symbol_store.is_empty().await?;
+    let indexed = svc.symbol_store.indexed_languages().await?;
+    if !empty && indexed.as_deref() == Some(fingerprint.as_str()) {
         return Ok(0);
     }
+    let ids: Vec<String> = languages
+        .all()
+        .iter()
+        .filter(|l| l.analyzable())
+        .map(|l| l.name().to_string())
+        .collect();
+    svc.symbol_store.restate_languages(ids, fingerprint).await?;
     let keeps_contents = svc.snapshot_captures.no_contents_reason().is_none();
     let project_dir = svc.snapshot_files().project_dir;
     let mut filled = 0;
@@ -143,7 +162,6 @@ pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
         } else {
             Revision::Working
         };
-        let languages = svc.languages.current();
         let supported = |p: &str| languages.for_path(p).is_some();
         let corpus = svc.trees.corpus(&ws, &rev, supported).await?;
         let files: Vec<FileSymbols> = corpus
@@ -157,6 +175,16 @@ pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
             files_collected: files.len() as i64,
             files_failed: 0,
         };
+        // A newer snapshot came while it read: that snapshot's collection
+        // restates what changed, and this one would only be older.
+        if svc
+            .snapshot_store
+            .latest_snapshot_id_for_stream(stream.id)
+            .await?
+            != Some(snapshot)
+        {
+            continue;
+        }
         filled += files.len();
         svc.symbol_store
             .record(stream.id.value(), snapshot, files, capture)
@@ -349,6 +377,40 @@ mod tests {
             })
             .await
             .unwrap();
+        assert_eq!(backfill(&svc).await.unwrap(), 1);
+        assert_eq!(
+            rows(&svc, "SELECT uri, snapshot_id FROM v_symbol ORDER BY uri").await,
+            serde_json::json!([
+                ["oxplow:oxplow/symbol?path=a.py&symbol=Widget", snap],
+                ["oxplow:oxplow/symbol?path=a.py&symbol=Widget::spin", snap]
+            ])
+        );
+        assert_eq!(backfill(&svc).await.unwrap(), 0);
+    }
+
+    /// The index follows the language set: with Python's pack off its
+    /// symbols go (and a deleted file's rows go whatever its language); on
+    /// again, they are restated from the latest snapshot.
+    #[tokio::test]
+    async fn the_index_follows_the_language_set() {
+        let (svc, _dir, stream) = fixture().await;
+        let snap = snapshot(&svc, stream, &[("a.py", Some(WIDGET))]).await;
+        backfill(&svc).await.unwrap();
+        let all = svc.languages.current();
+        let symbols = || async { rows(&svc, "SELECT uri FROM v_symbol ORDER BY uri").await };
+        assert_eq!(symbols().await.as_array().unwrap().len(), 2);
+        let without_python = oxplow_code_metrics::Languages::build(
+            &all.sources()
+                .iter()
+                .filter(|s| s.decl.id != "python")
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+        .0;
+        svc.languages.swap(without_python);
+        backfill(&svc).await.unwrap();
+        assert_eq!(symbols().await, serde_json::json!([]));
+        svc.languages.swap((*all).clone());
         assert_eq!(backfill(&svc).await.unwrap(), 1);
         assert_eq!(
             rows(&svc, "SELECT uri, snapshot_id FROM v_symbol ORDER BY uri").await,

@@ -56,7 +56,8 @@ impl SqliteSymbolStore {
     }
 
     /// Restate `files` for `stream_id` as read at `snapshot_id`, and record
-    /// the capture — one transaction.
+    /// the capture — one transaction. A file a newer snapshot already
+    /// restated keeps that snapshot's rows.
     pub async fn record(
         &self,
         stream_id: i64,
@@ -68,6 +69,19 @@ impl SqliteSymbolStore {
         self.db
             .transaction(move |tx| {
                 for file in &files {
+                    // A newer snapshot's rows for the file stand: a restate
+                    // that read an older snapshot never overwrites them.
+                    let newer: bool = tx
+                        .query_row(
+                            "SELECT EXISTS (SELECT 1 FROM symbol
+                              WHERE stream_id = ?1 AND path = ?2 AND snapshot_id > ?3)",
+                            rusqlite::params![stream_id, file.path, snapshot_id],
+                            |r| r.get(0),
+                        )
+                        .map_err(map_sql_err)?;
+                    if newer {
+                        continue;
+                    }
                     tx.execute(
                         "DELETE FROM symbol WHERE stream_id = ?1 AND path = ?2",
                         rusqlite::params![stream_id, file.path],
@@ -125,6 +139,49 @@ impl SqliteSymbolStore {
             .call(|c| c.query_row("SELECT NOT EXISTS (SELECT 1 FROM symbol)", [], |r| r.get(0)))
             .await
     }
+    /// The language set the index was last filled with (its fingerprint),
+    /// or `None` before it ever was.
+    pub async fn indexed_languages(&self) -> Result<Option<String>, DomainError> {
+        self.db
+            .call(|c| {
+                use rusqlite::OptionalExtension;
+                c.query_row(
+                    "SELECT languages FROM symbol_index_state WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+            })
+            .await
+    }
+
+    /// Drop every symbol whose language isn't in `languages` (its pack was
+    /// turned off), and record `fingerprint` as the set the index holds.
+    /// One transaction.
+    pub async fn restate_languages(
+        &self,
+        languages: Vec<String>,
+        fingerprint: String,
+    ) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                let keep = serde_json::to_string(&languages)
+                    .map_err(|e| DomainError::Invalid(format!("languages: {e}")))?;
+                tx.execute(
+                    "DELETE FROM symbol WHERE language NOT IN (SELECT value FROM json_each(?1))",
+                    [keep],
+                )
+                .map_err(map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO symbol_index_state (id, languages) VALUES (1, ?1)
+                     ON CONFLICT (id) DO UPDATE SET languages = excluded.languages",
+                    [&fingerprint],
+                )
+                .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -159,6 +216,53 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    /// Restating the languages drops the symbols of a language no longer
+    /// in the set and records the set's fingerprint.
+    #[tokio::test]
+    async fn restating_the_languages_drops_the_others_and_records_the_set() {
+        let db = Database::in_memory();
+        stream(&db, 1).await;
+        let store = SqliteSymbolStore::new(db.clone());
+        assert_eq!(store.indexed_languages().await.unwrap(), None);
+        let file = |path: &str, language: &str| FileSymbols {
+            path: path.into(),
+            language: language.into(),
+            rows: Some(vec![row("Widget::value", 10)]),
+        };
+        store
+            .record(
+                1,
+                7,
+                vec![file("a.py", "python"), file("b.rs", "rust")],
+                SymbolCapture::default(),
+            )
+            .await
+            .unwrap();
+        store
+            .restate_languages(vec!["rust".into()], "f1".into())
+            .await
+            .unwrap();
+        let paths: Vec<String> = db
+            .call(|c| {
+                let mut st = c.prepare("SELECT path FROM symbol ORDER BY path")?;
+                let rows = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>();
+                rows
+            })
+            .await
+            .unwrap();
+        assert_eq!(paths, vec!["b.rs".to_string()]);
+        assert_eq!(
+            store.indexed_languages().await.unwrap().as_deref(),
+            Some("f1")
+        );
+        store.restate_languages(vec![], "f2".into()).await.unwrap();
+        assert!(store.is_empty().await.unwrap());
+        assert_eq!(
+            store.indexed_languages().await.unwrap().as_deref(),
+            Some("f2")
+        );
     }
 
     /// A file's rows are restated whole, each under its rev-less ref; the

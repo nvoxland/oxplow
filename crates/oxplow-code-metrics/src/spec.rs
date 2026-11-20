@@ -772,6 +772,17 @@ impl Languages {
         (out, problems)
     }
 
+    /// A hash of every language's fingerprint, in order: what a result
+    /// computed with the set is keyed by, so turning a pack on, off or
+    /// editing one is new input.
+    pub fn fingerprint(&self) -> u64 {
+        self.all.iter().fold(0xcbf2_9ce4_8422_2325_u64, |acc, l| {
+            l.fingerprint().to_le_bytes().iter().fold(acc, |a, b| {
+                (a ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+            })
+        })
+    }
+
     /// What the set was built from: [`Languages::build`] of these is the same
     /// set.
     pub fn sources(&self) -> &[LanguageSource] {

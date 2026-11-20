@@ -50,3 +50,11 @@ oxplow.extensionSources:
   oxplow-bundled: extensions/oxplow-bundled
   oxtask: extensions/oxtask
   oxwiki: extensions/oxwiki
+  oxplow-rust: extensions/oxplow-rust
+  oxplow-typescript: extensions/oxplow-typescript
+  oxplow-python: extensions/oxplow-python
+  oxplow-go: extensions/oxplow-go
+  oxplow-java: extensions/oxplow-java
+  oxplow-c: extensions/oxplow-c
+  oxplow-csharp: extensions/oxplow-csharp
+  oxplow-clojure: extensions/oxplow-clojure
