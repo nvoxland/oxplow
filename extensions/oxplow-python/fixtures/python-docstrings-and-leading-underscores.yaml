@@ -1,0 +1,11 @@
+# A function with a docstring has a doc; a name that starts with `_` is
+# private and any other is public.
+when:
+  language: python
+  path: src/x.py
+  body: "def documented():\n    \"\"\"A docstring.\"\"\"\n    return 1\n\ndef undocumented():\n    return 1\n\ndef _helper():\n    pass\n"
+expect:
+  functions:
+    - { name: documented, has_doc: true, visibility: public }
+    - { name: undocumented, has_doc: false, visibility: public }
+    - { name: _helper, visibility: private }

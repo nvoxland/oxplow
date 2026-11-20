@@ -9,6 +9,34 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: rust-functions-and-their-symbols
+      input: { language: rust }
+      expect: a file's definitions, its functions' metrics and its imports
+    - name: rust-definitions-get-their-ids
+      input: { language: rust }
+      expect: every kind of definition and its id
+    - name: rust-a-definition-records-its-name-and-container
+      input: { language: rust }
+      expect: a method's name, container and line
+    - name: rust-methods-sit-in-their-modules-and-types
+      input: { language: rust }
+      expect: the modules and type around a method
+    - name: rust-function-complexity-counts-branches
+      input: { language: rust }
+      expect: complexity of ifs and match arms
+    - name: rust-nested-functions-each-get-their-own-record
+      input: { language: rust }
+      expect: an inner function's branches count for it alone
+    - name: rust-pub-functions-are-public-and-doc-comments-count
+      input: { language: rust }
+      expect: visibility and doc comments
+    - name: rust-imports-read-simple-uses
+      input: { language: rust }
+      expect: each use path in order
+    - name: rust-imports-read-grouped-and-aliased-uses
+      input: { language: rust }
+      expect: groups, aliases, globs and extern crate
 test_conventions:
   - { id: rust-tests, languages: [rust], paths: ['**/test_*.rs'], skips: ['#\[ignore'] }
 languages:

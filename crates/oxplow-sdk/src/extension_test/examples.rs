@@ -846,6 +846,91 @@ pub(super) async fn item_commands_example(
     }
 }
 
+/// A language's analysis of one file, as the fixture's oxplow reads it
+/// with the languages its extensions declare: the file's definitions
+/// (symbols), its functions' metrics and its imports.
+pub(super) async fn language_example(
+    host: &Host,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let languages = host.svc.languages.current();
+    let Some(language) = languages.by_name(id).filter(|l| l.analyzable()) else {
+        return report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!("`{id}` isn't a language the fixture's oxplow parses"),
+            )
+            .fix("the example's `when.language`, or the pack that declares it in `requires:`"),
+        );
+    };
+    let text = |key: &str| ex.when.get(key).and_then(Value::as_str);
+    let (Some(path), Some(body)) = (text("path"), text("body")) else {
+        return report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.when",
+                "a `language` example names the file's `path` and its `body`".to_string(),
+            )
+            .fix("`when: { language: rust, path: src/a.rs, body: \"fn a() {}\\n\" }`"),
+        );
+    };
+    let symbols: Vec<Value> = oxplow_code_metrics::extract_with_language(body, language)
+        .into_iter()
+        .map(|d| {
+            json!({
+                "kind": d.kind.as_str(),
+                "id": d.id,
+                "name": d.name,
+                "container": (!d.container.is_empty()).then(|| d.container.join("::")),
+                "line": d.name_line,
+            })
+        })
+        .collect();
+    let functions: Vec<Value> = oxplow_code_metrics::analyze_with_language(path, body, language)
+        .into_iter()
+        .map(|f| {
+            json!({
+                "name": f.name,
+                "id": f.id,
+                "complexity": f.complexity,
+                "length": f.length,
+                "parameter_count": f.parameter_count,
+                "visibility": format!("{:?}", f.visibility).to_lowercase(),
+                "has_doc": f.has_doc,
+                "start_line": f.start_line,
+            })
+        })
+        .collect();
+    let imports: Vec<Value> = oxplow_code_deps::extract_with_language(path, body, language)
+        .into_iter()
+        .map(|i| {
+            json!({
+                "module": i.module,
+                "kind": format!("{:?}", i.kind).to_lowercase(),
+                "line": i.start_line,
+            })
+        })
+        .collect();
+    let got = json!({ "symbols": symbols, "functions": functions, "imports": imports });
+    if let Some((at, want, found)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("`{id}` read {found} at `{at}`, the example expects {want}"),
+            )
+            .fix("the language's analysis.yaml or symbols.scm, or the example's `expect`"),
+        );
+    }
+}
+
 /// Read the published datasets with `when: { sql, params? }` as a page's
 /// loader would — a dataset, a decorator's labels, a metric's grid — through
 /// an inline page of one `sql` loader: `expect: { rows, columns? }`,

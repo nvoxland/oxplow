@@ -1,0 +1,19 @@
+# A C function is named by its identifier alone, its parameters and `if`
+# branches are counted, and `static` makes it private.
+when:
+  language: c
+  path: src/x.c
+  body: |
+
+    int classify(int x) {
+        if (x > 0) return 1;
+        if (x < 0) return -1;
+        return 0;
+    }
+    static int hidden(int x) { return x; }
+    int exported(int x) { return x; }
+expect:
+  functions:
+    - { name: classify, parameter_count: 1, complexity: 3, visibility: public }
+    - { name: hidden, visibility: private }
+    - { name: exported, visibility: public }

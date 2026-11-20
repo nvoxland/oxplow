@@ -1,0 +1,19 @@
+# An arrow function bound to a name is measured: its parameters count and
+# each `if` adds one to its complexity.
+when:
+  language: typescript
+  path: src/x.ts
+  body: |
+
+    const handler = (req: Request, res: Response) => {
+        if (req.method === "GET") {
+            return res.send("ok");
+        }
+        if (req.method === "POST") {
+            return res.send("created");
+        }
+        return res.send("?");
+    };
+expect:
+  functions:
+    - { name: handler, parameter_count: 2, complexity: 3 }

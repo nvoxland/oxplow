@@ -349,10 +349,19 @@ pub(super) async fn observe_diagnostics(host: &Host, body: &Value) -> Result<(),
         .get("path")
         .and_then(Value::as_str)
         .ok_or("`diagnostics.path` names the file")?;
+    // The file's language by its extension, as the fixture's oxplow
+    // declares it, unless the example names one.
+    let declared = host
+        .svc
+        .languages
+        .current()
+        .declared_for_path(path)
+        .map(|l| l.name().to_string())
+        .unwrap_or_default();
     let language = body
         .get("language")
         .and_then(Value::as_str)
-        .unwrap_or("rust");
+        .unwrap_or(&declared);
     let mut rows = Vec::new();
     for d in body
         .get("items")
@@ -391,10 +400,19 @@ pub(super) async fn observe_symbols(host: &Host, body: &Value) -> Result<(), Str
         .get("path")
         .and_then(Value::as_str)
         .ok_or("`symbols.path` names the file")?;
+    // The file's language by its extension, as the fixture's oxplow
+    // declares it, unless the example names one.
+    let declared = host
+        .svc
+        .languages
+        .current()
+        .declared_for_path(path)
+        .map(|l| l.name().to_string())
+        .unwrap_or_default();
     let language = body
         .get("language")
         .and_then(Value::as_str)
-        .unwrap_or("rust");
+        .unwrap_or(&declared);
     let mut rows = Vec::new();
     for sym in body
         .get("items")

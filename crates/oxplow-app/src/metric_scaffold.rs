@@ -58,7 +58,12 @@ impl MetricStarter {
         glob: Option<&str>,
     ) -> Result<Self, String> {
         let sampled = sampled(languages);
-        let name = language.filter(|l| !l.is_empty()).unwrap_or("rust");
+        // None named: the first language that has a starter.
+        let first = sampled
+            .first()
+            .map(|l| l.name().to_string())
+            .unwrap_or_default();
+        let name = language.filter(|l| !l.is_empty()).unwrap_or(&first);
         let language = languages
             .by_name(name)
             .filter(|l| l.analyzable())

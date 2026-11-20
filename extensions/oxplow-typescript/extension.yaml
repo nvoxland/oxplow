@@ -9,6 +9,49 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: typescript-functions-and-arrow-bindings
+      input: { language: typescript }
+      expect: the functions a file defines
+    - name: typescript-class-members
+      input: { language: typescript }
+      expect: a class's members in the class
+    - name: typescript-interfaces-types-enums-and-namespaces
+      input: { language: typescript }
+      expect: interfaces, types, enums and namespaces
+    - name: typescript-top-level-values-only
+      input: { language: typescript }
+      expect: only top-level values are definitions
+    - name: typescript-overloads-are-one-symbol
+      input: { language: typescript }
+      expect: overloads give one definition
+    - name: typescript-arrow-function-with-branches
+      input: { language: typescript }
+      expect: an arrow function's parameters and complexity
+    - name: typescript-docs-and-visibility-of-functions
+      input: { language: typescript }
+      expect: JSDoc and visibility of functions
+    - name: typescript-imports
+      input: { language: typescript }
+      expect: the imports of a file
+    - name: tsx-components-and-imports
+      input: { language: tsx }
+      expect: components and imports of a TSX file
+    - name: javascript-functions-and-arrow-bindings
+      input: { language: javascript }
+      expect: the functions a file defines
+    - name: javascript-class-members
+      input: { language: javascript }
+      expect: a class's members in the class
+    - name: javascript-top-level-values-only
+      input: { language: javascript }
+      expect: only top-level values are definitions
+    - name: javascript-rest-parameters-are-counted
+      input: { language: javascript }
+      expect: a rest parameter counts
+    - name: javascript-require-and-import
+      input: { language: javascript }
+      expect: require calls and imports
 languages:
   - id: typescript
     title: "TypeScript"

@@ -1,0 +1,32 @@
+# Out-of-class C++ definitions (qualified names, template members,
+# constructors, destructors, operators), aliases and typedefs give the
+# right definitions and ids.
+when:
+  language: cpp
+  path: a.cpp
+  body: |
+
+    namespace a::b { Foo& get(int n) { return x; } }
+    template <typename T> void Stack<T>::push(T v) {}
+    template <typename T> Stack<T>::Stack() {}
+    Widget::Widget(int n) : n_(n) {}
+    Widget::~Widget() {}
+    bool Widget::operator==(const Widget& o) const { return true; }
+    char **names(void) { return 0; }
+    using Id = int;
+    typedef struct { int x; } pt;
+    static const int limit = 3;
+expect:
+  symbols:
+    - { kind: namespace, id: "a::b" }
+    - { kind: function, id: "a::b::get(int)" }
+    - { kind: method, id: "Stack::push(T)" }
+    - { kind: constructor, id: "Stack::Stack()" }
+    - { kind: constructor, id: "Widget::Widget(int)" }
+    - { kind: method, id: "Widget::~Widget()" }
+    - { kind: method, id: "Widget::operator==(const Widget&)" }
+    - { kind: function, id: "names(void)" }
+    - { kind: type, id: Id }
+    - { kind: type, id: pt }
+    - { kind: field, id: "pt::x" }
+    - { kind: variable, id: limit }

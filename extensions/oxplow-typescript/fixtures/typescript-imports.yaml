@@ -1,0 +1,19 @@
+# TypeScript imports: named, namespace, type-only, side-effect and
+# re-exports all give an `import` edge for their module.
+when:
+  language: typescript
+  path: a.ts
+  body: |
+
+    import { useState } from "react";
+    import * as fs from "node:fs";
+    import type { Foo } from "./foo";
+    import "./side-effect";
+    export { x } from "./y";
+expect:
+  imports:
+    - { module: react, kind: import }
+    - { module: "node:fs", kind: import }
+    - { module: ./foo, kind: import }
+    - { module: ./side-effect, kind: import }
+    - { module: ./y, kind: import }

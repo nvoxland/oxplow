@@ -1,0 +1,19 @@
+# What a Rust file defines and what its functions measure: an `impl`'s
+# methods sit in their type, a trait impl's container names the trait, and
+# each branch of a function adds to its complexity.
+when:
+  language: rust
+  path: src/shape.rs
+  body: "use std::fmt;\n\npub struct Shape;\n\nimpl Shape {\n    /// Grows it.\n    pub fn grow(&self, by: u32) -> u32 {\n        if by > 1 {\n            by\n        } else {\n            1\n        }\n    }\n    fn hidden() {}\n}\n\nimpl fmt::Display for Shape {\n    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {\n        Ok(())\n    }\n}\n"
+expect:
+  symbols:
+    - { kind: struct, id: Shape, line: 3 }
+    - { kind: method, id: "Shape::grow", container: Shape }
+    - { kind: method, id: "Shape::hidden", container: Shape }
+    - { kind: method, id: "<Shape as fmt::Display>::fmt" }
+  functions:
+    - { name: grow, complexity: 2, parameter_count: 2, visibility: public, has_doc: true }
+    - { name: hidden, complexity: 1, parameter_count: 0, visibility: private, has_doc: false }
+    - { name: fmt, complexity: 1, parameter_count: 2 }
+  imports:
+    - { module: std::fmt, kind: use, line: 1 }

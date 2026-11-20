@@ -1,0 +1,25 @@
+# TypeScript interfaces, type aliases, enums, namespaces and modules are
+# definitions, and their members sit in them.
+when:
+  language: typescript
+  path: a.ts
+  body: |
+
+    interface TabState { activeId: string; close(): void }
+    type Role = "a" | "b";
+    enum Mode { A, B = 2 }
+    namespace NS { export function f() {} }
+    declare module "m" { }
+    module M {}
+expect:
+  symbols:
+    - { kind: interface, id: TabState }
+    - { kind: field, id: "TabState::activeId" }
+    - { kind: method, id: "TabState::close" }
+    - { kind: type, id: Role }
+    - { kind: enum, id: Mode }
+    - { kind: enum_member, id: "Mode::A" }
+    - { kind: enum_member, id: "Mode::B" }
+    - { kind: namespace, id: NS }
+    - { kind: function, id: "NS::f" }
+    - { kind: module, id: M }

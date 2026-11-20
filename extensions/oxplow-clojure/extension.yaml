@@ -9,6 +9,31 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: clojure-defs-and-their-ids
+      input: { language: clojure }
+      expect: the symbol of each definition form
+    - name: clojure-multimethods-name-their-dispatch-value
+      input: { language: clojure }
+      expect: a function symbol per defmethod dispatch value
+    - name: clojure-protocols-and-records
+      input: { language: clojure }
+      expect: protocol, method and record symbols
+    - name: clojure-def-of-fn-is-one-function-symbol
+      input: { language: clojure }
+      expect: a def of a fn as one function symbol
+    - name: clojure-defn-measures-and-visibility
+      input: { language: clojure }
+      expect: parameter count, complexity and visibility of defns
+    - name: clojure-branching-and-closures-add-to-complexity
+      input: { language: clojure }
+      expect: cond branches and closures in complexity
+    - name: clojure-top-level-lists-that-are-not-functions
+      input: { language: clojure }
+      expect: no function for values and plain calls
+    - name: clojure-ns-requires-are-imports
+      input: { language: clojure }
+      expect: the ns form's requires as imports
 test_conventions:
   - { id: clojure-tests, languages: [clojure], paths: ['**/*_test.clj', '**/*_test.cljc'] }
 languages:

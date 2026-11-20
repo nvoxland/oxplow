@@ -925,6 +925,61 @@ fn only_harness_implementations_name_a_harness() {
     );
 }
 
+/// The files of core that may name a language, each with why. A language
+/// is an extension's (`.context/language-support.md`): everything else
+/// reads the language set.
+#[rustfmt::skip]
+const LANGUAGE_NAMERS: &[(&str, &str)] = &[
+    ("crates/oxplow-code-metrics/src/spec.rs", "`native_grammar`: the one table of the grammars compiled into oxplow"),
+    ("crates/oxplow-domain/src/language_id.rs", "the editor's Monaco ids by file extension, not analysis languages"),
+];
+
+/// The production files that name an analysis language by its id, as a
+/// quoted string.
+fn language_namers() -> BTreeSet<String> {
+    const IDS: &[&str] = &[
+        "\"rust\"",
+        "\"typescript\"",
+        "\"tsx\"",
+        "\"javascript\"",
+        "\"python\"",
+        "\"golang\"",
+        "\"java\"",
+        "\"cpp\"",
+        "\"csharp\"",
+        "\"clojure\"",
+    ];
+    let mut out = BTreeSet::new();
+    for (path, text) in production_sources() {
+        if path.ends_with("/for_tests.rs") {
+            continue;
+        }
+        let named = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .any(|line| IDS.iter().any(|id| line.contains(id)));
+        if named {
+            out.insert(path);
+        }
+    }
+    out
+}
+
+/// Core names no language: a language is a language pack's (or any
+/// extension's) `languages:` entry, and core reads the set the enabled
+/// extensions declare.
+#[test]
+fn core_names_no_language() {
+    let pinned: BTreeSet<String> = LANGUAGE_NAMERS.iter().map(|(f, _)| f.to_string()).collect();
+    let found = language_namers();
+    let unlisted: Vec<_> = found.difference(&pinned).collect();
+    let gone: Vec<_> = pinned.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && gone.is_empty(),
+        "who names a language changed.\nunlisted (read the language set instead): {unlisted:#?}\nno longer there (drop from LANGUAGE_NAMERS): {gone:#?}"
+    );
+}
+
 /// oxplow never wakes an agent with what it delivers
 /// (`.context/agent-model.md` "Native messaging"): what it gives an agent
 /// reaches it only in the context of a prompt someone else started. So

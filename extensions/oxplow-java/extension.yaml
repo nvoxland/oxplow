@@ -9,6 +9,22 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: java-callables-carry-their-parameter-types
+      input: { language: java }
+      expect: ids with parameter types
+    - name: java-each-if-adds-to-a-methods-complexity
+      input: { language: java }
+      expect: complexity of a method
+    - name: java-a-nested-class-method-has-every-class-around-it
+      input: { language: java }
+      expect: the containers of a nested method
+    - name: java-only-public-methods-are-public
+      input: { language: java }
+      expect: visibility of methods
+    - name: java-imports-read-plain-wildcard-and-static-imports
+      input: { language: java }
+      expect: each imported module
 test_conventions:
   - { id: java-tests, languages: [java], skips: ['@Disabled', '@Ignore'] }
 languages:

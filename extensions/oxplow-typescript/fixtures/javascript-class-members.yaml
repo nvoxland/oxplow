@@ -1,0 +1,26 @@
+# A JavaScript class defines its methods, fields, constructor, accessors,
+# arrow-function properties and private `#` fields, each in its class.
+when:
+  language: javascript
+  path: a.js
+  body: |
+
+    class TabStore {
+        open() {}
+        x = 1;
+        static y;
+        constructor() {}
+        onClick = () => {};
+        get size() { return 1; }
+        #secret = 2;
+    }
+expect:
+  symbols:
+    - { kind: class, id: TabStore }
+    - { kind: method, id: "TabStore::open" }
+    - { kind: field, id: "TabStore::x" }
+    - { kind: field, id: "TabStore::y" }
+    - { kind: constructor, id: "TabStore::constructor" }
+    - { kind: method, id: "TabStore::onClick" }
+    - { kind: method, id: "TabStore::size" }
+    - { kind: field, id: "TabStore::#secret" }

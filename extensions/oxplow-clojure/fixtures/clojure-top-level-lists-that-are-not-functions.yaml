@@ -1,0 +1,7 @@
+# A `def` of a value and a plain top-level call define no function.
+when:
+  language: clojure
+  path: src/demo.clj
+  body: "(def some-data 42)\n(when true (println \"side effect\"))\n"
+expect:
+  functions: []

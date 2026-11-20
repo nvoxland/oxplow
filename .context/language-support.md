@@ -91,7 +91,17 @@ languages:
   offers them (online and in the SDK; the extension it writes `requires:`
   its language's pack), and an installed language server covers its
   language's files and keeps its Mason suggestion while the pack is off.
-- **Tests** read the checkout's packs:
+- **A language is tested by its pack's fixtures**: `when: { language: <id>, path, body }`
+  → `expect: { symbols, functions, imports }` (the file's definitions, its
+  functions' complexity, length, parameter count, visibility and doc, its
+  imports), run on the fixture's oxplow with the pack on. Each pack's
+  `fixtures/` holds the cases the per-language Rust tests used to; the
+  crates keep only engine tests (and the cases a fixture can't say yet:
+  markers, `list_units`, `ast_query`).
+- **Core names no language**: `source_guards::core_names_no_language` fails
+  on a quoted language id in production code outside `native_grammar` and
+  the editor's Monaco id table (`oxplow-domain/src/language_id.rs`).
+- **Rust tests** read the checkout's packs:
   `oxplow_code_metrics::for_tests::{shipped, lang}`; an oxplow-app test that
   parses code turns the packs on with
   `test_fixtures::enable_language_packs(dir)` (`services_with_thread` does).
@@ -278,9 +288,7 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 Live: languages from extensions, the shipped packs with native grammars, the
 LSP symbol surface, generic unit listing, and tree-sitter symbols with their
 index. **Still open** (the change-review plan, milestones 2 to 5): the
-`v_language` dataset and the pack suggestion, a fixture kind for a
-language's analysis with each pack's cases moved into it, a guard that core
-names no language, the language set for command, effect and provider
+`v_language` dataset and the pack suggestion, the language set for command, effect and provider
 scripts, holding an extension whose language conflicts, one `Parsers` pool,
 test conventions /
 file kinds / run patterns / report collectors in the packs, and WebAssembly

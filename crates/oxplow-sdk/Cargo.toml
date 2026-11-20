@@ -15,6 +15,8 @@ publish = false
 [dependencies]
 oxplow-ai = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-code-deps = { workspace = true }
+oxplow-code-metrics = { workspace = true }
 oxplow-config = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }

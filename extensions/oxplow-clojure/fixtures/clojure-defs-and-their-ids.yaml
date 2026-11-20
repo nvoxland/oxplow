@@ -1,0 +1,20 @@
+# Each top-level definition form is one symbol: `defn`, `defn-`, a `def` of a
+# function, `def` values, `defonce` and `defmacro`; the `ns` is the module,
+# and closures inside `let` or `map` are not symbols.
+when:
+  language: clojure
+  path: a.clj
+  body: "\n(ns acme.core\n  (:require [clojure.string :as str]))\n\n(defn parse [x] x)\n(defn- helper [] 1)\n(defn ^:private secret\n  \"A docstring.\"\n  [x] x)\n(defn documented\n  \"Docs\"\n  {:added \"1.0\"}\n  [x] x)\n(def timeout 30)\n(def handler (fn [req] req))\n(def ^:private hidden 1)\n(defonce state (atom {}))\n(def bare)\n(defmacro unless [c & body] `(if ~c nil (do ~@body)))\n(let [f (fn [x] x)] (f 1))\n(map (fn [x] x) [1])\n"
+expect:
+  symbols:
+    - { kind: module, id: acme.core }
+    - { kind: function, id: parse }
+    - { kind: function, id: helper }
+    - { kind: function, id: secret }
+    - { kind: function, id: documented }
+    - { kind: variable, id: timeout }
+    - { kind: function, id: handler }
+    - { kind: variable, id: hidden }
+    - { kind: variable, id: state }
+    - { kind: variable, id: bare }
+    - { kind: macro, id: unless }

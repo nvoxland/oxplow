@@ -1,0 +1,36 @@
+# A C file defines its macros, structs, unions, enums, typedefs, globals
+# and function definitions; a prototype is not a definition.
+when:
+  language: c
+  path: a.c
+  body: |
+
+    #define MAX 3
+    #define SQ(x) ((x)*(x))
+    struct config { int depth; char *name; };
+    union u { int a; float b; };
+    enum color { RED, GREEN };
+    typedef struct { int x; int y; } point;
+    typedef int myint;
+    int counter = 0;
+    int proto(int a);
+    static int parse_args(int argc, char **argv) { return 0; }
+expect:
+  symbols:
+    - { kind: constant, id: MAX }
+    - { kind: macro, id: SQ }
+    - { kind: struct, id: config }
+    - { kind: field, id: "config::depth" }
+    - { kind: field, id: "config::name" }
+    - { kind: struct, id: u }
+    - { kind: field, id: "u::a" }
+    - { kind: field, id: "u::b" }
+    - { kind: enum, id: color }
+    - { kind: enum_member, id: "color::RED" }
+    - { kind: enum_member, id: "color::GREEN" }
+    - { kind: type, id: point }
+    - { kind: field, id: "point::x" }
+    - { kind: field, id: "point::y" }
+    - { kind: type, id: myint }
+    - { kind: variable, id: counter }
+    - { kind: function, id: parse_args }

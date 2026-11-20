@@ -1,0 +1,18 @@
+# A plain, a wildcard and a static import each give a module.
+when:
+  language: java
+  path: A.java
+  body: |
+
+    package com.example;
+
+    import java.util.List;
+    import java.util.*;
+    import static java.lang.Math.PI;
+
+    class C {}
+expect:
+  imports:
+    - { module: java.util.List }
+    - { module: "java.util.*" }
+    - { module: java.lang.Math.PI }

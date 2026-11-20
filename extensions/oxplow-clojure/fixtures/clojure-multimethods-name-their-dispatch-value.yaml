@@ -1,0 +1,12 @@
+# A `defmulti` is a function by its name, and each `defmethod` is a function
+# named with its dispatch value in brackets, including a vector value.
+when:
+  language: clojure
+  path: a.clj
+  body: "\n(defmulti area :shape)\n(defmethod area :circle [s] 1)\n(defmethod area :square [s] 2)\n(defmethod area [:a :b] [s] 3)\n"
+expect:
+  symbols:
+    - { kind: function, id: area }
+    - { kind: function, id: "area(:circle)" }
+    - { kind: function, id: "area(:square)" }
+    - { kind: function, id: "area([:a :b])" }

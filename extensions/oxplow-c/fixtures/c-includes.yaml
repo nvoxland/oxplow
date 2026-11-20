@@ -1,0 +1,14 @@
+# Each `#include`, with angle brackets or quotes, is an `include` edge.
+when:
+  language: c
+  path: a.c
+  body: |
+
+    #include <stdio.h>
+    #include "local.h"
+
+    int main(void) { return 0; }
+expect:
+  imports:
+    - { module: "<stdio.h>", kind: include }
+    - { module: '"local.h"', kind: include }

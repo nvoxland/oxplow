@@ -1,0 +1,23 @@
+# A JavaScript file defines a function for each declaration and for each
+# arrow or function expression bound to a name; a callback passed as an
+# argument is not a definition.
+when:
+  language: javascript
+  path: a.js
+  body: |
+
+    export function parseRef(s) {}
+    const handler = () => {};
+    const f = function () {};
+    function* gen() {}
+    function outer() { const inner = () => {}; }
+    items.map(x => x + 1);
+    describe("thing", () => { it("works", () => {}); });
+expect:
+  symbols:
+    - { kind: function, id: parseRef }
+    - { kind: function, id: handler }
+    - { kind: function, id: f }
+    - { kind: function, id: gen }
+    - { kind: function, id: outer }
+    - { kind: function, id: "outer::inner" }

@@ -1,0 +1,13 @@
+# A JavaScript file's `require("m")` calls and `import` statements both
+# give an `import` edge.
+when:
+  language: javascript
+  path: a.js
+  body: |
+
+    const fs = require("fs");
+    import x from "y";
+expect:
+  imports:
+    - { module: fs, kind: import }
+    - { module: y, kind: import }

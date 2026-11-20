@@ -103,6 +103,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | action_point | `{ action_point: <id \| name>, context? } (what a named action point offers)` | `{ draws: none \| button \| menu, commands?: [ids] }` |
 | item_commands | `{ item_commands: <uri> } (the commands about an item, its store filter applied)` | `{ commands: [ids] }` |
 | context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
+| language | `{ language: <id>, path, body } (the file `body` at `path`, read as that language)` | `{ symbols?: [{ kind, id, name, container, line }], functions?: [{ name, id, complexity, length, parameter_count, visibility, has_doc, start_line }], imports?: [{ module, kind, line }] }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
 | wikilink | `{ wikilink }` | `{ uri }` |
 | collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files } \| { collector: <id>, trigger: start \| sqlite \| { files: [{ path, op }] } } (run for real, as that trigger fires; `given: - { store_sql: { extension, sql, params? } }` writes an extension's own SQLite file first)` | `{ entities?, events? } \| { facts } \| { ok?, result?, problems? } (`problems` also checks the rows an ok run quarantined; `[]` says none)` |

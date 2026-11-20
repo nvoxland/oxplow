@@ -9,6 +9,22 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: go-definitions-get-their-ids
+      input: { language: go }
+      expect: every definition and its id
+    - name: go-grouped-names-are-definitions-and-locals-are-not
+      input: { language: go }
+      expect: group names count and locals do not
+    - name: go-a-method-does-not-count-its-receiver-as-a-parameter
+      input: { language: go }
+      expect: a method's parameters and complexity
+    - name: go-capitals-are-public-and-any-comment-is-a-doc
+      input: { language: go }
+      expect: visibility and doc of functions
+    - name: go-imports-read-single-and-grouped-imports
+      input: { language: go }
+      expect: each import path
 test_conventions:
   - id: go-tests
     languages: [go]

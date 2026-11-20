@@ -9,6 +9,22 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: python-definitions-get-their-ids
+      input: { language: python }
+      expect: every definition and its id
+    - name: python-loops-and-ifs-add-to-complexity
+      input: { language: python }
+      expect: complexity of loops and ifs
+    - name: python-a-method-sits-in-its-class
+      input: { language: python }
+      expect: a method's class as its container
+    - name: python-docstrings-and-leading-underscores
+      input: { language: python }
+      expect: doc and visibility of functions
+    - name: python-imports-keep-dots-of-relative-modules
+      input: { language: python }
+      expect: each imported module
 test_conventions:
   - { id: python-tests, languages: [python], paths: ['**/test_*.py'] }
 languages:

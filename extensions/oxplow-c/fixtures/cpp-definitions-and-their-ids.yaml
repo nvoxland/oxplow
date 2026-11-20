@@ -1,0 +1,39 @@
+# A C++ file defines its namespaces, classes, structs, enums, macros,
+# globals and functions; an id carries the parameter types, a second
+# definition of the same signature gets `~2`, and a template class's
+# methods sit in it.
+when:
+  language: cpp
+  path: a.cpp
+  body: |
+
+    namespace geo { int area(const Shape& s) { return 0; } }
+    void f(int a) {}
+    void f(double x = 1.0) {}
+    class Widget { public: Widget(); ~Widget(); void draw() const; int size_; };
+    void Widget::draw() const {}
+    template <typename T> class Stack { void push(T v); };
+    struct P { int x; };
+    enum class Color { Red };
+    #define MAX 3
+    int counter = 0;
+expect:
+  symbols:
+    - { kind: namespace, id: geo }
+    - { kind: function, id: "geo::area(const Shape&)" }
+    - { kind: function, id: "f(int)" }
+    - { kind: function, id: "f(double)" }
+    - { kind: class, id: Widget }
+    - { kind: constructor, id: "Widget::Widget()" }
+    - { kind: method, id: "Widget::~Widget()" }
+    - { kind: method, id: "Widget::draw()" }
+    - { kind: field, id: "Widget::size_" }
+    - { kind: method, id: "Widget::draw()~2" }
+    - { kind: class, id: Stack }
+    - { kind: method, id: "Stack::push(T)" }
+    - { kind: struct, id: P }
+    - { kind: field, id: "P::x" }
+    - { kind: enum, id: Color }
+    - { kind: enum_member, id: "Color::Red" }
+    - { kind: constant, id: MAX }
+    - { kind: variable, id: counter }

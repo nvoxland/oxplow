@@ -1,0 +1,17 @@
+# A TSX file defines its function and arrow components, and reads its
+# imports as TypeScript does.
+when:
+  language: tsx
+  path: a.tsx
+  body: |
+    import React from "react";
+    import { Button } from "./Button";
+    export function App() { return <div/>; }
+    const B = () => <span/>;
+expect:
+  symbols:
+    - { kind: function, id: App }
+    - { kind: function, id: B }
+  imports:
+    - { module: react, kind: import }
+    - { module: ./Button, kind: import }

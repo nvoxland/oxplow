@@ -1,0 +1,18 @@
+# A namespace holds a class whose members are named by their signature:
+# methods, properties and events are fields, `const` is a constant, and a
+# destructor is a method.
+when:
+  language: csharp
+  path: a.cs
+  body: "\nnamespace Acme {\n    class P {\n        void Run() {}\n        public int Size { get; set; }\n        private int _x;\n        const int Max = 3;\n        public event EventHandler Changed;\n        P(int x) {}\n        ~P() {}\n    }\n}\n"
+expect:
+  symbols:
+    - { kind: namespace, id: Acme }
+    - { kind: class, id: "Acme::P" }
+    - { kind: method, id: "Acme::P::Run()" }
+    - { kind: field, id: "Acme::P::Size" }
+    - { kind: field, id: "Acme::P::_x" }
+    - { kind: constant, id: "Acme::P::Max" }
+    - { kind: field, id: "Acme::P::Changed" }
+    - { kind: constructor, id: "Acme::P::P(int)" }
+    - { kind: method, id: "Acme::P::~P()" }

@@ -9,6 +9,31 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: c-definitions-and-their-ids
+      input: { language: c }
+      expect: the definitions of a C file
+    - name: c-typedef-forms-pointers-and-prototypes
+      input: { language: c }
+      expect: typedefs, pointers and prototypes
+    - name: c-function-metrics-and-static-visibility
+      input: { language: c }
+      expect: a function's metrics and visibility
+    - name: c-includes
+      input: { language: c }
+      expect: the includes of a file
+    - name: cpp-definitions-and-their-ids
+      input: { language: cpp }
+      expect: the definitions of a C++ file
+    - name: cpp-qualified-templates-operators-and-wrappers
+      input: { language: cpp }
+      expect: qualified names, templates and operators
+    - name: cpp-qualified-function-name-has-no-declarator
+      input: { language: cpp }
+      expect: a qualified function's name
+    - name: cpp-includes-and-using
+      input: { language: cpp }
+      expect: includes and using edges
 languages:
   - id: c
     title: "C"

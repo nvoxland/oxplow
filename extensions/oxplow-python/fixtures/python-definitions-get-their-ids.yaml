@@ -1,0 +1,28 @@
+# Python definitions get stable ids: a method sits in its class, a function
+# inside a method sits in that method, and a second definition of one name
+# gets `~2`.
+when:
+  language: python
+  path: scripts/build.py
+  body: |
+
+    TIMEOUT = 30
+    class Builder:
+        retries = 3
+        def __init__(self): pass
+        @property
+        def run(self):
+            def helper(): pass
+            return lambda x: x
+    def main(): pass
+    def main(): pass
+expect:
+  symbols:
+    - { kind: variable, id: TIMEOUT }
+    - { kind: class, id: Builder }
+    - { kind: field, id: "Builder::retries" }
+    - { kind: method, id: "Builder::__init__" }
+    - { kind: method, id: "Builder::run" }
+    - { kind: function, id: "Builder::run::helper" }
+    - { kind: function, id: main }
+    - { kind: function, id: "main~2" }

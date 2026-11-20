@@ -1,0 +1,11 @@
+# An overload's id lists its parameter types only: names and default values
+# are dropped, and generic types stay whole.
+when:
+  language: csharp
+  path: a.cs
+  body: "\nclass P {\n    int Parse(string s, int n = 0) => n;\n    int Parse(List<string> xs) => 0;\n}\n"
+expect:
+  symbols:
+    - { kind: class, id: P }
+    - { kind: method, id: "P::Parse(string,int)" }
+    - { kind: method, id: "P::Parse(List<string>)" }

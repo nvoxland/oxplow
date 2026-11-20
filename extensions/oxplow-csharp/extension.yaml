@@ -9,6 +9,28 @@ intent:
     ordinary extension a project turns on when it has these files, so core
     names no language and a project that doesn't use one sees none of it.
   origin: null
+  examples:
+    - name: csharp-namespace-types-and-members
+      input: { language: csharp }
+      expect: a namespace, class and its members by signature
+    - name: csharp-overloads-drop-names-and-defaults
+      input: { language: csharp }
+      expect: overload ids with parameter types only
+    - name: csharp-type-kinds
+      input: { language: csharp }
+      expect: the symbol kind of each type declaration
+    - name: csharp-local-functions-nest-and-lambdas-do-not
+      input: { language: csharp }
+      expect: local functions as symbols, lambdas not
+    - name: csharp-file-scoped-namespace
+      input: { language: csharp }
+      expect: a file-scoped namespace symbol
+    - name: csharp-several-declarators-are-several-symbols
+      input: { language: csharp }
+      expect: one symbol per field declarator
+    - name: csharp-foreach-and-switch-cases-count-toward-complexity
+      input: { language: csharp }
+      expect: foreach and switch cases in complexity
 languages:
   - id: csharp
     title: "C#"

@@ -1,0 +1,19 @@
+# A method's parameters are those after its receiver, and its `if` adds to
+# its complexity.
+when:
+  language: go
+  path: main.go
+  body: |
+
+    package main
+
+    func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/" {
+            w.WriteHeader(200)
+            return
+        }
+        w.WriteHeader(404)
+    }
+expect:
+  functions:
+    - { name: handle, parameter_count: 2, complexity: 2 }
