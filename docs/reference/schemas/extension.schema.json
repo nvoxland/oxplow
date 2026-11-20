@@ -741,14 +741,16 @@
         },
         "open": {
           "description": "Other extensions' datasets may add rows to it (`adds_to:`): its\nview is its own rows `UNION ALL` theirs, each with these fields.",
-          "type": "boolean"
+          "type": "boolean",
+          "default": false
         },
         "adds_to": {
           "description": "The open dataset this one adds its rows to, named as a `ref()`\nnames one (`<namespace>/<name>`). Its fields must have the open\ndataset's names, in order; it still publishes as its own view too. Naming one that\nisn't published (its extension is off) joins nothing.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

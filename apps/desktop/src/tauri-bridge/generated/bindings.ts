@@ -2008,6 +2008,18 @@ export type DatasetDecl = {
 	materialize?: Materialize | null,
 	/**  Guidance for an agent reading the dataset. Not part of the contract. */
 	ai_context?: AiContext | null,
+	/**
+	 *  Other extensions' datasets may add rows to it (`adds_to:`): its
+	 *  view is its own rows `UNION ALL` theirs, each with these fields.
+	 */
+	open?: boolean,
+	/**
+	 *  The open dataset this one adds its rows to, named as a `ref()`
+	 *  names one (`<namespace>/<name>`). Its fields must have the open
+	 *  dataset's names, in order; it still publishes as its own view too. Naming one that
+	 *  isn't published (its extension is off) joins nothing.
+	 */
+	adds_to?: string | null,
 };
 
 /**

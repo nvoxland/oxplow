@@ -70,13 +70,15 @@ loaders' first rows and params are what a mount can take):
 | `oxplow/knowledge-page.sections` | a knowledge page (the end of its stack; oxwiki mounts its Edit part) | `uri`, `store`, `id` |
 | `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
+| `oxplow/change-review.sections` | oxplow-bundled's Review page (one analysed change; nodes `asked`, `look-here`, `by-area`). A signal belongs on `v_oxplow_review_signal` (`adds_to: oxplow/review_signal`); mount here only a whole section of your own | `change_id` |
 | `oxplow/settings.integrations` | Settings → Integrations, under Capabilities: an extension's own settings for the project. oxtask mounts its Task workflow (`task-workflow-settings`) | none (the page's params: `area`) |
 | `oxplow/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
 | `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
 
 `change_id` points at the page's change in `v_change`, with its analysis
-in `v_change_file`, `v_change_function`, `v_change_import`,
-`v_change_co_change` and `v_change_duplicate`. To learn a page's slots
+in `v_change_file`, `v_change_function`, `v_change_import`, `v_change_hunk`,
+`v_oxplow_change_co_change`, `v_change_duplicate` and the review's
+`v_oxplow_review_signal`. To learn a page's slots
 and params, read it with `oxplow_find_page` or `oxplow.page.describe`: its
 slot nodes and loaders are listed.
 

@@ -321,18 +321,37 @@ namespace"). Inside one:
 contributor's (`datasets::wire_open_datasets`, `union_contributors`). One
 extension owns a list that many fill: oxplow-bundled's `review_signal` (the
 change review's signals) is the first.
-- A contributor's fields have the open dataset's names, in the same order;
-  it still publishes as its own view. The open dataset's own field types
-  type the union's columns (`CAST`, or `+col` to keep one untyped): a
-  compound SELECT would otherwise type each column from whoever adds to it.
+- **The union is plain columns**, each arm selecting the open dataset's
+  fields by name, so a `WHERE change_id = ?` on it reaches each arm's
+  indexes. (A wrapper that typed the columns, `CAST` or `+col`, made every
+  read scan every contributor for every change.)
+- **Its fields are untyped** (`type: ""`), and its contract is checked by
+  name: a compound SELECT types each column from its arms, BLOB where they
+  differ. A dataset that reads an open one declares the types `check`
+  reports, and a page that filters it binds integers
+  (`CAST(:change_id AS INTEGER)`: a BLOB column doesn't convert a text
+  param).
+- **What it may not declare** (`open_problems`): a `key:`, `tests:` or
+  `materialize: { incremental }` (they would check other extensions' rows
+  and blame the owner), typed fields, or an `adds_to:` of its own.
+- **A contributor** gives some or all of the open dataset's fields, by name
+  (one it lacks is NULL in the union, so the owner can add a field without
+  breaking anyone); a field the open dataset lacks is its error. It still
+  publishes as its own view.
+- **Errors are the contributor's, never the owner's**, and it joins nothing:
+  a field the list lacks; a target that isn't open; a target in a namespace
+  of the pass that declares no such dataset (a typo); a contributor that
+  reads, directly or through its other datasets, the list it adds to (a
+  cycle). One that fails to compile is left out and the open dataset still
+  publishes. An `adds_to:` in a namespace no enabled extension has (the
+  owner is off) joins nothing and is no error, so a contributor needs no
+  `requires:`. An activation still holds the contributor's extension for
+  its own errors, as for any dataset error.
 - The open dataset reads each contributor (`dataset_input`), so it
   publishes after them and a materialized one recomputes when theirs move.
-- A contributor whose fields differ, or whose target isn't open, is its own
-  extension's error and joins nothing. One that fails to compile is left
-  out; the open dataset still publishes (a broken third-party contributor
-  never takes the list down). An `adds_to:` that names no published
-  dataset (its owner is off) joins nothing and is no error, so a
-  contributor needs no `requires:` on the owner.
+- An owner that wants to post-process every row (a severity override from
+  its settings) does it in a second dataset over the open one, never in the
+  open one's SQL (the union is built around it).
 
 A check (`datasets::check_extensions`, P7.C6) runs the same pass with temp
 views, standing an empty view in for each declared entity that hasn't

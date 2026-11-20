@@ -81,13 +81,13 @@ pub struct DatasetDecl {
     pub ai_context: Option<AiContext>,
     /// Other extensions' datasets may add rows to it (`adds_to:`): its
     /// view is its own rows `UNION ALL` theirs, each with these fields.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub open: bool,
     /// The open dataset this one adds its rows to, named as a `ref()`
     /// names one (`<namespace>/<name>`). Its fields must have the open
     /// dataset's names, in order; it still publishes as its own view too. Naming one that
     /// isn't published (its extension is off) joins nothing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub adds_to: Option<String>,
 }
 
@@ -1475,12 +1475,18 @@ fn check_contract(
     record: bool,
 ) -> Result<(), DomainError> {
     let decl = &m.source.decl;
-    let actual = view_columns(conn, &m.view)?;
+    let mut actual = view_columns(conn, &m.view)?;
     let declared: Vec<(String, String)> = decl
         .fields
         .iter()
         .map(|c| (c.name.clone(), c.sql_type.clone()))
         .collect();
+    if decl.open {
+        // A union's column types are its arms' (untyped fields, `open_problems`).
+        for (_, t) in actual.iter_mut() {
+            t.clear();
+        }
+    }
     if actual != declared {
         return Err(invalid(format!(
             "{}: the view's columns {} differ from its declared contract {}",
@@ -2154,6 +2160,13 @@ fn pass(
             if declared.get(&view) != Some(&e.extension) || existing.contains(&view) {
                 continue; // reported above
             }
+            let problems = open_problems(&src.decl);
+            if !problems.is_empty() {
+                for p in problems {
+                    push(&mut errors, &e.extension, format!("{}: {p}", src.file));
+                }
+                continue;
+            }
             match resolve_one(src, view, &ref_view, &source_ok, e.config.as_ref()) {
                 Ok(m) => resolved.push((e.extension.clone(), m)),
                 Err(err) => push(&mut errors, &e.extension, err.to_string()),
@@ -2162,13 +2175,21 @@ fn pass(
     }
     // Open datasets: each contributor (`adds_to:`) becomes an input of the
     // dataset it adds to, unioned in when that publishes.
-    let unions = wire_open_datasets(
-        &mut resolved,
-        &namespaces(extensions),
-        &owners,
-        &core,
-        &mut errors,
-    );
+    let unions = wire_open_datasets(&mut resolved, extensions, &owners, &core, &mut errors);
+    let fields_of: HashMap<String, Vec<String>> = resolved
+        .iter()
+        .map(|(_, m)| {
+            (
+                m.view.clone(),
+                m.source
+                    .decl
+                    .fields
+                    .iter()
+                    .map(|f| f.name.clone())
+                    .collect(),
+            )
+        })
+        .collect();
     // Publish in dependency order; a dataset reading one that didn't compile
     // doesn't either.
     let now = ts_to_string(oxplow_domain::Timestamp::now());
@@ -2200,7 +2221,7 @@ fn pass(
                 !in_pass.contains(r) || done.contains(r) || (joined(r) && failed.contains(r))
             }) {
                 if let Some(joins) = joins {
-                    union_contributors(&mut m, joins, &done);
+                    union_contributors(&mut m, joins, &done, &fields_of);
                 }
                 tx.execute_batch("SAVEPOINT extension_dataset")
                     .map_err(map_sql_err)?;
@@ -2304,48 +2325,86 @@ fn pass(
     Ok(CheckedDatasets { errors, views })
 }
 
-/// Each extension's namespace, by extension name.
-fn namespaces(extensions: &[ExtensionDatasets]) -> HashMap<String, String> {
-    extensions
-        .iter()
-        .map(|e| (e.extension.clone(), e.namespace.clone()))
-        .collect()
-}
-
-/// Connect each contributor (`adds_to:`) to the open dataset it names (its
-/// fields the same names in the same order): the
+/// Connect each contributor (`adds_to:`) to the open dataset it names: the
 /// open dataset reads it (so it publishes after it, and its lineage names
-/// it), and the returned map lists each open view's contributors. A
-/// contributor whose fields aren't the open dataset's, or whose target isn't
-/// open, is its extension's error and joins nothing; a target that names no
-/// dataset (its owner is off) joins nothing silently.
+/// it), and the returned map lists each open view's contributors.
+///
+/// What is the contributor's own error (its extension's, never the
+/// owner's), and joins nothing: a field the open dataset doesn't have, a
+/// target that isn't open, a target its namespace doesn't declare, and a
+/// contributor that reads the open dataset (a cycle). A target in a
+/// namespace no extension in the pass has (its owner is off), or an open
+/// dataset that didn't resolve, joins nothing silently.
 fn wire_open_datasets(
     resolved: &mut [(String, Resolved<'_>)],
-    namespace_of: &HashMap<String, String>,
+    extensions: &[ExtensionDatasets],
     owners: &HashMap<String, String>,
     core: &HashMap<String, String>,
     errors: &mut BTreeMap<String, Vec<String>>,
 ) -> HashMap<String, Vec<String>> {
-    // By name, in order: the open dataset's own SQL types the union's
-    // columns, and each contributor's own contract checks its types.
-    let field_list = |fields: &[DatasetField]| -> Vec<String> {
-        fields.iter().map(|f| f.name.clone()).collect()
-    };
-    let open: HashMap<String, Vec<String>> = resolved
+    // Every open dataset declared in the pass, resolved or not, and what
+    // each namespace declares: a contributor's error depends on the
+    // declaration, not on whether the owner compiled.
+    let mut open: HashMap<String, Vec<String>> = HashMap::new();
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    let namespaces: BTreeSet<String> = extensions
         .iter()
-        .filter(|(_, m)| m.source.decl.open)
-        .map(|(_, m)| (m.view.clone(), field_list(&m.source.decl.fields)))
+        .map(|e| oxplow_domain::contribution::extension_namespace(&e.namespace))
         .collect();
+    let mut namespace_of: HashMap<&str, &str> = HashMap::new();
+    for e in extensions {
+        namespace_of.insert(&e.extension, &e.namespace);
+        for src in &e.sources {
+            let view = extension_view(&e.namespace, &src.decl.name);
+            declared.insert(view.clone());
+            if src.decl.open {
+                open.insert(
+                    view,
+                    src.decl.fields.iter().map(|f| f.name.clone()).collect(),
+                );
+            }
+        }
+    }
+    // Who reads whom, to refuse a contributor that reads the list it adds to.
+    let mut reads: HashMap<String, BTreeSet<String>> = resolved
+        .iter()
+        .map(|(_, m)| (m.view.clone(), m.refs.clone()))
+        .collect();
+    let reaches = |reads: &HashMap<String, BTreeSet<String>>, from: &str, to: &str| {
+        let mut stack = vec![from.to_string()];
+        let mut seen = BTreeSet::new();
+        while let Some(v) = stack.pop() {
+            if v == to {
+                return true;
+            }
+            if seen.insert(v.clone()) {
+                stack.extend(reads.get(&v).into_iter().flatten().cloned());
+            }
+        }
+        false
+    };
     let mut unions: HashMap<String, Vec<String>> = HashMap::new();
     for (ext, m) in resolved.iter() {
-        let Some(target) = m.source.decl.adds_to.as_deref() else {
+        let Some(target) = m.source.decl.adds_to.as_deref().map(str::trim) else {
             continue;
         };
-        let ns = namespace_of
-            .get(ext)
-            .map(String::as_str)
-            .unwrap_or_default();
-        let Some(view) = ref_target(ns, target.trim(), owners, core) else {
+        let file = &m.source.file;
+        let ns = namespace_of.get(ext.as_str()).copied().unwrap_or_default();
+        let view = ref_target(ns, target, owners, core).or_else(|| {
+            // An open dataset that didn't resolve isn't in `owners`.
+            let (target_ns, name) = target.split_once('/').unwrap_or((ns, target));
+            let view = extension_view(target_ns, name);
+            declared.contains(&view).then_some(view)
+        });
+        let Some(view) = view else {
+            let target_ns = target.split_once('/').map_or(ns, |(n, _)| n);
+            if namespaces.contains(&oxplow_domain::contribution::extension_namespace(target_ns)) {
+                push(
+                    errors,
+                    ext,
+                    format!("{file}: adds to `{target}`, which names no dataset"),
+                );
+            }
             continue; // its owner isn't on: nothing to add to
         };
         let Some(wanted) = open.get(&view) else {
@@ -2353,27 +2412,50 @@ fn wire_open_datasets(
                 errors,
                 ext,
                 format!(
-                    "{}: adds to `{view}`, which isn't open (its owner declares `open: true` to take rows)",
-                    m.source.file
+                    "{file}: adds to `{view}`, which isn't open (its owner declares `open: true` to take rows)"
                 ),
             );
             continue;
         };
-        let have = field_list(&m.source.decl.fields);
-        if &have != wanted {
-            let show = |f: &[String]| f.join(", ");
+        let extra: Vec<&str> = m
+            .source
+            .decl
+            .fields
+            .iter()
+            .map(|f| f.name.as_str())
+            .filter(|n| !wanted.iter().any(|w| w == n))
+            .collect();
+        if !extra.is_empty() {
             push(
                 errors,
                 ext,
                 format!(
-                    "{}: adds to `{view}`, but its fields are ({}), not ({})",
-                    m.source.file,
-                    show(&have),
-                    show(wanted)
+                    "{file}: adds to `{view}`, but `{view}` has no field {} (its fields are {})",
+                    extra
+                        .iter()
+                        .map(|n| format!("`{n}`"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    wanted.join(", ")
                 ),
             );
             continue;
         }
+        if reaches(&reads, &m.view, &view) {
+            push(
+                errors,
+                ext,
+                format!("{file}: adds to `{view}` and reads it too, so it would read its own rows"),
+            );
+            continue;
+        }
+        if !resolved_has(&reads, &view) {
+            continue; // the open dataset didn't resolve: its owner says why
+        }
+        reads
+            .entry(view.clone())
+            .or_default()
+            .insert(m.view.clone());
         unions.entry(view).or_default().push(m.view.clone());
     }
     for (_, m) in resolved.iter_mut() {
@@ -2385,44 +2467,95 @@ fn wire_open_datasets(
     unions
 }
 
-/// Make an open dataset's SQL its own rows `UNION ALL` each contributor's
-/// that published (`done`); a contributor that failed leaves its lineage.
-fn union_contributors(m: &mut Resolved<'_>, joins: &[String], done: &BTreeSet<String>) {
-    let cols = m
-        .source
-        .decl
-        .fields
-        .iter()
-        .map(|f| quote(&f.name))
-        .collect::<Vec<_>>()
-        .join(", ");
-    // A compound SELECT types each column from its arms, so the union's
-    // types would depend on who adds to it: the open dataset's own field
-    // types decide them (`CAST`), and an untyped field stays untyped (`+`).
-    let typed = m
-        .source
-        .decl
-        .fields
-        .iter()
-        .map(|f| {
-            let name = quote(&f.name);
-            if f.sql_type.trim().is_empty() {
-                format!("+{name} AS {name}")
-            } else {
-                format!("CAST({name} AS {}) AS {name}", f.sql_type)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut sql = format!("SELECT {cols} FROM ({})", m.sql);
-    for view in joins {
-        if done.contains(view) {
-            sql.push_str(&format!(" UNION ALL SELECT {cols} FROM {}", quote(view)));
-        } else {
-            m.refs.remove(view);
-        }
+fn resolved_has(reads: &HashMap<String, BTreeSet<String>>, view: &str) -> bool {
+    reads.contains_key(view)
+}
+
+/// What an open dataset's declaration may not say: rows it doesn't own
+/// would be checked against it. A key, tests and an incremental watermark
+/// hold for its own rows only; typed fields can't hold for a union (a
+/// compound SELECT types each column from whoever adds to it).
+fn open_problems(decl: &DatasetDecl) -> Vec<String> {
+    let mut out = Vec::new();
+    if !decl.open {
+        return out;
     }
-    m.sql = format!("SELECT {typed} FROM ({sql})");
+    if !decl.key.is_empty() {
+        out.push("an open dataset takes no `key:` (other extensions' rows are in it)".into());
+    }
+    if !decl.tests.is_empty() {
+        out.push("an open dataset takes no `tests:` (other extensions' rows are in it)".into());
+    }
+    if decl
+        .materialize
+        .as_ref()
+        .and_then(Materialize::incremental)
+        .is_some()
+    {
+        out.push("an open dataset can't be `materialize: { incremental }`".into());
+    }
+    if decl.adds_to.is_some() {
+        out.push("an open dataset adds to no other one".into());
+    }
+    let typed: Vec<&str> = decl
+        .fields
+        .iter()
+        .filter(|f| !f.sql_type.trim().is_empty())
+        .map(|f| f.name.as_str())
+        .collect();
+    if !typed.is_empty() {
+        out.push(format!(
+            "an open dataset's fields are untyped (`type: \"\"`): the union's column types depend on who adds to it ({})",
+            typed.join(", ")
+        ));
+    }
+    out
+}
+
+/// Make an open dataset's SQL its own rows `UNION ALL` each contributor's
+/// that published (`done`), each column by name (a field a contributor
+/// lacks is NULL); a contributor that failed leaves its lineage. Plain
+/// columns, so a `WHERE` on the union reaches each arm's indexes.
+fn union_contributors(
+    m: &mut Resolved<'_>,
+    joins: &[String],
+    done: &BTreeSet<String>,
+    fields_of: &HashMap<String, Vec<String>>,
+) {
+    let fields: Vec<&str> = m
+        .source
+        .decl
+        .fields
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    let own = fields
+        .iter()
+        .map(|f| quote(f))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // The newline ends a `--` comment the owner's SQL may end with.
+    let mut sql = format!("SELECT {own} FROM ({}\n)", m.sql);
+    for view in joins {
+        if !done.contains(view) {
+            m.refs.remove(view);
+            continue;
+        }
+        let have = fields_of.get(view);
+        let cols = fields
+            .iter()
+            .map(|f| {
+                if have.is_some_and(|h| h.iter().any(|x| x == f)) {
+                    quote(f)
+                } else {
+                    format!("NULL AS {}", quote(f))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        sql.push_str(&format!(" UNION ALL SELECT {cols} FROM {}", quote(view)));
+    }
+    m.sql = sql;
 }
 
 fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: String) {
@@ -3689,11 +3822,12 @@ mod tests {
 
     /// An open dataset (`open: true`) is its own rows plus the rows of every
     /// dataset that `adds_to:` it: other extensions add rows to a list one
-    /// extension owns. A contributor with other columns, or one that
-    /// doesn't compile, is its own extension's error and is left out of the
-    /// union; the open dataset still publishes. `adds_to:` a dataset that
-    /// isn't open is an error; one that names no dataset (its owner is off)
-    /// joins nothing.
+    /// extension owns. A field a contributor lacks is NULL. A contributor
+    /// with a field the list lacks, one that reads the list it adds to, one
+    /// naming a dataset its namespace doesn't declare, or one that doesn't
+    /// compile is its own extension's error and is left out; the owner
+    /// stays clean. `adds_to:` a dataset that isn't open is an error; one
+    /// in a namespace no extension has (its owner is off) joins nothing.
     #[test]
     fn an_open_dataset_unions_the_datasets_that_add_to_it() {
         let mut conn = fresh();
@@ -3705,28 +3839,40 @@ mod tests {
             m.decl.adds_to = Some(target.into());
             m
         };
+        // The owner's SQL may end in a comment.
+        let signal = || {
+            open(source(
+                "signal",
+                "SELECT 'own' AS src, 1 AS n -- its own row",
+                &["src", "n"],
+            ))
+        };
         let errors = publish(
             &mut conn,
             &[
                 ext_in(
                     "own",
                     "own",
-                    vec![
-                        open(source(
-                            "signal",
-                            "SELECT 'own' AS src, 1 AS n",
-                            &["src", "n"],
-                        )),
-                        source("closed", "SELECT 1 AS n", &["n"]),
-                    ],
+                    vec![signal(), source("closed", "SELECT 1 AS n", &["n"])],
                 ),
                 ext_in(
                     "add",
                     "add",
-                    vec![adds_to(
-                        source("mine", "SELECT 'add' AS src, 2 AS n", &["src", "n"]),
-                        "own/signal",
-                    )],
+                    vec![
+                        adds_to(
+                            source("mine", "SELECT 'add' AS src, 2 AS n", &["src", "n"]),
+                            "own/signal",
+                        ),
+                        // A field it lacks is NULL; its types are its own.
+                        adds_to(
+                            source(
+                                "short",
+                                "SELECT uri AS src FROM ref('thread') WHERE 0",
+                                &["src TEXT"],
+                            ),
+                            "own/signal",
+                        ),
+                    ],
                 ),
                 ext_in(
                     "wrong",
@@ -3741,7 +3887,16 @@ mod tests {
                             "own/signal",
                         ),
                         adds_to(source("shut", "SELECT 3 AS n", &["n"]), "own/closed"),
+                        adds_to(source("typo", "SELECT 3 AS n", &["n"]), "own/nope"),
                         adds_to(source("gone", "SELECT 4 AS n", &["n"]), "off/signal"),
+                        adds_to(
+                            source(
+                                "loop",
+                                "SELECT src, n FROM ref('own/signal')",
+                                &["src", "n"],
+                            ),
+                            "own/signal",
+                        ),
                     ],
                 ),
             ],
@@ -3751,7 +3906,9 @@ mod tests {
         assert!(errors["add"].is_empty(), "{errors:?}");
         let wrong = errors["wrong"].join("\n");
         assert!(
-            wrong.contains("cols.sql: adds to `v_own_signal`, but its fields are"),
+            wrong.contains(
+                "cols.sql: adds to `v_own_signal`, but `v_own_signal` has no field `other`"
+            ),
             "{wrong}"
         );
         assert!(wrong.contains("broken.sql"), "{wrong}");
@@ -3759,8 +3916,22 @@ mod tests {
             wrong.contains("shut.sql: adds to `v_own_closed`, which isn't open"),
             "{wrong}"
         );
+        assert!(
+            wrong.contains("typo.sql: adds to `own/nope`, which names no dataset"),
+            "{wrong}"
+        );
+        assert!(
+            wrong.contains("loop.sql: adds to `v_own_signal` and reads it too"),
+            "{wrong}"
+        );
         assert!(!wrong.contains("gone.sql"), "{wrong}");
-        assert_eq!(errors["wrong"].len(), 3, "{wrong}");
+        // The refused loop still publishes as itself, and its own contract
+        // fails: a union's columns are BLOB where its arms' types differ.
+        assert!(
+            wrong.contains("loop.sql: the view's columns [src BLOB, n]"),
+            "{wrong}"
+        );
+        assert_eq!(errors["wrong"].len(), 6, "{:#?}", errors["wrong"]);
         let rows: Vec<(String, i64)> = conn
             .prepare("SELECT src, n FROM v_own_signal ORDER BY n")
             .unwrap()
@@ -3778,7 +3949,19 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(inputs, "v_add_mine");
+        assert_eq!(inputs, "v_add_mine,v_add_short");
+        // A WHERE on the union reaches each arm: plain columns, no wrapper.
+        let view_sql: String = conn
+            .query_row(
+                "SELECT sql FROM dataset WHERE view = 'v_own_signal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            !view_sql.contains("CAST(") && !view_sql.contains("+\""),
+            "{view_sql}"
+        );
         // A check (temp views) unions the same way.
         let checked = conn
             .unchecked_transaction()
@@ -3786,15 +3969,7 @@ mod tests {
                 let c = check_extensions(
                     &tx,
                     &[
-                        ext_in(
-                            "own",
-                            "own",
-                            vec![open(source(
-                                "signal",
-                                "SELECT 'own' AS src, 1 AS n",
-                                &["src", "n"],
-                            ))],
-                        ),
+                        ext_in("own", "own", vec![signal()]),
                         ext_in(
                             "add",
                             "add",
@@ -3817,6 +3992,21 @@ mod tests {
             .find(|v| v.name == "v_own_signal")
             .expect("checked");
         assert!(union.sql.contains("v_add_mine2"), "{}", union.sql);
+    }
+
+    /// An open dataset's declaration holds only for its own rows, so what
+    /// would check everyone's rows against it is refused: a key, tests, an
+    /// incremental watermark, typed fields, and adding to another list.
+    #[test]
+    fn an_open_dataset_declares_nothing_that_checks_other_rows() {
+        let mut conn = fresh();
+        let mut bad = source("list", "SELECT 1 AS n", &["n INTEGER"]);
+        bad.decl.open = true;
+        bad.decl.key = vec!["n".into()];
+        let errors = publish(&mut conn, &[ext_in("own", "own", vec![bad])]).unwrap();
+        let text = errors["own"].join("\n");
+        assert!(text.contains("takes no `key:`"), "{text}");
+        assert!(text.contains("fields are untyped"), "{text}");
     }
 
     /// A dataset is named by its extension's namespace, not its name:

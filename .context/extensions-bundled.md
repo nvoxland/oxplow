@@ -121,24 +121,32 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   sum: on a long session they are most of the prompt, and a sum with them
   hides where tokens really went. Fixtures: `dashboards-*`, `usage-*`.
 - **The change review** (`pages/change-review.yaml`, "Review", param
-  `change_id`). One page per analysed change: what it was asked to do
-  (a request's or turn's prompt, a commit's message), then **Look Here**,
-  one row per file with a `high` or `medium` signal, worst first, then by
-  `v_oxplow_change_interest`; each row expands to `change-review-file`
-  (its signals by line). **By Area** counts signals per `area`, and a
-  `sections` slot takes other extensions' sections.
+  `change_id`). One page per analysed change: **Asked**, what it was asked
+  to do (a request's or turn's prompt, a commit's message; first a line
+  when the analysis is still running or failed), then **Look Here**, one
+  row per file with a `high` or `medium` signal (a signal with no file is
+  a "The whole change" row), worst first, then by
+  `v_oxplow_change_interest`, at most five signals a row; each row expands
+  to `change-review-file` (all its signals: the whole file's first, then by
+  line). **By Area** counts signals per `area`, and a `sections` slot
+  (`oxplow/change-review.sections`) takes other extensions' sections.
   - The signals are the open dataset `review_signal`
     (`v_oxplow_review_signal`: `change_id, source, area, signal, severity,
     path, line, end_line, title, why, uri`). Any extension adds rows with a
     dataset that says `adds_to: oxplow/review_signal` (semantic-layer.md
     "Open datasets"). bundled's own sources: `review_signal_tests` (test
-    deleted, fewer assertions, skip added; `high`) and `review_signal_api`
-    (public signature changed, public function removed; `medium`).
-  - `severity`: `high` and `medium` show in Look Here; `info` only orders
-    files and counts in By Area.
-  - The brief (`parts/change-review-brief.yaml`) is one line at the start
-    of the Changes, commit and Uncommitted Changes pages' `sections`
-    slots: "**3 high** · 2 files to look at · Open Review".
+    file deleted; test deleted where the file now has fewer; fewer
+    assertions; skip added; all `high`, and read only in test files, since
+    the counts are text heuristics) and `review_signal_api` (public
+    signature changed, public function removed; `medium`).
+  - `severity`: `high` and `medium` put a file in Look Here; `info` is
+    counted in By Area and listed in the file's expansion.
+  - The brief (`parts/change-review-brief.yaml`) is one line under the first
+    section of the Changes page (`after: header`), the commit page (`after:
+    detail`) and Uncommitted Changes (`after: clean`): "**3 high** · 2
+    files to look at · Open Review".
+  - Page SQL binds `CAST(:change_id AS INTEGER)`: the union's columns are
+    untyped, and an MCP caller may pass the id as text.
   - Fixtures: `review-signals-*`, `the-review-page-*`. A commit's message
     in a fixture needs `observe: { commit: { sha, subject } }` (the
     indexer doesn't run there).

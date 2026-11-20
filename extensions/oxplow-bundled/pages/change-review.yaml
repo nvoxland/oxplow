@@ -14,41 +14,56 @@ loaders:
       -- turn's prompt, a commit's message.
       WITH f AS (
         SELECT count(*) AS n, coalesce(sum(additions), 0) AS a, coalesce(sum(deletions), 0) AS d
-        FROM v_change_file WHERE change_id = :change_id
+        FROM v_change_file WHERE change_id = CAST(:change_id AS INTEGER)
       )
       SELECT c.id AS change_id, c.kind, c.status,
-             CASE c.kind
+             -- Until the analysis is done, the lists below are not yet
+             -- complete: say so first.
+             CASE c.status WHEN 'done' THEN ''
+                           WHEN 'failed' THEN '_The analysis of this change failed, so the lists below are empty: ' || coalesce(c.error, 'unknown error') || '._' || char(10, 10)
+                           ELSE '_Analyzing this change: the lists below are not complete yet._' || char(10, 10) END
+             || coalesce(CASE c.kind
                WHEN 'request' THEN (SELECT r.prompt FROM v_request r WHERE r.id = CAST(c.target AS INTEGER))
                WHEN 'turn' THEN (SELECT t.prompt FROM v_agent_turn t WHERE t.id = CAST(c.target AS INTEGER))
                WHEN 'commit' THEN (SELECT m.subject || CASE WHEN m.body = '' THEN '' ELSE char(10, 10) || m.body END
                                    FROM v_commit m WHERE m.sha = c.target)
-               WHEN 'working' THEN 'Uncommitted changes.'
-             END AS asked,
+               WHEN 'working' THEN 'The uncommitted changes in the stream''s worktree. No request is attached to them.'
+             END, 'Nothing says what this change was for.') AS asked,
              CASE c.kind WHEN 'request' THEN 'A request' WHEN 'turn' THEN 'A turn' WHEN 'commit' THEN 'A commit'
                          WHEN 'working' THEN 'Uncommitted changes' ELSE 'A range' END AS what,
              printf('%d file%s · +%d −%d', f.n, CASE f.n WHEN 1 THEN '' ELSE 's' END, f.a, f.d) AS size,
              CASE c.status WHEN 'failed' THEN 'Failed: ' || coalesce(c.error, 'unknown error')
                            WHEN 'done' THEN 'Done' ELSE 'Analyzing…' END AS analysis,
              c.base_revision, c.head_revision
-      FROM v_change c, f WHERE c.id = :change_id
+      FROM v_change c, f WHERE c.id = CAST(:change_id AS INTEGER)
   look_here:
     sql: |
       -- One row per file with a `high` or `medium` signal: worst first,
-      -- then by the file's look-here-first score. `info` signals only order.
-      WITH s AS (SELECT * FROM v_oxplow_review_signal WHERE change_id = :change_id),
+      -- then by the file's look-here-first score. A signal about the whole
+      -- change (no file) is its own row. Five signals per file at most; the
+      -- row's expansion lists them all.
+      WITH s AS (
+        SELECT *, CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END AS rank,
+               row_number() OVER (PARTITION BY path
+                                  ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, line, title) AS nth
+        FROM v_oxplow_review_signal WHERE change_id = CAST(:change_id AS INTEGER)
+      ),
       f AS (
-        SELECT path,
-               min(CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END) AS rank,
+        SELECT path, min(rank) AS rank,
                json_group_array(json_object('text', title, 'hint', why))
-                 FILTER (WHERE severity IN ('high', 'medium')) AS signals
+                 FILTER (WHERE rank <= 2 AND nth <= 5) AS signals,
+               count(*) FILTER (WHERE rank <= 2) AS n
         FROM s GROUP BY path
       )
-      SELECT f.path,
+      SELECT f.path, coalesce(f.path, 'The whole change') AS file,
+             CASE WHEN f.n > 5
+                  THEN json_insert(f.signals, '$[#]', json_object('text', printf('%d more', f.n - 5), 'hint', 'Open the row for all of them.'))
+                  ELSE f.signals END AS signals_all,
              CASE f.rank WHEN 1 THEN 'high' ELSE 'medium' END AS severity,
              CASE f.rank WHEN 1 THEN 'danger' ELSE 'warning' END AS tone,
-             f.signals, c.id AS change_id, c.base_revision, c.head_revision
-      FROM f JOIN v_change c ON c.id = :change_id
-      LEFT JOIN v_oxplow_change_interest i ON i.change_id = c.id AND i.path = f.path
+             c.id AS change_id, c.base_revision, c.head_revision
+      FROM f JOIN v_change c ON c.id = CAST(:change_id AS INTEGER)
+      LEFT JOIN v_oxplow_change_interest i ON i.change_id = CAST(:change_id AS INTEGER) AND i.path = f.path
       WHERE f.rank <= 2
       ORDER BY f.rank, coalesce(i.interest, 0) DESC, f.path
   by_area:
@@ -57,7 +72,7 @@ loaders:
              count(*) FILTER (WHERE severity = 'high') AS high,
              count(*) FILTER (WHERE severity = 'medium') AS medium,
              count(*) FILTER (WHERE severity = 'info') AS info
-      FROM v_oxplow_review_signal WHERE change_id = :change_id
+      FROM v_oxplow_review_signal WHERE change_id = CAST(:change_id AS INTEGER)
       GROUP BY area
       ORDER BY CASE area WHEN 'tests' THEN 1 WHEN 'verification' THEN 2 WHEN 'dependencies' THEN 3
                          WHEN 'code' THEN 4 WHEN 'scope' THEN 5 WHEN 'history' THEN 6 ELSE 7 END, area
@@ -77,23 +92,22 @@ view:
     from: change
     viz: markdown
     markdown: { text: asked }
-    empty: Nothing says what this change was for.
   - id: look-here
     title: Look Here
-    description: The files with something worth a look, worst first. Open a row for each signal and its line.
+    description: The files with a high or medium signal, worst first, then by how much each changed. Open a row for each signal and its line.
     from: look_here
     viz: table
     columns:
-    - key: path
+    - key: file
       label: File
       link: { kind: diff-at, from: path, base: base_revision, head: head_revision }
       expand: change-review-file
     - { key: severity, label: Severity, format: badge, tone: tone }
-    - { key: signals, label: Why, format: items }
-    empty: Nothing stands out in this change.
+    - { key: signals_all, label: Why, format: items }
+    empty: No file has a high or medium signal.
   - id: by-area
     title: By Area
-    description: How many signals each area gave. `info` signals are context; they order the files above.
+    description: How many signals each area gave. `info` signals are context; they are listed under their file, not in Look Here.
     from: by_area
     viz: table
     columns:

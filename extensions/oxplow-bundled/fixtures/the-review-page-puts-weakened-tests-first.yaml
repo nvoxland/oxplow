@@ -22,7 +22,7 @@ steps:
             - { what: A commit, asked: Make grow add two numbers, analysis: Done }
         look_here:
           rows:
-            - { path: tests/it.rs, severity: high }
+            - { path: tests/it.rs, severity: high, signals_all: '[{"text":"Fewer assertions","hint":"This file has 3 → 1 assertions."},{"text":"Test skipped","hint":"This file has 0 → 1 skip marker."},{"text":"Test deleted: b","hint":"The file has 2 → 1 tests."}]' }
             - { path: src/lib.rs, severity: medium }
         by_area:
           rows:
@@ -34,3 +34,13 @@ steps:
         brief:
           rows:
             - { text: "**3 high** · 2 files to look at · [Open Review](oxplow:oxplow/page?change_id=1&page=change-review)" }
+  # A Look Here row opens its file's signals, worst first: the whole file's,
+  # then by line.
+  - when: { part: oxplow/change-review-file, params: { change_id: 1, path: tests/it.rs } }
+    expect:
+      loaders:
+        signals:
+          rows:
+            - { title: Fewer assertions, severity: high, line: null }
+            - { title: Test skipped, severity: high, line: null }
+            - { title: "Test deleted: b", severity: high, line: 8 }
