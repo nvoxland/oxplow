@@ -6,7 +6,7 @@
 //! and cleared it) leaves every unsaved row without its edges, and a
 //! writer's bug leaves drift. This restates every task (from the
 //! task interface, the same core its pump consumer runs),
-//! finding, thread-note and handoff slice from its row on boot, so the graph is its
+//! finding and thread-note slice from its row on boot, so the graph is its
 //! sources' again — which is why it stays: it is the graph's
 //! one repair path.
 //!
@@ -35,21 +35,18 @@
 //! Knowledge page bodies and recent commits are NOT re-projected here —
 //! the oxwiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
-//! kinds whose data lives entirely in SQLite (tasks, findings,
-//! handoffs).
+//! kinds whose data lives entirely in SQLite (findings).
 
 use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{body_edges, finding_edges};
-use oxplow_db::{SourceSlice, SqliteCodeQualityStore, SqliteHandoffStore, SqlitePageRefStore};
-use oxplow_domain::vocabulary::VocabularyHandle;
+use oxplow_db::page_ref_projections::finding_edges;
+use oxplow_db::{SourceSlice, SqliteCodeQualityStore, SqlitePageRefStore};
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
 /// trail makes the backfill observable.
 #[derive(Debug, Default)]
 pub struct BackfillCounts {
     pub findings: usize,
-    pub handoffs: usize,
 }
 
 /// Sources restated per transaction.
@@ -184,36 +181,15 @@ pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
 /// entirely in SQLite.
 pub struct Sources {
     pub findings: Arc<SqliteCodeQualityStore>,
-    pub handoffs: Arc<SqliteHandoffStore>,
 }
 
 /// Project every existing row into `page_ref`. Idempotent.
-pub async fn run(
-    vocabulary: VocabularyHandle,
-    page_refs: Arc<SqlitePageRefStore>,
-    sources: Sources,
-) -> BackfillCounts {
+pub async fn run(page_refs: Arc<SqlitePageRefStore>, sources: Sources) -> BackfillCounts {
     let Sources {
         findings: findings_store,
-        handoffs,
     } = sources;
     let mut counts = BackfillCounts::default();
-    let vocabulary = vocabulary.current();
-    let kinds = &vocabulary.resources;
-
-    // 2b. Handoffs — one source per row, parsed from its body, as a note.
-    if let Ok(rows) = handoffs.list_all_for_backfill().await {
-        let slices = rows
-            .into_iter()
-            .map(|(uri, body)| {
-                let edges = body_edges(kinds, &uri, &body);
-                slice(uri, None, edges)
-            })
-            .collect();
-        counts.handoffs = write_batched(&page_refs, "handoffs", slices).await;
-    }
-
-    // 3. Findings — one edge per row.
+    // Findings — one edge per row.
     if let Ok(rows) = findings_store.list_all_findings_for_backfill().await {
         let slices = rows
             .into_iter()
@@ -311,11 +287,9 @@ mod tests {
 
         let mut changes = db.subscribe_changes();
         let counts = run(
-            VocabularyHandle::core(),
             page_refs.clone(),
             Sources {
                 findings: findings_store,
-                handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
         )
         .await;
@@ -376,7 +350,6 @@ mod tests {
         let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
         let sources = || Sources {
             findings: findings_store.clone(),
-            handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
         };
         // One finding lost its edge: the repair restores it, and only it.
         db.transaction(|tx| {
@@ -388,7 +361,7 @@ mod tests {
         })
         .await
         .unwrap();
-        run(VocabularyHandle::core(), page_refs.clone(), sources()).await;
+        run(page_refs.clone(), sources()).await;
         assert_eq!(
             page_refs
                 .list_backlinks(&oxplow_domain::uri::build::file_uri("src/f7.rs"), None)
@@ -400,7 +373,7 @@ mod tests {
         );
 
         let mut changes = db.subscribe_changes();
-        let counts = run(VocabularyHandle::core(), page_refs.clone(), sources()).await;
+        let counts = run(page_refs.clone(), sources()).await;
         assert_eq!(counts.findings, 1500, "every finding is still checked");
         loop {
             match changes.try_recv() {

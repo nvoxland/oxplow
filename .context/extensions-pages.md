@@ -72,7 +72,7 @@ a typo is an error at the line):
   query take a subset: "Three kinds, by folder" above).
   A page's `description` says what the page is (what it shows, for
   what, over which scope and order), not what you can do on it. A page
-  whose purpose is an action (a form to file an item, or hand off work) may name that action; never list UI mechanics ("drag
+  whose purpose is an action (a form to file an item) may name that action; never list UI mechanics ("drag
   to reorder", "right-click for the rest") or the actions on offer.
 - **`loaders:`**: named loaders ("Loaders" below).
 - **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").
@@ -847,7 +847,7 @@ A page's `component` node and `viz: custom` run a web bundle from the
 extension's `custom_components`, sandboxed, fed the page's loaders. The
 reference is extensions-components.md "Custom components" below and `docs/guide/pages.md`. A page
 whose view is one `component` node fills the page under oxplow's bar
-(a custom page; bundled's Timeline is the example).
+(a custom page; bundled's Explore Data is the example).
 
 ### Agents
 

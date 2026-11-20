@@ -14,7 +14,6 @@ import { useContextMenu, useRowContextMenu, type MenuItems } from "./useRowConte
 import type { MenuItem } from "../menu.js";
 import { threadUri } from "../uri/uri.js";
 import { refCommandMenuItems, useRefOffers } from "./refCommands.js";
-import type { OpenHandoffs } from "../handoffs.js";
 import { Slideover } from "./Slideover.js";
 import { titleInitials } from "../initials.js";
 
@@ -28,8 +27,6 @@ interface NavigatorProps {
   /// while that thread's status is "awaiting". Absent for every other
   /// state. Keyed by thread id, parallel to agentStatuses.
   agentQuestions?: Record<string, string | undefined>;
-  /** Open handoffs to each thread, by thread id: a count on its row. */
-  openHandoffs?: Record<string, OpenHandoffs>;
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
   /** Whether it was made (a failure is the runner's: recorded, toasted). */
@@ -102,7 +99,6 @@ export function Navigator({
   streamStatuses,
   agentStatuses,
   agentQuestions,
-  openHandoffs,
   onSwitchStream,
   onSelectThread,
   onCreateThread,
@@ -495,7 +491,6 @@ export function Navigator({
                         selected={isSelected}
                         status={agentStatuses[thread.id]}
                         question={agentQuestions?.[thread.id]}
-                        handoffs={openHandoffs?.[thread.id]}
                         onClick={() => handleSelectThread(g.stream.id, thread.id)}
                         renaming={renaming?.kind === "thread" && renaming.id === thread.id}
                         onCommitRename={async (next) => {
@@ -722,7 +717,6 @@ function OverlayRow({
   selected,
   status,
   question,
-  handoffs,
   onClick,
   renaming = false,
   onCommitRename,
@@ -740,8 +734,6 @@ function OverlayRow({
   selected: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
-  /** Open handoffs to the thread. */
-  handoffs?: OpenHandoffs;
   onClick?(): void;
   renaming?: boolean;
   onCommitRename?(next: string): void | Promise<void>;
@@ -802,10 +794,9 @@ function OverlayRow({
                 onCancel={() => onCancelRename?.()}
               />
             ) : (
-              <>
-                <span
-                  style={{
-                    flex: 1,
+              <span
+                style={{
+                  flex: 1,
                   minWidth: 0,
                   fontSize: "var(--text-sm)",
                   fontWeight: isStream ? 700 : 400,
@@ -819,18 +810,8 @@ function OverlayRow({
                   whiteSpace: "nowrap",
                 }}
               >
-                  {label}
-                </span>
-                {handoffs ? (
-                  <span
-                    data-testid={testId ? `${testId}-handoffs` : undefined}
-                    title={`${handoffs.count} open handoff${handoffs.count === 1 ? "" : "s"}; the newest from ${handoffs.newestFrom}`}
-                    style={handoffBadgeStyle}
-                  >
-                    {handoffs.count}
-                  </span>
-                ) : null}
-              </>
+                {label}
+              </span>
             )
           }
         />
@@ -1333,19 +1314,4 @@ const OVERLAY_WIDTH = 240;
 const STREAM_PANEL_STYLE: CSSProperties = {
   marginBottom: 6,
   overflow: "hidden",
-};
-
-/** The count of a thread's open handoffs, after its title. */
-const handoffBadgeStyle: CSSProperties = {
-  flexShrink: 0,
-  marginLeft: 4,
-  marginRight: 6,
-  minWidth: 16,
-  padding: "0 4px",
-  borderRadius: 8,
-  fontSize: "var(--text-xs)",
-  lineHeight: "16px",
-  textAlign: "center",
-  color: "var(--text-on-accent)",
-  background: "var(--accent)",
 };

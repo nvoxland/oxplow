@@ -148,13 +148,12 @@ gates"). It is made visible, all of it bundled over existing datasets
   with the pair, `v_agent_nudge`) silences the other, so a long overlap
   alerts once.
 - The advisory **`shared-files-agent`** (turn end, to the agent, once per
-  thread): another thread's request also changed the files, with a
-  pointer to the handoffs to or
-  from that thread (`v_handoff`; `oxplow.handoff.send` hands the overlap over).
+  thread): another thread's request also changed the files; it says to
+  check what that thread is doing before duplicating its work.
 
-None refuses anything. Work handed from one thread to
-another is a handoff ([agent-model.md](./agent-model.md) "Handoffs and
-native messaging"): taking one moves its item.
+None refuses anything. Work moving from one thread to another uses each
+harness's own messaging ([agent-model.md](./agent-model.md) "Native
+messaging"); oxplow keeps no record of it.
 
 ## No gates
 

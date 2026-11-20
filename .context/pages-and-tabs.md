@@ -761,9 +761,8 @@ while the extensions load. The one built-in is `builtInPages.resource`
 (`pages/builtInPages.tsx`), the fallback renderer; it is a
 `(ctx) => CenterTab | null` over `{ ref, params, nav }`, `nav` the slot's
 `SlotNav` (`pages/slotNav.ts`). A page whose `view:` is one component node
-*is* that component (`ComponentPage`): oxplow's Timeline (the `timeline`
-page, params `from`, `to`, `thread`) is one — its window is its view
-params, written on every change (not its opening default) and followed on
+*is* that component (`ComponentPage`): a component may own its window
+as its view params, written on every change (not its opening default) and followed on
 Back/Forward; a frame's `setViewParams` reaches the tab as
 `patchViewParams` (null drops a key). Icons and labels: `kindForTabId`
 gives a route's page id (`tasks`, `gh/open-prs`) or a URI's resource as
@@ -893,8 +892,7 @@ margin; an embed or a slot takes its title from the page it shows):
 - **Component and terminal pages.** `terminal` (a `terminal` viz over
   `v_terminal`, the picked one the `terminal` selection, `new` / `rename`
   / `close` actions over `oxplow.terminal.*`; `terminal.md` "The terminal
-  viz and its host"). `timeline` (one `component` node; params `from`,
-  `to`, `thread`).
+  viz and its host").
 
 New Session (the `new-session` page) has two nodes, `start` and
 `earlier`, then a `sections` slot. **Start a new session** is a form over

@@ -935,7 +935,7 @@ mod tests {
         let t = fx.thread;
         fx.svc
             .db
-            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[], &[item]))
+            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[item]))
             .await
             .unwrap();
         assert!(items(&fx, Some("Auth")).await.is_empty());
@@ -969,7 +969,7 @@ mod tests {
         let t = fx.thread;
         fx.svc
             .db
-            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[], &[item]))
+            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[item]))
             .await
             .unwrap();
         let agent = |thread_id| Actor::Agent {

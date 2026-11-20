@@ -421,7 +421,7 @@ markdown itself, nor edits it in a `<textarea>`.
   element that took focus. One that did: the New Session form's first
   field (a select), mounting a moment after the launcher opened; the
   Enter that opens the typed page went to that select and nothing opened
-  (`timeline.spec.ts` on a slow machine, "New Session" left as the title).
+  (seen on a slow machine, "New Session" left as the title).
 - **"Save and Another"** for repetitive-entry flows (see the New
   Task form): a form page declares `again: { label, keep }`, a second
   button that files and restarts the form with the `keep` fields (state,
@@ -773,8 +773,7 @@ not a pick and isn't in the address.
   shows only the primary action and the `prominent` ones as buttons; the
   rest are items of its ☰ menu, so the bar stays short whatever a page and
   its extensions add. Mark an action prominent only when it is what a
-  person comes to the page to do (a list's New, a
-  timeline's Today/Fit). A button with an `icon` is the icon alone, its
+  person comes to the page to do (a list's New). A button with an `icon` is the icon alone, its
   label the hover; give a prominent action one when the icon says it
   plainly. Any other action's hover is only the page's `help:`, for a
   person, and only when the label doesn't say what it does — never the

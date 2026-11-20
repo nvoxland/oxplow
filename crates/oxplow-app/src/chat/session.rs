@@ -369,7 +369,7 @@ impl Actor {
 
     /// Context for an agent whose person prompts it in its own UI, through
     /// its history instead of a prompt: what a prompt would have carried
-    /// (the session context when it changed, handoffs, nudges, decisions).
+    /// (the session context when it changed, the context basket, nudges, decisions).
     /// Only while no turn runs: an item injected into one lengthens it.
     /// A turn ending or a compaction brings it due again, so a change
     /// reaches the agent before the person's next prompt.
@@ -610,13 +610,6 @@ impl Actor {
                         )
                         .await;
                 }
-            }
-            // A replayed history's plan was recorded when it was proposed.
-            Incoming::Plan(_) if self.replaying => {}
-            Incoming::Plan(text) => {
-                self.host
-                    .plan_proposed(self.thread(), &self.session_id, &text)
-                    .await
             }
             Incoming::Compacted if self.replaying => {}
             Incoming::Compacted => {

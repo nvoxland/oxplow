@@ -158,7 +158,7 @@ Every markdown surface: the `markdown` viz and markdown nodes of a
 page's view, and `oxplow-page` fenced blocks (an inline page, read-only,
 drawn live in the knowledge page body), foundation's `markdown` page (a `.md` file
 read as a document, View as → Markdown), the knowledge page body (the knowledge page's `markdown` viz), a task's body (the task page's `markdown` viz), a form's markdown field
-(`SchemaForm`: stream and thread prompts, a handoff's body). A
+(`SchemaForm`: stream and thread prompts). A
 dashboard's `TextTile` is plain text by its own decision (its file says
 why).
 

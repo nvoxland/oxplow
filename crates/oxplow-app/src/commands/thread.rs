@@ -141,16 +141,6 @@ fn record_thread(
     }
 }
 
-/// [`record_thread`] in the bus's transaction: the agent's thread must
-/// exist.
-pub(super) fn acting_thread(
-    ctx: &TxCtx<'_>,
-    named: Option<&str>,
-) -> Result<ThreadId, CommandError> {
-    let own = agent_scope(ctx)?.map(|(own, _)| Some(own));
-    record_thread(own, named)
-}
-
 /// [`record_thread`] for a command that runs outside the transaction.
 pub(crate) fn acting_thread_of(
     actor: &oxplow_domain::Actor,

@@ -1,17 +1,18 @@
 # Waiting on you raises its alert and counts in its panel's header while
-# anything waits on the person: here work handed to a thread with no agent.
+# anything waits on the person: here a question an agent asked.
 # (Tasks assigned to the person are the Assigned to you panel's, not counted
 # here.)
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude } }
 when: { page: oxplow/waiting-on-you }
 expect:
   loaders: { waiting_on_me: { rows: 0 } }
   alert: { firing: false }
 steps:
   - given:
-      - { command: oxplow.thread.create, input: { stream: str1, title: Docs } }
-      - { command: oxplow.handoff.send, input: { from_thread: thr1, to_thread: thr2, about: "oxplow:oxplow/thread?id=thr1", body: Check the release notes } }
+      - observe: { turn: { prompt: go, answer: "Pick A or B?" } }
   - expect:
-      loaders: { waiting_on_me: { rows: [{ what: Handed to a thread with no agent, title: Check the release notes }] } }
+      loaders: { waiting_on_me: { rows: [{ what: Waiting for your answer, title: "Pick A or B?" }] } }
       alert: { firing: true, message: "Waiting on you: 1" }
   - when: { part: oxplow/waiting-count }
     expect: { badge: 1 }

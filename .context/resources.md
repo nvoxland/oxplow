@@ -72,7 +72,7 @@ saying the id it names.
 
 | Field | Bare id |
 |---|---|
-| `thread`, `from_thread`, `to_thread`, `stream`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `trn4`, `req2`, `ses2`, `not3`, `hnd1`, `cmt5` |
+| `thread`, `from_thread`, `to_thread`, `stream`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `comment` | the prefixed id: `thr3`, `str1`, `trn4`, `req2`, `ses2`, `not3`, `cmt5` |
 | `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
@@ -287,7 +287,7 @@ graph writer and the link checker never drift. The desktop's
   ref_type)`; `PageRefEdge { source, target, … }`. Every end is an
   identity (no view); a file edge's version pin rides in its columns, not
   its URI. The writers are `page_ref_projections` (knowledge pages, notes,
-  handoffs, tasks' bodies, comments and links, findings, commits, and agent turns: a person's
+  tasks' bodies, comments and links, findings, commits, and agent turns: a person's
   prompt's references, `ref_type = prompt_mention`, written when the
   prompt is delivered) — each owns its source's slice.
 - **`comment`** (V99): `target_uri` (and `target_resource`), a
@@ -299,7 +299,7 @@ graph writer and the link checker never drift. The desktop's
   A hit is `{ resource, uri, stream_id, title, snippet, score }`.
 - **Everything else** stores the URI string where it stored the old ref:
   every dataset's `uri` column, `task.uri` / `parent_uri`, links,
-  handoffs, bookmarks, page
+  bookmarks, page
   visits, ui-preference scopes, fact subjects, event subjects and payload
   fields, command inverses and pending proposals.
 

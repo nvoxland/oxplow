@@ -42,22 +42,6 @@
     - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`: the session status that ranks first." }
     - { name: "detail", type: "", doc: "What that session waits on (the question, the permission asked), or why it stopped." }
     - { name: "since", type: "TEXT", doc: "When that session moved to it (RFC 3339)." }
-- name: agent_plan
-  version: 2
-  description: "Plans the agent put to the person, newest event last: Claude Code's `ExitPlanMode` (its plan and the file it saved it in) and Codex's `plan` item. opencode's `plan_exit` carries no text, so it records none. Whether the person accepted a plan is in no harness's hooks, so nothing here says. The row's event is `oxplow:oxplow/event?id=<event_id>`."
-  fields:
-    - { name: "event_id", type: "TEXT", doc: "The `agent.plan.proposed` event (v_event.id); read it with `oxplow_read event:<id>`." }
-    - { name: "seq", type: "INTEGER", doc: "The event's place in the log (v_event.seq): orders plans proposed in the same instant." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
-    - { name: "turn_id", type: "INTEGER", doc: "The turn it came in (v_agent_turn.id); NULL when none was open." }
-    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session (v_agent_session.id); NULL for a hook no session claims." }
-    - { name: "proposed_at", type: "TEXT", doc: "When it was proposed (RFC 3339)." }
-    - { name: "text", type: "TEXT", doc: "The plan, as the agent wrote it (the first 64 KiB)." }
-    - { name: "path", type: "TEXT", doc: "The file the harness saved it in (Claude's `planFilePath`); NULL when it says none." }
-  tests:
-    - { not_null: event_id }
-    - { unique: event_id }
-    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: agent_session_status
   version: 1
   description: "Each open agent session's status as last logged: `running`, `idle`, `awaiting_user`, `stopped`, `error`. A dead turn's `stalled` is derived live, never logged. v_agent_status rolls a thread's sessions up."
@@ -1050,18 +1034,6 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: search_handoff
-  version: 3
-  description: "What site search indexes for each handoff: the `handoff` kind's index is restated from these rows when they change."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "The handoff's canonical ref (`oxplow:oxplow/handoff?id=hnd<n>`): what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "Empty: a handoff has no title." }
-    - { name: "body", type: "TEXT", doc: "The handoff's markdown." }
-    - { name: "stream_id", type: "TEXT", doc: "Its recipient thread's stream (`str1`)." }
-    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only (when it was sent; a body is not edited)." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
 - name: usage_event
   version: 2
   description: "What the person used in oxplow, one row per use (a page opened, a command run) — the telemetry behind recent and most-used lists."
@@ -1683,8 +1655,8 @@
     - { not_null: key }
     - { unique: key }
 - name: page_ref
-  version: 5
-  description: "The cross-reference graph between pages and records: one row per edge `source → target`, each end a URI — a knowledge page naming a file, a commit touching a file or task, a handoff naming a task. Ask \"what points at X\" with `WHERE target_uri = uri('oxplow/file', 'path', 'src/app.rs')` and \"what does X point at\" with `WHERE source_uri = 'oxplow:oxplow/knowledge?id=intro&store=oxwiki'`. (v2: URIs and their resources in place of refs and kinds.)"
+  version: 6
+  description: "The cross-reference graph between pages and records: one row per edge `source → target`, each end a URI — a knowledge page naming a file, a commit touching a file or task, a turn naming what its prompt carried. Ask \"what points at X\" with `WHERE target_uri = uri('oxplow/file', 'path', 'src/app.rs')` and \"what does X point at\" with `WHERE source_uri = 'oxplow:oxplow/knowledge?id=intro&store=oxwiki'`. (v2: URIs and their resources in place of refs and kinds.)"
   fields:
     - { name: "source_uri", type: "TEXT", doc: "The page or record the edge starts at (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`, a commit's, a task's)." }
     - { name: "target_uri", type: "TEXT", doc: "What it points at (`oxplow:oxplow/file?path=src/app.rs`, a task's, a knowledge page's)." }
@@ -1895,33 +1867,6 @@
   tests:
     - { not_null: id }
     - { unique: id }
-- name: handoff
-  version: 4
-  description: "Work handed from one thread to another (`oxplow.handoff.send`; ref `oxplow:oxplow/handoff?id=hnd<n>`): who sent it, the thread it is for, what it is about, when the recipient's agent was given it, and how it ended. A record oxplow keeps, never a message it delivers: the recipient's agent is given it at its next prompt."
-  fields:
-    - { name: "id", type: "INTEGER", doc: "Handoff id (`hnd<n>`)." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/handoff?id=hnd<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it." }
-    - { name: "from_thread_id", type: "INTEGER", doc: "The thread that sent it." }
-    - { name: "from_thread_uri", type: "TEXT", doc: "That thread's URI (`oxplow:oxplow/thread?id=thr<n>`)." }
-    - { name: "from_session_id", type: "INTEGER", doc: "The agent session that sent it; NULL when a person or an effect did." }
-    - { name: "from_session_uri", type: "TEXT", doc: "That session's URI (`oxplow:oxplow/agent_session?id=ses<n>`)." }
-    - { name: "from_actor", type: "TEXT", doc: "Who sent it: `user`, `agent`, `effect`, `job` or `system` (the actor, never an input)." }
-    - { name: "to_thread_id", type: "INTEGER", doc: "The thread it is for (never a session: the thread outlives its processes)." }
-    - { name: "to_thread_uri", type: "TEXT", doc: "That thread's URI: where a handoff opens." }
-    - { name: "about", type: "TEXT", doc: "What it is about: the URI of a record of any resource (a task, a page), when it names one. What an extension does when the handoff is taken (oxplow-bundled moves a task onto the recipient thread) is its own." }
-    - { name: "body", type: "TEXT", doc: "Markdown body." }
-    - { name: "sent_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "delivered_at", type: "TEXT", doc: "When a prompt in the recipient thread carried it to its agent; NULL until then." }
-    - { name: "delivered_to_session_id", type: "INTEGER", doc: "The agent session that prompt was in." }
-    - { name: "state", type: "TEXT", doc: "`open`, `taken`, `declined` (by the recipient) or `withdrawn` (by the sender)." }
-    - { name: "settled_at", type: "TEXT", doc: "When it was taken, declined or withdrawn; NULL while open." }
-    - { name: "settled_by_session_id", type: "INTEGER", doc: "The agent session that settled it; NULL for a person." }
-    - { name: "note", type: "TEXT", doc: "What its settler said, when anything." }
-  tests:
-    - { not_null: id }
-    - { unique: id }
-    - { relationships: { column: from_thread_id, to: thread, field: id } }
-    - { relationships: { column: to_thread_id, to: thread, field: id } }
 - name: tool_call
   version: 7
   description: "Every tool call the agent made — reads, edits, commands — from its request to its finish: running, finished, denied by the policy, or abandoned when its turn ended with it open."

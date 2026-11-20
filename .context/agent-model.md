@@ -110,9 +110,8 @@ harness only delivers them.
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-knowledge`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' (one with `when:` only while its extension's setting holds it, `extensions-commands.md` "Skills") | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`, which reads the settings that offer skills) |
 | Slash commands | Core's (`configure`, `new-metric`, `note`: keep what was just worked out as a knowledge page) and the active extensions' | Same |
-| Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
+| Session context | Stream, worktree, branch, thread, the other live agents in the worktree | Prompt-time context |
 | Extension context | What an enabled extension says the agent should know now (`context:`), each as `<context from="<namespace>/<id>">`, once, then on change; 1,500 characters each, 3,000 in all | Prompt-time context (extensions-commands.md "Agent context") |
-| Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
 | Server instructions | What oxplow knows, writes are commands, answer with `oxplow_find_page` / `oxplow_show_page` | MCP `get_info` ("The agent's tools") |
 
@@ -981,7 +980,7 @@ developer-role message to the thread's history. Checked live on the
 
 The session actor (`chat/session.rs`, `inject_context`) therefore builds
 the context with `AgentContext::build_context` — the same "once, then on
-change" baselines, the `<handoffs>` block and nudges a prompt
+change" baselines and nudges a prompt
 carries — and injects it (`Connection::inject`), only when the connection
 says it can (`Connection::can_inject`: the thread runs no turn, read from
 `turn/started` / `turn/completed`; and the daemon knows the method, else
@@ -991,7 +990,7 @@ after a compaction (`ChatHost::compacted` resets the baselines; one inside
 a turn waits for that turn's end), and **on a change**: the
 `agent.context_changes` pump consumer (`context_watch.rs`) bumps
 `Services::context_changes` when the log records a fact the context
-reads — `handoff.sent` / `handoff.settled`, `agent.session.started` /
+reads — `agent.session.started` /
 `.ended` (who else is in the worktree) — and each session watching it
 builds again. A build that changes nothing is `None` (the baselines), so
 a no-op event injects nothing; a change during a turn waits for its end.
@@ -1009,7 +1008,7 @@ the named basket set to go next for it (**Send Next**,
 `oxplow.context.send_next`; one per thread, a basket next for one thread at
 a time; a basket set next but empty sends the thread's own instead). The
 next prompt of *any* agent in the thread carries it as a `<context-basket>`
-block after the handoffs (`agent_context::basket_block` over
+block after the session context (`agent_context::basket_block` over
 `context_store::waiting_for_thread_tx`), a named basket's items under a line
 `From your "<name>" basket:`, numbered. Each page is
 `[oxplow uri …]` with its label; each piece of text is quoted (up to
@@ -1087,21 +1086,18 @@ shows; the add then opens the tab it went to. The **Context** page (foundation p
 prompt, Baskets and In other baskets, with the same actions.
 
 **Building takes nothing; delivery commits.** `build_context` returns a
-`PendingContext` and changes no state: no baseline moves, no handoff or
-nudge is stamped. `AgentContext::commit` records the blocks as the
-session's baselines, stamps the handoffs it carried delivered (by id) and
-marks its nudges, and runs only once the agent has the text: the hook
+`PendingContext` and changes no state: no baseline moves, no nudge is stamped. `AgentContext::commit` records the blocks as the
+session's baselines and marks its nudges, and runs only once the agent has the text: the hook
 answer for Claude Code and opencode (`prompt_context` is build then
 commit, the answer counting as the success), `conn.prompt` for an ACP
 agent, the daemon's `{}` for an injection. A refused injection commits
-nothing, so a handoff stays undelivered and the next chance carries it
-whole.
+nothing, so the next chance carries it whole.
 
 Pinned by `context_is_injected_between_turns_never_during_one`,
 `a_refused_inject_loses_nothing` and
 `a_change_while_idle_is_injected_before_the_next_turn` (a scripted
 daemon), `a_context_that_was_not_delivered_takes_nothing` and
-`a_handoff_tells_the_context_watchers`, `a_recorded_inject_starts_no_turn_and_waits_for_none`
+`a_recorded_inject_starts_no_turn_and_waits_for_none`
 (`tests/fixtures/codex/inject.jsonl`, recorded on the live daemon),
 `nothing_is_injected_into_a_running_turn`, and the source guard
 `only_the_codex_connection_injects_context` (the drive guards stay:
@@ -1676,10 +1672,9 @@ it (`v_page_ref.target_uri`, `ref_type = 'prompt_mention'`); only a
 person's prompt is read. An `@path` is linked only when the file exists in
 the thread's worktree (`@types/node` is no file). What the prompt's
 **context** carried is linked too: the context basket's pages and sources
-and the handoffs delivered with it (`AgentContext::commit`,
-`context_store::take_delivered_tx`) are `prompt_mention` links from the
-turn that was open when the prompt was delivered (and a handoff records it,
-`handoff.delivered_turn_id`; a delivered context item is deleted).
+(`AgentContext::commit`, `context_store::take_delivered_tx`) are
+`prompt_mention` links from the turn that was open when the prompt was
+delivered (a delivered context item is deleted).
 
 **`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,
@@ -1823,7 +1818,6 @@ available from outside.
 | Waiting on a permission | `Notification` `permission_prompt` / `agent_needs_input`, and the `PermissionRequest` hook (observed, answered `Ack`) → AwaitingUser | `thread/status/changed` `activeFlags` `waitingOnApproval` → AwaitingUser, the request's command or reason as detail; cleared by the flags or `serverRequest/resolved` | the bridge forwards `permission.asked` (a `Notification`) and `permission.replied` |
 | Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | the `question` tool, posted as `AskUserQuestion` (its PreToolUse to its PostToolUse); a `?`-ending Stop |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
-| The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
 | Set at launch | `oxplow.agents.claude.model` → `--model`, `.effort` → `--effort` | `oxplow.agents.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `oxplow.agents.opencode.model` → `-m` (none when blank) |
 | Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` (`trigger` `manual` / `auto` from the preceding `compaction` part) |
@@ -1866,14 +1860,14 @@ available from outside.
   what a rewind leaves behind.
 - **Cost in dollars.** Never recorded ([metrics.md](./metrics.md)).
 
-### Handoffs and native messaging
+### Native messaging
 
-Work moving between threads is a **record oxplow keeps, never a message
-it delivers.** Without it the person carries a result from one terminal
-to another, or agents use their harness's own messaging, which oxplow
-doesn't see, which nobody acknowledges, and which wakes the recipient at
-the sender's choice. A handoff gives that move one durable, visible fact,
-and every transport stays native.
+Work moving between threads uses each harness's own messaging, which
+oxplow does not see, which nobody acknowledges, and which wakes the
+recipient at the sender's choice. Oxplow keeps no record of it and
+delivers no message of its own. Handoffs, a record oxplow kept for this
+move, were removed on 2026-11-20: they were used once, and the context
+basket (Send Next to a thread's next prompt) and tasks do the useful part.
 
 What the harnesses offer (Claude Code 2.1.301, Codex 0.163, opencode
 1.17.4; "wakes" is: starts a turn, so it spends that session's quota):
@@ -1892,91 +1886,14 @@ Every path that puts words in front of a model wakes it. The ones that
 don't are context channels, which wait for a turn someone else starts.
 None is cross-thread, visible to the person, and acknowledged.
 
-**The record** (`crates/oxplow-app/src/commands/handoff.rs`,
-`oxplow_db::handoff_store`, `v_handoff`, URI `handoff:hnd<n>`):
-
-- **From** a thread: an agent's own (naming another is refused), an
-  effect's event's, or the one a person names; the session and the actor
-  kind are the actor's, never an input. **To** an open thread, never a
-  session (the thread outlives its processes), any stream's: a handoff
-  is knowledge, not a write into that worktree. To the sender's own
-  thread is refused ("a note is for that"). An optional **about**: the URI of a record of any
-  resource, which its resource's own `resolve` dataset must hold (a resource
-  with none is taken as written); the prompt shows its title through that
-  dataset. And a Markdown **body**
-  whose `[[…]]` links are `page_ref` edges, checked like a note's
-  (`link_warnings`) and restated by the boot repair. Searchable
-  (`v_search_handoff`, under the recipient's stream).
-- **Commands**, all `Record` and open to every invoker (scope
-  `handoffs.write`): `oxplow.handoff.send { to_thread, body, about?,
-  from_thread? }` logs `handoff.sent@3` (v2 named `about` `task`; it upcasts), not undoable.
-  `oxplow.handoff.settle { handoff, state, note? }` is the record of how
-  it ended — `taken` / `declined` by the recipient thread, `withdrawn` by
-  the sender, each only while `open`, and `open` again by whoever settled
-  it — logging `handoff.settled@2`, undone by the state it replaced.
-  `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`
-  is how a recipient takes one: a native composite that checks the same
-  rule (`may_settle`) against the run's actor before it composes, then
-  composes the settle. What taking one does to what it is about is an
-  extension's: oxplow-bundled moves a task onto the recipient thread (it
-  reacts to `handoff.settled@2` and acts only when `about` is a task). A decline
-  undoes.
-- **Thread notes stay as they are.** They were the candidate carrier and
-  don't fit: a note belongs to its writer's thread, has no recipient,
-  state or delivery stamp, and the Explore hand-back relies on that.
-
-**When the recipient sees it.** Its agent: at the start of its next
-prompt. `AgentContext::build_context` reads the thread's open,
-undelivered handoffs (`SqliteHandoffStore::peek_for_prompt`) and
-`AgentContext::commit` stamps `delivered_at` and `delivered_to_session_id`
-(`mark_delivered`, by id) once the agent has them and puts them in a `<handoffs>` block after the session
-context: each one's URI, the sender's thread and session (or "the
-person"), when, its item's quoted title, the body up to
-`HANDOFF_BODY_IN_CONTEXT` characters with its URI for the rest, and how
-to resolve it. Never with a tool call: a handoff is a unit of work, not
-a nudge, and mustn't land in the middle of other work. The session
-context counts the thread's open ones (`- **Open handoffs to this
-thread:** N`, `agent_context::surroundings`), so a later session or a
-restart learns of them without the bodies again. Codex gets the whole
-block too, injected between turns. The take is two steps
-(`peek_for_prompt`, then `mark_delivered` by id once the agent has the
-text), so a delivery that fails stamps nothing.
-
-The person: at once, through oxplow-bundled's UI (with it off, the
-agent's `oxplow.handoff.send` still works and there is no menu entry):
-
-- **Hand Off Work…** is `oxplow.handoff.offer`'s `ui` (`about: thread`;
-  oxplow-bundled's command over the same operation as
-  `oxplow.handoff.send`), so it is on a thread's page and at the end of its Navigator menu. Its
-  form is the `hand-off` page (`viz: form`, `from_thread` fixed to the
-  thread), which picks the recipient and the item from lists (`choices`:
-  the `hand-off` page's `handoff_recipients` and `handoff_items` loaders) and takes the body
-  as Markdown.
-- The thread's Tasks page shows **Handoffs to This Thread** (Take,
-  Decline… with a note) and **Handoffs From This Thread** (Withdraw) in
-  its `thread.plan.header` strip, open ones first, settled ones for a
-  week.
-- The Navigator counts each thread's open inbound handoffs beside its
-  title (`useOpenHandoffs`), the newest sender in the tooltip.
-- foundation's Waiting on you lists an open handoff to a thread with
-  no agent session open there: the person's move. Agent status is not
-  touched; it stays derived from agent activity.
-
-foundation's fixture `taking-a-handoff-moves-its-task-to-the-receiving-thread`
-checks it: a handoff about a task is open with the task on the sender's
-thread; taken, the task is on the receiver's. bundled's fixture adds a
-handoff about something that is not a task, which taking changes nothing for.
-
 **Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
-a server prompt or `turn/start` for a handoff: those are Drive on an
-interactive surface ("Key invariant").
-`source_guards::a_handoff_reaches_an_agent_only_at_its_prompt` pins
-that `peek_for_prompt` has one caller and that no production code names
-`prompt_async`, Claude Code's channels, or its inbox socket (outside the
-harness that scrubs it from a child's environment). A restart loses
-nothing: the record and its stamps are in the database. Pinned by the
-`commands::handoff` tests and
-`a_handoff_reaches_the_recipients_next_prompt_once`.
+a server prompt or `turn/start` to deliver what it holds: those are Drive
+on an interactive surface ("Key invariant").
+`source_guards::nothing_wakes_an_agent_with_what_oxplow_delivers` pins
+that no production code names `prompt_async`, Claude Code's channels, or
+its inbox socket (outside the harness that scrubs it from a child's
+environment). What oxplow delivers reaches an agent only in the context
+of its next prompt, or injected between turns where the harness allows it.
 
 **How a Claude Code session is addressed** (checked 2026-10-16, Claude
 Code 2.1.301). `SendMessage { to }` takes the session's **name** as
@@ -2086,32 +2003,18 @@ equivalence between tools.
 | Duplicate ids | `a_conversation_bound_in_another_open_slot_is_found`, the refusals in `a_person_resumes_a_chosen_conversation` and `a_person_opens_a_session_on_a_chosen_conversation` |
 | Two-window tab context | `two_windows_each_report_their_own_page`, `tabs_are_listed_per_thread_with_selection_visibility_and_staleness` |
 | Stream / worktree assignment | `no_thread_edits_another_streams_worktree` (a thread never writes another stream's worktree, the primary checkout included), `an_agent_opens_in_its_own_stream_and_its_close_is_proposed` |
-| No terminal input from restore, metadata, tab discovery or handoff | `terminal_input_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
+| No terminal input from restore, metadata, tab discovery or delivery | `terminal_input_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
 
 Not yet covered: a recorded Claude hook carrying `session_title` (filed).
 
 ### Plans
 
-A plan the agent puts to the person is an `agent.plan.proposed` event
-(`{ thread, turn?, text, path? }`), anchored to the turn open
-when it came. The text sits in the payload, capped at 64 KiB, so a model
-reads it. Claude Code's `ExitPlanMode` PreToolUse is mapped by the
-harness (`claude_shaped_tool_use`: `ToolUse.plan` from `tool_input.plan`
-and `planFilePath`; core never names the tool); ingest logs the event
-beside the tool request, once per call id, and only for an allowed call.
-Codex has no tool call: the observer maps a completed `plan` item (its
-text is authoritative) to `Incoming::Plan`, which the chat host ingests as
-a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
-`plan_exit` carries no text, so it records none.
-
-`v_agent_plan` (thread, turn, session, `proposed_at`, `text`,
-`path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
-reads them; the bundled `thread-plan` (slot `thread.plan.header`) pages show a plan, newest
-first.
-
-**Whether the person accepted the plan is not recorded.** No hook or
-notification carries the dialog's answer; a later edit or a new prompt
-only suggests it.
+A plan the agent puts to the person is not recorded. Claude Code's
+`ExitPlanMode` is still a `Plan` tool call (`ToolKind::Plan`), so the
+thread waits on the person until it is answered ("Agent status"); its text
+is not kept. Plan capture (`agent.plan.proposed`, `v_agent_plan`, Codex's
+`plan` item as a `PlanProposed` hook) was removed on 2026-11-20 with the
+thread Plan part, its only reader; V52 deleted its events.
 
 ### Agent status
 

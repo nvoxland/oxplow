@@ -20,7 +20,6 @@ import {
   CheckSquare,
   FileText,
   Folder,
-  Forward,
   Gauge,
   GitCommit,
   GitCompare,
@@ -82,8 +81,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return Bot;
     case "thread":
       return MessagesSquare;
-    case "handoff":
-      return Forward;
 
     case "metric":
       return Gauge;

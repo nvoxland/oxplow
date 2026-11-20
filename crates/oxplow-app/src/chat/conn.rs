@@ -105,9 +105,6 @@ pub enum Incoming {
     /// (`None`). Observed only: whoever answers does it in the agent's own
     /// UI.
     Waiting(Option<String>),
-    /// The agent put a plan to the person (Codex's completed `plan` item).
-    /// Recorded; whether the person accepts it is not observable.
-    Plan(String),
     /// The agent summarized its context to make room (Codex's
     /// `contextCompaction` item). Observed only.
     Compacted,

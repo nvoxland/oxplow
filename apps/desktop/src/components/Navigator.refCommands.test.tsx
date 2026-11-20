@@ -5,16 +5,16 @@ import type { Stream, Thread, ThreadState } from "../api.js";
 import { personSpec, recordRefOffers } from "./refCommandsTestSupport.js";
 
 // A thread row's menu ends with the commands about its thread
-// (usability.md "Menus a page or row gets from extensions"): Hand Off
-// Work… among them, bound to that thread.
+// (usability.md "Menus a page or row gets from extensions"): an example
+// command among them, bound to that thread.
 
 const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
-  refCommands: async (ref: string) => (ref.startsWith("oxplow:oxplow/thread") ? ["oxplow.handoff.send"] : []),
+  refCommands: async (ref: string) => (ref.startsWith("oxplow:oxplow/thread") ? ["oxplow.thread.example"] : []),
   listPersonCommands: async () => [
-    personSpec("oxplow.handoff.send", {
-      label: "Hand Off Work…",
+    personSpec("oxplow.thread.example", {
+      label: "Example Command…",
       group: "Threads",
       about: "oxplow/thread",
       input: { from_thread: "{{uri}}" },
@@ -71,16 +71,16 @@ test("a thread's menu offers the commands about that thread", async () => {
     await waitFor(() => getByTestId("menu-item-ref-commands-Threads")),
   );
   const item = await waitFor(() =>
-    getByTestId("menu-item-ref-command-oxplow.handoff.send"),
+    getByTestId("menu-item-ref-command-oxplow.thread.example"),
   );
-  expect(item.textContent).toContain("Hand Off Work…");
+  expect(item.textContent).toContain("Example Command…");
   expect(
     queryByTestId("menu-item-ref-command-tracker.item.estimate"),
   ).toBeNull();
   fireEvent.click(item);
   await waitFor(() =>
     expect(ran).toEqual([
-      ["oxplow.handoff.send", { from_thread: "oxplow:oxplow/thread?id=thr2" }],
+      ["oxplow.thread.example", { from_thread: "oxplow:oxplow/thread?id=thr2" }],
     ]),
   );
 });

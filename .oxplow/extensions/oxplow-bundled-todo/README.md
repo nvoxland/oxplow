@@ -14,15 +14,13 @@ extension" has the rules for a move.
   Change Analysis (`change-review`), Tests Weakened, and Usually Changes
   With (`file-co-change`, on a diff's file header).
 - **Pages**: Agent Interface and Command Errors, Extension runs and
-  Extension Run Detail, Job Runs and Job Run Output, Merge Readiness,
-  Remote Branches and Hand Off Work.
-- **Custom components**: Explore Data, Timeline and the history graph
+  Extension Run Detail, Job Runs and Job Run Output, Merge Readiness
+  and Remote Branches.
+- **Custom components**: Explore Data and the history graph
   (replaces Git History's plain list at `vcs.history.graph`).
-- **Thread parts** with no mount: Plan, Handoffs to and from this thread.
 - **Advisories**: `hint-never-fires`, and `shared-files` /
   `shared-files-agent` (two threads changed the same file recently).
-- **Commands**: `oxplow.advisory_policy.read` / `.write`, and
-  `oxplow.handoff.offer` (the Hand Off Work… menu entry).
+- **Commands**: `oxplow.advisory_policy.read` / `.write`.
 
 `desktop-tests/` and `e2e-specs/` are the old frontend and browser tests of
 these pages. They are reference for a move, not specs to restore.

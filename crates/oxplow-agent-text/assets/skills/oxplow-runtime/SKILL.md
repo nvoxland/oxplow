@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: How oxplow tracks your work on its own (turns and requests), handoffs between threads, and the command bus. Loads on the oxplow `run_command` tool with oxplow.handoff.*, and on v_request, v_agent_turn or v_handoff.
+description: How oxplow tracks your work on its own (turns and requests), the context basket, and the command bus. Loads on the oxplow `run_command` tool, and on v_request or v_agent_turn.
 ---
 
 # Your work in oxplow
@@ -35,11 +35,6 @@ finish.
   t.stream_id`); they are already in your system prompt.
 - **Waiting on the person.** When you need their answer, end your reply
   with the question: oxplow shows your thread as waiting on them.
-- **Handoffs.** Work another thread hands you arrives at the start of a
-  prompt in a `<handoffs>` block. Take it on or decline it with
-  `oxplow.handoff.resolve`; to hand work to another thread, see
-  `references/commands.md`. A handoff may be `about` any record (a task, a
-  page), by its URI. Nothing wakes the other agent.
 - **Context basket.** A `<context-basket>` block is what the person
   collected for you; read each `[oxplow uri …]` with `oxplow_read`. Sent
   by mistake? The context `put_back { thread }` command returns it.
@@ -56,7 +51,7 @@ Inline code is for identifiers and snippets.
 # Commands (the one write path)
 
 State changes are **commands**. `list_commands` lists what you may run (ids
-and summaries); `list_commands { id }` (or `{ prefix: "oxplow.handoff." }`)
+and summaries); `list_commands { id }` (or `{ prefix: "oxplow.thread." }`)
 shows a command's input schema and an example input: read it before a
 command's first run and copy the example's shape. `run_command { id, input }`
 runs one. Every run is validated, policy-checked and audited; undoable runs

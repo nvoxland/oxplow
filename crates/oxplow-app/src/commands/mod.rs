@@ -31,7 +31,6 @@ pub mod extension_jobs;
 pub mod extension_services;
 pub mod extension_state;
 pub mod file;
-pub mod handoff;
 pub mod hint;
 pub mod lsp;
 pub mod metric;

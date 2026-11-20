@@ -363,7 +363,7 @@ describe("change links", () => {
 test("page links name any ref, which opens where its kind's page says", () => {
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/task?id=tsk3&provider=oxtask"], ["p"])).toBe("oxplow:oxplow/task?id=tsk3&provider=oxtask");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/page?page=git-dashboard"], ["p"])).toBe("oxplow:oxplow/page?page=git-dashboard");
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/handoff?id=hnd1"], ["p"])).toBe("oxplow:oxplow/handoff?id=hnd1");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/thread?id=thr1"], ["p"])).toBe("oxplow:oxplow/thread?id=thr1");
 });
 
 const result = (columns: string[], rows: (string | number | null)[][]) => ({

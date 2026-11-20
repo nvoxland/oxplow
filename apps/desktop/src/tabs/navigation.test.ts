@@ -48,10 +48,10 @@ test("what can't be reached is refused", async () => {
   await expect(planNavigation({ uri: "oxplow:oxplow/knowledge?id=x&store=oxwiki" }, states, null)).rejects.toThrow(/no stream/);
 });
 
-// Where a ref opens is the opener's: a handoff opens its thread, whatever
+// Where a ref opens is the opener's: a task opens its thread, whatever
 // the opener reads to say so.
 test("a ref goes where the opener says", async () => {
-  const note = await planNavigation({ uri: "oxplow:oxplow/handoff?id=hnd3" }, states, "str1", async () => ({ thread: "thr5" }));
+  const note = await planNavigation({ uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask" }, states, "str1", async () => ({ thread: "thr5" }));
   expect(note).toMatchObject({ streamId: "str2", threadId: "thr5", selectThread: true, page: null });
   const page = await planNavigation({ uri: "oxplow:oxplow/proposal?id=4" }, states, "str1", async () => ({ tab: knowledgePageRef("oxwiki", "overview") }));
   expect(page.page?.id).toBe("oxplow:oxplow/knowledge?id=overview&store=oxwiki");

@@ -41,7 +41,7 @@ pub trait ChatHost: Send + Sync + 'static {
     /// as sent.
     async fn context_delivered(&self, context: PendingContext);
     /// A signal that bumps whenever what [`Self::prompt_context`] would
-    /// say may have changed (a handoff to the thread, an agent arriving in
+    /// say may have changed (an item in the thread's basket, an agent arriving in
     /// its worktree, a recorded decision); `None` for a host that has no
     /// such events.
     fn context_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
@@ -98,8 +98,6 @@ pub trait ChatHost: Send + Sync + 'static {
         kind: Option<&str>,
         spawned_in: Option<&str>,
     );
-    /// The agent put a plan to the person. Recorded; nothing waits on it.
-    async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str);
     /// The agent went away mid-session.
     async fn interrupted(&self, thread: &ThreadId);
     /// The agent did something (stall-watch liveness).
@@ -395,27 +393,6 @@ impl ChatHost for ServicesChatHost {
             kind: kind.map(str::to_string),
         });
         env.harness_turn = spawned_in.map(str::to_string);
-        self.ingest(&svc, env).await;
-    }
-
-    async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str) {
-        let Some(svc) = self.svc.upgrade() else {
-            return;
-        };
-        let mut env = self.envelope(
-            HookKind::PlanProposed,
-            thread,
-            session_id,
-            serde_json::json!({}),
-            None,
-        );
-        env.tool = Some(oxplow_domain::agent::tool::ToolUse {
-            plan: Some(oxplow_domain::agent::tool::Plan {
-                text: text.to_string(),
-                path: None,
-            }),
-            ..Default::default()
-        });
         self.ingest(&svc, env).await;
     }
 

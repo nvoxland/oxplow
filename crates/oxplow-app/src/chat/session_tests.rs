@@ -129,9 +129,6 @@ impl ChatHost for Host {
         };
         self.log.lock().push(format!("subagent {what} {id}"));
     }
-    async fn plan_proposed(&self, _t: &ThreadId, _s: &str, text: &str) {
-        self.log.lock().push(format!("plan {text}"));
-    }
     async fn compacted(&self, _t: &ThreadId, _s: &str) {
         self.log.lock().push("compacted".into());
     }
@@ -1576,7 +1573,7 @@ mod codex {
     async fn a_refused_inject_loses_nothing() {
         let (mut rig, fake) = open_codex_failing(
             Host {
-                context: Some("<handoffs>x</handoffs>".into()),
+                context: Some("<context-basket>x</context-basket>".into()),
                 ..Host::default()
             },
             "thread/start",
@@ -1601,7 +1598,7 @@ mod codex {
             rig.host
                 .log()
                 .iter()
-                .filter(|l| *l == "delivered <handoffs>x</handoffs>")
+                .filter(|l| *l == "delivered <context-basket>x</context-basket>")
                 .count(),
             1
         );
@@ -1614,7 +1611,7 @@ mod codex {
         let (changes, _) = tokio::sync::watch::channel(0u64);
         let (rig, fake) = open_codex(
             Host {
-                context: Some("<handoffs>y</handoffs>".into()),
+                context: Some("<context-basket>y</context-basket>".into()),
                 changes: Some(changes.clone()),
                 ..Host::default()
             },
@@ -1836,23 +1833,6 @@ mod codex {
             .received()
             .iter()
             .any(|v| v.get("id") == Some(&json!(41)) && v.get("method").is_none()));
-    }
-
-    /// A plan the agent completes in the TUI reaches the host once, whole.
-    #[tokio::test]
-    async fn a_plan_item_in_the_tui_is_handed_to_the_host() {
-        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
-        fake.push(note(
-            "item/completed",
-            json!({"turnId": "u1", "item": {"type": "plan", "id": "p1", "text": "1. a\n2. b"}}),
-        ));
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !rig.host.log().iter().any(|l| l == "plan 1. a\n2. b") {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("the plan reaches the host");
     }
 
     /// Nothing here prompts the thread, and the TUI answers its own

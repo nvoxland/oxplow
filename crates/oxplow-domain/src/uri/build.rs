@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use crate::ids::{AgentSessionId, AgentTurnId, HandoffId, RequestId, StreamId, ThreadId};
+use crate::ids::{AgentSessionId, AgentTurnId, RequestId, StreamId, ThreadId};
 use crate::uri::oxplow_uri::{OxplowUri, ResourceName};
 use crate::uri::resources as r;
 
@@ -378,11 +378,6 @@ pub fn config_uri(key: &str) -> String {
 /// A code-quality finding.
 pub fn finding_uri(id: &str) -> String {
     keyed(r::FINDING, id)
-}
-
-/// Work handed from one thread to another (`handoff.id`).
-pub fn handoff_uri(id: HandoffId) -> String {
-    keyed(r::HANDOFF, &id.to_string())
 }
 
 /// An agent slot on a thread (`agent_session.id`).

@@ -24,11 +24,8 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
   the frame by a `ui:` fixture. What the library doesn't give it: icons (a
   card has no state glyph; its column says the state) and the host's own
   context menu (it draws `.ox-menu`).
-- **Timeline: oxplow-bundled's other built component** (`pages/timeline.yaml`,
-  source `src/timeline/`, built with `vis-timeline` by bundled's
-  `package.json`). The page is the worked example of a component that owns
-  its window through `from` / `to` view params. Foundation's only custom
-  component is the hand-written `integrations`.
+- **Foundation's only custom component** is the hand-written
+  `integrations`.
 - **Explore Data: oxplow-bundled's data app.** Deliberately simple,
   and the proof that an extension ships a data app: a **page with a
   component node** (`pages/explore-data.yaml`: `view: { component: { id:

@@ -7079,7 +7079,7 @@ commands:
                 .filter(|c| c.ui.is_some())
                 .filter(|c| {
                     let scope = scope_of(c);
-                    ["tasks.", "knowledge.", "handoffs."]
+                    ["tasks.", "knowledge."]
                         .iter()
                         .any(|s| scope.starts_with(s))
                 })

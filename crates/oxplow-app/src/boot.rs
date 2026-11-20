@@ -443,23 +443,21 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Page-ref graph repair: re-project every existing task,
-    // finding and handoff into `page_ref` — only when a migration or a
+    // Page-ref graph repair: re-project every existing finding into
+    // `page_ref` — only when a migration or a
     // new build may have left it drifted (`page_ref_backfill::needs_repair`).
     {
         let db = state.db.clone();
-        let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
         let sources = crate::page_ref_backfill::Sources {
             findings: state.code_quality_store.clone(),
-            handoffs: state.handoff_store.clone(),
         };
         tokio::spawn(async move {
             if !crate::page_ref_backfill::needs_repair(&db).await {
                 return;
             }
             let started = std::time::Instant::now();
-            let counts = crate::page_ref_backfill::run(vocabulary, page_refs, sources).await;
+            let counts = crate::page_ref_backfill::run(page_refs, sources).await;
             crate::page_ref_backfill::record_repair(&db, started.elapsed().as_millis() as i64)
                 .await;
             tracing::info!(?counts, "page-ref backfill done");

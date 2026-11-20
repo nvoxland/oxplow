@@ -4,12 +4,12 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the request review (Change Analysis, Tests Weakened, co-change), the agent-interface, extension-run, job-run, merge and branch pages, Explore Data, Timeline, the history graph and the shared-files advisories.
+description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the request review (Change Analysis, Tests Weakened, co-change), the agent-interface, extension-run, job-run, merge and branch pages, Explore Data, the history graph and the shared-files advisories.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
 permissions: [sql.read, files.read, ai.compute, agent.write]
-# Its Explore Data and Timeline components are TypeScript (src/), built into
+# Its Explore Data component is TypeScript (src/), built into
 # dist/ when oxplow is built and on every deploy; dist/ and node_modules/
 # aren't committed.
 build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
@@ -59,9 +59,6 @@ intent:
     - name: the-change-review-grid-reads-an-analyzed-commit
       input: { part: change-review, params: { change_id: 1 } }
       expect: the summary, the changed functions and the test files of an analyzed commit
-    - name: the-plan-pages-show-the-proposed-plans
-      input: { part: thread-plan, params: { thread_id: 1 } }
-      expect: the plans an agent proposed, newest first, under a thread
     - name: the-slot-page-links-the-mounted-page-and-its-host
       input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0" } }
       expect: the page a slot mount shows, the page that hosts it and the slot
@@ -90,9 +87,6 @@ custom_components:
   # the result under it with its own components (`showView`: an inline page).
   # Built from src/ into dist/ (bun build, no dependencies).
   - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
-  # Requests, sessions, threads and commits on a zoomable time axis
-  # (vis-timeline, which the kit has no viz for).
-  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Requests, sessions, threads and commits on a zoomable time axis." }
   - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
 advisories:
   # A hint that ran a hundred times and never once spoke is dead weight, or
@@ -180,9 +174,7 @@ advisories:
       )
       SELECT 'Another thread’s request (“' || (SELECT title FROM v_thread WHERE id = other)
              || '”) also changed ' || group_concat(path, ', ')
-             || '. Read the handoffs to or from that thread (v_handoff, thread_id = ' || other
-             || ') before duplicating its work. '
-             || 'oxplow.handoff.send hands the overlap over; the task you are on stays with this thread until a handoff of it is taken.' AS message
+             || '. Check what that thread is doing before duplicating its work.' AS message
       FROM (SELECT other, path FROM shared ORDER BY path)
       GROUP BY other
 configuration:
@@ -208,12 +200,3 @@ commands:
     scope: extension_config.write
     op: compare_exchange
     example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"sharedFiles": {"windowMinutes": 30}}}, "personal": null}
-  # The person's menu entry for foundation's handoff command.
-  # Foundation keeps the command (an agent runs it); this adds the
-  # label, shortcut and form a person uses.
-  - name: handoff.offer
-    summary: "The person's menu entry for `oxplow.handoff.send`: Hand Off Work… on a thread opens the hand-off form."
-    scope: handoffs.write
-    op: send
-    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
-    example: {"to_thread": "thr4", "task": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "body": "The parser fix is in; the remaining failure is the timezone case."}

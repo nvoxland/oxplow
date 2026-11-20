@@ -466,8 +466,7 @@ The shape of the task side; `.context/tasks.md` is the map.
   `thread.closed@1 { thread }`, archiving a stream logs `stream.archived@1
   { stream, threads }` (core namespace `stream`, kept without expiry).
   Bundled releases what they were working on by reacting to them; core's
-  commands name no task. A taken handoff's `about` is read from `v_handoff`
-  by the `handoff.settled` event's `handoff`.
+  commands name no task.
 - **The read contract is bundled's dataset `task` (`v_oxplow_task`)**,
   over `task_record` joined with oxplow's fields and the store's stages.
   Its links are `v_oxplow_task_link` (the edges `task_record_link:<type>`),
@@ -519,15 +518,13 @@ The shape of the task side; `.context/tasks.md` is the map.
   goes to the end of the thread's queue; a close clears the assignee and
   the rank. The `task_record` model's `title` is markdown like `body`, so
   a title naming a file or a task keeps its edge.
-- **Release.** Three bundled effects, on `thread.closed`,
-  `stream.archived` and `handoff.settled` (`state: taken`): a closed
+- **Release.** Two bundled effects, on `thread.closed` and
+  `stream.archived`: a closed
   thread's, or each archived thread's, open tasks (not done or canceled)
   go to the end of nobody's queue in the order the thread held them,
   assignee cleared and a place set (`oxplow.model.set_fields` once per
   task, because `oxplow.tasks.assign`'s script runs once for all the steps
-  and would give every release the same place); a taken handoff's open task
-  that isn't already the recipient's goes to the end of the recipient's
-  queue (`oxplow.tasks.assign`).
+  and would give every release the same place).
 - **Datasets that read both.** `thread_tasks` and `deviation` read the
   model `request_task` (`thread` and `request` are URIs, so they join
   `ref('thread')` / `ref('request')` on `uri`) and `task`.

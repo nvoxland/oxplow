@@ -41,7 +41,6 @@ pub mod extension_store;
 mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
-pub mod handoff_store;
 pub mod model_store;
 pub mod op_error_store;
 pub mod page_ref_projections;
@@ -104,7 +103,6 @@ pub use fact_store::{
     NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
-pub use handoff_store::SqliteHandoffStore;
 pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};

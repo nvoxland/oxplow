@@ -31,13 +31,12 @@ pub enum EntityKind {
     PageVisit,
     UsageEvent,
     AgentSession,
-    Handoff,
     Terminal,
 }
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 10] = [
+    pub const ALL: [EntityKind; 9] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Note,
@@ -46,7 +45,6 @@ impl EntityKind {
         EntityKind::PageVisit,
         EntityKind::UsageEvent,
         EntityKind::AgentSession,
-        EntityKind::Handoff,
         EntityKind::Terminal,
     ];
 
@@ -61,7 +59,6 @@ impl EntityKind {
             EntityKind::PageVisit => "pgv",
             EntityKind::UsageEvent => "usg",
             EntityKind::AgentSession => "ses",
-            EntityKind::Handoff => "hnd",
             EntityKind::Terminal => "trm",
         }
     }
@@ -78,7 +75,6 @@ impl EntityKind {
             EntityKind::PageVisit => "page-visit id (pgv…)",
             EntityKind::UsageEvent => "usage-event id (usg…)",
             EntityKind::AgentSession => "agent-session id (ses…)",
-            EntityKind::Handoff => "handoff id (hnd…)",
             EntityKind::Terminal => "terminal id (trm…)",
         }
     }
@@ -289,7 +285,6 @@ id_type!(RequestId, Request);
 id_type!(PageVisitId, PageVisit);
 id_type!(UsageEventId, UsageEvent);
 id_type!(AgentSessionId, AgentSession);
-id_type!(HandoffId, Handoff);
 id_type!(TerminalId, Terminal);
 
 #[cfg(test)]

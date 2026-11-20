@@ -501,33 +501,6 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   ).toBe("thread");
 });
 
-// --- Open handoffs: a count on the thread's row ---------------------------
-
-test("a thread's row counts its open handoffs, naming the newest sender", () => {
-  const { getByTestId, queryByTestId } = render(
-    <Navigator
-      streams={[STREAM]}
-      currentStreamId="str1"
-      threadStates={THREAD_STATES}
-      streamStatuses={{}}
-      agentStatuses={{}}
-      openHandoffs={{ thr2: { count: 2, newestFrom: "Writer" } }}
-      enabledAgents={["claude"]}
-      onSwitchStream={NOOP_ASYNC}
-      onSelectThread={NOOP_ASYNC}
-      onCreateThread={async () => true}
-      vcsEnabled
-    />,
-  );
-  openOverlay(getByTestId);
-  const badge = getByTestId("navigator-thread-row-thr2-handoffs");
-  expect(badge.textContent).toBe("2");
-  expect(badge.getAttribute("title")).toBe(
-    "2 open handoffs; the newest from Writer",
-  );
-  expect(queryByTestId("navigator-thread-row-thr1-handoffs")).toBeNull();
-});
-
 // The panel draws what the strip draws, then the same thing again for the
 // title: the abbreviation's tab, the gap, the title's tab, the gap, the guide.
 test("the panel keeps the strip's tab, gap and bar, and repeats them after the title", () => {

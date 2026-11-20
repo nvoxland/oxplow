@@ -3,8 +3,7 @@
 - oxplow records your turns from what it observes: there's nothing to
   report about them. Whether you track your work as tasks is the task
   tracker's business: when one is active, its skill says how, and you
-  follow it. For handoffs and the command bus, read the `oxplow-runtime`
-  skill.
+  follow it. For the command bus, read the `oxplow-runtime` skill.
 - The project keeps knowledge pages — durable understanding, in one or
   more stores (oxwiki is oxplow's own). Find them with `v_oxplow_knowledge_page`
   or `oxplow_search`, read one with `oxplow_read`, keep one with

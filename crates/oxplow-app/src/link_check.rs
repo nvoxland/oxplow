@@ -1,6 +1,6 @@
 //! Wikilink validity checker.
 //!
-//! Given a body (knowledge page, task summary/description, handoff),
+//! Given a body (knowledge page, task summary/description),
 //! flags every `[[…]]` wikilink whose target is invalid — either an
 //! **unrecognized ref shape** (e.g. `[[#13]]`, the GitHub form) or a
 //! **recognized ref whose object doesn't exist** (`[[]]`,

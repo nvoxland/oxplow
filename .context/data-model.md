@@ -576,8 +576,7 @@ Thread notes (`thread_note`,
 the per-thread capture pad of `oxplow.knowledge.add_note`) are gone: V112
 dropped the table with its `page_ref` edges and search rows, and with the
 commands, `v_thread_note`, `v_search_thread_note` and the `oxplow/thread_note`
-resource. What an agent leaves for the next one is a request's record or
-a handoff.
+resource. What an agent leaves for the next one is a request's record.
 
 ### Old UI units, answers and database dashboards (gone, V113)
 
@@ -593,20 +592,15 @@ visits, remembered preferences, context items, page-ref edges and search
 rows. Site search indexes pages instead (`v_search_page`, the launcher's
 pages; pages with no category are left out).
 
-### `handoff` (`handoff_store.rs`, V84)
+### Handoffs (gone, V51)
 
-Work handed from one thread to another (`oxplow.handoff.*`,
-[agent-model.md](./agent-model.md) "Handoffs and native messaging"):
-`from_thread_id`, `from_session_id` (NULL for a person or an effect),
-`from_actor` (CHECK `user` / `agent` / `effect` / `job` / `system`),
-`to_thread_id` (CHECK it isn't the sender's), `about` (a URI; V37 renamed it from `task`),
-`body`, `sent_at`, `delivered_at` + `delivered_to_session_id` (stamped by
-`SqliteHandoffStore::mark_delivered` once the agent has the prompt or
-injected context that carries it), `state` (CHECK `open` / `taken` / `declined` /
-`withdrawn`), `settled_at`, `settled_by_session_id`, `note`. Sessions
-are `ON DELETE SET NULL`, threads `CASCADE`. Its ref is `handoff:hnd<n>`;
-its body's `[[…]]` links are `page_ref` edges from `handoff`, restated
-by the boot repair like a note's. Read as `v_handoff`.
+Work handed from one thread to another (the `handoff` table,
+`oxplow.handoff.*`) was removed on 2026-11-20: the context basket and tasks
+do the useful part, and handoffs were used once. V51 dropped the table
+with its `page_ref` edges, its `oxplow/handoff` search rows, its
+`handoff.sent` and `handoff.settled` events and the `oxplow.handoff.*`
+audit rows. `v_handoff` and `v_search_handoff` went with it, and so did
+the `hnd` id kind.
 
 ### `terminal` (`terminal_store.rs`, V106)
 
@@ -818,7 +812,7 @@ table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_t
 the row change; **background jobs** (V7, `agent_job`) are written beside
 them by the hook ingest ([agent-model.md](./agent-model.md) "Background
 jobs");
-`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V13 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does. `handoff` has `delivered_turn_id` (V14), the turn a delivery landed in (a context item, once delivered, is deleted; V47).
+`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V13 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does.
 
 **Turns record the model and reasoning effort they ran on (V82).** Nullable TEXT
 `agent_turn.model` and `agent_turn.effort`, set by `close_turn_tx` from
@@ -828,12 +822,9 @@ whose harness said nothing (opencode when the bridge can't read its last
 message), has NULLs. The `AgentTurn` struct doesn't carry them: SQL reads
 them.
 
-**Plans an agent proposed are events, not a table.** `agent.plan.proposed@2`
-(`thread`, `turn?`, `text`, `path?`), logged by hook ingest when Claude's
-`ExitPlanMode` is requested or Codex completes a `plan` item, anchored to
-the turn; `v_agent_plan` (a model over `event_log`, no
-table, no migration) reads it. Whether the person accepted the plan is not
-recorded. See `agent-model.md` "Plans".
+**Plans an agent proposed are not recorded (V52).** V52 deleted the
+`agent.plan.proposed` events; `v_agent_plan`, which read them, is gone.
+See `agent-model.md` "Plans".
 **Turns record how full the context was (V83).** Nullable INTEGER
 `agent_turn.context_tokens` and `agent_turn.context_window`, set by
 `close_turn_tx` from `TurnEnd.context_tokens` / `context_window` (the same

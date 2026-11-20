@@ -1,9 +1,8 @@
 //! Telling a session that what its agent would be told may have changed.
 //!
 //! A harness with no prompt hook (Codex) is given its context by
-//! injection, between turns. The context changes while no turn runs — a
-//! handoff sent to the thread, another agent arriving in its worktree, a
-//! decision recorded, something put in a context basket or a basket set to go next — and the agent should have it before the person's
+//! injection, between turns. The context changes while no turn runs —
+//! another agent arriving in its worktree, a decision recorded, something put in a context basket or a basket set to go next — and the agent should have it before the person's
 //! next prompt, not after that turn ends. While an enabled extension
 //! declares an agent context (`context:`), whose query may read anything,
 //! every command counts as such a change. This pump consumer bumps
@@ -28,16 +27,12 @@ const CHANGING_COMMANDS: &[&str] = &[
     crate::commands::context_basket::PUT_BACK,
 ];
 
-/// The event types whose facts the context reads: the handoffs and their
-/// count and the agents open in a worktree.
+/// The event types whose facts the context reads: the agents open in a
+/// worktree, and the commands that change a basket.
 pub fn changes_context(event_type: &str) -> bool {
     matches!(
         event_type,
-        "handoff.sent"
-            | "handoff.settled"
-            | "agent.session.started"
-            | "agent.session.ended"
-            | "command.executed"
+        "agent.session.started" | "agent.session.ended" | "command.executed"
     )
 }
 

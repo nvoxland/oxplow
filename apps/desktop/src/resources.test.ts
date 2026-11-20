@@ -121,15 +121,15 @@ describe("an extension's ref kind (P8.D7)", () => {
 test("a core resource's row reads as one", () => {
   const kinds = resourcesFromResult({
     columns: ["resource", "extension", "label", "params", "additional", "resolve", "title", "searchable", "icon", "wikilink"],
-    rows: [["oxplow/handoff", "oxplow", "Handoff", '{"id":{"required":true,"pattern":"^hnd\\\\d+$"}}', 0, "v_handoff", null, null, null, null]],
+    rows: [["oxplow/thread", "oxplow", "Thread", '{"id":{"required":true,"pattern":"^thr\\\\d+$"}}', 0, "v_thread", null, null, null, null]],
     truncated: false,
     reads: { datasets: [], tables: [] },
   } as never);
   expect(kinds[0]).toMatchObject({
-    resource: "oxplow/handoff",
+    resource: "oxplow/thread",
     extension: "oxplow",
-    label: "Handoff",
-    params: { id: { required: true, pattern: "^hnd\\d+$" } },
+    label: "Thread",
+    params: { id: { required: true, pattern: "^thr\\d+$" } },
     additional: false,
     icon: null,
     wikilink: null,

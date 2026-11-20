@@ -66,8 +66,7 @@ is the store's (oxtask's `oxtask.tasks.set_workflow`), not bundled's.
 ## Reactions (events, not core code)
 
 - `thread.closed` and `stream.archived` release the work of the thread or
-  stream's threads; a taken handoff (`handoff.settled`) about a task (`v_handoff.about`) moves that task to
-  the recipient; starting a task (the first move to `in_progress` by an
+  stream's threads; starting a task (the first move to `in_progress` by an
   agent) assigns it to the agent's thread. These are bundled effects over
   the model.
 - **Request links** (`request_link`, the model `request_task`): what a
@@ -76,8 +75,8 @@ is the store's (oxtask's `oxtask.tasks.set_workflow`), not bundled's.
   `oxplow.task_record.changed`, `agent.prompt.submitted` and
   `agent.turn.ended` write it.
 - A core command that names a task checks it through the task resource's
-  `resolve:` view (`ref_resolver::resolve_view`): `oxplow.handoff.send`'s
-  `task`, link checks, the agent context. No task resource, nothing is
+  `resolve:` view (`ref_resolver::resolve_view`): link checks, the agent
+  context. No task resource, nothing is
   known.
 
 ## Recognizers (loose ids)

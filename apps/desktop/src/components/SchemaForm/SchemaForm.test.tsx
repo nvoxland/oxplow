@@ -162,7 +162,7 @@ test("a server error for a field that isn't shown appears once above the submit 
   expect((getByTestId("f-submit") as HTMLButtonElement).disabled).toBe(false);
 });
 
-const handoff = {
+const sendForm = {
   type: "object",
   required: ["to_thread", "body"],
   properties: {
@@ -175,7 +175,7 @@ test("a markdown field is the Markdown editor: Enter adds a line, Cmd/Ctrl+Enter
   const submitted: unknown[] = [];
   const { getByTestId } = render(
     <SchemaForm
-      schema={handoff}
+      schema={sendForm}
       initial={{ to_thread: "oxplow:oxplow/thread?id=thr2" }}
       onSubmit={(v) => submitted.push(v)}
       testIdPrefix="f"
@@ -198,7 +198,7 @@ test("a field with choices is a select of their labels, under their groups", () 
   const submitted: unknown[] = [];
   const { getByTestId } = render(
     <SchemaForm
-      schema={handoff}
+      schema={sendForm}
       initial={{ body: "yours" }}
       choices={{
         to_thread: [

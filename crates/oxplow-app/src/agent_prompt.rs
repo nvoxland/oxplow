@@ -38,13 +38,10 @@ pub struct OtherAgent {
 /// and thread the agent works in, and the other live agents sharing that
 /// worktree (`others`; the line is left out when there are none).
 /// What the session context says about the agent's surroundings: the
-/// other live agents in its worktree, and the open handoffs to its thread
-/// (a later session learns of them by their count; the first prompt that
-/// takes one carries its body).
+/// other live agents in its worktree.
 #[derive(Debug, Clone, Default)]
 pub struct Surroundings {
     pub others: Vec<OtherAgent>,
-    pub open_handoffs: usize,
 }
 
 pub fn build_session_context_block(
@@ -79,12 +76,6 @@ pub fn build_session_context_block(
         s.push_str(&format!(
             "- **Also in this worktree:** {}\n",
             named.join("; ")
-        ));
-    }
-    if around.open_handoffs > 0 {
-        s.push_str(&format!(
-            "- **Open handoffs to this thread:** {} (`v_handoff`)\n",
-            around.open_handoffs
         ));
     }
     s.push_str("</session-context>");
@@ -366,7 +357,6 @@ mod tests {
                 other("Login fix", "codex", 2, "thread 2"),
                 other("claude 2026-10-16", "claude", 1, "explore"),
             ],
-            open_handoffs: 0,
         };
         let block = build_session_context_block(&stream(), Some(&thread()), &around);
         assert!(

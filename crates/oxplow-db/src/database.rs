@@ -2360,6 +2360,81 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
     }
 
+    /// V52 drops the recorded plans' events and keeps the rest.
+    #[test]
+    fn v52_drops_the_plan_events() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(51))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+               VALUES ('e1', 'agent.plan.proposed', 2, 'a', 's', '[]', '{}'),
+                      ('e2', 'config.changed', 2, 'a', 's', '[]', '{}');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let types: Vec<String> = conn
+            .prepare("SELECT type FROM event_log")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(types, ["config.changed"]);
+    }
+
+    /// V51 drops the handoff table and what named a handoff: its refs, its
+    /// search entries, its events and the `oxplow.handoff.*` audit rows.
+    #[test]
+    fn v51_drops_handoffs_and_what_named_them() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(50))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO handoff (id, from_thread_id, from_actor, to_thread_id, body, sent_at)
+               VALUES (1, 1, 'agent', 2, 'do it', 'a');
+             INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
+               VALUES ('oxplow:oxplow/turn?id=trn1', 'oxplow:oxplow/handoff?id=hnd1', 'oxplow/turn', 'oxplow/handoff', 'prompt_mention'),
+                      ('oxplow:oxplow/turn?id=trn1', 'oxplow:oxplow/file?path=a.rs', 'oxplow/turn', 'oxplow/file', 'prompt_mention');
+             INSERT INTO search_entry (rowid, kind, uri, stream_id) VALUES
+               (1, 'oxplow/handoff', 'oxplow:oxplow/handoff?id=hnd1', '1'),
+               (2, 'oxplow/thread', 'oxplow:oxplow/thread?id=thr1', '1');
+             INSERT INTO search_fts (rowid, title, body) VALUES (1, 'h', 'do it'), (2, 't', 'thread');
+             INSERT INTO event_log (id, type, v, at, source, subject, payload)
+               VALUES ('e1', 'handoff.sent', 3, 'a', 's', '[]', '{}'),
+                      ('e2', 'handoff.settled', 2, 'a', 's', '[]', '{}'),
+                      ('e3', 'config.changed', 2, 'a', 's', '[]', '{}');
+             INSERT INTO command_audit (id, at, command, actor_kind, input_json, outcome)
+               VALUES (1, 'a', 'oxplow.handoff.send', 'agent', '{}', 'ok'),
+                      (2, 'a', 'oxplow.context.add', 'human', '{}', 'ok');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'handoff'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM page_ref WHERE target_resource = 'oxplow/handoff'"),
+            0
+        );
+        assert_eq!(count("SELECT count(*) FROM page_ref"), 1);
+        assert_eq!(count("SELECT count(*) FROM search_entry"), 1);
+        assert_eq!(count("SELECT count(*) FROM search_fts"), 1);
+        assert_eq!(
+            count("SELECT count(*) FROM event_log WHERE type LIKE 'handoff.%'"),
+            0
+        );
+        assert_eq!(count("SELECT count(*) FROM event_log"), 1);
+        assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
+    }
+
     /// V47 moves the waiting context items into `context_item`, each with
     /// its thread's stream; the delivered ones go with the old table.
     #[test]

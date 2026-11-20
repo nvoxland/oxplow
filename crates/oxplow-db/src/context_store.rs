@@ -517,11 +517,10 @@ pub fn waiting_for_thread_tx(
     .map_err(map_sql_err)
 }
 
-/// A prompt to `thread` carried `items` and the handoffs `handoffs`: record
-/// the turn they landed in — the thread's open turn (of `session` when
-/// known), which the prompt opened or went into — on the handoffs, link
-/// that turn to what it was given (`prompt_mention`: each item's page or
-/// source, each handoff), keep a copy of them as the thread's last send
+/// A prompt to `thread` carried `items`: link the turn they landed in —
+/// the thread's open turn (of `session` when known), which the prompt
+/// opened or went into — to what it was given (`prompt_mention`: each
+/// item's page or source), keep a copy of them as the thread's last send
 /// (its earlier one replaced; [`put_back_tx`]), then delete the items; a
 /// named basket they came from stops being next, so the thread sends its own
 /// again. With no turn open nothing is linked; the items still go.
@@ -529,10 +528,9 @@ pub fn take_delivered_tx(
     conn: &Connection,
     thread: ThreadId,
     session: Option<i64>,
-    handoffs: &[oxplow_domain::HandoffId],
     items: &[i64],
 ) -> Result<(), DomainError> {
-    use oxplow_domain::uri::build::{handoff_uri, turn_uri};
+    use oxplow_domain::uri::build::turn_uri;
     let turn: Option<i64> = conn
         .query_row(
             "SELECT id FROM agent_turn
@@ -563,14 +561,6 @@ pub fn take_delivered_tx(
                 ),
             )
         };
-        for id in handoffs {
-            conn.execute(
-                "UPDATE handoff SET delivered_turn_id = ?2 WHERE id = ?1 AND delivered_turn_id IS NULL",
-                params![id.value(), turn],
-            )
-            .map_err(map_sql_err)?;
-            mention(handoff_uri(*id))?;
-        }
         for item in &taken {
             if let Some(uri) = &item.source_uri {
                 mention(uri.clone())?;
@@ -985,8 +975,7 @@ mod tests {
             .is_none());
     }
 
-    /// Delivery records the turn on the handoffs, links the turn to what it
-    /// was given, deletes the items and sends the thread's own again; an item
+    /// Delivery links the turn to what it was given, deletes the items and sends the thread's own again; an item
     /// added after the build stays, and with no turn open the items still go.
     #[tokio::test]
     async fn delivery_links_the_turn_deletes_the_items_and_resets_what_goes_next() {
@@ -1004,8 +993,7 @@ mod tests {
                 .map_err(map_sql_err)?;
                 // Added after the prompt was built: not in what it carried.
                 let later = add_tx(tx, Basket::Thread(thread), &page("oxplow:oxplow/commit?sha=later"))?;
-                let handoff = oxplow_domain::HandoffId::new(7);
-                take_delivered_tx(tx, thread, None, &[handoff], &[own, sent])?;
+                take_delivered_tx(tx, thread, None, &[own, sent])?;
                 Ok((basket, own, sent, later))
             })
             .await
@@ -1029,7 +1017,6 @@ mod tests {
             [
                 "oxplow:oxplow/commit?sha=abc1234".to_string(),
                 "oxplow:oxplow/commit?sha=def5678".to_string(),
-                oxplow_domain::uri::build::handoff_uri(oxplow_domain::HandoffId::new(7)),
             ]
         );
         assert_eq!(next_for, None, "Send Next lasts one send");
@@ -1043,7 +1030,7 @@ mod tests {
             .transaction(move |tx| {
                 tx.execute("UPDATE agent_turn SET ended_at = 'b'", [])
                     .map_err(map_sql_err)?;
-                take_delivered_tx(tx, thread, None, &[], &[later])?;
+                take_delivered_tx(tx, thread, None, &[later])?;
                 Ok(later)
             })
             .await
@@ -1071,7 +1058,7 @@ mod tests {
                     },
                 )?;
                 set_next_tx(tx, thread, Some(basket))?;
-                take_delivered_tx(tx, thread, None, &[], &[first])?;
+                take_delivered_tx(tx, thread, None, &[first])?;
                 Ok((basket, first))
             })
             .await
@@ -1134,8 +1121,8 @@ mod tests {
                 Basket::Thread(thread),
                 &page("oxplow:oxplow/commit?sha=c"),
             )?;
-            take_delivered_tx(tx, thread, None, &[], &[own])?;
-            take_delivered_tx(tx, thread, None, &[], &[mine])
+            take_delivered_tx(tx, thread, None, &[own])?;
+            take_delivered_tx(tx, thread, None, &[mine])
         })
         .await
         .unwrap();

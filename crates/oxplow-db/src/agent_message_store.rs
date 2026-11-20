@@ -2,7 +2,7 @@
 //! when the sending call is requested and matched to the turn that receives
 //! them. The harness gives no message id, so the match is oxplow's: the
 //! same text, sent recently, by exactly one call. See
-//! `.context/agent-model.md` "Handoffs and native messaging".
+//! `.context/agent-model.md` "Native messaging".
 
 use rusqlite::{params, Connection};
 

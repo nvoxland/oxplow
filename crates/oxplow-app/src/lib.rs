@@ -115,8 +115,6 @@ pub mod page_ref_backfill;
 pub mod pages;
 pub mod param_pattern;
 pub(crate) mod pin_drift;
-#[cfg(test)]
-mod plan_tests;
 pub mod post_tool_reactors;
 pub mod providers;
 #[cfg(test)]
@@ -488,8 +486,6 @@ pub struct Services {
     pub thread_store: Arc<SqliteThreadStore>,
     /// A thread's agent sessions (`agent_session`).
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
-    /// Work handed between threads (`.context/agent-model.md` "Handoffs").
-    pub handoff_store: Arc<oxplow_db::SqliteHandoffStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
     /// append inside their own transaction via `event_log_store::append_tx`;
     /// this handle is for reads and the pump.
@@ -943,7 +939,6 @@ impl Services {
             db.clone(),
             vocabulary.clone(),
         ));
-        let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation =
             Arc::new(extension::extension_activation::ExtensionActivation::new());
@@ -1448,12 +1443,6 @@ impl Services {
             terminal_sessions.clone(),
             session_auth.clone(),
         );
-        let link_deps = link_check::LinkDeps {
-            project_dir: layout.project_dir.clone(),
-            vcs: vcs.clone(),
-            db: db.clone(),
-            vocabulary: vocabulary.clone(),
-        };
         for command in commands::thread::ops(session_processes.clone())
             .into_iter()
             .chain(commands::agent_session::ops(
@@ -1471,7 +1460,6 @@ impl Services {
             ))
             .chain(commands::ui::ops())
             .chain(commands::op_error::ops())
-            .chain(commands::handoff::ops(link_deps.clone()))
             .chain(commands::stream::ops(commands::stream::StreamDeps {
                 streams: streams.clone(),
                 snapshot_captures: snapshot_captures.clone(),
@@ -1757,7 +1745,6 @@ impl Services {
             stream_store,
             thread_store,
             agent_session_store,
-            handoff_store,
             event_log_store,
             sql,
             dataset_watermarks,
@@ -2317,8 +2304,6 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
-                // Taking a handoff moves its task, then settles it.
-                "oxplow.handoff.resolve",
                 // Bundled's assignment and queue order: oxplow's fields on
                 // a task, through `oxplow.model.set_fields`.
                 "oxplow.tasks.assign",

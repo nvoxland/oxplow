@@ -971,8 +971,7 @@ pub(crate) async fn run_script(
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, HandoffSettled,
-        HandoffSettledV2,
+        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, UiOpFailed, UiOpFailedV2,
     };
     use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Envelope;
@@ -981,9 +980,9 @@ mod tests {
 
     const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\npermissions: [sql.read, commands:oxplow.thread.*, commands:oxplow.effect.retry_all, commands:oxplow.probe.*]\neffects:\n";
 
-    /// Marks the sending thread's title once a handoff is taken.
-    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a taken handoff's sender.\n    on: [handoff.settled]\n    where: { state: taken }\n    needs: [sql.read]\n    entry: mark.star\n";
-    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"from_thread\"]}})\n    uri = x[\"event\"][\"payload\"][\"from_thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
+    /// Marks the thread's title once an operation labelled `taken` fails on it.
+    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark the thread.\n    on: [ui.op_failed]\n    where: { label: taken }\n    needs: [sql.read]\n    entry: mark.star\n";
+    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"thread\"]}})\n    uri = x[\"event\"][\"payload\"][\"thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
     /// Write extension `acme` into the project and publish the generation
     /// that carries it.
@@ -1011,21 +1010,27 @@ mod tests {
         svc.event_log_store.get(id).await.unwrap().unwrap()
     }
 
-    /// A handoff from the fixture's thread settling into `state`, anchored
-    /// to that thread as the command that makes it would: an effect reacting
+    /// An operation failing on the fixture's thread, labelled `state` (what
+    /// the effects filter on), anchored to that thread: an effect reacting
     /// runs for that thread.
     fn settled(fx: &crate::test_fixtures::ThreadFixture, state: &str) -> Envelope {
         settled_by(fx, state, "human")
     }
 
     fn settled_by(fx: &crate::test_fixtures::ThreadFixture, state: &str, source: &str) -> Envelope {
-        let mut env = Envelope::typed::<HandoffSettled>(
+        let mut env = Envelope::typed::<UiOpFailed>(
             source,
-            &HandoffSettledV2 {
-                handoff: "hnd1".into(),
-                state: state.into(),
-                from_thread: fx.thread.to_string(),
-                to_thread: "thr2".into(),
+            &UiOpFailedV2 {
+                label: state.into(),
+                command: None,
+                message: None,
+                exit_code: None,
+                thread: Some(fx.thread.to_string()),
+                signal: None,
+                duration_ms: None,
+                output: None,
+                audit_id: None,
+                proposal: None,
             },
         );
         env.anchors.thread_id = Some(fx.thread);
@@ -1055,7 +1060,7 @@ mod tests {
         let skip = "def transform(x):\n    return {\"skip\": \"noted\"}\n";
         let effect = |id: &str, after: &str| {
             format!(
-                "  - id: {id}\n    summary: s\n    on: [handoff.settled]\n    entry: skip.star\n    after: [{after}]\n"
+                "  - id: {id}\n    summary: s\n    on: [ui.op_failed]\n    entry: skip.star\n    after: [{after}]\n"
             )
         };
         extension(
@@ -1095,13 +1100,13 @@ mod tests {
         let svc = &fx.svc;
         extension(
             svc,
-            "  - id: react\n    summary: s\n    on: [handoff.settled]\n    entry: skip.star\n    after: [refs.drift]\n",
+            "  - id: react\n    summary: s\n    on: [ui.op_failed]\n    entry: skip.star\n    after: [refs.drift]\n",
             &[("skip.star", "def transform(x):\n    return {\"skip\": \"x\"}\n")],
         )
         .await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         assert_eq!(
-            consumer.after_for("handoff.settled"),
+            consumer.after_for("ui.op_failed"),
             vec!["refs.drift".to_string()]
         );
         assert!(consumer.after_for("snapshot.taken").is_empty());
@@ -1119,7 +1124,7 @@ mod tests {
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let ev = log(svc, settled(&fx, "taken")).await;
-        assert!(consumer.handles("handoff.settled"));
+        assert!(consumer.handles("ui.op_failed"));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
@@ -1155,8 +1160,8 @@ mod tests {
     async fn an_effect_reads_the_events_own_row() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
-        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [handoff.settled]\n    where: { state: taken }\n    needs: [sql.read]\n    entry: stamp.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"from_thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
+        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [ui.op_failed]\n    where: { label: taken }\n    needs: [sql.read]\n    entry: stamp.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(svc, stamp, &[("stamp.star", script)]).await;
         start(svc).await;
         let ev = log(svc, settled(&fx, "taken")).await;
@@ -1164,7 +1169,7 @@ mod tests {
             .handle(&ev)
             .await
             .unwrap();
-        assert_eq!(title(&fx).await, format!("handoff.settled #{}", ev.seq));
+        assert_eq!(title(&fx).await, format!("ui.op_failed #{}", ev.seq));
         // The script ran before its reaction; the reaction's run records
         // what the script called.
         let audit = svc.commands.audit_store().list_recent(1).await.unwrap();
@@ -1185,7 +1190,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            format!("{reaction:?}").contains(&format!("handoff.settled #{}", ev.seq)),
+            format!("{reaction:?}").contains(&format!("ui.op_failed #{}", ev.seq)),
             "{reaction:?}"
         );
     }
@@ -1232,7 +1237,7 @@ mod tests {
         let svc = &fx.svc;
         extension(
             svc,
-            &MARK_DONE.replace("{ to: done }", "{ state: [taken, withdrawn] }"),
+            &MARK_DONE.replace("{ to: done }", "{ label: [taken, withdrawn] }"),
             &[("mark.star", MARK)],
         )
         .await;
@@ -1357,7 +1362,7 @@ mod tests {
 
     /// A reaction of two steps: the item marked inside oxplow, then a
     /// write outside it (`oxplow.probe.write`).
-    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"from_thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
+    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
 
     /// `oxplow.probe.write`: a write outside oxplow that keeps each idempotency
     /// key it is sent, and fails while `fail` is set.
@@ -1740,8 +1745,8 @@ mod tests {
     async fn the_loop_guard_holds() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
-        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [handoff.settled]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"from_thread\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": x[\"event\"][\"payload\"][\"from_thread\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [ui.op_failed]\n    needs: [sql.read]\n    entry: bang.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"thread\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": x[\"event\"][\"payload\"][\"thread\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
@@ -2148,7 +2153,7 @@ mod tests {
         let thread = fx.thread.to_string();
         extension(
             &fx.svc,
-            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [handoff.settled]\n    entry: note.star\n",
+            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [ui.op_failed]\n    entry: note.star\n",
             &[(
                 "note.star",
                 &format!(
@@ -2310,8 +2315,8 @@ mod tests {
         use crate::commands::effect::BACKFILL_PLAN;
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
-        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [handoff.settled]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"from_thread\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": x[\"event\"][\"payload\"][\"from_thread\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [ui.op_failed]\n    needs: [sql.read]\n    entry: bang.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"thread\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": x[\"event\"][\"payload\"][\"thread\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         register(svc);
         // A person's event, and one the effect's own run made (its source).

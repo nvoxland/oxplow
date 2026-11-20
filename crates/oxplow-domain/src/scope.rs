@@ -279,13 +279,6 @@ pub const SCOPES: &[Scope] = &[
                   extension's `files:` declares with write access.",
     },
     Scope {
-        id: "handoffs.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Hand work from one thread to another, and settle a handoff: take, decline or withdraw it.",
-    },
-    Scope {
         id: "hints.write",
         access: Access::Record,
         host: Host::Daemon,

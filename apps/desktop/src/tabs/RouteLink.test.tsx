@@ -40,16 +40,16 @@ test("a link to a ref string opens through openRef, and Cmd-click asks for a new
   };
   const { getByTestId } = render(
     <PageNavigationContext.Provider value={nav}>
-      <RouteLink to="oxplow:oxplow/handoff?id=hnd1" testId="ref-link">
-        A handoff
+      <RouteLink to="oxplow:oxplow/thread?id=thr1" testId="ref-link">
+        A thread
       </RouteLink>
     </PageNavigationContext.Provider>,
   );
   fireEvent.click(getByTestId("ref-link"));
   fireEvent.click(getByTestId("ref-link"), { metaKey: true });
   expect(opened).toEqual([
-    ["oxplow:oxplow/handoff?id=hnd1", false],
-    ["oxplow:oxplow/handoff?id=hnd1", true],
+    ["oxplow:oxplow/thread?id=thr1", false],
+    ["oxplow:oxplow/thread?id=thr1", true],
   ]);
 });
 
@@ -57,11 +57,11 @@ test("outside a page a ref string opens through the window's opener", () => {
   const opened: string[] = [];
   setWindowRefOpener((ref) => opened.push(ref));
   const { getByTestId } = render(
-    <RouteLink to="oxplow:oxplow/handoff?id=hnd3" testId="ref-link">
-      A handoff
+    <RouteLink to="oxplow:oxplow/thread?id=thr3" testId="ref-link">
+      A thread
     </RouteLink>,
   );
   fireEvent.click(getByTestId("ref-link"));
   setWindowRefOpener(null);
-  expect(opened).toEqual(["oxplow:oxplow/handoff?id=hnd3"]);
+  expect(opened).toEqual(["oxplow:oxplow/thread?id=thr3"]);
 });

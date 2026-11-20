@@ -285,7 +285,7 @@ test("ready is heard once; an update posts only what the frame hasn't seen, nami
 
 test("a component navigates to app pages only", async () => {
   expect(componentMayOpen("oxplow:oxplow/task?id=tsk1&provider=oxtask")).toBe(true);
-  expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
+  expect(componentMayOpen("oxplow:oxplow/thread?id=thr1")).toBe(true);
   expect(componentMayOpen("https://evil.example/?d=1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);
   const h = harness({ navigate: (ref) => componentMayOpen(ref) });

@@ -34,7 +34,6 @@ pub const COMMAND: &str = "oxplow/command";
 pub const CONFIG: &str = "oxplow/config";
 pub const FINDING: &str = "oxplow/finding";
 pub const AGENT_SESSION: &str = "oxplow/agent_session";
-pub const HANDOFF: &str = "oxplow/handoff";
 pub const TERMINAL: &str = "oxplow/terminal";
 pub const SUBAGENT: &str = "oxplow/subagent";
 pub const RUN: &str = "oxplow/run";

@@ -164,8 +164,8 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
-/// `SequenceInput`'s schema, with its example input: handing work to two
-/// threads, one audited run.
+/// `SequenceInput`'s schema, with its example input: renaming two threads,
+/// one audited run.
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
@@ -175,12 +175,12 @@ fn sequence_schema() -> Value {
             serde_json::json!([{
                 "calls": [
                     {
-                        "name": "oxplow.handoff.send",
-                        "input": { "to_thread": "thr3", "body": "The login redirect loop is fixed; please re-run the e2e specs." }
+                        "name": "oxplow.thread.rename",
+                        "input": { "thread": "thr3", "title": "Login redirect: e2e specs" }
                     },
                     {
-                        "name": "oxplow.handoff.send",
-                        "input": { "to_thread": "thr4", "body": "The login redirect loop is fixed; docs need the new flow." }
+                        "name": "oxplow.thread.rename",
+                        "input": { "thread": "thr4", "title": "Login redirect: docs" }
                     }
                 ]
             }]),

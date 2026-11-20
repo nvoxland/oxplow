@@ -15,7 +15,7 @@ use oxplow_domain::uri::build;
 use oxplow_domain::uri::resources::{self as r, ResourceRegistry};
 use oxplow_domain::uri::{extract, RefVersion};
 
-/// A text body (a record's, a handoff's) → a file or directory it names.
+/// A text body (a record's) → a file or directory it names.
 pub const RT_BODY_FILE: &str = "file_mention";
 pub const RT_BODY_DIR: &str = "dir_mention";
 /// A text body → a record of a shared model it names (a task, a page).
@@ -213,7 +213,7 @@ const COMMENT_MENTIONS: MentionTypes = MentionTypes {
     commit: RT_COMMENT_COMMIT,
 };
 
-/// Edges contributed by a text body (`source` its URI: a handoff's, …).
+/// Edges contributed by a text body (`source` its URI: a record's, …).
 /// Single-owner source.
 pub fn body_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<PageRefEdge> {
     mention_edges(kinds, source, body, &BODY_MENTIONS)

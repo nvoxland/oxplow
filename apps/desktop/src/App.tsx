@@ -1,7 +1,6 @@
 import { useTreeDirty } from "./treeDirty.js";
 import { useResourcesLoader } from "./resources.js";
 import { isWorkspaceDir } from "./workspaceFiles.js";
-import { useOpenHandoffs } from "./handoffs.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -242,7 +241,6 @@ export function App() {
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
   // The agent session whose tab's Rename… strip is open.
   // The conversation picker open over a session's terminal, and for what.
-  const openHandoffs = useOpenHandoffs();
   const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
     () => threadStatuses(Object.values(sessionStatuses)),
     [sessionStatuses],
@@ -2038,7 +2036,6 @@ export function App() {
           streamStatuses={streamStatuses}
           agentStatuses={agentStatuses}
           agentQuestions={agentQuestions}
-          openHandoffs={openHandoffs}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
           onCreateThread={async (streamId, title) => {

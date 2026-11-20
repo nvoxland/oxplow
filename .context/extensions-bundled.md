@@ -282,27 +282,20 @@ screens and the holder's add the review and analysis:
 - **Request blocks.** Blocks for a request's tests (coverage, untested
   files, test runs, failed tests, analysis findings), its metric deltas, its
   nudges and its plan, mounted at `oxplow/diff-view.sections`.
-  `thread-plan` and the two handoff strips mounted
-  on the old Tasks page; its board has no slot, so they mount nowhere
-  until they move.
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component, replacing
   core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
-- **The hand-off screen.** `hand-off`. Its menu entry is the command
-  `handoff.offer`. It runs the same operation as a foundation command and
-  adds the label, shortcut and form a person uses. (The wiki screens have
-  moved to `oxplow-bundled`: see "The knowledge pages" below.)
+- **The wiki screens** have moved to `oxplow-bundled`: see "The knowledge
+  pages" below.
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
-- **Timeline.** The `timeline` page and its component (requests, sessions,
-  threads and commits on a zoomable axis; source in `src/timeline/`, built
-  with the npm dependency `vis-timeline` by bundled's `package.json`). It
-  moved with the rest of the person-facing screens. Foundation has no build
-  step, no `package.json` and no `node_modules`; its only custom component
-  is the hand-written `integrations`.
+- **No Timeline page.** The `timeline` page and its component (and the
+  `vis-timeline` dependency) were removed. Foundation has no build step, no
+  `package.json` and no `node_modules`; its only custom component is the
+  hand-written `integrations`.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
@@ -318,8 +311,8 @@ screens and the holder's add the review and analysis:
   foundation's too; its header opens Git Status (`git-dashboard`).
   Waiting on you (`waiting-on-you`, count `waiting-count`, project
   scope) is foundation's: what only the person can move — a question an
-  agent waits on (`v_agent_status` `awaiting_user`, linked to its thread),
-  an open handoff to a thread with no agent session, an open note. Its
+  agent waits on (`v_agent_status` `awaiting_user`, linked to its thread).
+  Its
   alert fires while anything waits. Tasks assigned to the person are
   bundled's Assigned to you, never repeated here. Fixtures:
   `waiting-on-you-*`. Its
@@ -552,12 +545,11 @@ moved page, metric or dimension keeps its id.
   The decorators' limits hold: a label is at most 40 characters and an
   extension puts at most 3 on one URI.
 
-## Task reactions to thread, stream and handoff events
+## Task reactions to thread and stream events
 
-Three bundled effects keep the task model right when a thread closes, a
-stream archives or a handoff is taken (`effects/release_on_close.star`,
-`effects/take_handoff_task.star`). They read `v_oxplow_task` and `v_handoff` through `sql.read` and write
-oxplow's two fields.
+Two bundled effects keep the task model right when a thread closes or a
+stream archives (`effects/release_on_close.star`). They read
+`v_oxplow_task` through `sql.read` and write oxplow's two fields.
 
 ## Added for extraction
 

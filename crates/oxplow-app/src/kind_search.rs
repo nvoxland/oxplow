@@ -1282,30 +1282,6 @@ mod core_tests {
         .await;
     }
 
-    /// A handoff is found by its body, under its recipient's stream.
-    #[tokio::test]
-    async fn a_handoff_is_found_by_its_body() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let from = crate::test_fixtures::new_thread(&svc, stream.id, "A").await;
-        let to = crate::test_fixtures::new_thread(&svc, stream.id, "B").await;
-        change_loop(&svc);
-        run(
-            &svc,
-            crate::commands::handoff::SEND,
-            serde_json::json!({
-                "from_thread": from.id.to_string(),
-                "to_thread": to.id.to_string(),
-                "body": "the sprocket half is yours",
-            }),
-        )
-        .await;
-        eventually("the handoff is found", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/handoff")
-        })
-        .await;
-    }
-
     /// Setup the commands don't offer: one batch of SQL, committed.
     async fn exec(svc: &Services, sql: &'static str) {
         svc.db

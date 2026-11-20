@@ -40,7 +40,6 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "vcs",
     "knowledge",
     "record",
-    "handoff",
     "test",
     "code",
     "command",
@@ -171,8 +170,6 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
             .expect("core type registers");
-        r.register::<AgentPlanProposed>()
-            .expect("core type registers");
         r.register::<AgentTokensReported>()
             .expect("core type registers");
         r.register::<TestRunRecorded>()
@@ -185,8 +182,6 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<RecordRead>().expect("core type registers");
         r.register::<RefDrifted>().expect("core type registers");
-        r.register::<HandoffSent>().expect("core type registers");
-        r.register::<HandoffSettled>().expect("core type registers");
         r.register::<ThreadClosed>().expect("core type registers");
         r.register::<StreamArchived>().expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
@@ -1436,32 +1431,6 @@ pub struct AgentStatusChangedV2 {
     pub detail: Option<String>,
 }
 
-/// `agent.plan.proposed@2`: the agent put a plan to the person before
-/// acting (Claude's `ExitPlanMode`, Codex's `plan` item; opencode's
-/// `plan_exit` carries no text, so it records none). Whether the person
-/// accepted it is in no hook, so it isn't recorded. The text sits in the
-/// payload, capped, so `v_agent_plan` reads it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentPlanProposedV2 {
-    /// The thread (`thr3`).
-    pub thread: String,
-    /// The turn (`trn12`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn: Option<String>,
-    pub text: String,
-    /// The file the harness saved it in (Claude's `planFilePath`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-}
-
-pub struct AgentPlanProposed;
-impl EventType for AgentPlanProposed {
-    const TYPE: &'static str = "agent.plan.proposed";
-    const V: u32 = 2;
-    type Payload = AgentPlanProposedV2;
-}
-
 pub struct AgentStatusChanged;
 impl EventType for AgentStatusChanged {
     const TYPE: &'static str = "agent.status.changed";
@@ -1806,70 +1775,6 @@ impl EventType for UiOpErrorDismissed {
     type Payload = UiOpErrorMarkV1;
 }
 
-/// `handoff.sent@3`: work was handed from one thread to another
-/// (`oxplow.handoff.send`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct HandoffSentV3 {
-    /// The handoff (`hnd1`).
-    pub handoff: String,
-    /// The sending thread (`thr3`).
-    pub from_thread: String,
-    /// The receiving thread (`thr4`).
-    pub to_thread: String,
-    /// What it is about, when it names one: the URI of a record of any
-    /// resource (a task, a page).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub about: Option<String>,
-}
-
-pub struct HandoffSent;
-impl EventType for HandoffSent {
-    const TYPE: &'static str = "handoff.sent";
-    const V: u32 = 3;
-    type Payload = HandoffSentV3;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            // v2 is v3 with `about` named `task`.
-            2 => {
-                let mut payload = payload;
-                if let Some(object) = payload.as_object_mut() {
-                    if let Some(task) = object.remove("task") {
-                        object.insert("about".into(), task);
-                    }
-                }
-                Ok(payload)
-            }
-            _ => Err(DomainError::Invalid(format!(
-                "handoff.sent@{from_v} has no upcast"
-            ))),
-        }
-    }
-}
-
-/// `handoff.settled@2`: a handoff's state moved (`oxplow.handoff.settle`):
-/// taken or declined by its recipient, withdrawn by its sender, or open
-/// again (an undo).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct HandoffSettledV2 {
-    /// The handoff (`hnd1`).
-    pub handoff: String,
-    /// `open`, `taken`, `declined` or `withdrawn`.
-    pub state: String,
-    /// The sending thread (`thr3`).
-    pub from_thread: String,
-    /// The receiving thread (`thr4`).
-    pub to_thread: String,
-}
-
-pub struct HandoffSettled;
-impl EventType for HandoffSettled {
-    const TYPE: &'static str = "handoff.settled";
-    const V: u32 = 2;
-    type Payload = HandoffSettledV2;
-}
-
 /// `thread.closed@1`: a thread was closed (`oxplow.thread.close`): its
 /// sessions ended with it, and what it was working on goes back to nobody
 /// (bundled releases its tasks).
@@ -1947,7 +1852,6 @@ mod tests {
             versions,
             vec![
                 ("agent.context.compacted", 2),
-                ("agent.plan.proposed", 2),
                 ("agent.prompt.submitted", 3),
                 ("agent.session.ended", 2),
                 ("agent.session.started", 3),
@@ -1976,8 +1880,6 @@ mod tests {
                 ("file.directory_created", 1),
                 ("file.renamed", 1),
                 ("file.saved", 1),
-                ("handoff.sent", 3),
-                ("handoff.settled", 2),
                 ("record.read", 1),
                 ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),
@@ -1999,23 +1901,6 @@ mod tests {
         assert_eq!(r.latest("thread.closed"), Some(1));
         assert_eq!(r.latest("agent.turn.ended"), Some(5));
         assert_eq!(r.owner("config.changed", 3), Some(None));
-    }
-
-    /// A handoff sent before `about` was named `task` still reads: its
-    /// task is what it is about.
-    #[test]
-    fn a_v2_handoff_sent_upcasts_its_task_to_about() {
-        let r = EventSchemaRegistry::core();
-        let (v, payload) = r
-            .upcast_to_latest(
-                "handoff.sent",
-                2,
-                serde_json::json!({ "handoff": "hnd1", "from_thread": "thr1", "to_thread": "thr2", "task": "oxplow:acme/t?id=1" }),
-            )
-            .unwrap();
-        assert_eq!(v, 3);
-        assert_eq!(payload["about"], "oxplow:acme/t?id=1");
-        assert!(payload.get("task").is_none());
     }
 
     /// A switch logged when the local level was called `personal` reads

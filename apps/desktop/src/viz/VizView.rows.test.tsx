@@ -334,7 +334,7 @@ test("a tree's row click sets the param its column selects and marks the picked 
 });
 
 // A cell or heading that links to a ref opens it where its kind's page
-// says (`openRef`), whatever the kind: a handoff, a note, an extension's.
+// says (`openRef`), whatever the kind: a task, a note, an extension's.
 test("a link to a ref of any kind opens through the page's openRef", () => {
   const opened: Array<[string, boolean | undefined]> = [];
   const nav = {

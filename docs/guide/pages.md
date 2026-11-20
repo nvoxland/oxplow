@@ -360,13 +360,13 @@ title, back and forward, bookmarks and the page's actions.
 # extension.yaml
 permissions: [sql.read]              # it runs its own SQL
 custom_components:
-  - { id: timeline, bundle: dist/timeline, sql: read }
-# pages/timeline.yaml
-title: Timeline
+  - { id: requests-since, bundle: dist/requests-since, sql: read }
+# pages/requests-since.yaml
+title: Requests Since
 icon: history
 category: Activity
 params: [{ name: from }, { name: to }]
-view: { component: { id: timeline } }
+view: { component: { id: requests-since } }
 ```
 
 A whole-page component's `component.page` carries the page's `params`, `streamId` and
@@ -421,11 +421,10 @@ memory** (yours, in every tab of the component; JSON, 64 KB a value and
 `oxplow extension check` warns when a component's script uses
 `localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
-so only its sources are committed. A Timeline page is a
-working example: it reads
-its window from `from` and `to`, writes every change of it back with
-`setViewParams`, and follows `onViewParams` when Back or Forward moves the
-tab. A default it computes ("the last week") stays out of the address, so
+so only its sources are committed. A page that shows a window of time
+works best this way: the component reads its window from `from` and `to`,
+writes every change of it back with `setViewParams`, and follows
+`onViewParams` when Back or Forward moves the tab. A default it computes ("the last week") stays out of the address, so
 a bookmark doesn't freeze it to one date.
 
 ## Replacing a view
