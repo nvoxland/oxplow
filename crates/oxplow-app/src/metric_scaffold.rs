@@ -426,7 +426,7 @@ mod tests {
         let sampled = sampled(&languages);
         assert_eq!(
             names(&sampled),
-            "`rust`, `typescript`, `javascript`, `python`, `go`, `c`, `cpp`"
+            "`rust`, `typescript`, `javascript`, `python`, `go`, `c`, `cpp`, `starlark`"
         );
         for language in sampled {
             let (text, starts) = source(language, &[("calm", 0), ("busy", 11)]);
