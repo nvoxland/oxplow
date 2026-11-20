@@ -283,6 +283,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::agent_contexts::AgentContextFile>>")]
     pub context: Option<Value>,
+    /// Command substrings that mark a shell call as a test or
+    /// static-analysis run.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::run_patterns::RunPatternFile>>")]
+    pub run_patterns: Option<Value>,
     /// External providers: programs implementing a capability, whose
     /// operations its `commands:` declare.
     #[serde(default)]

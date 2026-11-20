@@ -362,6 +362,17 @@
       },
       "default": null
     },
+    "run_patterns": {
+      "description": "Command substrings that mark a shell call as a test or\nstatic-analysis run.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/RunPatternFile"
+      },
+      "default": null
+    },
     "providers": {
       "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
       "type": [
@@ -3682,6 +3693,28 @@
         "id",
         "doc",
         "query"
+      ]
+    },
+    "RunPatternFile": {
+      "description": "A `run_patterns:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "`test` or `analysis`.",
+          "type": "string"
+        },
+        "patterns": {
+          "description": "Command substrings, matched case-insensitively; none empty.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "patterns"
       ]
     },
     "ProviderSpec": {

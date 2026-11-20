@@ -233,6 +233,25 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         d.needs = c.needs.clone();
         out.push(d);
     }
+    // A run pattern has no id of its own: `<kind>`, then `<kind>-2`, …
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (i, r) in ext.run_patterns.iter().enumerate() {
+        let kind = match r.kind {
+            oxplow_config::collectors::RunKind::Test => "test",
+            oxplow_config::collectors::RunKind::Analysis => "analysis",
+        };
+        let n = seen.entry(kind).or_default();
+        *n += 1;
+        let id = if *n == 1 {
+            kind.to_string()
+        } else {
+            format!("{kind}-{n}")
+        };
+        let mut d = new(ContributionKind::RunPattern, &id, RunsOn::Agent);
+        d.source = item("run_patterns", i);
+        d.description = Some(format!("{kind} runs: {}", r.patterns.join(", ")));
+        out.push(d);
+    }
     // An implementation is chosen by `<capability>/<id>`.
     for i in &ext.implementations {
         let mut d = new(
@@ -606,6 +625,24 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::AiProfile => ext.ai_profiles.retain(|x| x.id != local),
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
         ContributionKind::AgentContext => ext.contexts.retain(|x| x.id != local),
+        ContributionKind::RunPattern => {
+            // Ids are `<kind>`, `<kind>-2`, … in declaration order.
+            let mut seen: std::collections::HashMap<&'static str, usize> = Default::default();
+            ext.run_patterns.retain(|r| {
+                let kind = match r.kind {
+                    oxplow_config::collectors::RunKind::Test => "test",
+                    oxplow_config::collectors::RunKind::Analysis => "analysis",
+                };
+                let n = seen.entry(kind).or_default();
+                *n += 1;
+                let id = if *n == 1 {
+                    kind.to_string()
+                } else {
+                    format!("{kind}-{n}")
+                };
+                id != local
+            })
+        }
         ContributionKind::Implementation => {
             let global = c.global.as_str();
             ext.implementations

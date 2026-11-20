@@ -31,6 +31,7 @@ pub mod jobs;
 pub mod manifest_v2;
 pub mod public_contracts;
 pub mod replacements;
+pub mod run_patterns;
 pub mod schema;
 pub mod shared_models;
 pub mod skills;
@@ -400,6 +401,9 @@ pub struct Extension {
     /// What it puts in the coding agent's context (`context:`; valid
     /// ones — invalid ones are in `errors`).
     pub contexts: Vec<agent_contexts::AgentContextDecl>,
+    /// The command substrings it says mark a test or analysis run
+    /// (`run_patterns:`; valid ones — invalid ones are in `errors`).
+    pub run_patterns: Vec<run_patterns::RunPatternDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1817,6 +1821,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         implementations: Vec::new(),
         skills: Vec::new(),
         contexts: Vec::new(),
+        run_patterns: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -2032,6 +2037,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let (declared, errors) =
                 agent_contexts::parse_contexts(v, man, &manifest, ext.configuration.as_ref());
             ext.contexts = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.run_patterns.as_ref() {
+            let (declared, errors) = run_patterns::parse_run_patterns(v, man, &manifest);
+            ext.run_patterns = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
@@ -3739,6 +3749,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.implementations.clear();
     ext.skills.clear();
     ext.contexts.clear();
+    ext.run_patterns.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
     ext.measures.clear();

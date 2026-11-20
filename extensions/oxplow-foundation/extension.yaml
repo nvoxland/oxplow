@@ -10,6 +10,11 @@ permissions: [sql.read, files.read, ai.compute, agent.write]
 custom_components:
   # Settings → Integrations: hand-written, with no build step.
   - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync], description: "The Settings area for the instances of external providers: adding one, signing in and checking it." }
+# What counts as a test or an analysis run: core matches these (and the
+# project's own `testing:` patterns) and names no tool itself.
+run_patterns:
+  - { kind: test, patterns: [pytest, 'cargo test', 'cargo nextest', 'npm test', 'npm run test', 'pnpm test', 'yarn test', 'bun test', jest, vitest, 'go test', 'gradle test', 'mvn test', 'dotnet test', rspec, phpunit] }
+  - { kind: analysis, patterns: ['cargo clippy', 'clippy-driver', eslint, ruff, 'golangci-lint', flake8, pylint, mypy, staticcheck, 'tsc --noemit', 'tsc --noEmit'] }
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a page can
@@ -803,6 +808,11 @@ resources:
     label: Agent context
     params: { agent_context: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: book-open
+  - name: run_pattern
+    description: "Command substrings that mark a shell call as a test or analysis run."
+    label: Run pattern
+    params: { run_pattern: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: terminal
   - name: implementation
     description: "One way to provide a capability, such as a task tracker or an agent."
     label: Implementation

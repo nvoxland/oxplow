@@ -31,7 +31,7 @@ pub mod capabilities;
 #[cfg(test)]
 mod catalog_datasets_tests;
 pub mod change_analysis;
-pub mod change_diff;
+pub(crate) mod change_diff;
 pub mod change_reactor;
 pub mod chat;
 pub mod churn;

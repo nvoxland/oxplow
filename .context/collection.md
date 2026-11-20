@@ -155,12 +155,23 @@ section for the column.
 
 ## Ingestion (hybrid)
 
+**What counts as a run.** Core names no tool. An extension's `run_patterns:
+[{ kind: test | analysis, patterns: [<substring>, …] }]` says which command
+substrings mark a test or an analysis run; core matches those of every
+*enabled* extension (`CollectionService::declared_patterns`; a disabled
+extension's are not matched), then the project's `testing.runPatterns`,
+`analysisPatterns` and its two commands. oxplow-foundation declares the
+tools core used to know (pytest, cargo test, jest, eslint, ruff, …). The
+matching itself is unchanged: per sub-command, case-insensitive substring,
+read-only executables skipped, `--no-run` never a run. An empty pattern or
+a `kind` other than `test` / `analysis` is a load error at the entry's line.
+
 Two paths feed the store (see [agent-model.md](./agent-model.md) for the
 hook + MCP wiring):
 
-- **Passive** — the PostToolUse Bash hook detects a test run (built-in
-  patterns + `testing.runPatterns` + the two commands) and/or a
-  static-analysis run (built-in patterns + `testing.analysisPatterns`, via
+- **Passive** — the PostToolUse Bash hook detects a test run (the enabled
+  extensions' `run_patterns:` + `testing.runPatterns` + the two commands) and/or a
+  static-analysis run (the extensions' `kind: analysis` patterns + `testing.analysisPatterns`, via
   `detect_analysis_run`) and records the matching observation(s) against
   the turn the tool call ran in, so its request. It then runs **every** report collector whose `on_run`
   is that kind of run and whose report the run wrote (its mtime inside the
@@ -410,7 +421,7 @@ didn't count also leaves the lost coverage's `failed` capture.
 
 **Tool-agnostic design:** the hook never encodes tool→command knowledge.
 It keys only on (1) "was this a test run?" (substring match against
-built-in patterns + `runPatterns`) and (2) "did a report collector read a
+the extensions' `run_patterns:` + `runPatterns`) and (2) "did a report collector read a
 report this run wrote?" (its mtime inside the run's freshness window). The tool-specific command it
 names comes entirely from the project's config, so it works for any
 test tool, current or future.

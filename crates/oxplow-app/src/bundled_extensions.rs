@@ -169,6 +169,12 @@ mod tests {
                     continue;
                 };
                 for (n, line) in text.lines().enumerate() {
+                    // A `run_patterns:` entry names the tools whose commands
+                    // count as a run (`cargo test`): that is data about
+                    // other people's projects, not this checkout's build.
+                    if *path == "extension.yaml" && line.trim_start().starts_with("- { kind: ") {
+                        continue;
+                    }
                     for needle in needles {
                         if line.contains(needle) {
                             hits.push(format!("{}/{path}:{}: `{needle}`", b.name, n + 1));

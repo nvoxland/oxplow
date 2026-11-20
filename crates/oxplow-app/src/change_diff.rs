@@ -82,11 +82,7 @@ impl ChangeDiffReader {
                 files.len()
             ));
         }
-        let root = self
-            .worktrees
-            .resolve(Some(&row.stream_id.to_string()))
-            .await
-            .into_local_path();
+        let root = crate::change_analysis::stream_root(&self.worktrees, row.stream_id).await;
         let mut bytes = 0usize;
         let mut out = Vec::with_capacity(files.len());
         for (path, status) in files {

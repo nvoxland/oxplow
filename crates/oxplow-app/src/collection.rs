@@ -33,64 +33,26 @@ use oxplow_script::{Collector, CollectorInput, CollectorKind, CollectorOutput, C
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
 
-/// Built-in command substrings that count as a test run. The `testing:`
-/// block's `runPatterns` extends (never replaces) this list.
-const DEFAULT_TEST_PATTERNS: &[&str] = &[
-    "pytest",
-    "cargo test",
-    "cargo nextest",
-    "npm test",
-    "npm run test",
-    "pnpm test",
-    "yarn test",
-    "bun test",
-    "jest",
-    "vitest",
-    "go test",
-    "gradle test",
-    "mvn test",
-    "dotnet test",
-    "rspec",
-    "phpunit",
-];
-
-/// Built-in command substrings that count as a static-analysis run. The
-/// `testing:` block's `analysisPatterns` extends (never replaces) this
-/// list. Tool-agnostic: no command→tool knowledge lives here, only "did an
-/// analyzer run?" — the report a run regenerates is what gets parsed.
-const DEFAULT_ANALYSIS_PATTERNS: &[&str] = &[
-    "cargo clippy",
-    "clippy-driver",
-    "eslint",
-    "ruff",
-    "golangci-lint",
-    "flake8",
-    "pylint",
-    "mypy",
-    "staticcheck",
-    "tsc --noemit",
-    "tsc --noEmit",
-];
-
 /// Does `command` look like a test run? Case-insensitive substring match
-/// against the built-in patterns plus any caller-supplied extras.
-pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
-    test_run_segment(command, extra_patterns).is_some()
+/// against `patterns`: what the enabled extensions declare
+/// (`run_patterns:`) and the project's own ([`CollectionService::test_patterns`]).
+pub fn detect_test_run(command: &str, patterns: &[String]) -> bool {
+    test_run_segment(command, patterns).is_some()
 }
 
 /// The sub-command of `command` that runs the tests, trimmed — what a test
 /// run shows as its command, not the agent's whole Bash call. A
 /// `--no-run` invocation builds the tests without running any, so it isn't
 /// one.
-pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<String> {
-    matched_segments(command, DEFAULT_TEST_PATTERNS, extra_patterns)
+pub fn test_run_segment(command: &str, patterns: &[String]) -> Option<String> {
+    matched_segments(command, &[], patterns)
         .find(|sub| !sub.split_whitespace().any(|t| t == "--no-run"))
 }
 
 /// Does `command` look like a static-analysis run? Same substring matching as
-/// [`detect_test_run`], against the analysis patterns + profile extras.
-pub fn detect_analysis_run(command: &str, extra_patterns: &[String]) -> bool {
-    matches_any(command, DEFAULT_ANALYSIS_PATTERNS, extra_patterns)
+/// [`detect_test_run`], against the analysis patterns.
+pub fn detect_analysis_run(command: &str, patterns: &[String]) -> bool {
+    matches_any(command, &[], patterns)
 }
 
 /// Executables that only READ. A sub-command leading with one of these can
@@ -640,13 +602,28 @@ impl CollectionService {
             .map(|t| t.stream_id.to_string()))
     }
 
-    /// What counts as a test run besides the built-in patterns: the
+    /// What the enabled extensions say marks a `kind` run (`run_patterns:`).
+    async fn declared_patterns(&self, kind: oxplow_config::collectors::RunKind) -> Vec<String> {
+        let root = self.worktrees.resolve(None).await.into_local_path();
+        self.extensions
+            .unpinned(&root, "run patterns are read from declarations")
+            .iter()
+            .filter(|e| e.enabled)
+            .flat_map(|e| e.run_patterns.iter().filter(|r| r.kind == kind))
+            .flat_map(|r| r.patterns.iter().cloned())
+            .collect()
+    }
+
+    /// What counts as a test run: the enabled extensions' patterns, the
     /// project's `runPatterns`, and its own configured commands — running
     /// the way you declared to run tests is a test run, so `fastCommand`
-    ///  detects without a built-in pattern in its script name.
-    fn test_patterns(&self) -> Vec<String> {
+    /// detects without a pattern in its script name.
+    async fn test_patterns(&self) -> Vec<String> {
         let cfg = self.testing_cfg();
-        let mut patterns = cfg.run_patterns.clone();
+        let mut patterns = self
+            .declared_patterns(oxplow_config::collectors::RunKind::Test)
+            .await;
+        patterns.extend(cfg.run_patterns.clone());
         patterns.extend(cfg.command.clone());
         patterns.extend(cfg.fast_command.clone());
         patterns
@@ -1085,7 +1062,7 @@ impl CollectionService {
         let mut payload = serde_json::Map::new();
         // The sub-command that ran the tests; the whole call beside it
         // when it was more.
-        let shown = test_run_segment(command, &self.test_patterns())
+        let shown = test_run_segment(command, &self.test_patterns().await)
             .unwrap_or_else(|| command.trim().to_string());
         if shown != command.trim() {
             payload.insert("shellCommand".into(), json!(command));
@@ -2080,9 +2057,13 @@ impl CollectionService {
             return Ok(None);
         }
         let cfg = self.testing_cfg();
-        let test_patterns = self.test_patterns();
+        let test_patterns = self.test_patterns().await;
+        let mut analysis_patterns = self
+            .declared_patterns(oxplow_config::collectors::RunKind::Analysis)
+            .await;
+        analysis_patterns.extend(cfg.analysis_patterns.clone());
         let is_test = detect_test_run(bash.command, &test_patterns);
-        let is_analysis = detect_analysis_run(bash.command, &cfg.analysis_patterns);
+        let is_analysis = detect_analysis_run(bash.command, &analysis_patterns);
         if !is_test && !is_analysis {
             return Ok(None);
         }
@@ -3804,6 +3785,41 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extension::extensions::run_patterns::parse_run_patterns;
+
+    /// What oxplow-foundation declares for `kind` (`run_patterns:`): the
+    /// patterns a running oxplow matches before a project adds its own.
+    fn foundation(kind: RunKind) -> Vec<String> {
+        let text = include_str!("../../../extensions/oxplow-foundation/extension.yaml");
+        let v: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+        let (declared, errors) = parse_run_patterns(&v["run_patterns"], "extension.yaml", text);
+        assert!(errors.is_empty(), "{errors:?}");
+        declared
+            .into_iter()
+            .filter(|d| d.kind == kind)
+            .flat_map(|d| d.patterns)
+            .collect()
+    }
+
+    fn with(kind: RunKind, extra: &[String]) -> Vec<String> {
+        let mut all = foundation(kind);
+        all.extend(extra.iter().cloned());
+        all
+    }
+
+    // The detection tests below read as they always did: the foundation's
+    // patterns, and what a test adds.
+    fn detect_test_run(command: &str, extra: &[String]) -> bool {
+        super::detect_test_run(command, &with(RunKind::Test, extra))
+    }
+
+    fn test_run_segment(command: &str, extra: &[String]) -> Option<String> {
+        super::test_run_segment(command, &with(RunKind::Test, extra))
+    }
+
+    fn detect_analysis_run(command: &str, extra: &[String]) -> bool {
+        super::detect_analysis_run(command, &with(RunKind::Analysis, extra))
+    }
     use crate::blob_store::BlobStore;
 
     #[test]
@@ -3926,6 +3942,55 @@ mod tests {
             trust("coverage-report", &["tests.parse".into(), "x".into()]),
             "exec:tests.parse,x"
         );
+    }
+
+    /// An enabled extension's `run_patterns:` are matched — the foundation's
+    /// and a project extension's — and a disabled extension's are not.
+    #[tokio::test]
+    async fn an_extensions_run_patterns_count_while_it_is_enabled() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/mine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: mine\nintent: { purpose: t, origin: null, examples: [] }\nrun_patterns:\n  - { kind: test, patterns: [run-my-suite] }\n  - { kind: analysis, patterns: [lint-it] }\n",
+        )
+        .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let tests = || async { fx.svc.collection.test_patterns().await };
+        let analysis = || async {
+            fx.svc
+                .collection
+                .declared_patterns(oxplow_config::collectors::RunKind::Analysis)
+                .await
+        };
+        let t = tests().await;
+        assert!(t.contains(&"run-my-suite".to_string()), "{t:?}");
+        assert!(
+            t.contains(&"cargo test".to_string()),
+            "foundation's too: {t:?}"
+        );
+        assert!(super::detect_test_run("./run-my-suite --fast", &t));
+        let a = analysis().await;
+        assert!(a.contains(&"lint-it".to_string()) && a.contains(&"ruff".to_string()));
+        // A test pattern is no analysis pattern.
+        assert!(!a.contains(&"run-my-suite".to_string()));
+
+        fx.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.extension.disable",
+                json!({ "name": "mine" }),
+                true,
+            )
+            .await
+            .unwrap();
+        let t = tests().await;
+        assert!(!t.contains(&"run-my-suite".to_string()), "{t:?}");
+        assert!(!analysis().await.contains(&"lint-it".to_string()));
+        assert!(t.contains(&"cargo test".to_string()));
     }
 
     #[test]
