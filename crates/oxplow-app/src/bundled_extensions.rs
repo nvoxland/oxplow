@@ -258,6 +258,12 @@ mod tests {
         let needles = [".context/", "crates/", "cargo "];
         let mut hits = Vec::new();
         for b in BUNDLED {
+            // A language pack describes its stack's own tools (`cargo test`
+            // in the Rust pack's run patterns and setup skill): that is
+            // about other people's projects, not this checkout's build.
+            let pack = b
+                .file("extension.yaml")
+                .is_some_and(|m| m.lines().any(|l| l.starts_with("languages:")));
             for (path, bytes) in b.files() {
                 // Fixtures are test data, and `dist/` is built output.
                 if path.starts_with("fixtures/") || path.starts_with("dist/") {
@@ -273,7 +279,7 @@ mod tests {
                     if *path == "extension.yaml" && line.trim_start().starts_with("- { kind: ") {
                         continue;
                     }
-                    for needle in needles {
+                    for needle in needles.iter().filter(|n| !(pack && **n == "cargo ")) {
                         if line.contains(needle) {
                             hits.push(format!("{}/{path}:{}: `{needle}`", b.name, n + 1));
                         }
