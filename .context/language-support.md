@@ -55,7 +55,11 @@ languages:
 - **`grammar: { native: <name> }`** is for the extensions that ship with
   oxplow only (`oxplow_code_metrics::native_grammar`, the one place in core
   that names grammar crates). A third party brings a WebAssembly grammar
-  (`wasm:`; loading it is not built yet: such a language is refused, saying so).
+  (`wasm: grammars/x.wasm`; loading it is not built yet: such a language is
+  refused, saying so). `grammar.source: { repository, rev, path? }` says where
+  the `wasm` was built from (`path`: the folder whose `src/` holds
+  `parser.c`); only `oxplow extension grammar build` reads it
+  ([extensions-sdk.md](./extensions-sdk.md) "extension grammar build").
 - **`analysis.yaml`** is the data the walkers read
   (`oxplow_code_metrics::LanguageSpec::parse`):
   `functions { kinds, param_list_fields, parameter_kinds, form_heads }`,
@@ -334,6 +338,6 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 
 Live: languages from extensions, the shipped packs with native grammars, the
 LSP symbol surface, generic unit listing, and tree-sitter symbols with their
-index. **Still open** (the change-review plan, milestones 2 to 5): the
+index. **Still open** (the change-review plan, milestones 2 to 5):
 one `Parsers` pool, and WebAssembly
 grammars (Clojure first).

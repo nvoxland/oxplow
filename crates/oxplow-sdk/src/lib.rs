@@ -17,6 +17,7 @@ pub mod contribution;
 pub use contribution::{add_contribution, contribution, Contribution};
 pub mod examples;
 pub mod extension_test;
+pub mod grammar;
 mod rename;
 mod throwaway;
 

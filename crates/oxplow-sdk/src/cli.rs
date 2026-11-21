@@ -59,6 +59,14 @@ usage:
       datasets and their rows, collectors' outputs, providers' grants —
       writing nothing. --services lists, per script, the host services it
       uses (sql.read, tree.read, ai.compute) and whether it declared them
+  oxplow extension grammar build <name|path> [--language <id>] [--root <dir>]
+      compile the tree-sitter grammar of each of the extension's languages
+      that declares `grammar: { wasm: grammars/<x>.wasm, source: { repository,
+      rev, path? } }` to that WebAssembly file: fetch the grammar at its rev
+      (a shallow clone cached under ~/.cache/oxplow/grammars/), then compile
+      its parser.c and scanner.c with wasi-sdk's clang (downloaded once into
+      ~/.cache/oxplow/wasi-sdk/, or WASI_SDK_PATH's). Run by the author, by
+      hand: it needs git and network; oxplow itself never builds a grammar
   oxplow extension test <name|path> [--only <example,…>] [--bless] [--require-ui] [--json] [--junit <file>] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a page's rows, a collector's
@@ -97,12 +105,18 @@ pub fn run_to(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 
             let _ = writeln!(err, "oxplow extension: {e}");
             1
         }
+        Err(Failure::Message(m)) => {
+            let _ = writeln!(err, "oxplow extension: {m}");
+            1
+        }
     }
 }
 
 enum Failure {
     Usage(String),
     Sdk(crate::SdkError),
+    /// A failure the command words itself: printed, exit 1.
+    Message(String),
 }
 
 impl From<crate::SdkError> for Failure {
@@ -421,6 +435,39 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 }
             }
             Ok(if report.ok { 0 } else { 1 })
+        }
+        "grammar" => {
+            if pos.next().map(String::as_str) != Some("build") {
+                return Err(Failure::Usage(
+                    "grammar takes `build <name> [--language <id>]`".into(),
+                ));
+            }
+            let target = pos.next().ok_or_else(|| {
+                Failure::Usage("grammar build needs an extension name or path".into())
+            })?;
+            let direct = Path::new(target.trim_end_matches('/'));
+            let dir = if direct.join("extension.yaml").is_file() {
+                direct.to_path_buf()
+            } else {
+                let (root, name) = locate(p.root.as_deref(), target);
+                root.join(EXTENSIONS_DIR).join(name)
+            };
+            let jobs =
+                crate::grammar::jobs(&dir, p.language.as_deref()).map_err(Failure::Message)?;
+            if jobs.is_empty() {
+                return Err(Failure::Message(format!(
+                    "{}: no language declares both `grammar.wasm` and `grammar.source`",
+                    dir.display()
+                )));
+            }
+            let cache = crate::grammar::cache_dir().map_err(Failure::Message)?;
+            for job in &jobs {
+                crate::grammar::build(job, &cache, &mut |line| {
+                    let _ = writeln!(out, "{line}");
+                })
+                .map_err(|e| Failure::Message(format!("{}: {e}", job.language)))?;
+            }
+            Ok(0)
         }
         other => Err(Failure::Usage(format!("unknown subcommand `{other}`"))),
     }
@@ -1054,6 +1101,58 @@ mod tests {
         assert_eq!(report["root"], ".oxplow/extensions/fake", "{report}");
         let e = e["fix"].as_str().unwrap();
         assert!(e.contains("--bless"), "{e}");
+    }
+
+    /// `grammar build` says what is missing rather than reaching for the
+    /// network: an extension with no wasm grammar and source builds nothing.
+    #[test]
+    fn grammar_build_names_what_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ext = dir.path().join(".oxplow/extensions/acme");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nlanguages:\n  - { id: acme, title: Acme, grammar: { wasm: g.wasm } }\n",
+        )
+        .unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let root = dir.path().display().to_string();
+        let code = run_to(
+            &[
+                "grammar".into(),
+                "build".into(),
+                "acme".into(),
+                "--root".into(),
+                root.clone(),
+            ],
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(code, 1);
+        assert!(
+            String::from_utf8_lossy(&err).contains("no language declares both"),
+            "{}",
+            String::from_utf8_lossy(&err)
+        );
+        let code = run_to(
+            &[
+                "grammar".into(),
+                "build".into(),
+                "acme".into(),
+                "--language".into(),
+                "acme".into(),
+                "--root".into(),
+                root,
+            ],
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(code, 1);
+        assert!(String::from_utf8_lossy(&err).contains("no `grammar.source`"));
+        assert_eq!(
+            run_to(&["grammar".into(), "nope".into()], &mut out, &mut err),
+            2
+        );
     }
 
     #[test]

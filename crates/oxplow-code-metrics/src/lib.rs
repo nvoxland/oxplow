@@ -28,9 +28,9 @@ pub mod symbols;
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
 pub use language::UnitKind;
 pub use spec::{
-    native_grammar, DocStrategy, Duplication, Forms, GrammarDecl, ImportStrategy, Language,
-    LanguageDecl, LanguageProblem, LanguageSource, LanguageSpec, Languages, LspDecl, MergeKey,
-    MergeSpec, StarterDecl, VisibilityStrategy,
+    native_grammar, DocStrategy, Duplication, Forms, GrammarDecl, GrammarSource, ImportStrategy,
+    Language, LanguageDecl, LanguageProblem, LanguageSource, LanguageSpec, Languages, LspDecl,
+    MergeKey, MergeSpec, StarterDecl, VisibilityStrategy,
 };
 pub use symbols::{extract, extract_with_language, Definition, SymbolKind};
 pub use tree_sitter::Tree;
