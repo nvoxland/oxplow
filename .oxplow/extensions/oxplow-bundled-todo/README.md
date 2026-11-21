@@ -10,9 +10,6 @@ extension" has the rules for a move.
 
 ## What is still here
 
-- **Request review**, mounted on the Changes, commit and uncommitted pages:
-  Change Analysis (`change-review`), Tests Weakened, and Usually Changes
-  With (`file-co-change`, on a diff's file header).
 - **Pages**: Agent Interface and Command Errors, Extension runs and
   Extension Run Detail, Job Runs and Job Run Output, Merge Readiness
   and Remote Branches.
