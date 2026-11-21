@@ -1,0 +1,15 @@
+title: Contribution run
+description: The cost, permissions, model calls and related runs of one contribution run.
+icon: activity
+for: oxplow/contribution_run
+default: true
+params:
+- name: uri
+  label: Contribution run
+loaders:
+  run:
+    sql: |
+      SELECT run_id FROM v_contribution_run WHERE run_id = uri_param(:uri, 'id')
+view:
+  id: run-details
+  embed: { page: oxplow/run-details }

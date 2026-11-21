@@ -108,8 +108,8 @@ pub struct CallSite<'a> {
     pub caller: &'a str,
     /// For a recorded computation (`ai_compute`), the hash of its input.
     pub input_hash: Option<&'a str>,
-    /// The extension run that made it (`contribution_run.run_id`).
-    pub run: Option<&'a str>,
+    /// The contribution run that made it (`contribution_run.run_id`).
+    pub run: Option<&'a oxplow_domain::run::RunId>,
 }
 
 impl<'a> CallSite<'a> {
@@ -1447,7 +1447,7 @@ impl AiService {
             input_hash: site.input_hash.map(str::to_string),
             request: request.body(),
             response,
-            run_id: site.run.map(str::to_string),
+            run_id: site.run.map(ToString::to_string),
         };
         match self.calls.record(call).await {
             Ok(id) => Some(id),

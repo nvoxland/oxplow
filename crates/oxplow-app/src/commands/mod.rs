@@ -1839,7 +1839,7 @@ impl CommandBus {
             }
             Resolved::External(handler) => {
                 let invocation = Invocation {
-                    run: run.child(None, Mode::External),
+                    run: run.clone().in_mode(Mode::External),
                     idempotency_key: None,
                     confirmed: false,
                 };

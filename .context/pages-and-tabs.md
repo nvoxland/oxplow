@@ -93,6 +93,10 @@ browser regression checks usable terminal height before and after reload.
 A URI names a thing; a **page** is one **renderer** of it. A tab's id is
 the URI it shows, and nothing in the desktop keeps a list of page kinds.
 
+Foundation's `contribution-run` renderer reads the run ID from the
+`oxplow/contribution_run` URI and embeds `oxplow/run-details`. The same
+part takes a named `run_id` when embedded in a page or expanded from a row.
+
 **Which page draws a URI** (the daemon decides which pages *can*; the
 window picks among them):
 

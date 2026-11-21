@@ -392,8 +392,10 @@ left out; `summarize` or `decide` otherwise) and optional
   `run_id` when the caller supplies it). AI usage is queryable in the
   [semantic layer](./semantic-layer.md). An `AiCompute`
   computation takes a `Caller { name, run }` (a bare name converts to
-  one with no run); a collector's `CollectorOracle` names its run and
-  counts each call on it (`contribution_run.ai_calls`).
+  one with no run). Collectors, job rounds and the agent's AI commands
+  pass the contribution run's ID and count the request on that run
+  (`contribution_run.ai_calls`). The agent's call still names its thread
+  as the caller. A cached result reuses the original model call's record.
 - **Every call keeps what it was asked and answered** (V41): the request
   as `AiService` hands it to the provider — `ModelRequest::Complete {
   system, prompt, json }` or `Decide { state, questions }`, its `body()`

@@ -1,0 +1,96 @@
+title: Run details
+description: The cost, permissions, model calls and related runs of one contribution run.
+params:
+- name: run_id
+loaders:
+  cost:
+    sql: |
+      SELECT wall_ms, cpu_ms, peak_bytes, ai_calls
+      FROM v_contribution_run
+      WHERE run_id = :run_id
+        AND (wall_ms IS NOT NULL OR cpu_ms IS NOT NULL OR peak_bytes IS NOT NULL OR ai_calls IS NOT NULL)
+  scopes:
+    sql: |
+      SELECT s.key AS scope, s.value AS calls
+      FROM v_contribution_run r, json_each(r.scopes) s
+      WHERE r.run_id = :run_id ORDER BY s.key
+  decisions:
+    sql: |
+      SELECT d.value ->> 'need' AS need, d.value ->> 'name' AS name,
+             d.value ->> 'decision' AS decision, d.value ->> 'reason' AS reason
+      FROM v_contribution_run r, json_each(r.decisions) d
+      WHERE r.run_id = :run_id ORDER BY (d.value ->> 'decision') <> 'denied', d.key
+  model_calls:
+    sql: |
+      SELECT model, input_tokens, output_tokens, uri
+      FROM v_ai_call WHERE run_id = :run_id ORDER BY at, id
+  related_runs:
+    sql: |
+      SELECT 'Parent' AS relation, p.contribution, p.started_at, p.uri
+      FROM v_contribution_run r JOIN v_contribution_run p ON p.run_id = r.parent_run_id
+      WHERE r.run_id = :run_id
+      UNION ALL
+      SELECT 'Child' AS relation, c.contribution, c.started_at, c.uri
+      FROM v_contribution_run c WHERE c.parent_run_id = :run_id
+      ORDER BY relation DESC, started_at, uri
+  cause:
+    sql: |
+      SELECT e.type, e.at, e.uri
+      FROM v_contribution_run r JOIN v_event e ON e.id = r.cause_event_id
+      WHERE r.run_id = :run_id
+view:
+  stack:
+  - id: cost
+    title: Cost
+    viz: detail
+    from: cost
+    columns:
+    - { key: wall_ms, label: Wall time, format: duration }
+    - { key: cpu_ms, label: CPU time, format: duration }
+    - { key: peak_bytes, label: Peak memory, format: bytes }
+    - { key: ai_calls, label: Model calls }
+    empty: No cost was recorded for this run.
+  - id: scopes
+    title: Scopes used
+    viz: table
+    from: scopes
+    columns:
+    - { key: scope, label: Scope }
+    - { key: calls, label: Calls }
+    empty: No scopes were recorded.
+  - id: decisions
+    title: Permission decisions
+    viz: table
+    from: decisions
+    columns:
+    - { key: need, label: Need }
+    - { key: name, label: Name }
+    - { key: decision, label: Decision }
+    - { key: reason, label: Reason }
+    empty: No permission decisions were recorded.
+  - id: model-calls
+    title: Model calls
+    viz: table
+    from: model_calls
+    columns:
+    - { key: model, label: Model, link: { kind: page, from: uri } }
+    - { key: input_tokens, label: Input tokens }
+    - { key: output_tokens, label: Output tokens }
+    empty: No model calls were recorded.
+  - id: related-runs
+    title: Parent and child runs
+    viz: table
+    from: related_runs
+    columns:
+    - { key: relation, label: Relation }
+    - { key: contribution, label: Contribution, link: { kind: page, from: uri } }
+    - { key: started_at, label: Started, format: datetime }
+    empty: No parent or child runs were recorded.
+  - id: cause
+    title: Causing event
+    viz: detail
+    from: cause
+    columns:
+    - { key: type, label: Event, link: { kind: page, from: uri } }
+    - { key: at, label: When, format: datetime }
+    empty: No causing event was recorded.

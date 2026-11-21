@@ -582,6 +582,8 @@ A command that only reads (`View` / `Read`) stops after step 4: its handler runs
 `Database::read` — a snapshot that is always rolled back, so a write it
 makes never lands (nothing would audit it) — and the outcome has
 `audit_id: None`, `event_id: None`.
+An external read handler receives the command's run ID too, so model calls
+can link to the command's contribution run.
 
 `CommandBus::undo(actor, audit_id, confirmed)` loads the row, refuses a
 run that didn't complete, was already undone or has no inverse, runs the

@@ -457,6 +457,12 @@ impl RunContext {
         self
     }
 
+    /// Execute a handler in its mode while keeping the enclosing run's identity.
+    pub fn in_mode(mut self, mode: Mode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     /// This run, started by `parent`'s (a person's `oxplow.effect.retry`
     /// of an effect's reaction): linked to it as its parent and stopped
     /// with it, still run as its own actor.

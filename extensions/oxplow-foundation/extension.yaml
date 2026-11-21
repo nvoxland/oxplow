@@ -40,6 +40,9 @@ intent:
     - name: a person bookmarks a page for their thread
       input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+    - name: run-details-shows-cost-and-denied-decisions-first
+      input: { part: run-details }
+      expect: the run's cost and scopes, with denied permission decisions before allowed ones
     - name: definition-reads-a-pages-title-origin-and-nodes
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/commit.yaml } }
       expect: the tab named for the file, then the page's source, the other pages that draw the file, its params, loaders, nodes and actions; no YAML (the Text view shows that)

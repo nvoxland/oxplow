@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 use super::super::ops::Op;
 use super::super::util::{failed, invalid, ServicesSlot};
 use super::super::HandlerOutput;
-use super::ids::{read_op, result_of};
-use crate::ai_compute::AiComputeError;
+use super::ids::{read_op_with_invocation, result_of};
+use crate::ai_compute::{AiComputeError, Caller};
 use crate::ai_service::{AiServiceError, Question, Role};
 
 /// The most text an agent's model call takes (`decide`'s `state`,
@@ -105,12 +105,12 @@ fn compute_error(e: AiComputeError) -> CommandError {
 
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
-        read_op(
+        read_op_with_invocation(
             "ai.compute",
             "decide",
             services.clone(),
-            |svc, actor, p: AiDecideParams| async move {
-                let caller = ai_caller(&actor)?;
+            |svc, invocation, p: AiDecideParams| async move {
+                let caller = ai_caller(invocation.actor())?;
                 check_ai_text("state", &p.state)?;
                 let mut questions = BTreeMap::new();
                 for (name, q) in p.questions {
@@ -144,25 +144,32 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     };
                     questions.insert(name, question);
                 }
+                invocation.run.used_ai();
                 let decision = svc
                     .ai_compute
-                    .decide(caller.as_str(), &Role::DECIDE, &p.state, &questions)
+                    .decide(
+                        Caller::in_run(&caller, &invocation.run),
+                        &Role::DECIDE,
+                        &p.state,
+                        &questions,
+                    )
                     .await
                     .map_err(compute_error)?;
                 result_of(json!({ "answers": decision.value, "cached": decision.cached }))
             },
         ),
-        read_op(
+        read_op_with_invocation(
             "ai.compute",
             "summarize",
             services,
-            |svc, actor, p: AiSummarizeParams| async move {
-                let caller = ai_caller(&actor)?;
+            |svc, invocation, p: AiSummarizeParams| async move {
+                let caller = ai_caller(invocation.actor())?;
                 check_ai_text("text", &p.text)?;
+                invocation.run.used_ai();
                 let summary = svc
                     .ai_compute
                     .summarize(
-                        caller.as_str(),
+                        Caller::in_run(&caller, &invocation.run),
                         &Role::SUMMARIZE,
                         &p.text,
                         p.focus.as_deref(),
