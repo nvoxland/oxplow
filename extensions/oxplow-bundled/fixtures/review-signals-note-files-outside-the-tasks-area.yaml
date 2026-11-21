@@ -1,0 +1,21 @@
+# The review's `scope` signals: on a request's change, the files the request
+# changed outside the area its task names. The file in the area gives none.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: "Fix src/ui/panel.rs", stage: ready } }
+  - observe: { snapshot: { trigger: manual, files: [{ path: src/ui/panel.rs, hash: h0 }, { path: docs/readme.md, hash: h0 }] } }
+  - observe:
+      turn:
+        prompt: Fix the panel
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/panel.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [docs/readme.md], ok: true }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/ui/panel.rs, hash: h1 }, { path: docs/readme.md, hash: h1 }] } }
+  - observe: { analyze: { kind: request, requestId: req1 } }
+when:
+  sql: SELECT change_id, area, signal, severity, path, title FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_scope'
+expect:
+  rows:
+    - { change_id: 1, area: scope, signal: outside-task-area, severity: info, path: docs/readme.md, title: "Outside the task's area" }

@@ -1,0 +1,22 @@
+# The review's `history` signals: a file changed without the files it
+# usually changes with, and a file untouched for months. A file the change
+# adds has no history, so it is not "dormant" and gives no signal.
+given:
+  - observe: { commit: { sha: ab0, at: "2026-10-22T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ab1, at: "2026-10-17T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ab2, at: "2026-10-07T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: old, at: "2026-04-10T00:00:00Z", files: [{ path: src/c.rs, status: modified }] } }
+  - observe:
+      change:
+        kind: working
+        target: ""
+        files:
+          - { path: src/a.rs, additions: 1 }
+          - { path: src/c.rs, additions: 1 }
+          - { path: src/d.rs, status: added, additions: 1 }
+when:
+  sql: SELECT area, signal, severity, path, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_history' ORDER BY path
+expect:
+  rows:
+    - { area: history, signal: partners-unchanged, severity: info, path: src/a.rs, title: Usual co-changers not changed, why: "Usually changes with src/b.rs, which this change doesn't touch." }
+    - { area: history, signal: dormant-file, severity: info, path: src/c.rs, title: Long-untouched file changed, why: $any }

@@ -28,8 +28,9 @@ steps:
             - { path: src/lib.rs, severity: medium }
         by_area:
           rows:
-            - { area: tests, high: 3, medium: 0 }
-            - { area: code, high: 0, medium: 1 }
+            - { area: tests, high: 3, medium: 0, info: 0 }
+            - { area: code, high: 0, medium: 1, info: 1 }
+            - { area: history, high: 0, medium: 0, info: 2 }
   - when: { part: oxplow/change-review-brief, params: { change_id: 1 } }
     expect:
       loaders:
@@ -46,3 +47,4 @@ steps:
             - { title: Fewer assertions, severity: high, line: null }
             - { title: Test skipped, severity: high, line: null }
             - { title: "Test deleted: b", severity: high, line: 8 }
+            - { title: Long-untouched file changed, severity: info, line: null }

@@ -138,6 +138,26 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     assertions; skip added; all `high`, and read only in test files, since
     the counts are text heuristics) and `review_signal_api` (public
     signature changed, public function removed; `medium`).
+    More sources, one dataset each (`datasets/review_signal_*.sql`):
+    - `review_signal_harness`: a changed file that matches a `test-harness`,
+      `ci` or `lint-config` rule of `v_file_kind_rule` (`glob_match`); `high`,
+      area `tests`, one row per file and kind.
+    - `review_signal_dependencies`: a `dependency-manifest` or `lockfile`
+      file changed; `high`, area `dependencies`.
+    - `review_signal_sensitive`: a `sensitive` or `migration` file changed;
+      `medium`, area `code`.
+    - `review_signal_scope`: files a request changed outside its task's area
+      (`v_oxplow_deviation`), on the request's change (`target` is the
+      request id as text); `info`, area `scope`.
+    - `review_signal_shape`: files with a reason in
+      `v_oxplow_change_interest` (large, complex, long new functions);
+      `info`, `why` is the reasons text.
+    - `review_signal_history`: `v_oxplow_change_co_change` rows, as
+      `partners-unchanged` and `dormant-file`; a file the change adds is
+      never a signal (no history, so it always read as dormant); `info`.
+    - `review_signal_duplication`: `v_change_duplicate` blocks of the
+      change's files, with the copy in `why`; `info`. The scan runs after the
+      rest of the analysis, so these rows come late.
   - `severity`: `high` and `medium` put a file in Look Here; `info` is
     counted in By Area and listed in the file's expansion.
   - The brief (`parts/change-review-brief.yaml`) is one line under the first

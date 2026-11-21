@@ -1,0 +1,20 @@
+# The review's `harness` signals from a language pack's rules: a jest
+# config or a snapshot is a test harness, a tsconfig a lint config.
+requires: [oxplow-typescript]
+given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: web/jest.config.js, additions: 3 }
+          - { path: web/__snapshots__/panel.test.ts.snap, additions: 9 }
+          - { path: web/tsconfig.json, additions: 1 }
+          - { path: web/panel.ts, additions: 5 }
+when:
+  sql: SELECT signal, severity, path, title FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_harness' ORDER BY path
+expect:
+  rows:
+    - { signal: test-harness-changed, severity: high, path: "web/__snapshots__/panel.test.ts.snap", title: Test harness changed }
+    - { signal: test-harness-changed, severity: high, path: web/jest.config.js, title: Test harness changed }
+    - { signal: lint-config-changed, severity: high, path: web/tsconfig.json, title: Lint config changed }

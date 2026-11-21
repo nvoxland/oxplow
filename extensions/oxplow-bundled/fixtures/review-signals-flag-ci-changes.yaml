@@ -1,0 +1,23 @@
+# The review's `harness` signals: a CI pipeline file the change touched
+# says what passing means may have changed. One row per file and kind, even
+# when several globs match; other files give none.
+given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: .github/workflows/ci.yml, additions: 4, deletions: 1 }
+          - { path: src/main.rs, additions: 2 }
+  - observe:
+      change:
+        kind: commit
+        target: def
+        files:
+          - { path: .gitlab-ci.yml, additions: 1 }
+when:
+  sql: SELECT change_id, area, signal, severity, path, line, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_harness' ORDER BY change_id, path
+expect:
+  rows:
+    - { change_id: 1, area: tests, signal: ci-changed, severity: high, path: .github/workflows/ci.yml, line: null, title: CI config changed, why: ".github/workflows/ci.yml matches the CI rule .github/workflows/**, so what passing means may have changed." }
+    - { change_id: 2, area: tests, signal: ci-changed, severity: high, path: .gitlab-ci.yml, line: null, title: CI config changed, why: ".gitlab-ci.yml matches the CI rule .gitlab-ci.yml, so what passing means may have changed." }

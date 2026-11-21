@@ -1,0 +1,17 @@
+# The review's `sensitive` signals: a file in a sensitive place and a
+# migration are worth a look; other files give none.
+given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: src/auth/login.rs, additions: 3 }
+          - { path: db/migrations/V2__add_col.sql, additions: 1 }
+          - { path: src/view.rs, additions: 1 }
+when:
+  sql: SELECT area, signal, severity, path, title FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_sensitive' ORDER BY path
+expect:
+  rows:
+    - { area: code, signal: migration-changed, severity: medium, path: db/migrations/V2__add_col.sql, title: Migration changed }
+    - { area: code, signal: sensitive-path, severity: medium, path: src/auth/login.rs, title: Sensitive file changed }

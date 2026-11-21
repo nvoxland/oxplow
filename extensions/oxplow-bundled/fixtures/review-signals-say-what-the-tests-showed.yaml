@@ -1,0 +1,29 @@
+# The review's `verification` signals come from the runs oxplow read, never
+# the agent's word: a request whose latest test run failed says so (`high`),
+# and one that changed code with no test run says that (`medium`).
+given:
+  - observe: { snapshot: { trigger: manual, files: [{ path: src/a.rs, hash: h0 }] } }
+  - observe:
+      turn:
+        prompt: Change a and run the tests
+        tools:
+          - { name: Edit, kind: edit, paths: [src/a.rs], ok: true }
+  - observe: { test_run: { turn: 1, cases: [{ name: a::grows, status: passed }, { name: a::shrinks, status: failed }] } }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/a.rs, hash: h1 }] } }
+  - observe: { analyze: { kind: request, requestId: req1 } }
+  - observe:
+      turn:
+        prompt: Change b without testing
+        tools:
+          - { name: Edit, kind: edit, paths: [src/b.rs], ok: true }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/a.rs, hash: h1 }, { path: src/b.rs, hash: h1 }] } }
+  - observe: { analyze: { kind: request, requestId: req2 } }
+when:
+  sql: |
+    SELECT c.target AS request_row, s.signal, s.severity, s.path, s.title
+    FROM v_oxplow_review_signal s JOIN v_change c ON c.id = s.change_id
+    WHERE s.source = 'oxplow/review_signal_verification' ORDER BY c.target, s.signal
+expect:
+  rows:
+    - { request_row: "1", signal: tests-failing, severity: high, path: null, title: Tests failing }
+    - { request_row: "2", signal: no-test-run, severity: medium, path: null, title: No tests ran }

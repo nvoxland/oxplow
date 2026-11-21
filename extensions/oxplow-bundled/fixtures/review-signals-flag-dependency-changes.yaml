@@ -1,0 +1,18 @@
+# The review's `dependencies` signals: the manifest and the lockfile a
+# change touched, each once; a source file gives none.
+requires: [oxplow-rust]
+given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: Cargo.toml, additions: 2 }
+          - { path: Cargo.lock, additions: 30, deletions: 4 }
+          - { path: src/lib.rs, additions: 1 }
+when:
+  sql: SELECT area, signal, severity, path, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_dependencies' ORDER BY path
+expect:
+  rows:
+    - { area: dependencies, signal: lockfile-changed, severity: high, path: Cargo.lock, title: Lockfile changed, why: "Cargo.lock matches the lockfile rule **/Cargo.lock, so the dependencies may have changed." }
+    - { area: dependencies, signal: dependency-manifest-changed, severity: high, path: Cargo.toml, title: Dependency manifest changed, why: "Cargo.toml matches the dependency manifest rule **/Cargo.toml, so the dependencies may have changed." }

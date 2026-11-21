@@ -1,0 +1,21 @@
+# The review's `shape` signals: a file the "look here first" score gives a
+# reason is listed with that reason; a routine file gives none.
+given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: src/hot.rs, additions: 10, deletions: 2 }
+          - { path: src/calm.rs, additions: 3, deletions: 1 }
+          - { path: src/big.rs, additions: 40, deletions: 20 }
+        functions:
+          - { path: src/hot.rs, symbol: grow, body_changed: true, start_line: 1, length: 20, params_before: 1, params_after: 1, complexity_delta: 3 }
+          - { path: src/hot.rs, symbol: widen, signature_changed: true, start_line: 30, length: 10, params_before: 1, params_after: 3 }
+          - { path: src/hot.rs, symbol: fresh, status: added, start_line: 50, length: 70, params_after: 0 }
+when:
+  sql: SELECT area, signal, severity, path, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_shape' ORDER BY path
+expect:
+  rows:
+    - { area: code, signal: shape, severity: info, path: src/big.rs, title: Large or complex change, why: 60 lines touched }
+    - { area: code, signal: shape, severity: info, path: src/hot.rs, title: Large or complex change, why: "complexity +3 across 1 fn; +2 params across 1 fn; added 70-line function" }

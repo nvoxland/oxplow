@@ -1,0 +1,21 @@
+# The review's `findings` signals: a lint-like fact (a rule at a line) on a
+# line the change touched is a signal; the same fact on a line it left alone
+# is not. Here a fact collector found `unwrap` calls on lines 2 and 5, and
+# the uncommitted change rewrote line 2 only.
+given:
+  - observe: { turn: { prompt: base, write: { path: src/a.rs, body: "fn a() {\n    let x = 1;\n}\nfn b() {\n    y.unwrap();\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/a.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: unwrap it, write: { path: src/a.rs, body: "fn a() {\n    let x = z.unwrap();\n}\nfn b() {\n    y.unwrap();\n}\n" } } }
+  - observe: { analyze: { kind: working } }
+  - observe:
+      facts:
+        measure: oxplow.ast_hit
+        items:
+          - { value: 1, path: src/a.rs, line: 2, rule: unwrap_expect }
+          - { value: 1, path: src/a.rs, line: 5, rule: unwrap_expect }
+when:
+  sql: SELECT signal, severity, path, line, title FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_findings'
+expect:
+  rows:
+    - { signal: lint-unwrap_expect, severity: medium, path: src/a.rs, line: 2, title: "Added: unwrap_expect" }
