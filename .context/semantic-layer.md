@@ -246,11 +246,17 @@ A published view is a **dataset**: one `SELECT` in a file, reading only
 through `ref('<dataset>')` and `source('<table>')`, compiled to a view at
 every open (`crates/oxplow-db/src/datasets.rs`, called from
 `migrate_and_compile` after the migrations). Core datasets live in
-`crates/oxplow-db/datasets/`: `<name>.sql` plus an entry in `datasets.yaml`
+`crates/oxplow-db/datasets/`: `<name>.sql` plus an entry under `datasets:` in `datasets.yaml`
 (`name`, `version`, `description`, `fields` — the contract, with each
-field's SQLite type and doc — optional `relationships`, and `tests`); the build script embeds every
-file there, and view `v_<name>` publishes it. The compiler, per owner, in
-one transaction:
+field's SQLite type and doc — optional `relationships`, and `tests`).
+Core's top-level `field_groups:` declares reusable lists of fields. A
+dataset's `groups: [contribution_run]` prepends the group's fields and docs
+to its own `fields:`. The SQL still names each column in that order. A
+field cannot appear twice, and a change to a group changes the pinned
+contract of every dataset that uses it.
+
+The build script embeds every file there, and view `v_<name>` publishes
+it. The compiler, per owner, in one transaction:
 
 - resolves `ref()` / `source()` with the tokenizer — an unknown dataset or
   table, or a non-literal argument, is an error at `file:line:col`;

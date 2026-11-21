@@ -54,6 +54,11 @@ pub struct DatasetDecl {
     pub description: String,
     /// The contract: the view's fields (its columns), in order.
     pub fields: Vec<DatasetField>,
+    /// Field groups expanded by the core manifest loader, for diagnostics.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[specta(skip)]
+    pub field_groups: Vec<String>,
     /// How its fields point into other datasets:
     /// `[{ from: <field>, to: <dataset>.<field> }]`. Declared, checked and
     /// published (`v_dataset.relationships`); not part of the contract.
@@ -362,8 +367,8 @@ pub fn contract_drift(golden: &serde_json::Value, decls: &[DatasetDecl]) -> Vec<
                 };
                 if let Some(change) = change {
                     out.push(format!(
-                        "{} v{}'s contract changed ({change}); bump its `version` in datasets.yaml",
-                        d.name, d.version
+                        "{} v{}'s contract changed ({change}){}; bump its `version` in datasets.yaml",
+                        d.name, d.version, field_group_context(d)
                     ));
                 }
             }
@@ -698,6 +703,14 @@ fn record_relationships(conn: &Connection, view: &str, json: &str) -> Result<(),
     Ok(())
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CoreDatasetManifest {
+    #[serde(default)]
+    field_groups: BTreeMap<String, Vec<DatasetField>>,
+    datasets: Vec<serde_yaml::Mapping>,
+}
+
 /// Join a `datasets.yaml` with its SQL files (`file(name)` reads
 /// `<name>.sql`; `sql_files()` lists the stems present).
 pub fn sources_from(
@@ -706,20 +719,92 @@ pub fn sources_from(
     file: impl Fn(&str) -> Option<String>,
     sql_files: impl Fn() -> Vec<String>,
 ) -> Result<Vec<DatasetSource>, DomainError> {
-    let decls: Vec<DatasetDecl> =
-        serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/datasets.yaml: {e}")))?;
     let declared_in = format!("{dir}/datasets.yaml");
+    let manifest: CoreDatasetManifest =
+        serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{declared_in}: {e}")))?;
     let lines = decl_lines(yaml);
-    for d in &decls {
-        let at = match lines.get(d.name.as_str()) {
+    let mut decls = Vec::with_capacity(manifest.datasets.len());
+    for mut entry in manifest.datasets {
+        let at = match entry
+            .get("name")
+            .and_then(serde_yaml::Value::as_str)
+            .and_then(|name| lines.get(name))
+        {
             Some(line) => format!("{declared_in}:{line}"),
             None => declared_in.clone(),
         };
-        check_key(d, &at)?;
-        check_relationships(d, &at)?;
-        check_materialize(d, &at)?;
+        let groups: Vec<String> = entry
+            .remove("groups")
+            .map(serde_yaml::from_value)
+            .transpose()
+            .map_err(|e| invalid(format!("{at}: groups: {e}")))?
+            .unwrap_or_default();
+        if !groups.is_empty() {
+            entry
+                .entry(serde_yaml::Value::String("fields".into()))
+                .or_insert_with(|| serde_yaml::Value::Sequence(Vec::new()));
+        }
+        let mut decl: DatasetDecl = serde_yaml::from_value(serde_yaml::Value::Mapping(entry))
+            .map_err(|e| invalid(format!("{at}: {e}")))?;
+        decl.field_groups = groups;
+        expand_field_groups(&mut decl, &manifest.field_groups, &at)?;
+        check_key(&decl, &at)?;
+        check_relationships(&decl, &at)?;
+        check_materialize(&decl, &at)?;
+        decls.push(decl);
     }
     join_sources(decls, dir, &declared_in, file, sql_files)
+}
+
+fn expand_field_groups(
+    decl: &mut DatasetDecl,
+    groups: &BTreeMap<String, Vec<DatasetField>>,
+    at: &str,
+) -> Result<(), DomainError> {
+    if decl.field_groups.is_empty() {
+        return Ok(());
+    }
+    let mut owners = BTreeMap::new();
+    let mut combined = Vec::new();
+    for group in &decl.field_groups {
+        let fields = groups.get(group).ok_or_else(|| {
+            invalid(format!(
+                "{at}: `{}` uses unknown field group `{group}`",
+                decl.name
+            ))
+        })?;
+        for field in fields {
+            if let Some(previous) = owners.insert(&field.name, group) {
+                return Err(invalid(format!(
+                    "{at}: `{}` declares field `{}` more than once in field groups `{previous}` and `{group}`",
+                    decl.name, field.name,
+                )));
+            }
+            combined.push(field.clone());
+        }
+    }
+    for field in &decl.fields {
+        if let Some(group) = owners.get(&field.name) {
+            return Err(invalid(format!(
+                "{at}: `{}` declares field `{}` in both field group `{group}` and its own fields",
+                decl.name, field.name,
+            )));
+        }
+    }
+    combined.append(&mut decl.fields);
+    decl.fields = combined;
+    Ok(())
+}
+
+fn field_group_context(decl: &DatasetDecl) -> String {
+    if decl.field_groups.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " in dataset using field groups [{}]",
+            decl.field_groups.join(", ")
+        )
+    }
 }
 
 /// Join declarations (from `declared_in`) with their `<name>.sql` files in
@@ -777,6 +862,7 @@ pub fn join_sources(
                         d.until
                     ),
                     fields: Vec::new(),
+                    field_groups: Vec::new(),
                     relationships: Vec::new(),
                     key: Vec::new(),
                     tests: Vec::new(),
@@ -1509,8 +1595,11 @@ fn check_contract(
         }
         Some(before) => match before.change_to(&decl.fields, &decl.key) {
             Some(change) => Err(invalid(format!(
-                "{}: {} v{}'s contract changed ({change}); bump its version",
-                m.source.file, decl.name, decl.version
+                "{}: {} v{}'s contract changed ({change}){}; bump its version",
+                m.source.file,
+                decl.name,
+                decl.version,
+                field_group_context(decl)
             ))),
             None => Ok(()),
         },
@@ -2617,6 +2706,7 @@ mod tests {
                 name: name.into(),
                 version: 1,
                 description: format!("{name}."),
+                field_groups: Vec::new(),
                 fields: columns
                     .iter()
                     .map(|c| {
@@ -3176,12 +3266,89 @@ mod tests {
         );
     }
 
+    const SHARED_FIELDS: &str = "
+field_groups:
+  common: [{ name: id, type: INTEGER, doc: Row id. }]
+datasets:
+- name: a
+  version: 1
+  description: A.
+  groups: [common]
+  fields: [{ name: title, type: TEXT, doc: Row title. }]
+- name: b
+  version: 1
+  description: B.
+  groups: [common]
+";
+
+    fn grouped_sources(yaml: &str) -> Result<Vec<DatasetSource>, DomainError> {
+        sources_from(
+            yaml,
+            "datasets",
+            |file| match file {
+                "a.sql" => Some("SELECT id, title FROM source('streams')".into()),
+                "b.sql" => Some("SELECT id FROM source('streams')".into()),
+                _ => None,
+            },
+            || vec!["a".into(), "b".into()],
+        )
+    }
+
+    #[test]
+    fn a_dataset_publishes_its_group_fields_before_its_own() {
+        let mut conn = fresh();
+        let sources = grouped_sources(SHARED_FIELDS).unwrap();
+        compile(&mut conn, "t", &sources, &view).unwrap();
+        assert_eq!(
+            view_columns(&conn, "v_t_a").unwrap(),
+            vec![
+                ("id".into(), "INTEGER".into()),
+                ("title".into(), "TEXT".into())
+            ],
+        );
+        assert_eq!(
+            view_columns(&conn, "v_t_b").unwrap(),
+            vec![("id".into(), "INTEGER".into())],
+        );
+    }
+
+    #[test]
+    fn editing_a_field_group_drifts_every_contract_that_uses_it() {
+        let decls = |yaml| {
+            grouped_sources(yaml)
+                .unwrap()
+                .into_iter()
+                .map(|source| source.decl)
+                .collect::<Vec<_>>()
+        };
+        let golden = pin_contracts(&serde_json::json!({}), &decls(SHARED_FIELDS));
+        let changed = SHARED_FIELDS.replace("Row id.", "The stream id.");
+        let drift = contract_drift(&golden, &decls(&changed));
+        assert_eq!(drift.len(), 2, "{drift:?}");
+        for (name, message) in ["a", "b"].into_iter().zip(drift) {
+            assert!(message.starts_with(&format!("{name} v1")), "{message}");
+            assert!(message.contains("common"), "{message}");
+        }
+    }
+
+    #[test]
+    fn a_dataset_cannot_redeclare_a_field_from_a_group() {
+        let duplicate = SHARED_FIELDS.replace(
+            "fields: [{ name: title, type: TEXT, doc: Row title. }]",
+            "fields: [{ name: id, type: INTEGER, doc: Row id. }]",
+        );
+        let message = grouped_sources(&duplicate).unwrap_err().to_string();
+        assert!(message.contains("`a`"), "{message}");
+        assert!(message.contains("`id`"), "{message}");
+        assert!(message.contains("common"), "{message}");
+    }
+
     /// P8.B2: `materialize: { every: 2h }` is recorded as its clock; a
     /// clock the grammar can't read is an error at its line.
     #[test]
     fn an_every_clock_is_checked_and_recorded() {
         let yaml = |every: &str| {
-            format!("- name: a\n  version: 1\n  description: d\n  materialize: {{ every: {every} }}\n  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n")
+            format!("datasets:\n- name: a\n  version: 1\n  description: d\n  materialize: {{ every: {every} }}\n  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n")
         };
         let ok = sources_from(
             &yaml("2h"),
@@ -3214,7 +3381,7 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("datasets/datasets.yaml:1: `a` materializes `every: soon`"),
+                .contains("datasets/datasets.yaml:2: `a` materializes `every: soon`"),
             "{err}"
         );
     }
@@ -3226,7 +3393,7 @@ mod tests {
     fn an_incremental_dataset_is_refused_what_appending_cant_keep_right() {
         let decl = |extra: &str| {
             format!(
-                "- name: a\n  version: 1\n  description: d\n  materialize: {{ incremental: id }}\n{extra}  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n    - {{ name: v, type: TEXT, doc: \"A value.\" }}\n"
+                "datasets:\n- name: a\n  version: 1\n  description: d\n  materialize: {{ incremental: id }}\n{extra}  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n    - {{ name: v, type: TEXT, doc: \"A value.\" }}\n"
             )
         };
         let load = |yaml: String, sql: &str| {
@@ -3243,7 +3410,7 @@ mod tests {
         assert!(load(decl("  key: [id]\n"), plain).is_ok());
         assert!(
             err(decl(""), plain)
-                .contains("datasets/datasets.yaml:1: `a` is incremental but declares no key"),
+                .contains("datasets/datasets.yaml:2: `a` is incremental but declares no key"),
             "{}",
             err(decl(""), plain)
         );
@@ -3262,7 +3429,7 @@ mod tests {
             );
         let e = err(yaml, "SELECT id, v, 1 AS n FROM source('streams')");
         assert!(
-            e.contains("datasets/datasets.yaml:1: `a`'s watermark `n` must be its key"),
+            e.contains("datasets/datasets.yaml:2: `a`'s watermark `n` must be its key"),
             "{e}"
         );
         for (sql, what) in [
@@ -3322,7 +3489,7 @@ mod tests {
     fn a_relationship_from_an_undeclared_field_or_to_no_field_is_an_error_at_its_line() {
         let decl = |rel: &str| {
             format!(
-                "- name: a\n  version: 1\n  description: d\n  relationships: [{rel}]\n  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n"
+                "datasets:\n- name: a\n  version: 1\n  description: d\n  relationships: [{rel}]\n  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n"
             )
         };
         let load = |yaml: &str| {
@@ -3337,14 +3504,14 @@ mod tests {
         let err = load(&decl("{ from: nope, to: task.id }")).unwrap_err();
         assert!(
             err.to_string().contains(
-                "datasets/datasets.yaml:1: `a`'s relationship from `nope` names no field it declares"
+                "datasets/datasets.yaml:2: `a`'s relationship from `nope` names no field it declares"
             ),
             "{err}"
         );
         let err = load(&decl("{ from: id, to: task }")).unwrap_err();
         assert!(
             err.to_string().contains(
-                "datasets/datasets.yaml:1: `a`'s relationship to `task` isn't `<dataset>.<field>`"
+                "datasets/datasets.yaml:2: `a`'s relationship to `task` isn't `<dataset>.<field>`"
             ),
             "{err}"
         );
@@ -3353,7 +3520,7 @@ mod tests {
     /// A key names declared columns; another is an error at its line.
     #[test]
     fn a_key_on_an_undeclared_column_is_an_error_at_its_line() {
-        let yaml = "- name: a\n  version: 1\n  description: d\n  key: [nope]\n  fields:\n    - { name: id, type: INTEGER, doc: \"Row id.\" }\n";
+        let yaml = "datasets:\n- name: a\n  version: 1\n  description: d\n  key: [nope]\n  fields:\n    - { name: id, type: INTEGER, doc: \"Row id.\" }\n";
         let err = sources_from(
             yaml,
             "datasets",
@@ -3363,7 +3530,7 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string().contains(
-                "datasets/datasets.yaml:1: `a`'s key names `nope`, which isn't one of its columns"
+                "datasets/datasets.yaml:2: `a`'s key names `nope`, which isn't one of its columns"
             ),
             "{err}"
         );

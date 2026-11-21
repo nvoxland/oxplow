@@ -606,6 +606,7 @@ mod tests {
                     name: name.into(),
                     version: 1,
                     description: format!("{name}."),
+                    field_groups: Vec::new(),
                     fields: columns
                         .iter()
                         .map(|(n, t)| DatasetField {
@@ -756,6 +757,7 @@ mod tests {
                     name: name.into(),
                     version,
                     description: format!("{name}."),
+                    field_groups: Vec::new(),
                     fields: [("id", "TEXT"), ("title", title_type)]
                         .iter()
                         .map(|(n, t)| DatasetField {

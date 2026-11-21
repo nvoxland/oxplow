@@ -1860,6 +1860,7 @@ mod tests {
                 name: name.into(),
                 version: 1,
                 description: "d".into(),
+                field_groups: Vec::new(),
                 fields: columns
                     .iter()
                     .map(|(n, t)| DatasetField {
