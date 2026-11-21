@@ -1,0 +1,17 @@
+manifest: 2
+name: oxplow-lua
+namespace: oxplow
+description: "What oxplow knows about Lua: the language server to suggest. Ships with oxplow, off until a project uses Lua."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Lua in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+  examples:
+    - name: lua-the-language-server-is-suggested
+      input: { sql: v_language }
+      expect: the Mason package of the language server
+languages:
+  - { id: lua, title: Lua, extensions: [lua], lsp: { package: lua-language-server } }

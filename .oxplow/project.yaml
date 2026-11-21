@@ -61,3 +61,10 @@ oxplow.extensionSources:
   oxplow-csharp: extensions/oxplow-csharp
   oxplow-clojure: extensions/oxplow-clojure
   oxplow-starlark: extensions/oxplow-starlark
+  oxplow-lua: extensions/oxplow-lua
+  oxplow-ruby: extensions/oxplow-ruby
+  oxplow-bash: extensions/oxplow-bash
+  oxplow-zig: extensions/oxplow-zig
+  oxplow-json: extensions/oxplow-json
+  oxplow-yaml: extensions/oxplow-yaml
+  oxplow-web: extensions/oxplow-web

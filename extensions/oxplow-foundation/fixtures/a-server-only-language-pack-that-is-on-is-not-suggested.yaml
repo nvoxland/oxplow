@@ -1,0 +1,6 @@
+# The Ruby pack is on: nothing to suggest for the project's Ruby files.
+requires: [oxplow-ruby]
+given:
+  - observe: { snapshot: { files: [{ path: app/model.rb, hash: 0123456789abcdef0123456789abcdef }] } }
+when: { advisory: language-pack }
+expect: { lines: [] }

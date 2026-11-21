@@ -65,8 +65,8 @@ manager owns:
 > (`languageId`). The bridge to the declared languages
 > (`.context/language-support.md`) is `Languages::by_lsp_id(id)`: a
 > language's declared `lsp_ids` (`typescriptreact` is TSX's), then its id
-> and aliases. A language with no grammar (Lua, YAML: foundation declares
-> them) has no analysis. Use it whenever an LSP buffer needs tree-sitter
+> and aliases. A language with no grammar (Lua, YAML: their packs
+> `oxplow-lua`, `oxplow-yaml` declare them) has no analysis. Use it whenever an LSP buffer needs tree-sitter
 > analysis — don't re-derive the mapping.
 
 ## Installer (`crates/oxplow-app/src/lsp_installer.rs`)

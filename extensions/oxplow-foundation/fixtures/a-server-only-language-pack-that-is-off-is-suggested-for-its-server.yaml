@@ -1,0 +1,8 @@
+# The project has Ruby files and the Ruby pack is off. Ruby has no grammar in
+# oxplow, so the pack gives its language server suggestion: the notice says so.
+given:
+  - observe: { snapshot: { files: [{ path: app/model.rb, hash: 0123456789abcdef0123456789abcdef }] } }
+when: { advisory: language-pack }
+expect:
+  lines:
+    - "This project has Ruby files. Turn on the [Ruby language pack](oxplow:oxplow/extension?name=oxplow-ruby) to get its language server suggestion."

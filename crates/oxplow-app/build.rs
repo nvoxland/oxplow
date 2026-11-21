@@ -42,6 +42,13 @@ const BUNDLED: &[&str] = &[
     "oxplow-csharp",
     "oxplow-clojure",
     "oxplow-starlark",
+    "oxplow-lua",
+    "oxplow-ruby",
+    "oxplow-bash",
+    "oxplow-zig",
+    "oxplow-json",
+    "oxplow-yaml",
+    "oxplow-web",
 ];
 
 fn main() {

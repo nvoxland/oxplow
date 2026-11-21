@@ -1757,7 +1757,7 @@ mod tests {
             ..ChangedFile::default()
         };
         let files = vec![
-            file("spec/foo_spec.rb"),
+            file("spec/foo_spec.zig"),
             file("src/it/flow.rb"),
             file("src/a.test.ts"),
             file("src/lib.rb"),
@@ -1777,7 +1777,7 @@ mod tests {
         assert_eq!(is_test(&tests), [true, true, true, false]);
         // A function in a project test file is a test function.
         assert!(super::is_test_function(
-            "spec/foo_spec.rb",
+            "spec/foo_spec.zig",
             "x",
             &[],
             &tests

@@ -126,6 +126,41 @@ mod generated {
         FILES.get_or_init(|| read("oxplow-starlark"))
     }
 
+    pub fn oxplow_lua() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-lua"))
+    }
+
+    pub fn oxplow_ruby() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-ruby"))
+    }
+
+    pub fn oxplow_bash() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-bash"))
+    }
+
+    pub fn oxplow_zig() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-zig"))
+    }
+
+    pub fn oxplow_json() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-json"))
+    }
+
+    pub fn oxplow_yaml() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-yaml"))
+    }
+
+    pub fn oxplow_web() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-web"))
+    }
+
     /// `extensions/<name>/`'s files, kept for the life of the process.
     fn read(name: &str) -> Files {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -220,6 +255,48 @@ pub const BUNDLED: &[BundledExtension] = &[
         files: generated::oxplow_starlark,
         required: false,
     },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-lua",
+        files: generated::oxplow_lua,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-ruby",
+        files: generated::oxplow_ruby,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-bash",
+        files: generated::oxplow_bash,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-zig",
+        files: generated::oxplow_zig,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-json",
+        files: generated::oxplow_json,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-yaml",
+        files: generated::oxplow_yaml,
+        required: false,
+    },
+    // A language pack: off until a project uses its language.
+    BundledExtension {
+        name: "oxplow-web",
+        files: generated::oxplow_web,
+        required: false,
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static BundledExtension> {
@@ -250,6 +327,21 @@ pub fn is_reserved(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Everything about a language lives in its pack: foundation declares no
+    /// `languages:` (the server-only ones — Lua, Ruby, Bash, … — are packs
+    /// of their own), and none of the shipped packs shares a language id.
+    #[test]
+    fn foundation_declares_no_languages() {
+        let manifest = find("oxplow-foundation")
+            .and_then(|b| b.file("extension.yaml"))
+            .expect("foundation's manifest");
+        let doc: serde_yaml::Value = serde_yaml::from_str(manifest).unwrap();
+        assert!(
+            doc.get("languages").is_none(),
+            "a language is a pack's: give it `extensions/oxplow-<name>/` with `languages:`"
+        );
+    }
 
     /// What oxplow ships runs in other people's projects: its text and
     /// examples must not name this repository's docs or build.

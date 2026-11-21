@@ -191,7 +191,7 @@ mod tests {
                 .await,
             serde_json::json!([
                 ["go", "oxplow-go", 0, 1, "gopls"],
-                ["lua", "oxplow-foundation", 1, 0, "lua-language-server"],
+                ["lua", "oxplow-lua", 1, 0, "lua-language-server"],
                 ["rust", "oxplow-rust", 1, 1, "rust-analyzer"]
             ])
         );

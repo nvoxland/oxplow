@@ -1,0 +1,35 @@
+manifest: 2
+name: oxplow-ruby
+namespace: oxplow
+description: "What oxplow knows about Ruby: the language server to suggest. Ships with oxplow, off until a project uses Ruby."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Ruby in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+  examples:
+    - name: ruby-the-language-server-is-suggested
+      input: { sql: v_language }
+      expect: the Mason package of the language server
+    - name: ruby-spec-files-and-skips-are-counted
+      input: { sql: v_change_test_file }
+      expect: a spec file's assertions and skips
+    - name: ruby-gemfile-is-a-dependency-manifest
+      input: { sql: v_file_kind_rule }
+      expect: the kind the pack gives that path
+test_conventions:
+  - id: ruby-tests
+    languages: [ruby]
+    paths: ['**/*_spec.rb', '**/spec/**', '**/*_test.rb']
+    skips: ['\b(?:xit|xspecify|xdescribe|xcontext)\b', '\bskip\s*\(?\s*[''"]']
+file_kinds:
+  - { id: ruby-dependency-manifest, kind: dependency-manifest, label: Dependency manifest, globs: ['**/Gemfile', '**/*.gemspec'] }
+  - { id: ruby-lockfile, kind: lockfile, label: Lockfile, globs: ['**/Gemfile.lock'] }
+  - { id: ruby-lint-config, kind: lint-config, label: Lint config, globs: ['**/.rubocop.yml'] }
+  - { id: ruby-test-harness, kind: test-harness, label: Test harness, globs: ['**/.rspec', '**/spec/spec_helper.rb', '**/spec/rails_helper.rb'] }
+run_patterns:
+  - { id: ruby-test, kind: test, patterns: [rspec] }
+languages:
+  - { id: ruby, title: Ruby, extensions: [rb], lsp: { package: ruby-lsp } }

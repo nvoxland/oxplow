@@ -1,0 +1,18 @@
+manifest: 2
+name: oxplow-web
+namespace: oxplow
+description: "What oxplow knows about HTML and CSS: the language server to suggest. Ships with oxplow, off until a project uses HTML and CSS."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about HTML and CSS in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+  examples:
+    - name: web-the-language-server-is-suggested
+      input: { sql: v_language }
+      expect: the Mason package of the language server
+languages:
+  - { id: html, title: HTML, extensions: [html, htm], lsp: { package: html-lsp } }
+  - { id: css, title: CSS, extensions: [css], lsp: { package: css-lsp } }
