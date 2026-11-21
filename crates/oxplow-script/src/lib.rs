@@ -97,6 +97,11 @@ pub struct CollectedFact {
     /// fact with the idiom slug here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
+    /// How bad a lint-like fact is (its `severity` column): what the change
+    /// review ranks it by (`error` → high, `warning` → medium, `info` /
+    /// `note` → info). None for a fact that isn't a finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<FactSeverity>,
     /// Free text about this one fact, kept in its `detail` column (a
     /// duplicate block's copy, `path:start-end`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,6 +116,28 @@ pub struct CollectedFact {
     pub den: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dims: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// A lint-like fact's severity, as a collector gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FactSeverity {
+    Error,
+    Warning,
+    Info,
+    Note,
+}
+
+impl FactSeverity {
+    /// The word stored in the fact's `severity` column.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+            Self::Note => "note",
+        }
+    }
 }
 
 /// What a fact collector's run says of its capture, beside its facts
@@ -748,6 +775,26 @@ mod tests {
         // Anything but `facts` is refused.
         let err = facts_of(serde_json::json!({ "samples": [] })).unwrap_err();
         assert!(err.to_string().contains("facts"), "{err}");
+    }
+
+    /// A lint-like fact says how bad it is: `error`, `warning`, `info` or
+    /// `note` (what the review ranks it by). Another word fails the run,
+    /// naming the four, rather than being dropped.
+    #[test]
+    fn a_fact_carries_its_severity_and_a_wrong_one_fails() {
+        let facts = facts_of(serde_json::json!({ "facts": [
+            { "measure": "oxplow.ast_hit", "value": 1, "rule": "todo", "severity": "error", "path": "a.rs", "line": 3 },
+            { "measure": "oxplow.ast_hit", "value": 1, "rule": "unwrap" }
+        ] }))
+        .expect("facts");
+        assert_eq!(facts[0].severity, Some(FactSeverity::Error));
+        assert_eq!(facts[0].severity.unwrap().as_str(), "error");
+        assert_eq!(facts[1].severity, None);
+        let err = facts_of(serde_json::json!({ "facts": [
+            { "measure": "oxplow.ast_hit", "value": 1, "severity": "fatal" }
+        ] }))
+        .unwrap_err();
+        assert!(err.to_string().contains("warning"), "{err}");
     }
 
     /// A fact collector may say what its run's capture is beside its facts:

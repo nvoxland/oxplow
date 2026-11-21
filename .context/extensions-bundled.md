@@ -210,7 +210,10 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     kind from the setting `review.signals` (`[{ signal, severity: high |
     medium | info | off }]`, the last row for a kind wins; `off` drops it),
     and the source's own in `source_severity`. So one setting ranks every
-    extension's signals. The union's column types follow its contributors,
+    extension's signals. A row with no severity, or one the review doesn't
+    know, is `medium`: a source's rows are never lost for it
+    (`examples/extensions/schema-review` is a third party's source that
+    relies on it). The union's column types follow its contributors,
     so `shown` casts every column but `change_id` (left as is so a filter on
     it reaches each source) to a fixed type.
   - `severity`: `high` and `medium` put a file in Look Here; `info` is
