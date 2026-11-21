@@ -1,0 +1,23 @@
+# A language pack's lint collector reaches the change review. The Rust pack
+# finds each `todo!` as a fact (the fixture records that fact itself:
+# a fixture's snapshot doesn't run a fact collector) with its line and a `warning` severity; the
+# review turns one on a changed line into a signal. The uncommitted change
+# adds a `todo!()` on line 2 of a file whose base had none.
+requires: [oxplow-rust]
+given:
+  - observe: { turn: { prompt: base, write: { path: src/a.rs, body: "fn a() {\n    let x = 1;\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/a.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: leave a todo, write: { path: src/a.rs, body: "fn a() {\n    todo!();\n}\n" } } }
+  - observe: { analyze: { kind: working } }
+  - observe:
+      facts:
+        measure: oxplow.ast_hit
+        producer: oxplow.rust.panic_macros
+        items:
+          - { value: 1, path: src/a.rs, line: 2, rule: panic_macro, severity: warning }
+when:
+  sql: SELECT signal, severity, path, line FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_findings'
+expect:
+  rows:
+    - { signal: lint-panic_macro, severity: medium, path: src/a.rs, line: 2 }

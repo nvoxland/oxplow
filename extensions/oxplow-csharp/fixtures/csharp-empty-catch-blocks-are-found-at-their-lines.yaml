@@ -1,4 +1,4 @@
-# C#: empty catch blocks count.
+# C#: each empty catch block gives a warning fact at its line.
 when:
   collector: oxplow.csharp.empty_catch
   files:
@@ -7,5 +7,5 @@ when:
     "src/Util.cs": "class Util {\n    static void Noop() { try { } catch { } }\n}\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "rule": "empty_catch", "dims": {"oxplow.language": "csharp"}}
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Util.cs", "path": "src/Util.cs", "rule": "empty_catch", "dims": {"oxplow.language": "csharp"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "line": 5, "rule": "empty_catch", "severity": "warning", "dims": {"oxplow.language": "csharp"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Util.cs", "path": "src/Util.cs", "line": 2, "rule": "empty_catch", "severity": "warning", "dims": {"oxplow.language": "csharp"}}

@@ -16,13 +16,13 @@ intent:
     - name: rust-cargo-toml-is-a-dependency-manifest
       input: { sql: v_file_kind_rule }
       expect: the kind the pack gives that path
-    - name: rust-panic-todo-and-path-qualified-panic-macros-are-counted
+    - name: rust-panic-todo-and-path-qualified-panic-macros-are-found-at-their-lines
       input: { collector: oxplow.rust.panic_macros }
       expect: the facts the collector records for the files given
-    - name: rust-unsafe-blocks-are-counted-per-file-and-tagged-with-their-rule
+    - name: rust-unsafe-blocks-are-found-at-their-lines-and-tagged-with-their-rule
       input: { collector: oxplow.rust.unsafe_blocks }
       expect: the facts the collector records for the files given
-    - name: rust-unwrap-and-expect-calls-are-counted
+    - name: rust-unwrap-and-expect-calls-are-found-at-their-lines
       input: { collector: oxplow.rust.unwrap_expect_calls }
       expect: the facts the collector records for the files given
     - name: rust-functions-and-their-symbols
@@ -97,9 +97,9 @@ configuration:
           clippyReport: { type: string, default: target/clippy.json, description: "The clippy report (JSON) that the analysis run reads, from the project root." }
 collectors:
   # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
-  - { id: oxplow.rust.unsafe_blocks, doc: "Counts the `unsafe` blocks in Rust files.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.unwrap_expect_calls, doc: "Counts the `unwrap` and `expect` calls in Rust files.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.panic_macros, doc: "Counts the `panic!`, `todo!` and similar macros in Rust files.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unsafe_blocks, doc: "Finds each `unsafe` block in Rust files, one fact per hit at its line.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unwrap_expect_calls, doc: "Finds each `unwrap` and `expect` call in Rust files, one fact per hit at its line.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.panic_macros, doc: "Finds each `panic!`, `todo!` and similar macro in Rust files, one fact per hit at its line.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
   # A report: clippy's JSON findings, read after an analysis run.
   - { id: oxplow.rust.clippy_report, doc: "Reads the clippy report after an analysis run.", records: analysis, entry: "oxplow:clippy", report: { path: { setting: /rust/clippyReport, default: target/clippy.json } }, on: { run: analysis } }
 metrics:

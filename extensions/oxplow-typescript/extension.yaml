@@ -19,16 +19,16 @@ intent:
     - name: ts-tsconfig-is-lint-config
       input: { sql: v_file_kind_rule }
       expect: the kind the pack gives that path
-    - name: ts-any-annotations-are-counted
+    - name: ts-any-annotations-are-found-at-their-lines
       input: { collector: oxplow.ts.any_usage }
       expect: the facts the collector records for the files given
-    - name: ts-console-calls-are-counted-including-namespaced-ones
+    - name: ts-console-calls-are-found-at-their-lines-including-namespaced-ones
       input: { collector: oxplow.ts.console_calls }
       expect: the facts the collector records for the files given
-    - name: ts-ignore-and-expect-error-comments-are-counted
+    - name: ts-ignore-and-expect-error-comments-are-found-at-their-lines
       input: { collector: oxplow.ts.ts_ignore }
       expect: the facts the collector records for the files given
-    - name: ts-non-null-assertions-are-counted
+    - name: ts-non-null-assertions-are-found-at-their-lines
       input: { collector: oxplow.ts.non_null_assertions }
       expect: the facts the collector records for the files given
     - name: typescript-functions-and-arrow-bindings
@@ -141,10 +141,10 @@ configuration:
           eslintReport: { type: string, default: target/eslint.json, description: "The ESLint report (JSON format) that the analysis run reads, from the project root." }
 collectors:
   # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
-  - { id: oxplow.ts.any_usage, doc: "Counts the uses of the `any` type in TypeScript files.", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.non_null_assertions, doc: "Counts the non-null assertions in TypeScript files.", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.console_calls, doc: "Counts the `console.*` calls in TypeScript files.", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.ts_ignore, doc: "Counts the `@ts-ignore` and `@ts-expect-error` comments in TypeScript files.", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.any_usage, doc: "Finds each use of the `any` type in TypeScript files, one fact per hit at its line.", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.non_null_assertions, doc: "Finds each non-null assertion in TypeScript files, one fact per hit at its line.", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.console_calls, doc: "Finds each `console.*` call in TypeScript files, one fact per hit at its line.", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.ts_ignore, doc: "Finds each `@ts-ignore` and `@ts-expect-error` comment in TypeScript files, one fact per hit at its line.", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
   # A report: ESLint's JSON findings, read after an analysis run.
   - { id: oxplow.ts.eslint_report, doc: "Reads the ESLint report after an analysis run.", records: analysis, entry: "oxplow:eslint", report: { path: { setting: /typescript/eslintReport, default: target/eslint.json } }, on: { run: analysis } }
 metrics:

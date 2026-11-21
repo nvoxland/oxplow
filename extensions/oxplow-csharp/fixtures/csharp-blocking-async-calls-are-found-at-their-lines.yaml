@@ -1,4 +1,4 @@
-# C#: .Result and invoked .Wait() count, a method-group reference does not.
+# C#: .Result and invoked .Wait() each give a warning fact at their line, a method-group reference does not.
 when:
   collector: oxplow.csharp.blocking_async_calls
   files:
@@ -7,4 +7,5 @@ when:
     "src/Util.cs": "class Util {\n    static void Noop() { try { } catch { } }\n}\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "rule": "blocking_async", "dims": {"oxplow.language": "csharp"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "line": 6, "rule": "blocking_async", "severity": "warning", "dims": {"oxplow.language": "csharp"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "line": 7, "rule": "blocking_async", "severity": "warning", "dims": {"oxplow.language": "csharp"}}
