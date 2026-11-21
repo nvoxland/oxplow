@@ -228,17 +228,17 @@ datasets:
     description: "The change review's signals as the pages show them: every row of `v_oxplow_review_signal` (every extension's sources) with the severity the project set for its kind in `review.signals`, and without the kinds set `off`."
     fields:
       - { name: change_id, type: BLOB, doc: "The change (v_change.id)." }
-      - { name: source, type: "", doc: "The dataset that gave it (`<ns>/<dataset>`)." }
-      - { name: area, type: "", doc: "`tests`, `verification`, `code`, `dependencies`, `history`, `scope` or `other`." }
-      - { name: signal, type: "", doc: "The signal's kind." }
-      - { name: severity, type: "", doc: "`high`, `medium` or `info`: the project's for this kind, else the source's." }
-      - { name: path, type: BLOB, doc: "The file, or NULL for the whole change." }
-      - { name: line, type: BLOB, doc: "The line, or NULL." }
-      - { name: end_line, type: BLOB, doc: "The last line, or NULL." }
-      - { name: title, type: "", doc: "One line for a list." }
-      - { name: why, type: "", doc: "The evidence." }
-      - { name: uri, type: BLOB, doc: "A link, or NULL." }
-      - { name: source_severity, type: "", doc: "The severity the source gave, before the project's setting." }
+      - { name: source, type: TEXT, doc: "The dataset that gave it (`<ns>/<dataset>`)." }
+      - { name: area, type: TEXT, doc: "`tests`, `verification`, `code`, `dependencies`, `history`, `scope` or `other`." }
+      - { name: signal, type: TEXT, doc: "The signal's kind." }
+      - { name: severity, type: TEXT, doc: "`high`, `medium` or `info`: the project's for this kind, else the source's." }
+      - { name: path, type: TEXT, doc: "The file, or NULL for the whole change." }
+      - { name: line, type: INT, doc: "The line, or NULL." }
+      - { name: end_line, type: INT, doc: "The last line, or NULL." }
+      - { name: title, type: TEXT, doc: "One line for a list." }
+      - { name: why, type: TEXT, doc: "The evidence." }
+      - { name: uri, type: TEXT, doc: "A link, or NULL." }
+      - { name: source_severity, type: TEXT, doc: "The severity the source gave, before the project's setting." }
   - name: review_signal_verification
     version: 1
     adds_to: oxplow/review_signal

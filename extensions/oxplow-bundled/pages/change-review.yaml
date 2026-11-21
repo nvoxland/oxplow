@@ -34,7 +34,24 @@ loaders:
              printf('%d file%s · +%d −%d', f.n, CASE f.n WHEN 1 THEN '' ELSE 's' END, f.a, f.d) AS size,
              CASE c.status WHEN 'failed' THEN 'Failed: ' || coalesce(c.error, 'unknown error')
                            WHEN 'done' THEN 'Done' ELSE 'Analyzing…' END AS analysis,
-             c.base_revision, c.head_revision
+             c.base_revision, c.head_revision,
+             -- Where its checks (collectors on `change.analyzed`) stand.
+             (SELECT CASE WHEN count(*) = 0 THEN 'None ran'
+                          WHEN sum(state <> 'ok') = 0 THEN 'Done'
+                          ELSE trim(
+                            CASE WHEN sum(state = 'pending') > 0 THEN printf('%d running ', sum(state = 'pending')) ELSE '' END
+                            || CASE WHEN sum(state = 'failed') > 0 THEN printf('%d failed', sum(state = 'failed')) ELSE '' END)
+                     END
+              FROM v_oxplow_review_check k WHERE k.change_id = c.id) AS checks,
+             -- The languages of its files whose pack is off: their files get
+             -- no symbols, lint findings or code signals.
+             (SELECT group_concat(title || ' ([turn on](oxplow:oxplow/extension?name=' || extension || '))', ', ')
+              FROM (SELECT DISTINCT l.title, l.extension
+                    FROM v_language l, json_each(l.extensions) e
+                    WHERE l.enabled = 0 AND l.analyzable = 1
+                      AND EXISTS (SELECT 1 FROM v_change_file cf
+                                  WHERE cf.change_id = c.id AND lower(cf.path) LIKE '%.' || e.value)
+                    ORDER BY l.title)) AS packs_off
       FROM v_change c, f WHERE c.id = CAST(:change_id AS INTEGER)
   look_here:
     sql: |
@@ -95,6 +112,8 @@ rail:
   - { key: what, label: What }
   - { key: size, label: Size }
   - { key: analysis, label: Analysis }
+  - { key: checks, label: Checks }
+  - { key: packs_off, label: Packs off, format: markdown }
 view:
   stack:
   - id: asked

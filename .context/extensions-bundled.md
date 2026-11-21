@@ -188,12 +188,18 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `change.analyzed` (files) event (its `collector_run.last_event_id` is
       older than that event's seq), `failed` when that run failed, else `ok`.
       The Review page shows a pending check as still running.
+  - **The About rail** also says where the change's checks stand
+    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", or "None
+    ran") and which language packs are off for the files it changed (from
+    `v_language`, with a link to turn each on).
   - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),
     never the union itself: every row with the project's severity for its
     kind from the setting `review.signals` (`[{ signal, severity: high |
     medium | info | off }]`, the last row for a kind wins; `off` drops it),
     and the source's own in `source_severity`. So one setting ranks every
-    extension's signals.
+    extension's signals. The union's column types follow its contributors,
+    so `shown` casts every column but `change_id` (left as is so a filter on
+    it reaches each source) to a fixed type.
   - `severity`: `high` and `medium` put a file in Look Here; `info` is
     counted in By Area and listed in the file's expansion.
   - The brief (`parts/change-review-brief.yaml`) is one line under the first

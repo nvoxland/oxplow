@@ -1,0 +1,18 @@
+# The Review page's About rail says where the change's checks stand and
+# which language packs are off for the files it changed: those files get no
+# symbols, lint findings or code signals until the pack is on.
+requires: [oxplow-rust]
+given:
+  - observe: { change: { kind: commit, target: c1, files: [{ path: src/a.py, status: modified }, { path: src/b.rs, status: modified }, { path: README.md, status: modified }] } }
+when: { page: change-review, params: { change_id: 1 } }
+expect:
+  loaders:
+    change:
+      rows: [{ packs_off: "Python ([turn on](oxplow:oxplow/extension?name=oxplow-python))" }]
+steps:
+  - given:
+      - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: c1, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+    expect:
+      loaders:
+        change:
+          rows: [{ checks: "1 failed" }]
