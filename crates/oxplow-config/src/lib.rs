@@ -778,8 +778,17 @@ pub struct ExtensionSettings {
 /// The folder that holds extension sources by default, under a checkout.
 pub const EXTENSION_SOURCES_DIR: &str = ".oxplow/extensions";
 
-/// The extensions on when nothing sets their switch.
-pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled", "oxtask", "oxwiki"];
+/// The extensions on when nothing sets their switch: oxplow's own, and the
+/// language packs for the files nearly every project has (JSON, YAML,
+/// HTML/CSS), so oxplow never asks to turn those on.
+pub const DEFAULT_EXTENSIONS: &[&str] = &[
+    "oxplow-bundled",
+    "oxtask",
+    "oxwiki",
+    "oxplow-json",
+    "oxplow-yaml",
+    "oxplow-web",
+];
 
 impl ExtensionSettings {
     /// Whether `name`'s switch was turned off on purpose.
@@ -3376,10 +3385,41 @@ oxplow.lsp.servers:
         )
         .unwrap();
         let settings = extension_settings(dir.path());
-        assert_eq!(settings.enabled(), ["mine", "oxtask", "oxwiki"]);
+        assert_eq!(
+            settings.enabled(),
+            [
+                "mine",
+                "oxplow-json",
+                "oxplow-web",
+                "oxplow-yaml",
+                "oxtask",
+                "oxwiki"
+            ]
+        );
         assert!(settings.turned_off("triage"));
         assert!(settings.turned_off("oxplow-bundled"));
         assert!(!settings.turned_off("oxtask"));
+    }
+
+    /// The packs for the files nearly every project has (JSON, YAML,
+    /// HTML/CSS) are on by default, so oxplow never asks for them; a
+    /// project turns one off like any extension.
+    #[test]
+    fn the_common_file_packs_are_on_by_default_and_turn_off() {
+        let dir = tempdir().unwrap();
+        let settings = extension_settings(dir.path());
+        for name in ["oxplow-json", "oxplow-yaml", "oxplow-web"] {
+            assert!(settings.is_enabled(name), "{name} is on by default");
+        }
+        assert!(!settings.is_enabled("oxplow-ruby"));
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.extensions.oxplow-yaml.enabled: false\n",
+        )
+        .unwrap();
+        let settings = extension_settings(dir.path());
+        assert!(settings.turned_off("oxplow-yaml"));
+        assert!(settings.is_enabled("oxplow-json"));
     }
 
     /// Where oxplow's own extensions run from is no setting: a dev build

@@ -149,6 +149,51 @@
     ]
   },
   {
+    "key": "oxplow.extensions.oxplow-json.enabled",
+    "title": "Enable oxplow-json",
+    "description": "Whether this extension is enabled. Deployment and permission approval are separate.",
+    "category": "extensions",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "owner": "core",
+    "accepts": [
+      1,
+      2
+    ]
+  },
+  {
+    "key": "oxplow.extensions.oxplow-web.enabled",
+    "title": "Enable oxplow-web",
+    "description": "Whether this extension is enabled. Deployment and permission approval are separate.",
+    "category": "extensions",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "owner": "core",
+    "accepts": [
+      1,
+      2
+    ]
+  },
+  {
+    "key": "oxplow.extensions.oxplow-yaml.enabled",
+    "title": "Enable oxplow-yaml",
+    "description": "Whether this extension is enabled. Deployment and permission approval are separate.",
+    "category": "extensions",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "owner": "core",
+    "accepts": [
+      1,
+      2
+    ]
+  },
+  {
     "key": "oxplow.extensions.oxtask.enabled",
     "title": "Enable oxtask",
     "description": "Whether this extension is enabled. Deployment and permission approval are separate.",

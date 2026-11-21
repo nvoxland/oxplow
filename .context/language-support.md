@@ -14,7 +14,10 @@ grammar, so nothing parses them: `oxplow-lua`, `oxplow-ruby`, `oxplow-bash`
 (HTML and CSS). Each declares its files and the Mason package of its server
 (`lsp:`), nothing else; `oxplow-ruby` also holds its `rspec` run pattern, its
 Gemfile, lockfile, RuboCop and RSpec file kinds and its spec-file test
-conventions. A server-only pack is off by default like the rest: its server
+conventions. `oxplow-json`, `oxplow-yaml` and `oxplow-web` are **on by
+default** (in `DEFAULT_EXTENSIONS`), since nearly every project has those
+files and a suggestion for them would be noise; a project turns one off like
+any extension. The other server-only packs are off by default: a server
 is still suggested while it is off (`v_language` lists off packs), and the
 `language-pack` advisory says "Turn on the Ruby language pack to get its
 language server suggestion".
