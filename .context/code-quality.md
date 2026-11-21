@@ -130,7 +130,9 @@ longer holds or pairs every subtree in the repo.
 subtrees ("records": hash, size, lines, enclosing function — scope
 independent, so one entry serves a file in scope or out of it) are cached
 in `oxplow_code_dup::DupCache` (`Services.dup_cache`), keyed on
-`(space, content id, language, DETECTOR_VERSION, min_nodes, min_lines)`.
+`(space, content id, language, DETECTOR_VERSION, min_nodes, min_lines)`,
+the language by its definition's fingerprint (a pack edited and redeployed
+misses), not its name.
 `Trees::cached_corpus` hands the scan each file's id with a text reader
 that runs only on a miss; an edit is a new id, so nothing is stale, and
 `DETECTOR_VERSION` is bumped whenever hashing changes (a golden test pins
@@ -218,8 +220,10 @@ its changed files. There is no manual "Scan now" any more.
   whole-tree parses.
 - **An analysis whose inputs haven't moved isn't redone**, forced or
   not. `change.analyzed_from` (V12) records the build, each side's tree
-  (a snapshot's `tree_hash`; a working tree's latest snapshot's) and a
-  request's own files; a rerun from the same keeps what's stored, and no
+  (a snapshot's `tree_hash`; a working tree's latest snapshot's), a
+  request's own files, the language set's fingerprint, and what makes a
+  file a test (the enabled `test_conventions:`' fingerprint and the
+  project's `testing.testPaths`); a rerun from the same keeps what's stored, and no
   duplicate scan is queued. A turn's end no longer forces a rerun: its
   take does, and only when it recorded files.
 - **One detection at a time per process, whoever asks.** The detector

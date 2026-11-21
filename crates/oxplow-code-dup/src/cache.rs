@@ -6,7 +6,8 @@
 //! enclosing function), independent of any scan's scope, so one entry
 //! serves a file in scope (all its records) and out of it (those whose
 //! hash the scope has). It is keyed on what decides the records: the
-//! file's content id in its identity space, its language, the detector's
+//! file's content id in its identity space, its language's definition
+//! (its fingerprint, so a pack edited and redeployed misses), the detector's
 //! version ([`DETECTOR_VERSION`]) and the size floors it was built with —
 //! an edit is a new id, so nothing here is ever stale.
 //!
@@ -54,6 +55,7 @@ pub struct FileKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CacheKey {
     pub file: FileKey,
+    /// The language's definition fingerprint, not its name.
     pub lang: u64,
     pub min_nodes: u32,
     pub min_lines: u32,

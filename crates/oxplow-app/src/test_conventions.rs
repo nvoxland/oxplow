@@ -40,6 +40,9 @@ struct Rule {
 pub struct TestConventions {
     rules: Vec<Rule>,
     languages: Arc<Languages>,
+    /// A hash of the declarations it was built from: an analysis keyed by it
+    /// is stale when the conventions change.
+    fingerprint: u64,
 }
 
 impl Default for TestConventions {
@@ -48,6 +51,7 @@ impl Default for TestConventions {
         Self {
             rules: Vec::new(),
             languages: Arc::new(Languages::build(&[]).0),
+            fingerprint: 0,
         }
     }
 }
@@ -72,7 +76,22 @@ impl TestConventions {
         decls: impl Iterator<Item = &'a TestConventionDecl>,
         languages: Arc<Languages>,
     ) -> Self {
+        let decls: Vec<&TestConventionDecl> = decls.collect();
+        // FNV-1a over the declarations as written.
+        let fingerprint = decls
+            .iter()
+            .flat_map(|d| {
+                serde_json::to_string(d)
+                    .unwrap_or_default()
+                    .into_bytes()
+                    .into_iter()
+                    .chain(std::iter::once(0xff))
+            })
+            .fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
+                (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
         let rules = decls
+            .into_iter()
             .filter_map(|d| {
                 let paths = if d.paths.is_empty() {
                     None
@@ -99,7 +118,16 @@ impl TestConventions {
                 })
             })
             .collect();
-        Self { rules, languages }
+        Self {
+            rules,
+            languages,
+            fingerprint,
+        }
+    }
+
+    /// A hash of the declarations it holds.
+    pub fn fingerprint(&self) -> u64 {
+        self.fingerprint
     }
 
     /// Every convention oxplow ships (foundation's and each language pack's,

@@ -1183,6 +1183,41 @@ fn the_size_floors_are_part_of_the_key() {
     assert_eq!(stats.hits, 0);
 }
 
+/// A language whose definition changed (a pack edited and redeployed: its
+/// `analysis.yaml`, its grammar) misses the cache, though its name is the
+/// same: the entry is keyed on the definition.
+#[test]
+fn a_changed_language_definition_misses_the_cache() {
+    let (files, scope) = family();
+    let cache = DupCache::default();
+    let shipped = oxplow_code_metrics::for_tests::shipped();
+    detect_duplicates_scoped_cached(
+        &shipped,
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/oxplow-rust");
+    let mut sources =
+        oxplow_code_metrics::for_tests::sources_in(&dir, "oxplow-rust", true).unwrap();
+    for s in &mut sources {
+        if let Some(a) = s.analysis.as_mut() {
+            a.push_str("\n# edited\n");
+        }
+    }
+    let (edited, problems) = oxplow_code_metrics::Languages::build(&sources);
+    assert!(problems.is_empty(), "{problems:#?}");
+    let (_, stats) = detect_duplicates_scoped_cached(
+        &edited,
+        cached(&files, true),
+        &scope,
+        detect_opts(),
+        &cache,
+    );
+    assert_eq!(stats.hits, 0);
+}
+
 /// Files without a content id are parsed every time and never cached.
 #[test]
 fn a_file_with_no_key_bypasses_the_cache() {
