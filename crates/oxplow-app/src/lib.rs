@@ -219,6 +219,8 @@ pub enum AppInitError {
     Config(#[from] oxplow_config::ConfigError),
     #[error("db: {0}")]
     Db(#[from] oxplow_db::DbInitError),
+    #[error("contribution run recovery: {0}")]
+    ContributionRunRecovery(oxplow_domain::DomainError),
     #[error("session: {0}")]
     Session(#[from] oxplow_session::SessionError),
     #[error("io: {0}")]
@@ -917,6 +919,8 @@ impl Services {
         info!(project = %layout.project_dir.display(), "config loaded");
 
         let db = Database::open(&layout.state_db_path)?;
+        db.transaction_now(|tx| oxplow_db::contribution_run_store::interrupt_unfinished_tx(tx))
+            .map_err(AppInitError::ContributionRunRecovery)?;
         let machine = MachineEnv {
             secrets,
             config_dir: oxplow_config::global_config_dir(),
@@ -2091,6 +2095,47 @@ mod tests {
         .unwrap();
         assert!(services.layout.state_dir.exists());
         assert!(services.layout.state_db_path.exists());
+    }
+
+    #[tokio::test]
+    async fn boot_interrupts_an_unfinished_contribution_run() {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        use oxplow_domain::run::{ContributionRef, Mode, RunContext};
+
+        let project = tempdir().unwrap();
+        init_git(project.path());
+        let layout = AppLayout::for_project(project.path());
+        ensure_state_dir(&layout.state_dir).unwrap();
+        {
+            let db = Database::open(&layout.state_db_path).unwrap();
+            let run = RunContext::contribution(
+                ContributionRef {
+                    id: ContributionId::new("example", ContributionKind::Command, "check"),
+                    extension: "example".into(),
+                    version: None,
+                    generation: None,
+                    deployment: None,
+                },
+                oxplow_domain::Actor::System,
+                Mode::External,
+            );
+            db.transaction_now(|tx| oxplow_db::contribution_run_store::begin_tx(tx, &run))
+                .unwrap();
+        }
+        let services = Services::boot(
+            layout,
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+        .unwrap();
+        let outcome: String = services
+            .db
+            .read(|conn| {
+                conn.query_row("SELECT outcome FROM contribution_run", [], |row| row.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(outcome, "interrupted");
     }
 
     #[tokio::test]

@@ -84,7 +84,12 @@ impl CommandBus {
             .db
             .transaction(move |tx| {
                 let id = insert_tx(tx, &row)?;
-                oxplow_db::extension_run_store::record_tx(tx, &run_c, ended, error_c.as_deref())?;
+                oxplow_db::contribution_run_store::record_tx(
+                    tx,
+                    &run_c,
+                    ended,
+                    error_c.as_deref(),
+                )?;
                 Ok(id)
             })
             .await
@@ -336,7 +341,7 @@ pub(super) fn record_tx(
         },
     )?;
     // An extension's run (its command's, a policy's call) ends with it.
-    oxplow_db::extension_run_store::record_tx(
+    oxplow_db::contribution_run_store::record_tx(
         tx,
         &run,
         match failed {

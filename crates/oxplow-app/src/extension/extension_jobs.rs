@@ -234,7 +234,7 @@ impl ExtensionJobs {
                 .query_row(
                     // A job's extension is its run's.
                     "SELECT count(*), COALESCE(sum(r.extension = ?1), 0)
-                FROM extension_job j LEFT JOIN extension_run r ON r.run_id = j.run_id
+                FROM extension_job j LEFT JOIN contribution_run r ON r.run_id = j.run_id
                 WHERE j.state IN ('queued', 'running')",
                     [ctx.run.extension().unwrap_or_default()],
                     |row| Ok((row.get(0)?, row.get(1)?)),

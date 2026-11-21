@@ -2394,6 +2394,45 @@ mod tests {
         assert_eq!(rows, 2, "the earlier row is kept");
     }
 
+    #[test]
+    fn migrates_contribution_run_actor_and_resolvable_parent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(62))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO extension_run
+              (run_id, parent_run_id, extension, contribution, kind, actor_kind, actor,
+               agent_session_id, mode, started_at, finished_at, outcome,
+               wall_ms, cpu_ms, peak_bytes, ai_calls, scopes_json, decisions_json)
+             VALUES ('root', 'absent', 'acme', 'acme.sync', 'collector', 'agent', 'agent:thr3',
+                     7, 'external', 'start', 'end', 'ok', 3, 2, 1, 0, '{}', '[]'),
+                    ('child', 'root', 'acme', 'acme.check', 'command', 'system', 'system',
+                     NULL, 'pure', 'start', 'end', 'denied', 3, 2, 1, 0, '{}', '[]');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        assert!(conn
+            .query_row(
+                "SELECT actor_kind = 'agent' AND actor_id = 'thr3' AND session_id = 7
+                    AND parent_run_id IS NULL AND cpu_ms = 2
+             FROM contribution_run WHERE run_id = 'root'",
+                [],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert!(conn
+            .query_row(
+                "SELECT actor_kind = 'system' AND actor_id IS NULL AND parent_run_id = 'root'
+                    AND outcome = 'denied'
+             FROM contribution_run WHERE run_id = 'child'",
+                [],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap());
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {

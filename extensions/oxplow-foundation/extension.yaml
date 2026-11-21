@@ -737,6 +737,13 @@ resources:
     resolve: job_run
     title: intent_key
     icon: activity
+  - name: contribution_run
+    description: "One execution of a contribution."
+    label: Contribution run
+    params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
+    resolve: contribution_run
+    title: contribution
+    icon: activity
   - name: ai_call
     description: "One call to a language model, with its cost."
     label: Model call

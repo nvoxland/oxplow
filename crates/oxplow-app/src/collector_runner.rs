@@ -1440,7 +1440,7 @@ async fn run_collector_once(
                     };
                     oxplow_db::collector_store::record_run_in(tx, &run)
                         .map_err(oxplow_db::map_sql_err)?;
-                    oxplow_db::extension_run_store::record_tx(
+                    oxplow_db::contribution_run_store::record_tx(
                         tx,
                         &this_run,
                         oxplow_domain::run::Outcome::Ok,
@@ -1496,7 +1496,7 @@ async fn run_collector_once(
         .transaction(move |tx| {
             oxplow_db::collector_store::record_run_in(tx, &failed)
                 .map_err(oxplow_db::map_sql_err)?;
-            oxplow_db::extension_run_store::record_tx(
+            oxplow_db::contribution_run_store::record_tx(
                 tx,
                 &this_run,
                 if this_run.cancel().is_cancelled() {
@@ -1744,7 +1744,12 @@ impl RunLog {
                 oxplow_db::collector_store::record_run_in(tx, &run)
                     .map_err(oxplow_db::map_sql_err)?;
                 if let Some((run, outcome, error)) = &ended {
-                    oxplow_db::extension_run_store::record_tx(tx, run, *outcome, error.as_deref())?;
+                    oxplow_db::contribution_run_store::record_tx(
+                        tx,
+                        run,
+                        *outcome,
+                        error.as_deref(),
+                    )?;
                 }
                 Ok(true)
             })

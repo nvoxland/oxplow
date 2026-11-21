@@ -947,12 +947,57 @@ async fn a_given_observes_runs_health_usage_and_hints() {
   - observe: { hint: { hint: x/never, evaluated: 3 } }
   - observe: { nudge: { kind: x/spoke, message: m } }
 when:
-  sql: SELECT (SELECT group_concat(outcome || ':' || cpu_ms || ':' || ai_calls, ',') FROM (SELECT * FROM v_extension_run ORDER BY started_at)) AS runs, (SELECT state || ':' || reason FROM v_contribution_health) AS health, (SELECT input_tokens FROM v_token_usage) AS tokens, (SELECT evaluated FROM v_hint_stat WHERE hint = 'x/never') AS evaluated, (SELECT count(*) FROM v_agent_nudge WHERE kind = 'x/spoke') AS nudges
+  sql: SELECT (SELECT group_concat(outcome || ':' || cpu_ms || ':' || ai_calls, ',') FROM (SELECT * FROM v_contribution_run ORDER BY started_at)) AS runs, (SELECT state || ':' || reason FROM v_contribution_health) AS health, (SELECT input_tokens FROM v_token_usage) AS tokens, (SELECT evaluated FROM v_hint_stat WHERE hint = 'x/never') AS evaluated, (SELECT count(*) FROM v_agent_nudge WHERE kind = 'x/spoke') AS nudges
 expect:
   rows:
     - { runs: \"failed:30:2,ok:0:0\", health: \"disabled:boom\", tokens: 1999, evaluated: 3, nudges: 1 }
 ",
         );
+    let report = test_extension(dir.path(), "notes", false).await.unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_observes_run_details_and_live_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+    write(
+        dir.path(),
+        ".oxplow/extensions/notes/fixtures/basic.yaml",
+        r#"given:
+  - observe:
+      run:
+        extension: acme
+        contribution: pull
+        version: "2.1"
+        outcome: denied
+        days_ago: 2
+        wall_ms: 92
+        cpu_ms: 30
+        peak_bytes: 4096
+        ai_calls: 2
+        scopes: { sql.read: 3 }
+        decisions:
+          - { need: scope, name: sql.read, decision: allowed }
+          - { need: host, name: denied.example, decision: denied, reason: missing grant }
+  - observe:
+      run: { extension: acme, contribution: push, version: "3.0", live: true }
+when:
+  sql: >
+    SELECT version, outcome, wall_ms, peak_bytes,
+           json_extract(scopes, '$."sql.read"') AS reads,
+           json_extract(decisions, '$[0].decision') AS first_decision,
+           json_extract(decisions, '$[1].reason') AS denial,
+           finished_at IS NULL AS live, cpu_ms, ai_calls
+    FROM v_contribution_run
+    WHERE extension = 'acme'
+    ORDER BY started_at
+expect:
+  rows:
+    - { version: "2.1", outcome: denied, wall_ms: 92, peak_bytes: 4096, reads: 3, first_decision: allowed, denial: missing grant, live: 0, cpu_ms: 30, ai_calls: 2 }
+    - { version: "3.0", outcome: null, wall_ms: null, peak_bytes: null, reads: null, first_decision: null, denial: null, live: 1, cpu_ms: null, ai_calls: null }
+"#,
+    );
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
     assert!(report.ok, "{:?}", report.errors);
 }

@@ -69,7 +69,7 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "visit" => observe_visit(host, body).await,
         "refs" => observe_refs(host, body).await,
         "analyze" => observe_analyze(host, body).await,
-        "run" => observe_run(host, body).await,
+        "run" => Box::pin(observe_run(host, body)).await,
         "health" => observe_health(host, body).await,
         "token_usage" => observe_token_usage(host, body).await,
         "hint" => observe_hint(host, body).await,
@@ -463,13 +463,23 @@ pub(super) async fn observe_symbols(host: &Host, body: &Value) -> Result<(), Str
         .map_err(|e| e.to_string())
 }
 
-/// `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?,
-/// ai_calls?, error? }`: a finished run of `extension`'s `contribution`
-/// (`kind` a collector by default), recorded as the host does
-/// (`extension_run_store::record_tx`); `days_ago` is when it began.
+/// Observe a contribution run through its store. Use `days_ago` to set
+/// when it began and `live: true` to leave it unfinished.
 pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_domain::contribution::{ContributionId, ContributionKind};
-    use oxplow_domain::run::{ContributionRef, Mode, Outcome, RunContext};
+    use oxplow_domain::run::{ContributionRef, Mode, Outcome, RunContext, Usage};
+
+    #[derive(Default, serde::Deserialize)]
+    #[serde(default)]
+    struct Observations {
+        cpu_ms: u64,
+        peak_bytes: u64,
+        ai_calls: u32,
+        scopes: std::collections::BTreeMap<String, u32>,
+        decisions: Vec<oxplow_domain::grant::Decided>,
+        wall_ms: Option<u64>,
+        live: bool,
+    }
     let text = |k: &str| body.get(k).and_then(Value::as_str);
     let extension = text("extension").ok_or("`run.extension` names the extension")?;
     let local = text("contribution").ok_or("`run.contribution` names the contribution")?;
@@ -482,23 +492,17 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
         "implementation" => ContributionKind::Implementation,
         other => return Err(format!("`run.kind: {other}` — fix: collector, effect, command, job, advisory or implementation")),
     };
-    let outcome = match text("outcome").unwrap_or("ok") {
-        "ok" => Outcome::Ok,
-        "skipped" => Outcome::Skipped,
-        "failed" => Outcome::Failed,
-        "denied" => Outcome::Denied,
-        "cancelled" => Outcome::Cancelled,
-        other => {
-            return Err(format!(
-                "`run.outcome: {other}` — fix: ok, skipped, failed, denied or cancelled"
-            ))
-        }
-    };
+    let outcome = text("outcome")
+        .unwrap_or("ok")
+        .parse::<Outcome>()
+        .map_err(|e| format!("`run.outcome`: {e}"))?;
+    let observations: Observations =
+        serde_json::from_value(body.clone()).map_err(|e| format!("run observations: {e}"))?;
     let mut run = RunContext::contribution(
         ContributionRef {
             id: ContributionId::new(&host.namespace_of(extension), kind, local),
             extension: extension.to_string(),
-            version: None,
+            version: text("version").map(str::to_owned),
             generation: None,
             deployment: None,
         },
@@ -511,15 +515,26 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
         );
         run = run.began_at(at);
     }
-    run.used_cpu(body.get("cpu_ms").and_then(Value::as_u64).unwrap_or(0), 0);
-    for _ in 0..body.get("ai_calls").and_then(Value::as_u64).unwrap_or(0) {
-        run.used_ai();
-    }
+    let run = run.with_observed_result(
+        Usage {
+            cpu_ms: observations.cpu_ms,
+            peak_bytes: observations.peak_bytes,
+            ai_calls: observations.ai_calls,
+            scopes: observations.scopes,
+            observed_wall_time: observations.wall_ms.map(std::time::Duration::from_millis),
+        },
+        observations.decisions,
+    );
+    let live = observations.live;
     let error = text("error").map(str::to_string);
     host.svc
         .db
         .transaction(move |tx| {
-            oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
+            if live {
+                oxplow_db::contribution_run_store::begin_tx(tx, &run)
+            } else {
+                oxplow_db::contribution_run_store::record_tx(tx, &run, outcome, error.as_deref())
+            }
         })
         .await
         .map_err(|e| e.to_string())

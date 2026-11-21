@@ -30,7 +30,7 @@ pub struct NewAiCall {
     /// What it answered (`{ text }` or `{ answers }`); `None` when the
     /// call failed.
     pub response: Option<serde_json::Value>,
-    /// The extension run that made it (`extension_run.run_id`); `None` for
+    /// The extension run that made it (`contribution_run.run_id`); `None` for
     /// oxplow's own.
     pub run_id: Option<String>,
 }

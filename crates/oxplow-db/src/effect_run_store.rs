@@ -58,7 +58,7 @@ pub struct EffectRunKey {
     /// From 1.
     pub attempt: u32,
     pub origin: ReactionOrigin,
-    /// The attempt's run (`extension_run.run_id`), recorded on its row.
+    /// The attempt's run (`contribution_run.run_id`), recorded on its row.
     pub run_id: Option<String>,
 }
 

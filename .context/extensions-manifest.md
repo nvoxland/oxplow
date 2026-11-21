@@ -34,7 +34,7 @@ command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
 `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`,
 `oxplow:oxplow/metric?metric=acme.todos`.
-Storage (`v_contribution.uri`, `v_extension_run.contribution`,
+Storage (`v_contribution.uri`, `v_contribution_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
 keys and the desktop carry that string; every contribution kind in
 `KINDS` is a resource of oxplow (`oxplow/page`, `oxplow/command`, …) whose

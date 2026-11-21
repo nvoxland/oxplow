@@ -1,4 +1,4 @@
-//! A contribution's run as `v_extension_run` shows it: who it was, what it
+//! A contribution's run as `v_contribution_run` shows it: who it was, what it
 //! was caused by, how it ended, and the data it affected — for a run that
 //! succeeded, failed and was tried again, was cancelled, and was refused —
 //! without a secret value, a prompt or a path anywhere in the row.
@@ -95,13 +95,13 @@ async fn fresh(fx: &ThreadFixture) -> Vec<Vec<Value>> {
     .await
 }
 
-const RUNS: &str = "SELECT outcome, error, version, generation, actor, latest, mode, run_id
-                      FROM v_extension_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/sync'
+const RUNS: &str = "SELECT outcome, error, version, generation, actor_kind, mode, run_id
+                      FROM v_contribution_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/sync'
                      ORDER BY started_at, run_id";
 
 /// A run that failed and one that came after it: each is its own row, with
-/// the extension's version, the actor and the failure; only the last is
-/// `latest`; the collector's own row names the last, and no secret or
+/// the extension's version, the actor and the failure. The collector's
+/// own row names the last, and no secret or
 /// program output beyond the failure's reason is in any column.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
@@ -132,10 +132,6 @@ async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential(
     // catalog generation (a command's run records the one it pinned).
     assert_eq!(runs[0][3], Value::Null, "{:?}", runs[0]);
     assert_eq!(runs[0][4], json!("human"), "who");
-    assert_eq!(
-        (runs[0][5].clone(), runs[1][5].clone()),
-        (json!(0), json!(1))
-    );
 
     // The collector's row points at the run that last touched its data; the
     // failed run's attempt stays recorded under its own id.
@@ -144,14 +140,14 @@ async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential(
         "SELECT run_id, status FROM v_collector_run WHERE owner = 'acme' AND id = 'sync'",
     )
     .await;
-    assert_eq!(last, vec![vec![runs[1][7].clone(), json!("ok")]]);
+    assert_eq!(last, vec![vec![runs[1][6].clone(), json!("ok")]]);
 
     // Nothing in any recorded column carries the credential or the program's
     // own output.
     let everything = rows(
         &fx,
-        "SELECT json_group_array(json_object('e', error, 'd', decisions, 's', scopes, 'a', actor))
-           FROM v_extension_run",
+        "SELECT json_group_array(json_object('e', error, 'd', decisions, 's', scopes, 'a', actor_id))
+           FROM v_contribution_run",
     )
     .await;
     assert!(
@@ -243,7 +239,7 @@ async fn a_refused_caller_is_a_denied_run_not_a_failure() {
         .expect_err("a job may not run it");
     let runs = rows(
         &fx,
-        "SELECT outcome, version, kind, error FROM v_extension_run
+        "SELECT outcome, version, kind, error FROM v_contribution_run
           WHERE contribution = 'oxplow:oxplow/command?command=acme.no.jobs'",
     )
     .await;
@@ -309,7 +305,7 @@ async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
     );
     let runs = rows(
         &fx,
-        "SELECT outcome FROM v_extension_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/spin'",
+        "SELECT outcome FROM v_contribution_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/spin'",
     )
     .await;
     assert_eq!(runs, vec![vec![json!("cancelled")]]);

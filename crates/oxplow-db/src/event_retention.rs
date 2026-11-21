@@ -186,8 +186,8 @@ pub struct SweepReport {
     pub payloads_expired: usize,
     /// Refused runs' audit rows past [`REFUSED_AUDIT_DAYS`], deleted.
     pub refused_audit_deleted: usize,
-    /// Extension runs past [`EXTENSION_RUN_DAYS`], deleted.
-    pub extension_runs_deleted: usize,
+    /// Extension runs past [`CONTRIBUTION_RUN_DAYS`], deleted.
+    pub contribution_runs_deleted: usize,
     /// A project's windows naming a namespace nothing logs: kept
     /// for an extension not installed yet, and said, since a typo does nothing.
     pub unused: Vec<String>,
@@ -202,7 +202,7 @@ pub const REFUSED_AUDIT_DAYS: i64 = 30;
 
 /// How long an extension run's record is kept: a collector's events'
 /// window, so a run and the events it led to age out together.
-pub const EXTENSION_RUN_DAYS: i64 = 90;
+pub const CONTRIBUTION_RUN_DAYS: i64 = 90;
 
 /// Rows one sweep transaction touches: small enough that a hook waiting on
 /// the writer lock waits milliseconds, not the whole backlog.
@@ -308,15 +308,15 @@ async fn sweep_in_batches(
         }
     }
     // Extension runs past their window.
-    let cutoff = before(EXTENSION_RUN_DAYS);
+    let cutoff = before(CONTRIBUTION_RUN_DAYS);
     loop {
         let cutoff = cutoff.clone();
         let n = db
             .transaction(move |tx| {
-                crate::extension_run_store::sweep_tx(tx, &cutoff, batch as usize)
+                crate::contribution_run_store::sweep_tx(tx, &cutoff, batch as usize)
             })
             .await?;
-        report.extension_runs_deleted += n;
+        report.contribution_runs_deleted += n;
         if (n as i64) < batch {
             break;
         }
@@ -396,10 +396,10 @@ mod tests {
         assert_eq!(left, ["ok", "error", "invalid"]);
     }
 
-    /// Extension runs are kept for [`EXTENSION_RUN_DAYS`]: a sweep drops the
+    /// Extension runs are kept for [`CONTRIBUTION_RUN_DAYS`]: a sweep drops the
     /// older ones and leaves the rest, and a second finds nothing more.
     #[tokio::test]
-    async fn extension_runs_past_their_window_are_swept() {
+    async fn contribution_runs_past_their_window_are_swept() {
         let db = Database::in_memory();
         let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
         let at = |days: i64| {
@@ -407,15 +407,15 @@ mod tests {
                 now.unix_ms() - days * DAY_MS,
             ))
         };
-        let (old, kept) = (at(EXTENSION_RUN_DAYS + 1), at(EXTENSION_RUN_DAYS - 1));
+        let (old, kept) = (at(CONTRIBUTION_RUN_DAYS + 1), at(CONTRIBUTION_RUN_DAYS - 1));
         db.transaction(move |tx| {
             for (id, started) in [("old", &old), ("kept", &kept)] {
                 tx.execute(
-                    "INSERT INTO extension_run
-                       (run_id, extension, contribution, kind, actor_kind, actor, mode,
+                    "INSERT INTO contribution_run
+                       (run_id, extension, contribution, kind, actor_kind, mode,
                         started_at, finished_at, outcome, wall_ms, cpu_ms, peak_bytes,
                         ai_calls, scopes_json, decisions_json)
-                     VALUES (?1, 'acme', 'oxplow:oxplow/collector?collector=acme/pull', 'collector', 'system', 'system',
+                     VALUES (?1, 'acme', 'oxplow:oxplow/collector?collector=acme/pull', 'collector', 'system',
                         'external', ?2, ?2, 'ok', 1, 0, 0, 0, '{}', '[]')",
                     rusqlite::params![id, started],
                 )
@@ -426,11 +426,11 @@ mod tests {
         .await
         .unwrap();
         let first = sweep(&db, now, &BTreeMap::new()).await.unwrap();
-        assert_eq!(first.extension_runs_deleted, 1);
+        assert_eq!(first.contribution_runs_deleted, 1);
         let left: Vec<String> = db
             .read(|c| {
                 let mut st = c
-                    .prepare("SELECT run_id FROM extension_run ORDER BY run_id")
+                    .prepare("SELECT run_id FROM contribution_run ORDER BY run_id")
                     .map_err(crate::map_sql_err)?;
                 let rows = st
                     .query_map([], |r| r.get(0))
@@ -443,7 +443,7 @@ mod tests {
             .unwrap();
         assert_eq!(left, ["kept"]);
         let second = sweep(&db, now, &BTreeMap::new()).await.unwrap();
-        assert_eq!(second.extension_runs_deleted, 0);
+        assert_eq!(second.contribution_runs_deleted, 0);
     }
 
     #[tokio::test]
@@ -492,7 +492,7 @@ mod tests {
                 content_deleted: 5,
                 payloads_expired: 5,
                 refused_audit_deleted: 0,
-                extension_runs_deleted: 0,
+                contribution_runs_deleted: 0,
                 unused: Vec::new(),
             }
         );

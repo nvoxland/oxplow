@@ -890,7 +890,7 @@ async fn record_run(
     if let Err(e) = svc
         .db
         .transaction(move |tx| {
-            oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
+            oxplow_db::contribution_run_store::record_tx(tx, &run, outcome, error.as_deref())
         })
         .await
     {
@@ -1938,7 +1938,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT outcome FROM v_extension_run WHERE contribution = 'oxplow:oxplow/effect?effect=acme/mark-done'"
+                "SELECT outcome FROM v_contribution_run WHERE contribution = 'oxplow:oxplow/effect?effect=acme/mark-done'"
             )
             .await,
             json!([["cancelled"]])
@@ -1991,7 +1991,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT outcome FROM v_extension_run WHERE contribution = 'oxplow:oxplow/effect?effect=acme/mark-done'"
+                "SELECT outcome FROM v_contribution_run WHERE contribution = 'oxplow:oxplow/effect?effect=acme/mark-done'"
             )
             .await,
             json!([["cancelled"]])

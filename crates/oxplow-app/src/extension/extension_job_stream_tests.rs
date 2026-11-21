@@ -347,22 +347,22 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
         ["tool_call", "usage", "tool_result", "text", "usage"]
     );
 
-    // The command ran as the job: its run says so, and whose run it was
-    // nested in.
+    // The command ran as the job. The job attempt does not yet record a
+    // contribution run of its own.
     let ran = rows(
         &fx,
-        "SELECT actor_kind, actor, parent_run_id IS NOT NULL FROM v_extension_run
+        "SELECT actor_kind, actor_id, parent_run_id FROM v_contribution_run
           WHERE contribution = 'oxplow:oxplow/command?command=triage.todos.lookup'",
         vec![],
     )
     .await;
     assert_eq!(ran.len(), 1, "{ran:?}");
     assert_eq!(ran[0][0], json!("job"));
-    assert_eq!(
-        ran[0][1],
-        json!(oxplow_domain::uri::build::job_run_uri(&id)),
-        "the job run is the actor"
+    assert!(
+        ran[0][1].as_str().unwrap().starts_with(&format!("{id}:")),
+        "the job run is the actor: {ran:?}"
     );
+    assert_eq!(ran[0][2], Value::Null);
 }
 
 /// A tool call the command refuses, one with input its schema doesn't

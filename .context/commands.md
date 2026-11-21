@@ -430,7 +430,7 @@ that command at once; nothing runs a command before the first activation
 publishes. Each runs as its extension's contribution (an
 extension-scoped operation — configuration, state, jobs — finds its owner
 that way), so foundation's command runs are `oxplow-foundation`'s
-`v_extension_run` rows like any extension's. An extension may declare a command over the same operation in
+`v_contribution_run` rows like any extension's. An extension may declare a command over the same operation in
 its own namespace. A script reaches record and write operations only by
 composing commands.
 

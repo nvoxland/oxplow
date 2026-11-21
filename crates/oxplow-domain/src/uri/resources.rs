@@ -39,6 +39,7 @@ pub const SUBAGENT: &str = "oxplow/subagent";
 pub const RUN: &str = "oxplow/run";
 pub const PROPOSAL: &str = "oxplow/proposal";
 pub const COLLECTOR: &str = "oxplow/collector";
+pub const CONTRIBUTION_RUN: &str = "oxplow/contribution_run";
 pub const JOB_RUN: &str = "oxplow/job_run";
 pub const AI_CALL: &str = "oxplow/ai_call";
 pub const CONSUMER: &str = "oxplow/consumer";

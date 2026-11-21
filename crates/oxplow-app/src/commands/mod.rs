@@ -1742,7 +1742,7 @@ impl CommandBus {
 
     /// A run that leaves no audit row — a read, or one that changed
     /// nothing — is still an extension's run when it is one: recorded as
-    /// such ([`oxplow_db::extension_run_store`]).
+    /// such ([`oxplow_db::contribution_run_store`]).
     async fn ran_unaudited(&self, run: &RunContext, failed: Option<&CommandError>) {
         if run.contribution_ref().is_none() {
             return;
@@ -1762,7 +1762,7 @@ impl CommandBus {
         if let Err(e) = self
             .db
             .transaction(move |tx| {
-                oxplow_db::extension_run_store::record_tx(tx, &run, ended, error.as_deref())
+                oxplow_db::contribution_run_store::record_tx(tx, &run, ended, error.as_deref())
             })
             .await
         {

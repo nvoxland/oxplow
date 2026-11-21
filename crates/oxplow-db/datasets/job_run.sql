@@ -1,7 +1,7 @@
 SELECT j.id,
        j.contribution_id AS job,
        j.intent_key,
-       CAST((SELECT r.extension FROM source('extension_run') r WHERE r.run_id = j.run_id) AS TEXT) AS extension,
+       CAST((SELECT r.extension FROM source('contribution_run') r WHERE r.run_id = j.run_id) AS TEXT) AS extension,
        j.package_version AS version,
        j.contract_version,
        j.operation,

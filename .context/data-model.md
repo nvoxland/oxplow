@@ -625,8 +625,9 @@ them. **V25** dropped their data: the `effort`, `effort_file`,
 `effort_metric_delta`, `effort_observation_row` and
 `effort_evidence_state` tables; every `effort_id` column
 (`agent_nudge`, `agent_token_usage`, `agent_tool_call`, `metric_capture`,
-`once_mark`, `snapshot_op`, `event_log`, `extension_run`; the tables with
-a foreign key rebuilt, every token row and capture kept); the effort
+`once_mark`, `snapshot_op`, `event_log` and the old run table, now replaced
+by `contribution_run`; the tables with a foreign key rebuilt, every token
+row and capture kept); the effort
 events, their measures, specs and the effort producers' captures; the
 `effort` change kind; the effort-projected `page_ref` edges and search
 entries; the `effort_policy` capability rows; and an effort-only once
@@ -1927,44 +1928,41 @@ bus writes an attempt's row in its run's transaction, or claims it
 `started` first when a step runs outside it (`claim_tx` / `finish_tx`).
 See [extensions-events.md](./extensions-events.md) "Effects".
 
-### `extension_run` — `crates/oxplow-db/src/extension_run_store.rs`
+### `contribution_run` — `crates/oxplow-db/src/contribution_run_store.rs`
 
-V48. One row per finished run of extension code (`oxplow_domain::run`,
-[extensions-permissions.md](./extensions-permissions.md) "The run context"): `run_id` (a
-UUIDv7), `parent_run_id`, `extension`, `contribution`
-(its URI, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=request_review/review`), `kind`, `version`, `generation`, `actor_kind` /
-`actor`, the anchors (`stream_id`, `thread_id`, `turn_id`,
-`agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
-`mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /
-`failed` / `denied` / `cancelled` / `stale`), `error`, `wall_ms`,
-`cpu_ms` (its scripts' CPU, summed), `peak_bytes` (the most one of its
-scripts held), `ai_calls`, `scopes_json`, `decisions_json`. STRICT.
+The shared record for a run of contribution code
+(`oxplow_domain::run`, [The run context](./extensions-permissions.md)).
+It holds the fields common to every run. Each kind's detail record holds
+the fields specific to that kind. The existing ledgers still keep their
+own run fields until their detail records move to the shared table.
 
-- **Written once, by the host that ran it**, in the transaction its own
-  record lands in: a collector's with its `collector_run` row, a fact
-  collector's with its capture, a command's (an extension's `commands:`
-  entry, or a policy's call) with its audit row (`record_tx` /
-  `audit_only`); an effect's by the bus with its run, or by the effect
-  host when its script skipped or failed before the bus. `INSERT OR
-  REPLACE`: a host that learns the final outcome later rewrites it.
-- **Core's own work writes nothing**: `record_tx` is a no-op for a run
-  with no contribution.
-- **What it never holds:** an input, a result, a credential's value, a
-  prompt. What a run read or was answered stays where it already is
-  (`command_audit`, `event_content`). A program's own words in an `error`
-  have the credentials the run was handed replaced by `[redacted]`.
-- **`generation` is NULL for a run that holds none:** a collector's, an
-  effect's and a job's run belongs to its extension's `version` (its live
-  check rechecks that at each host call and at publication), so only a
-  command's run, which pins a generation, records one. A run stopped by a
-  person, or because its extension changed or was disabled, is `cancelled`
-  and says nothing of the contribution's health.
-- **Linked from the records that already existed:** `command_audit`,
-  `effect_run`, `collector_run` and `ai_call` each gained `run_id`
-  (V48). A person's `oxplow.collector.sync` run is the collector run's
-  `parent_run_id`.
-- **Swept** on the collector window (`EXTENSION_RUN_DAYS`, 90 days) by
-  `event_retention::sweep`, in its 5,000-row batches.
+- **Identity and cause.** `run_id` is a UUIDv7. `contribution` is the
+  contribution's URI. The row records its `kind`, `extension`, `version`
+  and `generation` when pinned. `actor_kind` and `actor_id` identify who
+  ran it. `stream_id`, `thread_id`, `turn_id`, `session_id` and
+  `snapshot_id` are integer anchors. `cause_event_id` identifies the
+  causing event, and `mode` says how the run executes.
+- **Parent.** `parent_run_id` is set only if the parent's row exists.
+  Deleting the parent clears the link. A run without a contribution
+  still writes no shared row.
+- **Lifecycle.** Commands and collectors use `record_tx` to begin and end
+  in one transaction. A run that spans transactions can use `begin_tx`
+  and `finish_tx`. A live row has NULL `finished_at`, `outcome` and cost.
+  The store refuses a second finish. At boot, recovery ends stray live
+  rows as `interrupted` and leaves their cost unknown.
+- **End and cost.** `started_at` and `finished_at` are RFC 3339.
+  `outcome` is `ok`, `skipped`, `failed`, `denied`, `cancelled`,
+  `invalid` or `interrupted`. The row records `error`, `wall_ms`,
+  summed script `cpu_ms`, maximum script `peak_bytes`, `ai_calls`,
+  `scopes_json` and `decisions_json`. Inputs, results, credential values
+  and prompts stay outside this table. Program errors redact any
+  credentials the run received.
+- **Readers.** `v_contribution_run` publishes the shared fields, with
+  `scopes` and `decisions` for the two JSON columns, and the run's URI.
+  `command_audit`, `effect_run`, `collector_run` and `ai_call` can name
+  a run in `run_id`.
+- **Retention.** `event_retention::sweep` removes finished rows that began
+  more than 90 days ago (`CONTRIBUTION_RUN_DAYS`), in batches of 5,000.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 

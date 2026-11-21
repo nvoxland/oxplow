@@ -92,7 +92,7 @@ pub struct CollectorRun {
     /// The seq of the last trigger event it ran for.
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub last_event_id: Option<i64>,
-    /// The last run (`extension_run.run_id`); `None` for one before runs
+    /// The last run (`contribution_run.run_id`); `None` for one before runs
     /// were recorded.
     #[serde(default)]
     pub run_id: Option<String>,

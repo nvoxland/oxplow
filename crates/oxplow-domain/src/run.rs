@@ -132,6 +132,8 @@ pub struct Usage {
     /// The most any one of its scripts held live at once.
     pub peak_bytes: u64,
     pub ai_calls: u32,
+    /// Wall time supplied by a fixture. Hosts measure their own elapsed time.
+    pub observed_wall_time: Option<Duration>,
 }
 
 /// How a run ended.
@@ -143,6 +145,8 @@ pub enum Outcome {
     Failed,
     Denied,
     Cancelled,
+    Invalid,
+    Interrupted,
 }
 
 impl Outcome {
@@ -153,6 +157,27 @@ impl Outcome {
             Outcome::Failed => "failed",
             Outcome::Denied => "denied",
             Outcome::Cancelled => "cancelled",
+            Outcome::Invalid => "invalid",
+            Outcome::Interrupted => "interrupted",
+        }
+    }
+}
+
+impl std::str::FromStr for Outcome {
+    type Err = crate::DomainError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "ok" => Ok(Self::Ok),
+            "skipped" => Ok(Self::Skipped),
+            "failed" => Ok(Self::Failed),
+            "denied" => Ok(Self::Denied),
+            "cancelled" => Ok(Self::Cancelled),
+            "invalid" => Ok(Self::Invalid),
+            "interrupted" => Ok(Self::Interrupted),
+            _ => Err(crate::DomainError::Invalid(format!(
+                "unknown run outcome {value:?}"
+            ))),
         }
     }
 }
@@ -597,6 +622,18 @@ impl RunContext {
     /// It began at `at`, not now: a run recorded after the fact.
     pub fn began_at(mut self, at: crate::time::Timestamp) -> Self {
         self.began = at;
+        self
+    }
+
+    /// Supply the observations of a run made by a fixture. These decisions
+    /// describe past checks and do not grant authority.
+    pub fn with_observed_result(
+        mut self,
+        usage: Usage,
+        decisions: Vec<crate::grant::Decided>,
+    ) -> Self {
+        self.usage = Arc::new(std::sync::Mutex::new(usage));
+        self.decided = Arc::new(std::sync::Mutex::new(decisions));
         self
     }
 

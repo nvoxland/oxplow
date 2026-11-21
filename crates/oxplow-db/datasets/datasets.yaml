@@ -253,7 +253,7 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 8
+  version: 9
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -270,7 +270,7 @@
     - { name: "input_hash", type: "TEXT", doc: "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls." }
     - { name: "request_hash", type: "TEXT", doc: "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept." }
     - { name: "response_hash", type: "TEXT", doc: "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed." }
-    - { name: "run_id", type: "TEXT", doc: "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)" }
+    - { name: "run_id", type: "TEXT", doc: "The contribution run that made the call (`v_contribution_run.run_id`); NULL for oxplow's own calls. (v3)" }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/ai_call?id=<id>`: its URI. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
   tests:
     - { not_null: id }
@@ -1059,7 +1059,7 @@
     - { not_null: id }
     - { unique: id }
 - name: effect_run
-  version: 2
+  version: 3
   key: [effect, event_id, attempt]
   description: "Each attempt at an extension effect's reaction to an event: the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` — and a person's `effect.retry` of a failed one makes the next. A failed attempt whose every step was a write to a provider keeping `idempotent_writes` is sent again by itself, at most twice (`auto`; `retry_at` says when); any other waits for a person. A reaction's state is its latest attempt's (`latest = 1`)."
   fields:
@@ -1078,46 +1078,47 @@
     - { name: "started_at", type: "TEXT", doc: "When it started (RFC 3339)." }
     - { name: "finished_at", type: "TEXT", doc: "When it ended; NULL while `started`." }
     - { name: "retry_at", type: "TEXT", doc: "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed." }
-    - { name: "run_id", type: "TEXT", doc: "The attempt's run (`v_extension_run.run_id`). (v2)" }
+    - { name: "run_id", type: "TEXT", doc: "The attempt's run (`v_contribution_run.run_id`). (v2)" }
   tests:
     - { not_null: effect }
-- name: extension_run
-  version: 9
+- name: contribution_run
+  version: 1
   key: [run_id]
-  description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
+  description: "Each recorded contribution run, including live runs. It holds the contribution identity, actor, anchors, cause, outcome, cost and authority. Its input, result, prompts and credential values are private."
+  relationships: [{ from: thread_id, to: thread.id }, { from: turn_id, to: agent_turn.id }, { from: session_id, to: agent_session.id }]
   fields:
-    - { name: "run_id", type: "TEXT", doc: "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`." }
-    - { name: "parent_run_id", type: "TEXT", doc: "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run." }
-    - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=change_review/review`." }
-    - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
-    - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
-    - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
-    - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `page`, `system` or `effect`." }
-    - { name: "actor", type: "TEXT", doc: "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`." }
-    - { name: "stream_id", type: "INTEGER", doc: "The stream it ran for; NULL when none." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it ran for; NULL when none." }
-    - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran for; NULL when none." }
-    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session it ran for; NULL when none." }
-    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot it ran over; NULL when none." }
-    - { name: "cause_event_id", type: "TEXT", doc: "The event that caused it (`v_event.id`); NULL for a run a person or schedule started." }
-    - { name: "mode", type: "TEXT", doc: "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)." }
+    - { name: "run_id", type: "TEXT", doc: "The run's UUIDv7, ordered by start time." }
+    - { name: "parent_run_id", type: "TEXT", doc: "The recorded run that started it, if any." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares the contribution." }
+    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (v_contribution.uri)." }
+    - { name: "kind", type: "TEXT", doc: "The contribution kind, such as collector, command, effect, job or implementation." }
+    - { name: "version", type: "TEXT", doc: "The extension's declared version when it ran, if any." }
+    - { name: "generation", type: "TEXT", doc: "The extension catalog generation it ran against, if any." }
+    - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `page`, `component`, `system`, `effect` or `job`." }
+    - { name: "actor_id", type: "TEXT", doc: "The actor's id for its kind, such as `thr3` for an agent. NULL when the actor has no id." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream it ran for (v_stream.id), if any." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread it ran for (v_thread.id), if any." }
+    - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran for (v_agent_turn.id), if any." }
+    - { name: "session_id", type: "INTEGER", doc: "The agent session it ran for (v_agent_session.id), if any." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot it ran over, if any." }
+    - { name: "cause_event_id", type: "TEXT", doc: "The event that caused it (v_event.id), if any." }
+    - { name: "mode", type: "TEXT", doc: "`pure`, `transactional` or `external`." }
     - { name: "started_at", type: "TEXT", doc: "When it began (RFC 3339)." }
-    - { name: "finished_at", type: "TEXT", doc: "When it ended (RFC 3339)." }
-    - { name: "outcome", type: "TEXT", doc: "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)" }
-    - { name: "error", type: "TEXT", doc: "Why it failed, was denied or stopped." }
-    - { name: "wall_ms", type: "INTEGER", doc: "How long it ran." }
-    - { name: "cpu_ms", type: "INTEGER", doc: "Its scripts' CPU time, summed (0 for a run that ran no script)." }
-    - { name: "peak_bytes", type: "INTEGER", doc: "The most any one of its scripts held live at once." }
-    - { name: "ai_calls", type: "INTEGER", doc: "The model calls it made." }
-    - { name: "scopes", type: "TEXT", doc: "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)." }
-    - { name: "decisions", type: "TEXT", doc: "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)." }
-    - { name: "latest", type: "", doc: "1 on its contribution's most recent run." }
+    - { name: "finished_at", type: "TEXT", doc: "When it ended (RFC 3339). NULL while live." }
+    - { name: "outcome", type: "TEXT", doc: "`ok`, `skipped`, `failed`, `denied`, `cancelled`, `invalid` (input refused) or `interrupted` (oxplow stopped before it ended). NULL while live." }
+    - { name: "error", type: "TEXT", doc: "Why it did not end `ok`, if known." }
+    - { name: "wall_ms", type: "INTEGER", doc: "Elapsed time in milliseconds. NULL while live or when unmeasured." }
+    - { name: "cpu_ms", type: "INTEGER", doc: "Script CPU time in milliseconds, summed. NULL while live or when unmeasured." }
+    - { name: "peak_bytes", type: "INTEGER", doc: "Peak script memory in bytes. NULL while live or when unmeasured." }
+    - { name: "ai_calls", type: "INTEGER", doc: "Model calls it made. NULL while live or when unmeasured." }
+    - { name: "scopes", type: "TEXT", doc: "The scopes it used and their counts, as a JSON object." }
+    - { name: "decisions", type: "TEXT", doc: "Permission decisions as a JSON array of `{ need, decision, reason? }`." }
+    - { name: "uri", type: "TEXT", doc: "The run's URI (`oxplow:oxplow/contribution_run?id=<run_id>`)." }
   tests:
     - { not_null: run_id }
     - { unique: run_id }
 - name: job_run
-  version: 6
+  version: 7
   key: [id]
   description: "Each job run: one execution of a job an extension declares (a `jobs:` declaration, run through its `jobs.write/enqueue` command) — which job, its state and its current attempt, and what that attempt has used so far. A job is the declaration (`oxplow:oxplow/job?job=<extension>/<id>`); a job run is one execution of it (`oxplow:oxplow/job_run?id=<id>`). What it was asked and what it answered stay private to the extension (`jobs.read/snapshot`); what it streams is in `v_job_run_output`."
   fields:
@@ -1132,7 +1133,7 @@
     - { name: "attempt", type: "INTEGER", doc: "Its current attempt, 0 before the first starts." }
     - { name: "cancellation_requested", type: "INT", doc: "1 once someone asked it to stop." }
     - { name: "invoker", type: "TEXT", doc: "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …" }
-    - { name: "run_id", type: "TEXT", doc: "The run that started it (`v_extension_run.run_id`)." }
+    - { name: "run_id", type: "TEXT", doc: "The run that started it (`v_contribution_run.run_id`)." }
     - { name: "created_at", type: "TEXT", doc: "When it was started (RFC 3339)." }
     - { name: "updated_at", type: "TEXT", doc: "When its state last changed (RFC 3339)." }
     - { name: "ai_calls", type: "INT", doc: "Model rounds its current attempt has finished." }
@@ -1491,9 +1492,9 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector
-  version: 3
+  version: 4
   key: [uri]
-  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_extension_run`."
+  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_contribution_run`."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<namespace>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (`project` for the project's own)." }
@@ -1513,7 +1514,7 @@
   tests:
     - { not_null: uri }
 - name: collector_run
-  version: 6
+  version: 7
   description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
   fields:
     - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
@@ -1524,7 +1525,7 @@
     - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
     - { name: "cursor_json", type: "TEXT", doc: "Its checkpoint: the opaque state its script or provider read returned last." }
     - { name: "last_event_id", type: "INTEGER", doc: "The seq of the last trigger event it ran for." }
-    - { name: "run_id", type: "TEXT", doc: "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)" }
+    - { name: "run_id", type: "TEXT", doc: "Its last run (`v_contribution_run.run_id`); NULL for a run before runs were recorded. (v2)" }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
   tests:
     - { not_null: owner }

@@ -386,14 +386,14 @@ left out; `summarize` or `decide` otherwise) and optional
   *number* of model calls an extension may make was considered with
   scoped grants (2026-10-10) and left out for now: a grant says only
   whether a contribution may call a model, and each run's calls are
-  counted (`v_extension_run.ai_calls`, `v_ai_call.run_id`).
+  counted (`v_contribution_run.ai_calls`, `v_ai_call.run_id`).
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
   (role, provider, model, caller, tokens, latency, ok, error, and
-  `run_id` — the extension run that made it, V48), so AI usage is itself
-  queryable in the [semantic layer](./semantic-layer.md). An `AiCompute`
+  `run_id` when the caller supplies it). AI usage is queryable in the
+  [semantic layer](./semantic-layer.md). An `AiCompute`
   computation takes a `Caller { name, run }` (a bare name converts to
   one with no run); a collector's `CollectorOracle` names its run and
-  counts each call on it (`extension_run.ai_calls`).
+  counts each call on it (`contribution_run.ai_calls`).
 - **Every call keeps what it was asked and answered** (V41): the request
   as `AiService` hands it to the provider — `ModelRequest::Complete {
   system, prompt, json }` or `Decide { state, questions }`, its `body()`

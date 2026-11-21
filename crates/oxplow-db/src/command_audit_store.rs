@@ -101,7 +101,7 @@ pub struct NewCommandAudit {
     pub inverse: Option<CommandCall>,
     /// The scopes the run called, and how often.
     pub scopes: BTreeMap<String, u32>,
-    /// The run it was (`extension_run.run_id` when an extension's).
+    /// The run it was (`contribution_run.run_id` when an extension's).
     pub run_id: Option<String>,
 }
 

@@ -283,7 +283,7 @@ Status: done. `oxplow_domain::grant` defines the request (derived from a
 contribution's declaration by `grants.rs`), the grant (the extension's declared `permissions`,
 approved when it was deployed; narrowing asks nothing new), and each
 run's decisions (`allowed`, `denied`, `unenforced`), recorded on
-`v_extension_run` — the usage record, with actor, cause, anchors, cost,
+`v_contribution_run` — the usage record, with actor, cause, anchors, cost,
 scopes and model calls, never values or contents. A deployment's
 permissions cover its whole declaration, and a deployment is immutable.
 Per-dataset reads,
@@ -323,7 +323,8 @@ Prerequisites: Define scoped extension grants and usage audit contracts.
 
 #### Expose consistent extension run health and safe usage evidence
 
-Status: planned.
+Status: in progress. The shared run record and dataset are in place. The
+per-kind detail migrations and run inspector are planned.
 
 Scope: Unify run identity, status, errors, cancellation, resource usage, grant decisions and data freshness across contributions. Publish semantic views and a small reusable inspector for extension authors and developers. Keep high-volume activity bounded and distinguish retryable execution failure from contract or permission rejection.
 

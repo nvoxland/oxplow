@@ -2,6 +2,8 @@
 //! extension machinery. `pub(crate)` by default; a module is `pub` only when
 //! another crate imports it (`.context/working-in-this-repo.md`).
 
+#[cfg(test)]
+mod contribution_run_tests;
 pub(crate) mod extension_activation;
 #[cfg(test)]
 mod extension_activation_tests;
@@ -40,8 +42,6 @@ mod extension_lifecycle_tests;
 #[cfg(test)]
 pub(crate) mod extension_private_state_tests;
 pub mod extension_resources;
-#[cfg(test)]
-mod extension_run_health_tests;
 #[cfg(test)]
 mod extension_run_pin_tests;
 pub(crate) mod extension_runtime_adapters;

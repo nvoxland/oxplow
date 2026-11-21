@@ -240,8 +240,13 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
      col? }] } } }` (what a language server reported for a file),
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
-     (the definitions the index read from it), ``{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
-     (a finished run of an extension's code), `{ observe: { health: { namespace, contribution,
+     (the definitions the index read from it), `{ observe: { run: { extension,
+     contribution, kind?, version?, outcome?, error?, days_ago?, wall_ms?,
+     cpu_ms?, peak_bytes?, ai_calls?, scopes?, decisions?, live? } } }`
+     (a contribution run, left unfinished with `live: true`; `scopes` maps
+     scope names to call counts and `decisions` takes entries such as
+     `{ need: scope, name: sql.read, decision: denied, reason: missing grant }`),
+     `{ observe: { health: { namespace, contribution,
      kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
      thread?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
      hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,

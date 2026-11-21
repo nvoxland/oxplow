@@ -328,8 +328,8 @@ hosts (`network`), credentials (`secrets`), models (`ai`), and so on. You
 approve them when you deploy the extension (Settings → Extensions), and a
 deploy that adds a permission asks again. `process` is declared, not
 confined: a program reads and writes files as you, and its network is
-confined only on macOS. Every run is recorded in `v_extension_run`, with
-what each permission decided.
+confined only on macOS. `v_contribution_run` shows recorded contribution
+runs and their permission decisions.
 
 Ask the agent for the details: the `oxplow-collection` skill covers host
 helpers, the exact output schemas and a worked example.

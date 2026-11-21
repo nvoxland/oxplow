@@ -191,16 +191,13 @@ its scope trace.
   operations capture their implicit backing scope in declared authority.
   Routing and dispatch check run authority. This is handler attribution, not
   a coordinated DB/catalog activation or a new per-child command audit.
-- **Every contribution's run is recorded once** (`extension_run`,
-  `v_extension_run`; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"):
-  its identity, actor, anchors, cause, outcome, cost (`cpu_ms`,
-  `peak_bytes`, from each script's `Ran`), the scopes it called and its
-  model calls — never what it read or wrote. Nested work of the same
-  contribution adds to its parent's usage (`child()` shares it); another
-  contribution's child is its own row, its `parent_run_id` the run that
-  started it. A person's `oxplow.effect.retry` / `backfill` links the
-  reaction's run to theirs (`under`) without making it theirs: the
-  effect still runs as itself.
+- **Contribution runs have a shared record** (`contribution_run`,
+  `v_contribution_run`). It holds identity, actor, anchors, cause, outcome,
+  cost, scopes used and model call count. It excludes the contents a run
+  read or wrote. Nested work of the same contribution adds to its parent's
+  usage (`child()` shares it). A child run of another contribution has its
+  own row. `parent_run_id` is set when the parent has a recorded row.
+  `oxplow.effect.retry` and `backfill` still run the effect as itself.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
   (launcher, Activity) is a dashboard of three tables over the last 30 days:
   `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
@@ -226,11 +223,11 @@ its scope trace.
   three attempts); a collector is not retried by itself, its schedule runs it
   again. A collector whose last run failed is not `fresh` in
   `v_contribution_health` — its rows are the last good run's — and a failed
-  attempt keeps its own `extension_run` row, reachable from its data effects
-  (`effect_run.run_id`, `collector_run.run_id`, `job_run.run_id`). A program's
-  words in an `error` have the credentials it was handed replaced. Runs are
-  kept 90 days (`EXTENSION_RUN_DAYS`). Pinned by `extension_run_health_tests.rs`
-  and `event_retention::tests::extension_runs_past_their_window_are_swept`.
+  attempt keeps its own `contribution_run` row, reachable from its data effects
+  (`effect_run.run_id`, `collector_run.run_id`). Program errors redact
+  credentials the run received. Finished runs are kept 90 days
+  (`CONTRIBUTION_RUN_DAYS`). Pinned by `contribution_run_tests.rs`
+  and `event_retention::tests::contribution_runs_past_their_window_are_swept`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts and report
@@ -405,7 +402,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   a provider's `host/call`s. Core's own work has none and is allowed what
   it does (core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
-  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
+  `Unenforced(why)`, recorded on the run (`v_contribution_run.decisions`).
   `grant::decide` refuses what the contribution didn't declare ("not
   declared"), then what its extension's permissions don't allow — the
   refusal names the permission: ``needs `ai.compute` in the

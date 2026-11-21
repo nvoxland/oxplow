@@ -584,9 +584,15 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`; `trigger: turn_end` makes
   it the latest turn's end take, so its files are that turn's), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
-  at a snapshot taken with the file), `collect` (`run_event_collectors`) 
-  `run` (`extension_run_store::record_tx`; `days_ago` through
-  `RunContext::began_at`), `health` (`disable_tx`), `token_usage`, `hint`
+  at a snapshot taken with the file), `collect` (`run_event_collectors`),
+  `run` (`contribution_run_store`, read through `v_contribution_run`).
+  A run can set `version`, `days_ago` for its start, `wall_ms`, `cpu_ms`,
+  `peak_bytes`, `ai_calls`, `scopes` (scope names mapped to call counts)
+  and `decisions` (entries with `need`, `name` when the need has one,
+  `decision` and `reason` for denials and unenforced checks). For example,
+  `{ need: scope, name: sql.read, decision: denied, reason: missing grant }`.
+  With `live: true`, the store begins the run and leaves its outcome and
+  costs NULL. Other kinds include `health` (`disable_tx`), `token_usage`, `hint`
   and `nudge` (their stores), `conversation` (a harness's saved
   conversation as `v_agent_conversation` lists it, `{ harness, id, title?,
   first_prompt?, started_at?, updated_at?, size_bytes?, parent? }`, or `{
