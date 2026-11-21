@@ -944,14 +944,26 @@ pub(super) async fn take_snapshot(
         if let (Some(path), Some(blob)) = (text("path"), text("blob")) {
             git_oids.insert(path.to_string(), blob.to_string());
         }
+        // A file with a `body` has its text kept, as a take keeps it: what
+        // a script's `files()` / `grep_tree()` reads of the tree.
+        let (blob_hash, size_bytes) = match text("body") {
+            Some(body) => (
+                host.svc
+                    .blobs
+                    .write(body.as_bytes())
+                    .map_err(|e| format!("a snapshot file's `body`: {e}"))?,
+                body.len() as i64,
+            ),
+            None => (text("hash").unwrap_or("h").to_string(), 1),
+        };
         rows.push(FileSnapshot {
             id: 0,
             stream_id: stream,
             path: text("path")
                 .ok_or("a snapshot file names its `path`")?
                 .to_string(),
-            blob_hash: Some(text("hash").unwrap_or("h").to_string()),
-            size_bytes: 1,
+            blob_hash: Some(blob_hash),
+            size_bytes,
             captured_at: oxplow_domain::Timestamp::now(),
             storage: SnapshotStorage::Oxplow,
             snapshot_id: None,

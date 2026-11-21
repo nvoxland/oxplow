@@ -836,6 +836,58 @@ def transform(input):
         assert_eq!(dims["acme.container"], serde_json::json!("Parser"));
     }
 
+    /// `grep_tree` finds whole words (or a regex) in the run's tree, in
+    /// path then line order, limited by `paths` and `max`, and needs the tree.
+    #[test]
+    fn grep_tree_searches_the_run_tree() {
+        let map: std::collections::HashMap<String, String> = [
+            ("src/a.rs", "fn foo() {}\nlet food = 1;\nfoo();\n"),
+            ("src/b.rs", "  call(foo)  \n"),
+            ("docs/x.md", "foo\n"),
+        ]
+        .into_iter()
+        .map(|(p, t)| (p.to_string(), t.to_string()))
+        .collect();
+        let hosts = runtime::Hosts {
+            tree: Some(TreeHost::new(map)),
+            ..runtime::Hosts::default()
+        };
+        let run = |script: &str| {
+            runtime::run_starlark_hosted(script, &serde_json::json!({}), &hosts).unwrap()
+        };
+        let summary = "def transform(x):\n    return [\"%s:%d\" % (h[\"path\"], h[\"line\"]) for h in grep_tree(\"foo\")]\n";
+        assert_eq!(
+            run(summary),
+            serde_json::json!(["docs/x.md:1", "src/a.rs:1", "src/a.rs:3", "src/b.rs:1"]),
+            "whole words only, in order"
+        );
+        let narrowed = "def transform(x):\n    return [h[\"text\"] for h in grep_tree(\"foo\", paths = [\"src/b.rs\"])]\n";
+        assert_eq!(
+            run(narrowed),
+            serde_json::json!(["call(foo)"]),
+            "trimmed text"
+        );
+        let limited = "def transform(x):\n    return len(grep_tree(\"foo\", max = 2))\n";
+        assert_eq!(run(limited), serde_json::json!(2));
+        let regex = "def transform(x):\n    return len(grep_tree(\"fo+d\", regex = True))\n";
+        assert_eq!(run(regex), serde_json::json!(1));
+        let bad = runtime::run_starlark_hosted(
+            "def transform(x):\n    return grep_tree(\"(\", regex = True)\n",
+            &serde_json::json!({}),
+            &hosts,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(bad.contains("bad pattern"), "{bad}");
+        let err = runtime::run_starlark(
+            "def transform(x):\n    return grep_tree(\"foo\")\n",
+            &serde_json::json!({}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("`grep_tree()` needs `tree.read`"), "{err}");
+    }
+
     #[test]
     fn source_files_and_markers_builtins_are_language_agnostic() {
         // A single script sweeps source_files() (each tagged with language) and

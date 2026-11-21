@@ -158,6 +158,26 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     - `review_signal_duplication`: `v_change_duplicate` blocks of the
       change's files, with the copy in `why`; `info`. The scan runs after the
       rest of the analysis, so these rows come late.
+    - `review_signal_unused`: a **check**, not a SQL source over stored
+      rows: the collector `oxplow.review.unused` (`collectors/review/unused.star`,
+      `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,
+      `needs: [tree.read, sql.read]`) reads `change_diff` for the lines the
+      change removed, takes the call-shaped names (`name(`) that aren't also
+      called on an added line of the same file, keeps those the head tree
+      defines (`v_symbol`; a library call has no symbol) and finds no other
+      mention of with `grep_tree` (a text search over the stream's latest
+      snapshot, so it says "possibly"), and writes one row per function:
+      `code`, `medium`, `possibly-unused`, at the definition. Its entity
+      `review_unused` (key `change_id|path|line|signal`) holds the rows; a rerun
+      reads the change's earlier keys and tombstones the ones it no longer
+      produces. `review_signal_unused` adds them to the list.
+    - `v_oxplow_review_check` (`datasets/review_check.sql`): one row per
+      analysed change and per check (a collector on `change.analyzed`):
+      `change_id, collector, collector_uri, state, last_run_at, error`.
+      `state` is `pending` until the check has run for the change's latest
+      `change.analyzed` (files) event (its `collector_run.last_event_id` is
+      older than that event's seq), `failed` when that run failed, else `ok`.
+      The Review page shows a pending check as still running.
   - `severity`: `high` and `medium` put a file in Look Here; `info` is
     counted in By Area and listed in the file's expansion.
   - The brief (`parts/change-review-brief.yaml`) is one line under the first

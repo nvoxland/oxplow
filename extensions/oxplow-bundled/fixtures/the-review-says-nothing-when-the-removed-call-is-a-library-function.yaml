@@ -1,0 +1,17 @@
+# A change removes a call to a library function: the tree defines no such symbol, so there is nothing to call unused.
+requires: [oxplow-rust]
+# (The symbols step takes a placeholder snapshot; the one with the text comes after it.)
+given:
+  - { files: { "src/lib.rs": "pub fn run() -> usize {\n    String::from(\"a\").len()\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/lib.rs": "pub fn run() -> usize {\n    1\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Change }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Change } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  - observe: { symbols: { path: src/lib.rs, items: [{"name": "run", "kind": "function", "line": 1}] } }
+  - observe: { snapshot: { files: [{ path: src/lib.rs, body: "pub fn run() -> usize {\n    1\n}\n" }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+when: { sql: "SELECT change_id, signal, severity, path, line, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_unused'" }
+expect: { rows: [] }

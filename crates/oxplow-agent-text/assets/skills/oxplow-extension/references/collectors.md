@@ -147,3 +147,50 @@ Rules:
   `"deleted": {"<name>": [key, …]}` for removed ones.
 - **Unmentioned entities.** One the run doesn't return is left as it was.
 - **Default.** `sync: replace` makes each run restate everything.
+
+## A review check
+
+A **review check** is an entity collector that runs when a change's analysis
+is stored and adds rows to the change review's list. It is how a check too
+costly or too textual for plain SQL over the stored analysis (a search of the
+tree, a parse) joins the review.
+
+```yaml
+collectors:
+  - id: acme.review.todo-left
+    doc: "TODO markers a change added."
+    runtime: starlark
+    entry: collectors/review/todo_left.star
+    on: [change.analyzed]
+    where: { phase: files }          # the analysis, not its duplicate scan
+    needs: [tree.read, sql.read]
+    input: "SELECT :stream_id AS stream_id"
+    sync: upsert
+    entities:
+      - name: review_todo
+        key: id
+        columns: { id: text, change_id: int, path: text, line: int, signal: text, title: text, why: text, uri: text }
+datasets:
+  - name: review_signal_todo
+    adds_to: oxplow/review_signal    # the open list; fields by name, untyped in the list
+```
+
+- The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)`
+  gives the hunks with their added and removed lines, `grep_tree(pattern)` the
+  tree, `scope("sql.read", …)` the semantic layer (`v_symbol` of the stream in
+  `input["rows"][0]["stream_id"]`).
+- Key the rows by change, so one rerun replaces the change's rows: read its
+  earlier keys with `scope("sql.read", { "sql": "SELECT id FROM v_<ns>_<entity>
+  WHERE change_id = :c", "params": … })` and return the ones it no longer
+  produces in `"deleted": { "<entity>": [key, …] }`.
+- The dataset (`datasets/<name>.sql`) selects the open list's fields from
+  `ref('<entity>')`: `change_id, source, area, signal, severity, path, line,
+  end_line, title, why, uri` (one you lack is NULL). `severity` is `high`,
+  `medium` or `info`.
+- A check runs after the analysis, so a Review page reads
+  `v_oxplow_review_check` (per change and check: `pending`, `failed` or `ok`) to
+  say a check is still running.
+- Test it with a fixture: commits with real files (`- { files: { "<path>": "…" } }`,
+  `oxplow.vcs.stage` and `.commit`), `observe: analyze`, `observe: symbols`, a
+  `observe: snapshot` with each file's `body` (the tree the run searches),
+  then `observe: event` `change.analyzed` and a `sql` read of the dataset.

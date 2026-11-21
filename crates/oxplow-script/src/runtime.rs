@@ -311,6 +311,65 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
     }
 
+    /// Search the run's tree for `pattern`: `[{path, line, text}]` (1-indexed
+    /// lines, `text` the line trimmed and cut at 300 characters), in path then
+    /// line order, at most `max` of them (default 200, never more than
+    /// 1000). The pattern is a literal matched as a whole word
+    /// (`foo` finds `foo(` and not `food`) unless `regex = True`, when it is a
+    /// regular expression. `paths` limits it to files matching any of its
+    /// globs. Needs `tree.read`; a bad pattern or glob is an error.
+    fn grep_tree<'v>(
+        pattern: &str,
+        #[starlark(default = starlark::values::none::NoneOr::None)]
+        paths: starlark::values::none::NoneOr<
+            starlark::values::list_or_tuple::UnpackListOrTuple<String>,
+        >,
+        #[starlark(default = 200)] max: i32,
+        #[starlark(default = false)] regex: bool,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let host = Hosts::tree(eval, "grep_tree")?;
+        let re = if regex {
+            regex::Regex::new(pattern)
+        } else {
+            regex::Regex::new(&format!(r"\b{}\b", regex::escape(pattern)))
+        }
+        .map_err(|e| anyhow::anyhow!("bad pattern \"{pattern}\": {e}"))?;
+        let globs = match paths.into_option() {
+            Some(list) => {
+                let mut set = globset::GlobSetBuilder::new();
+                for g in list.items {
+                    set.add(
+                        globset::Glob::new(&g)
+                            .map_err(|e| anyhow::anyhow!("bad glob \"{g}\": {e}"))?,
+                    );
+                }
+                Some(set.build().map_err(|e| anyhow::anyhow!("bad globs: {e}"))?)
+            }
+            None => None,
+        };
+        let max = max.clamp(1, 1000) as usize;
+        let mut files: Vec<(&String, &String)> = host
+            .files
+            .iter()
+            .filter(|(path, _)| globs.as_ref().is_none_or(|g| g.is_match(path.as_str())))
+            .collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        let mut hits = Vec::new();
+        'files: for (path, text) in files {
+            for (i, line) in text.lines().enumerate() {
+                if re.is_match(line) {
+                    let shown: String = line.trim().chars().take(300).collect();
+                    hits.push(serde_json::json!({ "path": path, "line": i + 1, "text": shown }));
+                    if hits.len() >= max {
+                        break 'files;
+                    }
+                }
+            }
+        }
+        Ok(eval.heap().alloc(serde_json::Value::Array(hits)))
+    }
+
     /// The language-agnostic **reader**: every *recognized* source file from the
     /// host, each tagged with its detected language —
     /// `[{path, text, language}]`. Files whose extension isn't a supported

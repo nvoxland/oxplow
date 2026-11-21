@@ -1,0 +1,25 @@
+# A review check is a collector on `change.analyzed`; the Review page shows
+# a check that hasn't run for a change's latest analysis as pending, and one
+# whose run failed as failed. A change that doesn't exist makes
+# `oxplow.review.unused` fail (it can't read its diff); another change it
+# runs for is ok.
+requires: [oxplow-rust]
+given:
+  - { files: { "src/lib.rs": "pub fn run() -> u32 {\n    1\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/lib.rs": "pub fn run() -> u32 {\n    2\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Change }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Change } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  - observe: { symbols: { path: src/lib.rs, items: [{ name: run, kind: function, line: 1 }] } }
+  - observe: { snapshot: { files: [{ path: src/lib.rs, body: "pub fn run() -> u32 {\n    2\n}\n" }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+when: { sql: "SELECT change_id, collector, state FROM v_oxplow_review_check ORDER BY change_id" }
+expect: { rows: [{ change_id: 1, collector: oxplow/oxplow.review.unused, state: ok }] }
+steps:
+  - given:
+      - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 99, kind: commit, target: nope, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+    when: { sql: "SELECT change_id, state, substr(error, 1, 60) AS error FROM v_oxplow_review_check WHERE state = 'failed'" }
+    expect: { rows: [{ change_id: 99, state: failed }] }
