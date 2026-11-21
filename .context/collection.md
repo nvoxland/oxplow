@@ -86,7 +86,9 @@ section for the column.
   bundled parser needs no permission (the loader doesn't look for an
   `oxplow:` entry file). An own extension's `exec` program needs
   `process.run` (the loader refuses it otherwise) and runs from
-  the extension's deployment; its own jaq/starlark parser needs nothing.
+  the extension's deployment; its own jaq/starlark parser needs `files.read`
+  (it reads a project file and can keep its text, so the approval says so,
+  whichever extension declares it).
   Every collector is readable as `v_collector` (trigger, `enabled`, `state`
   `disabled`/`failing`/`never_run`/`ok`, last run and its error; a plain view over
   `contribution`, `collector_run` and `contribution_health`).

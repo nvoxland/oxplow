@@ -2878,6 +2878,14 @@ fn needed_permissions(
         // Its declared needs and what its kind implies: a Starlark fact
         // collector reads the project's code (`tree.read`).
         let mut needed = needs_permissions(&c.service_needs());
+        // A report collector that parses with its own script reads a project
+        // file and can keep its text: it reads files. A parser oxplow ships
+        // only turns the file into report rows.
+        if c.records.is_some() && c.bundled_parser().is_none() {
+            needed.files = needed
+                .files
+                .max(Some(oxplow_domain::permissions::FilesAccess::Read));
+        }
         if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec
             && c.bundled_parser().is_none()
         {
@@ -6149,6 +6157,32 @@ columns: [{ key: title }]
         let errors = permission_errors(dir.path(), &collector("    needs: [sql.read]\n"));
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("`sql.read`"), "{errors:?}");
+    }
+
+    /// A report collector that parses with its own script reads a project
+    /// file and can keep its text, so it is `files: read` (the approval says
+    /// so); one that uses a parser oxplow ships turns the file into report
+    /// rows only, and is baseline.
+    #[test]
+    fn a_report_collector_with_its_own_parser_is_files_read() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "parse.star",
+            "def transform(x):\n    return {\"findings\": []}\n",
+        );
+        let collector = |entry: &str, permissions: &str| {
+            format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{permissions}collectors:\n  - id: lint\n    records: analysis\n    on: {{ run: analysis }}\n{entry}\n")
+        };
+        let bundled = "    report: { path: out/lint.json }\n    entry: oxplow:clippy";
+        let own = "    report: { path: out/lint.json, format: json }\n    entry: parse.star\n    runtime: starlark";
+        let errors = permission_errors(dir.path(), &collector(bundled, ""));
+        assert!(errors.is_empty(), "{errors:?}");
+        let errors = permission_errors(dir.path(), &collector(own, ""));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("files"), "{errors:?}");
+        let errors = permission_errors(dir.path(), &collector(own, "permissions: [files.read]\n"));
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     const EXT: &str =
