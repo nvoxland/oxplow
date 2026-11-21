@@ -30,7 +30,6 @@ use oxplow_domain::capability::FILESYSTEM;
 use oxplow_domain::filesystem::{
     ByteRange, FileSystem, FileSystemRegistry, FsCx, FsEntry, FsError, FsKind, FsStat, WRITABLE,
 };
-use oxplow_domain::language_id::language_id_for_path;
 use oxplow_domain::{CommandError, InputValidator};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -45,15 +44,21 @@ pub struct FileSystemsHost {
     /// The filesystem id each published instance holds, by instance id:
     /// what [`CapabilityHost::retire`] takes out.
     published: Arc<parking_lot::Mutex<BTreeMap<String, String>>>,
+    /// Says what the editor draws a file as (`stat.language`).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 impl FileSystemsHost {
     pub const CAPABILITY: &'static str = "filesystem";
 
-    pub fn new(registry: Arc<FileSystemRegistry>) -> Self {
+    pub fn new(
+        registry: Arc<FileSystemRegistry>,
+        languages: crate::extension::language_set::LanguagesHandle,
+    ) -> Self {
         Self {
             registry,
             published: Arc::default(),
+            languages,
         }
     }
 }
@@ -109,6 +114,7 @@ impl CapabilityHost for FileSystemsHost {
             instance: instance.clone(),
             features: if writable { &[WRITABLE] } else { &[] },
             verbs,
+            languages: self.languages.clone(),
         });
         let registry = self.registry.clone();
         let published = self.published.clone();
@@ -132,6 +138,8 @@ pub struct ExternalFileSystem {
     features: &'static [&'static str],
     /// Each declared contract verb's compiled input schema.
     verbs: BTreeMap<&'static str, InputValidator>,
+    /// Says what the editor draws a file as (`stat.language`).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 #[derive(Debug, Deserialize)]
@@ -277,9 +285,7 @@ impl FileSystem for ExternalFileSystem {
                 size: e.size.filter(|_| file),
                 modified_at: e.modified_at,
                 is_text: e.is_text.filter(|_| file),
-                language: language_id_for_path(path)
-                    .map(str::to_string)
-                    .filter(|_| file),
+                language: self.languages.editor_language(path).filter(|_| file),
             }
         }))
     }

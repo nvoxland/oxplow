@@ -20,7 +20,6 @@ use oxplow_config::OxplowConfig;
 use oxplow_domain::filesystem::{
     ByteRange, FileSystem, FsCx, FsEntry, FsError, FsKind, FsStat, LOCAL, WRITABLE,
 };
-use oxplow_domain::language_id::language_id_for_path;
 use oxplow_domain::vcs::Revision;
 
 use crate::trees::{relative, Trees};
@@ -35,6 +34,8 @@ pub struct LocalFs {
     router: Arc<WorktreeRouter>,
     files: Arc<WorkspaceFiles>,
     config: Arc<RwLock<OxplowConfig>>,
+    /// Says what the editor draws a file as (`stat.language`).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 impl LocalFs {
@@ -43,12 +44,14 @@ impl LocalFs {
         router: Arc<WorktreeRouter>,
         files: Arc<WorkspaceFiles>,
         config: Arc<RwLock<OxplowConfig>>,
+        languages: crate::extension::language_set::LanguagesHandle,
     ) -> Self {
         Self {
             trees,
             router,
             files,
             config,
+            languages,
         }
     }
 
@@ -99,13 +102,19 @@ fn is_text(head: &[u8]) -> bool {
     !head[..head.len().min(SNIFF)].contains(&0)
 }
 
-fn file_stat(path: &str, size: u64, modified_at: Option<i64>, head: &[u8]) -> FsStat {
+fn file_stat(
+    languages: &crate::extension::language_set::LanguagesHandle,
+    path: &str,
+    size: u64,
+    modified_at: Option<i64>,
+    head: &[u8],
+) -> FsStat {
     FsStat {
         kind: FsKind::File,
         size: Some(size),
         modified_at,
         is_text: Some(is_text(head)),
-        language: language_id_for_path(path).map(str::to_string),
+        language: languages.editor_language(path),
     }
 }
 
@@ -120,7 +129,11 @@ fn dir_stat(modified_at: Option<i64>) -> FsStat {
 }
 
 /// `path` on disk under `root`: its stat, or `None` when it isn't there.
-pub(super) fn stat_on_disk(root: &Path, path: &str) -> std::io::Result<Option<FsStat>> {
+pub(super) fn stat_on_disk(
+    languages: &crate::extension::language_set::LanguagesHandle,
+    root: &Path,
+    path: &str,
+) -> std::io::Result<Option<FsStat>> {
     let abs = root.join(path);
     let meta = match std::fs::metadata(&abs) {
         Ok(meta) => meta,
@@ -139,7 +152,13 @@ pub(super) fn stat_on_disk(root: &Path, path: &str) -> std::io::Result<Option<Fs
     std::fs::File::open(&abs)?
         .take(SNIFF as u64)
         .read_to_end(&mut head)?;
-    Ok(Some(file_stat(path, meta.len(), modified, &head)))
+    Ok(Some(file_stat(
+        languages,
+        path,
+        meta.len(),
+        modified,
+        &head,
+    )))
 }
 
 /// `range` of the file at `root`/`path`, without reading the rest.
@@ -180,12 +199,19 @@ impl FileSystem for LocalFs {
         let root = self.root(cx).await;
         if rev == Revision::Working {
             let path = path.to_string();
-            return blocking(move || stat_on_disk(&root, &path))
+            let languages = self.languages.clone();
+            return blocking(move || stat_on_disk(&languages, &root, &path))
                 .await?
                 .map_err(|e| FsError::Storage(e.to_string()));
         }
         if let Some(bytes) = self.trees.read_at(&root, &rev, path).await? {
-            return Ok(Some(file_stat(path, bytes.len() as u64, None, &bytes)));
+            return Ok(Some(file_stat(
+                &self.languages,
+                path,
+                bytes.len() as u64,
+                None,
+                &bytes,
+            )));
         }
         // Not a file there: a folder when files lie under it.
         let under = format!("{path}/");

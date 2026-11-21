@@ -900,6 +900,8 @@ impl ExtensionActivation {
             }
         };
         retired.finish().await;
+        // The file kinds this publication wrote: what a corpus leaves out.
+        crate::extension::language_set::refresh_excluded(&svc).await;
         if offer_stale.load(std::sync::atomic::Ordering::SeqCst) {
             self.request();
         }

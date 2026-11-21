@@ -49,6 +49,9 @@ skills:
   - { name: setup-c-reports, file: skills/setup-c-reports/SKILL.md }
 languages:
   - id: c
+    editor: { monaco: c }
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, switch, return, sizeof, catch, assert, do, else, defined]
     title: "C"
     extensions: [c, h]
     grammar: { native: c }
@@ -62,6 +65,9 @@ languages:
       branch: ["    if (x == {n}) { return {n}; }"]
       tail: ["    return 0;", "}"]
   - id: cpp
+    editor: { monaco: cpp }
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, switch, return, sizeof, catch, assert, do, else, defined, static_cast, dynamic_cast, reinterpret_cast, const_cast, typeid, decltype]
     title: "C++"
     extensions: [cc, cxx, cpp, hpp, hxx]
     aliases: ["c++", "cxx", "cc"]

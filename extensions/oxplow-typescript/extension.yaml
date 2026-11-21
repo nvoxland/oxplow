@@ -75,6 +75,9 @@ intent:
       expect: require calls and imports
 languages:
   - id: typescript
+    editor: { monaco: typescript }
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, switch, catch, return, function, new, await, typeof, yield, super, void, delete, throw, require]
     title: "TypeScript"
     extensions: [ts]
     aliases: ["ts"]
@@ -89,6 +92,9 @@ languages:
       branch: ["    if (x === {n}) { return {n}; }"]
       tail: ["    return 0;", "}"]
   - id: tsx
+    editor: { monaco: typescript }
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, switch, catch, return, function, new, await, typeof, yield, super, void, delete, throw, require]
     title: "TSX"
     extensions: [tsx]
     lsp_ids: [typescriptreact]
@@ -98,6 +104,9 @@ languages:
     lsp: { package: typescript-language-server }
     units: [class, module]
   - id: javascript
+    editor: { monaco: javascript }
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, switch, catch, return, function, new, await, typeof, yield, super, void, delete, throw, require]
     title: "JavaScript"
     extensions: [js, mjs, cjs, jsx]
     aliases: ["js", "jsx"]

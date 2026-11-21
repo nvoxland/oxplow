@@ -14,4 +14,4 @@ intent:
       input: { sql: v_language }
       expect: the Mason package of the language server
 languages:
-  - { id: bash, title: Bash, extensions: [sh, bash], aliases: [shell], lsp: { package: bash-language-server } }
+  - { id: bash, title: Bash, extensions: [sh, bash], aliases: [shell], lsp: { package: bash-language-server }, comments: { line: ["#"] }, editor: { monaco: shell } }

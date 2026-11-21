@@ -43,6 +43,9 @@ skills:
   - { name: setup-python-reports, file: skills/setup-python-reports/SKILL.md }
 languages:
   - id: python
+    editor: { monaco: python }
+    comments: { line: ["#"] }
+    keywords: [if, for, while, return, except, lambda, def, elif, with, assert, yield, await, print, len, range, str, int, float, bool, list, dict, set, tuple, not, isinstance]
     title: "Python"
     extensions: [py]
     aliases: ["py"]

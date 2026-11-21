@@ -14,4 +14,4 @@ intent:
       input: { sql: v_language }
       expect: the Mason package of the language server
 languages:
-  - { id: json, title: JSON, extensions: [json, jsonc], lsp: { package: json-lsp } }
+  - { id: json, title: JSON, extensions: [json, jsonc], lsp: { package: json-lsp }, editor: { monaco: json } }

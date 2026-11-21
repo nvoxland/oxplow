@@ -381,6 +381,88 @@ pub struct LanguageDecl {
     /// How the metric scaffold writes a sample function (none: no starter).
     #[serde(default)]
     pub starter: Option<StarterDecl>,
+    /// How a comment is written, so counting a file's assertions skips what
+    /// is commented out. Here, not in `analysis.yaml`, because a language
+    /// known only by its server (Lua, Ruby, Bash) has no analysis file and
+    /// has comments all the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<CommentsDecl>,
+    /// Words that look like a call (`name(`) and aren't: control keywords and
+    /// the built-ins nobody defines (`if`, `match`, `Some`, `print`). A check
+    /// that reads calls out of text (`oxplow.review.unused`) skips them for
+    /// this language's files; scripts read them with `language_keywords`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+    /// How the editor draws its files. A declared `editor.monaco` always wins
+    /// over core's highlighting fallback for undeclared extensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<EditorDecl>,
+}
+
+/// `editor: { monaco: elixir }`: what the editor knows the language as.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditorDecl {
+    /// Its Monaco language id (`typescript`, `shell`, `plaintext`): what
+    /// highlights its files and what a language server is asked for.
+    pub monaco: String,
+}
+
+/// A language's comment syntax: `comments: { line: ["//"], block: [["/*", "*/"]] }`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentsDecl {
+    /// Markers that start a comment running to the end of the line.
+    #[serde(default)]
+    pub line: Vec<String>,
+    /// `[open, close]` pairs of comments that may span lines.
+    #[serde(default)]
+    pub block: Vec<[String; 2]>,
+}
+
+impl CommentsDecl {
+    /// `text` without its comments (each block comment leaves its newlines,
+    /// so the lines still count the same). Strings aren't read: a marker
+    /// inside one starts a comment, as it did before comments were declared.
+    pub fn strip(&self, text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while !rest.is_empty() {
+            let line = self
+                .line
+                .iter()
+                .filter(|m| !m.is_empty())
+                .filter_map(|m| rest.find(m.as_str()))
+                .min();
+            let block = self
+                .block
+                .iter()
+                .filter(|[open, close]| !open.is_empty() && !close.is_empty())
+                .filter_map(|pair| rest.find(pair[0].as_str()).map(|i| (i, pair)))
+                .min_by_key(|(i, _)| *i);
+            match (line, block) {
+                (Some(l), b) if b.is_none_or(|(i, _)| l < i) => {
+                    out.push_str(&rest[..l]);
+                    rest = rest[l..].find('\n').map_or("", |n| &rest[l + n..]);
+                }
+                (_, Some((i, [open, close]))) => {
+                    out.push_str(&rest[..i]);
+                    let body = &rest[i + open.len()..];
+                    let (skipped, after) = match body.find(close.as_str()) {
+                        Some(c) => (&body[..c], &body[c + close.len()..]),
+                        None => (body, ""),
+                    };
+                    out.extend(skipped.chars().filter(|c| *c == '\n'));
+                    rest = after;
+                }
+                _ => {
+                    out.push_str(rest);
+                    break;
+                }
+            }
+        }
+        out
+    }
 }
 
 /// A language's declaration with its files' texts: what an extension's
@@ -838,13 +920,45 @@ impl Language {
     }
 }
 
+/// Path globs a corpus leaves out, compiled.
+#[derive(Debug)]
+struct ExcludedPaths {
+    globs: Vec<String>,
+    set: globset::GlobSet,
+}
+
+impl ExcludedPaths {
+    /// A glob that doesn't parse is left out (the file-kind rule that holds
+    /// it is the one a person sees as wrong); none at all is `None`.
+    fn new(globs: Vec<String>) -> Option<Self> {
+        let mut set = globset::GlobSetBuilder::new();
+        let mut kept = Vec::new();
+        for g in globs {
+            if let Ok(glob) = globset::GlobBuilder::new(&g)
+                .literal_separator(true)
+                .build()
+            {
+                set.add(glob);
+                kept.push(g);
+            }
+        }
+        (!kept.is_empty())
+            .then(|| set.build().ok().map(|set| Self { globs: kept, set }))
+            .flatten()
+    }
+}
+
 /// The languages the enabled extensions declare.
 #[derive(Clone, Default)]
 pub struct Languages {
     all: Vec<Language>,
     /// What it was built from (the languages that joined), to ship to a
     /// script worker, which builds its own.
-    sources: Vec<LanguageSource>,
+    sources: Arc<Vec<LanguageSource>>,
+    /// The files a corpus leaves out, by path (the project's enabled
+    /// `generated` and `vendored` file kinds): set by the host, shipped to a
+    /// script worker with the set.
+    excluded: Option<Arc<ExcludedPaths>>,
     by_extension: HashMap<String, usize>,
     by_name: HashMap<String, usize>,
     by_lsp_id: HashMap<String, usize>,
@@ -943,7 +1057,7 @@ impl Languages {
                 out.by_lsp_id.insert(e, i);
             }
             out.all.push(lang);
-            out.sources.push(source.clone());
+            Arc::make_mut(&mut out.sources).push(source.clone());
         }
         (out, problems)
     }
@@ -963,6 +1077,27 @@ impl Languages {
     /// set.
     pub fn sources(&self) -> &[LanguageSource] {
         &self.sources
+    }
+
+    /// This set, leaving out the files `globs` match from a corpus
+    /// ([`Languages::is_excluded`]): the enabled `generated` and `vendored`
+    /// file kinds' globs, in `glob_match`'s dialect.
+    pub fn with_excluded(&self, globs: Vec<String>) -> Self {
+        let mut out = self.clone();
+        out.excluded = ExcludedPaths::new(globs).map(Arc::new);
+        out
+    }
+
+    /// The globs [`with_excluded`](Self::with_excluded) was given.
+    pub fn excluded_globs(&self) -> &[String] {
+        self.excluded.as_ref().map_or(&[], |e| &e.globs)
+    }
+
+    /// Whether `path` is one of the files a corpus leaves out.
+    pub fn is_excluded(&self, path: &str) -> bool {
+        self.excluded
+            .as_ref()
+            .is_some_and(|e| e.set.is_match(path.replace('\\', "/")))
     }
 
     /// Every language, in the order the set was built.
@@ -995,6 +1130,14 @@ impl Languages {
         self.by_extension
             .get(&ext.to_ascii_lowercase())
             .map(|i| &self.all[*i])
+    }
+
+    /// The editor's (Monaco's) id for a file, from the language that declares
+    /// its extension (`editor: { monaco }`), when it gives one.
+    pub fn editor_id_for_path(&self, path: &str) -> Option<&str> {
+        self.declared_for_path(path)
+            .and_then(|l| l.decl().editor.as_ref())
+            .map(|e| e.monaco.as_str())
     }
 
     /// The language oxplow parses a file as: [`declared_for_path`](Self::declared_for_path)

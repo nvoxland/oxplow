@@ -703,6 +703,8 @@ pub struct LanguageDeclRow {
     pub lsp_ids: Vec<String>,
     pub lsp_package: Option<String>,
     pub facets: serde_json::Value,
+    /// Its Monaco language id, when it declares one.
+    pub monaco: Option<String>,
 }
 
 /// Restate every loaded language (`language_decl`).
@@ -716,8 +718,8 @@ pub fn replace_language_decls_tx(
         conn.execute(
             "INSERT OR IGNORE INTO language_decl
                (id, title, extension, enabled, analyzable, extensions, aliases, lsp_ids,
-                lsp_package, facets)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                lsp_package, facets, monaco)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 r.id,
                 r.title,
@@ -729,6 +731,7 @@ pub fn replace_language_decls_tx(
                 serde_json::to_string(&r.lsp_ids).unwrap_or_else(|_| "[]".into()),
                 r.lsp_package,
                 r.facets.to_string(),
+                r.monaco,
             ],
         )
         .map_err(map_sql_err)?;

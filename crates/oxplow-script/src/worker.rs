@@ -83,6 +83,9 @@ pub enum ToWorker {
     /// worker builds its own set from them.
     Languages {
         sources: Vec<oxplow_code_metrics::LanguageSource>,
+        /// The globs of the files a corpus leaves out.
+        #[serde(default)]
+        excluded: Vec<String>,
     },
     Run {
         #[serde(flatten)]
@@ -427,8 +430,10 @@ pub fn main() -> ! {
         match msg {
             ToWorker::Tree { files } => tree = Some(crate::runtime::TreeHost::new(files)),
             // The host built the same set, so nothing here is refused.
-            ToWorker::Languages { sources } => {
-                languages = oxplow_code_metrics::Languages::build(&sources).0
+            ToWorker::Languages { sources, excluded } => {
+                languages = oxplow_code_metrics::Languages::build(&sources)
+                    .0
+                    .with_excluded(excluded)
             }
             ToWorker::Run {
                 engine,

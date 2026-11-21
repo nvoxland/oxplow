@@ -179,7 +179,10 @@ pub async fn restate_file_kinds(svc: &crate::Services) -> Result<(), DomainError
             .collect();
     svc.db
         .transaction(move |tx| oxplow_db::model_store::replace_file_kind_rules_tx(tx, true, &rows))
-        .await
+        .await?;
+    // A project rule for `generated` or `vendored` changes what a corpus leaves out.
+    crate::extension::language_set::refresh_excluded(svc).await;
+    Ok(())
 }
 
 /// `generated` changed: the snapshot captures take the new filter, so an
@@ -307,6 +310,16 @@ mod tests {
             rules("extension = 'project-settings'").await,
             json!([["generated", "gen/**", null, "project-settings"]])
         );
+        // The corpus leaves out what the file kinds say is generated or
+        // vendored: the foundation's rules and the project's own.
+        let languages = svc.languages.current();
+        assert!(languages.is_excluded("gen/out.rs"), "the project's rule");
+        assert!(
+            languages.is_excluded("src/generated/a.rs"),
+            "the foundation's"
+        );
+        assert!(languages.is_excluded("vendor/lib/a.go"));
+        assert!(!languages.is_excluded("src/main.rs"));
 
         svc.commands
             .run(

@@ -1,14 +1,43 @@
-/** Maps a file path's extension to a Monaco language id. The set of
- *  ids matches Monaco's bundled basic-languages registrations — adding
- *  an entry here is enough to light up syntax highlighting for that
- *  extension. Falls back to `plaintext` for anything unrecognized. */
+/** The Monaco language id of a file path. A language an enabled pack
+ *  declares (`editor: { monaco }`, `v_language.monaco`) always wins; the
+ *  table below is only the highlighting fallback for extensions no pack
+ *  declares (its ids match Monaco's bundled basic-languages
+ *  registrations). `plaintext` for anything unrecognized. */
 export function languageForPath(path: string | null): string {
   if (!path) return "plaintext";
   const lower = path.toLowerCase();
+  for (const [suffix, id] of declared) {
+    if (lower.endsWith(suffix)) return id;
+  }
   for (const [suffix, id] of EXTENSION_MAP) {
     if (lower.endsWith(suffix)) return id;
   }
   return "plaintext";
+}
+
+/** Extension suffix (`.ex`) → Monaco id, from the languages the enabled
+ *  extensions declare; loaded by `editorLanguages.ts`. */
+let declared: ReadonlyArray<readonly [string, string]> = [];
+const declaredListeners = new Set<() => void>();
+
+/** What the declared languages are now: `rows` are `v_language`'s file
+ *  extensions (no dot) and its Monaco id. */
+export function setDeclaredEditorLanguages(rows: ReadonlyArray<{ extensions: string[]; monaco: string }>): void {
+  const next: Array<readonly [string, string]> = [];
+  for (const row of rows) {
+    for (const ext of row.extensions) next.push([`.${ext.toLowerCase()}`, row.monaco] as const);
+  }
+  const same =
+    next.length === declared.length && next.every(([s, id], i) => declared[i]![0] === s && declared[i]![1] === id);
+  if (same) return;
+  declared = next;
+  for (const l of declaredListeners) l();
+}
+
+/** Called when the declared languages change (a pack turned on or off). */
+export function onDeclaredEditorLanguagesChanged(listener: () => void): () => void {
+  declaredListeners.add(listener);
+  return () => declaredListeners.delete(listener);
 }
 
 const EXTENSION_MAP: ReadonlyArray<readonly [string, string]> = [
@@ -89,7 +118,7 @@ const EXTENSION_MAP: ReadonlyArray<readonly [string, string]> = [
 /// providers register once for each of these and no-op per call via
 /// `hasLspServer` — see `editor-lsp-providers.ts`.
 export function allKnownLanguageIds(): string[] {
-  return [...new Set(EXTENSION_MAP.map(([, id]) => id))];
+  return [...new Set([...declared, ...EXTENSION_MAP].map(([, id]) => id))];
 }
 
 /// Whether a language can use LSP features is data-driven now: see

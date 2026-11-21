@@ -53,6 +53,9 @@ languages:
     symbols: languages/rust/symbols.scm   # + symbols.yaml beside it
     lsp: { package: rust-analyzer }       # the Mason package to suggest
     units: [class, module]                # code units beyond functions
+    comments: { line: ["//"], block: [["/*", "*/"]] }   # what counting assertions skips (a path in no language: none stripped)
+    keywords: [if, for, match, Some]      # words that look like a call (`name(`) and aren't: `language_keywords(lang)`
+    editor: { monaco: rust }              # the editor's (Monaco's) id for its files: v_language.monaco
     starter:                              # how the metric scaffold writes a sample function
       function: "fn {name}(x: i32) -> i32 {"
       branch: ["    if x == {n} { return {n}; }"]
@@ -333,7 +336,7 @@ per-language view is page or agent work.
 `v_language` (`language_decl`, V56) lists every language every *loaded*
 extension declares, on or off: `id`, `title`, `extension`, `enabled` (the
 declaring extension is on), `analyzable` (it has a grammar), `extensions`,
-`aliases`, `lsp_ids` (JSON arrays), `lsp_package` and `facets` (JSON:
+`aliases`, `lsp_ids` (JSON arrays), `lsp_package`, `monaco` and `facets` (JSON:
 `imports`, `merge`, `duplication`, `starter`, each 0 or 1, read from its
 `analysis.yaml`). It is restated whole with each published generation
 (`extension_generation.rs`, from the catalog snapshot, which holds the
@@ -391,6 +394,17 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 4. **`symbols.scm`** (and `symbols.yaml`): the captures in "Symbols" above.
 5. **Its test conventions**: `test_conventions:` (a test-file name, the
    assertion and skip forms), with a fixture in the pack.
+5b. **Say how the editor and the checks read its files**: `editor: { monaco }`
+   (every pack declares it, even where the fallback would agree, so a pack is
+   complete on its own), `comments:` and `keywords:` (they sit on the
+   declaration, not in `analysis.yaml`, because a language known only by its
+   server has comments and keywords too). Core knows none of them: the
+   assertion counter strips the path's language's comments, `unused.star`
+   skips its keywords, the editor reads its Monaco id. The one table core
+   keeps is `oxplow_domain::language_id` — the editor's highlighting for
+   extensions *no enabled pack declares* (Monaco's own ids: kotlin, sql, …);
+   a declared `editor.monaco` always wins, and no oxplow analysis language
+   relies on it. A third party needs no core edit.
 6. **Optional**: `starter:` (the metric scaffold's sample), `lsp:`, the merge
    and import facets, its idiom metrics (fact collectors), and the Monaco id /
    icon in `apps/desktop/src/editor-language.ts`.

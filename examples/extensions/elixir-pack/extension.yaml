@@ -32,6 +32,8 @@ test_conventions:
 languages:
   - id: elixir
     title: Elixir
+    editor: { monaco: elixir }
+    comments: { line: ["#"] }
     extensions: [ex, exs]
     aliases: ["ex", "exs"]
     grammar:
