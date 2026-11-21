@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { VIZ_ICON_NAMES, VIZ_TONES, cellIcon, vizIcon, toneColor } from "./vizIcons.js";
-import { DEFAULT_PAGE_ICON, pageKindIconComponent } from "../pageKinds.js";
+import { MISSING_PAGE_ICON, pageKindIconComponent } from "../pageKinds.js";
 import { ICONS } from "../icons.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 
@@ -63,13 +63,13 @@ test("a page kind draws its page's icon", () => {
 });
 
 // A cell that opens a page always has an icon: a kind the vocabulary
-// doesn't know (a page no extension declares any more) draws the generic
-// page icon, so a list of pages (Go To) lines up. Any other column keeps
+// doesn't know (a page no extension declares any more) draws the
+// missing-page icon, so a list of pages (Go To) lines up. Any other column keeps
 // "an unknown name draws nothing".
-test("a cell that opens a page draws the page icon when its kind is unknown", () => {
+test("a cell that opens a page draws the missing-page icon when its kind is unknown", () => {
   const page = { kind: "page" } as const;
   const spec = cellIcon("assistant-settings", page);
-  expect(spec && "Icon" in spec ? spec.Icon : null).toBe(DEFAULT_PAGE_ICON);
+  expect(spec && "Icon" in spec ? spec.Icon : null).toBe(MISSING_PAGE_ICON);
   expect(cellIcon(null, page)).not.toBeNull();
   expect(cellIcon("task", page)).toEqual(vizIcon("task"));
   expect(cellIcon("ready", null)).toBeNull();
