@@ -934,22 +934,48 @@ const LANGUAGE_NAMERS: &[(&str, &str)] = &[
     ("crates/oxplow-domain/src/language_id.rs", "the editor's Monaco ids by file extension, not analysis languages"),
 ];
 
-/// The production files that name an analysis language by its id, as a
+/// Every language id the checkout's extensions declare (each `languages:`
+/// entry's `id`), quoted as Rust spells a string, less the ones that are
+/// also something else in core. Aliases (`shell`, `js`) and ids of two
+/// letters or fewer (`go`, `c`) are ordinary strings too often to tell.
+fn declared_language_names() -> BTreeSet<String> {
+    // Also the scripting runtime's name, or a data format core reads and
+    // writes, not the language.
+    const ALSO_SOMETHING_ELSE: &[&str] = &["starlark", "json", "yaml", "html", "css"];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
+    let mut out = BTreeSet::new();
+    for entry in std::fs::read_dir(&root)
+        .expect("the extensions folder")
+        .flatten()
+    {
+        let Ok(text) = std::fs::read_to_string(entry.path().join("extension.yaml")) else {
+            continue;
+        };
+        let doc: serde_yaml::Value = serde_yaml::from_str(&text).expect("a manifest");
+        for lang in doc
+            .get("languages")
+            .and_then(|l| l.as_sequence())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = lang.get("id").and_then(|v| v.as_str()) {
+                if id.len() > 2 && !ALSO_SOMETHING_ELSE.contains(&id) {
+                    out.insert(format!("\"{id}\""));
+                }
+            }
+        }
+    }
+    assert!(
+        out.contains("\"rust\""),
+        "the packs' languages were read: {out:?}"
+    );
+    out
+}
+
+/// The production files that name a declared language by its id, as a
 /// quoted string.
 fn language_namers() -> BTreeSet<String> {
-    const IDS: &[&str] = &[
-        "\"rust\"",
-        "\"typescript\"",
-        "\"tsx\"",
-        "\"javascript\"",
-        "\"python\"",
-        "\"golang\"",
-        "\"java\"",
-        "\"cpp\"",
-        "\"csharp\"",
-        "\"clojure\"",
-        // Not "starlark": it is also the scripting runtime's name.
-    ];
+    let names = declared_language_names();
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {
         if path.ends_with("/for_tests.rs") {
@@ -958,7 +984,7 @@ fn language_namers() -> BTreeSet<String> {
         let named = text
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))
-            .any(|line| IDS.iter().any(|id| line.contains(id)));
+            .any(|line| names.iter().any(|id| line.contains(id.as_str())));
         if named {
             out.insert(path);
         }
