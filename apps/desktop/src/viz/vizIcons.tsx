@@ -8,7 +8,7 @@
 import { Layers, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactElement } from "react";
 
-import { DEFAULT_PAGE_ICON, pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
+import { MISSING_PAGE_ICON, pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 import { ICONS } from "../icons.js";
 
@@ -95,11 +95,11 @@ export function vizIcon(name: unknown, extensions: Extension[] | null = null): V
 
 /** The icon a cell draws: its icon column's (`vizIcon`), or, when the
  *  cell opens a page and that names none (a page no extension declares
- *  any more), the generic page's, so a list of pages lines up. */
+ *  any more), the missing page's, so a list of pages lines up. */
 export function cellIcon(name: unknown, link: { kind: string } | null, extensions: Extension[] | null = null): VizIconSpec | null {
   const spec = vizIcon(name, extensions);
   if (spec || link?.kind !== "page") return spec;
-  return { Icon: DEFAULT_PAGE_ICON, tone: null, label: typeof name === "string" && name !== "" ? name : "Page" };
+  return { Icon: MISSING_PAGE_ICON, tone: null, label: typeof name === "string" && name !== "" ? name : "Page" };
 }
 
 /** A cell's icon. `tone` (the column's) wins over the glyph's own. */

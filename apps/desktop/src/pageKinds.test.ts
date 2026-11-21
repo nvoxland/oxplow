@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import { ICONS } from "./icons.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
-import { DEFAULT_PAGE_ICON, declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindIconOrDefault, pageKindLabel } from "./pageKinds.js";
+import { AppWindow, SquareDashed } from "lucide-react";
+
+import { DEFAULT_PAGE_ICON, MISSING_PAGE_ICON, declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindIconOrDefault, pageKindLabel } from "./pageKinds.js";
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
@@ -35,7 +37,7 @@ describe("pageKindIconComponent", () => {
     }
   });
 
-  test("a page no extension declares draws the page icon", () => {
+  test("a page no extension declares draws the missing-page icon", () => {
     expect(pageKindIconComponent("page")).not.toBeNull();
   });
 
@@ -47,16 +49,29 @@ describe("pageKindIconComponent", () => {
 
 // Where a page kind is drawn (a tab, Quick Open, a backlink, a link), a
 // kind nothing knows — a page an extension no longer declares — draws the
-// generic page icon, so its row lines up with the others.
+// missing-page icon, so its row lines up with the others and still reads
+// as gone; a declared page that names no icon draws the generic page's.
 describe("pageKindIconOrDefault", () => {
+  test("the two defaults are a window and a dashed square", () => {
+    expect(DEFAULT_PAGE_ICON).toBe(AppWindow);
+    expect(MISSING_PAGE_ICON).toBe(SquareDashed);
+  });
+
   test("a known kind draws its own icon", () => {
     expect(pageKindIconOrDefault("task")).toBe(pageKindIconComponent("task")!);
   });
 
-  test("an unknown kind draws the generic page icon", () => {
-    expect(pageKindIconOrDefault("assistant-settings")).toBe(DEFAULT_PAGE_ICON);
-    expect(pageKindIconOrDefault("")).toBe(DEFAULT_PAGE_ICON);
-    expect(pageKindIconComponent("page")).toBe(DEFAULT_PAGE_ICON);
+  test("an unknown kind draws the missing-page icon", () => {
+    expect(pageKindIconOrDefault("assistant-settings")).toBe(MISSING_PAGE_ICON);
+    expect(pageKindIconOrDefault("")).toBe(MISSING_PAGE_ICON);
+    expect(pageKindIconComponent("page")).toBe(MISSING_PAGE_ICON);
+  });
+
+  test("a declared page that names no icon draws the generic page icon", () => {
+    const extensions = [
+      { name: "x", namespace: "oxplow", enabled: true, pageFiles: [{ id: "oxplow/plain", extension: "x", slug: "plain", title: "Plain", icon: null }] },
+    ] as unknown as Extension[];
+    expect(pageKindIconOrDefault("plain", extensions)).toBe(DEFAULT_PAGE_ICON);
   });
 });
 
@@ -116,8 +131,8 @@ describe("a declared page", () => {
     expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(ICONS["git-merge"]!);
   });
 
-  test("a declared page that names no icon draws the page icon, so a list of pages has one for every row", () => {
-    expect(pageKindIconComponent("plain", extensions)).toBe(pageKindIconComponent("page"));
+  test("a declared page that names no icon draws the generic page icon, so a list of pages has one for every row", () => {
+    expect(pageKindIconComponent("plain", extensions)).toBe(DEFAULT_PAGE_ICON);
     expect(pageKindIconComponent("gone", extensions)).toBeNull();
     expect(pageKindIconComponent("off/x", extensions)).toBeNull();
   });

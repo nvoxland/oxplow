@@ -11,11 +11,13 @@
  * lucide-react icon used everywhere a page-kind label renders —
  * tabs, rail history/finished, backlinks list, markdown links. An entity
  * kind's icon is here; a declared page's is the one its `pages:` entry
- * names, so a page added to a manifest needs nothing here. Where a page
- * kind is drawn, a kind nothing knows draws `DEFAULT_PAGE_ICON`
- * (`pageKindIconOrDefault`), so every row of pages lines up.
+ * names, so a page added to a manifest needs nothing here; one that names
+ * none draws `DEFAULT_PAGE_ICON`. Where a page kind is drawn, a kind
+ * nothing knows draws `MISSING_PAGE_ICON` (`pageKindIconOrDefault`), so
+ * every row of pages lines up and a gone page still reads as gone.
  */
 import {
+  AppWindow,
   Bot,
   BookOpen,
   Braces,
@@ -25,10 +27,10 @@ import {
   Gauge,
   GitCommit,
   GitCompare,
-  Glasses,
   LayoutDashboard,
   type LucideIcon,
   MessagesSquare,
+  SquareDashed,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
 import { iconFor } from "./icons.js";
@@ -39,9 +41,13 @@ import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { pageFileOf } from "./pages/pageFiles.js";
 
-/** The generic page's icon: a page no enabled extension declares, a
- *  declared page that names no icon, and any kind nothing knows. */
-export const DEFAULT_PAGE_ICON: LucideIcon = Glasses;
+/** The generic page's icon: a declared page that names no icon. */
+export const DEFAULT_PAGE_ICON: LucideIcon = AppWindow;
+
+/** A missing page's icon: a page no enabled extension declares, and any
+ *  kind nothing knows (a page still in visits and bookmarks after its
+ *  extension dropped it). */
+export const MISSING_PAGE_ICON: LucideIcon = SquareDashed;
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -79,7 +85,7 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
 
     // A page no enabled extension declares (yet).
     case "page":
-      return DEFAULT_PAGE_ICON;
+      return MISSING_PAGE_ICON;
     case "symbol":
       return Braces;
 
@@ -101,10 +107,10 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
 }
 
 /** The icon a page kind draws where one is shown: its own, or the
- *  generic page's when nothing knows the kind (a page an extension no
+ *  missing page's when nothing knows the kind (a page an extension no
  *  longer declares), so it never draws without one. */
 export function pageKindIconOrDefault(kind: string, extensions: Extension[] | null = null): LucideIcon {
-  return pageKindIconComponent(kind, extensions) ?? DEFAULT_PAGE_ICON;
+  return pageKindIconComponent(kind, extensions) ?? MISSING_PAGE_ICON;
 }
 
 /** The page file a page kind names (`tasks`, `gh/open-prs`). */
@@ -134,7 +140,7 @@ export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref
 }
 
 /**
- * Render the icon for `kind` — the generic page's when nothing knows the
+ * Render the icon for `kind` — the missing page's when nothing knows the
  * kind, so a list of pages lines up.
  *
  * `aria-hidden` is set by default because the adjacent text label
