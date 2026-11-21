@@ -1,5 +1,6 @@
 # repo.rust_dyn: each `dyn Trait` in a Rust file counts; a file with none
 # and a file in another language give no fact.
+requires: [oxplow-rust]
 when:
   collector: repo.scan_dyn
   files:

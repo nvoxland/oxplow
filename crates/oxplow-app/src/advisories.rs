@@ -465,7 +465,7 @@ mod tests {
         let mut e =
             crate::extension::extensions::load_extensions(tempfile::tempdir().unwrap().path())
                 .into_iter()
-                .next()
+                .find(|e| e.name == "oxplow-foundation")
                 .unwrap();
         e.name = "x".into();
         e.namespace = "x".into();

@@ -1,0 +1,8 @@
+# A Gemfile is a dependency manifest, its lock a lockfile, and `.rspec` a test harness.
+when:
+  sql: "SELECT glob_match(glob, 'Gemfile') AS gemfile, glob_match(glob, 'app/Gemfile.lock') AS lock, glob_match(glob, 'spec/spec_helper.rb') AS helper, kind FROM v_file_kind_rule WHERE extension = 'oxplow-ruby' AND (glob_match(glob, 'Gemfile') OR glob_match(glob, 'app/Gemfile.lock') OR glob_match(glob, 'spec/spec_helper.rb')) ORDER BY kind"
+expect:
+  rows:
+    - { gemfile: 1, lock: 0, helper: 0, kind: dependency-manifest }
+    - { gemfile: 0, lock: 1, helper: 0, kind: lockfile }
+    - { gemfile: 0, lock: 0, helper: 1, kind: test-harness }

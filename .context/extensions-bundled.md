@@ -36,7 +36,10 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 - **The shipped extensions.** Beside the two above ship oxtask and oxwiki
   (on by default: they are in `DEFAULT_EXTENSIONS`) and the language packs
-  (off by default; `.context/language-support.md`). All are in `BUNDLED` and `build.rs`'s list; one that is off is turned on
+  (off by default; `.context/language-support.md`): `oxplow-rust`,
+  `-typescript`, `-python`, `-go`, `-java`, `-c`, `-csharp`, `-clojure`,
+  `-starlark`, and the server-only `-lua`, `-ruby`, `-bash`, `-zig`, `-json`,
+  `-yaml` and `-web` (HTML, CSS). All are in `BUNDLED` and `build.rs`'s list; one that is off is turned on
   with its `oxplow.extensions.<name>.enabled` scalar. oxtask and oxwiki have
   `requires: [oxplow-bundled]`; a language pack requires nothing. `requires:` is by extension name, so it
   crosses namespaces (`oxtask` and `oxwiki` are not in `oxplow`'s). With

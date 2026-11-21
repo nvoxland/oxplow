@@ -6,9 +6,18 @@ data files. oxplow's own are its **language packs**, shipped extensions that
 are off by default (`extensions/oxplow-rust`, `oxplow-typescript` (TypeScript,
 TSX, JavaScript), `oxplow-python`, `oxplow-go`, `oxplow-java`, `oxplow-c` (C,
 C++), `oxplow-csharp`, `oxplow-clojure`); a project turns on the ones it uses
-(`oxplow.extensions.oxplow-rust.enabled: true`). Foundation declares the
-languages oxplow knows only by their language servers (Lua, JSON, YAML,
-HTML, CSS, Bash, Ruby, Zig): no grammar, so nothing parses them.
+(`oxplow.extensions.oxplow-rust.enabled: true`). Everything about a language
+lives in its pack: **foundation declares no language** (a test holds it). The
+languages oxplow knows only by their language servers have packs too, with no
+grammar, so nothing parses them: `oxplow-lua`, `oxplow-ruby`, `oxplow-bash`
+(Bash, `shell`), `oxplow-zig`, `oxplow-json`, `oxplow-yaml` and `oxplow-web`
+(HTML and CSS). Each declares its files and the Mason package of its server
+(`lsp:`), nothing else; `oxplow-ruby` also holds its `rspec` run pattern, its
+Gemfile, lockfile, RuboCop and RSpec file kinds and its spec-file test
+conventions. A server-only pack is off by default like the rest: its server
+is still suggested while it is off (`v_language` lists off packs), and the
+`language-pack` advisory says "Turn on the Ruby language pack to get its
+language server suggestion".
 
 ## What a pack holds
 
@@ -18,7 +27,7 @@ its idiom metrics and their collectors (`oxplow.rust.*`, `oxplow.ts.*`,
 `oxplow.ast_hit` and dimension `oxplow.rule` are foundation's), its
 `test_conventions:`, its `file_kinds:` (dependency manifests, lockfiles,
 lint and test-harness config), its `run_patterns:` (foundation keeps only
-`rspec` and `phpunit`, which no pack covers), report collectors with a
+`phpunit`, which no pack covers yet), report collectors with a
 bundled parser (Rust's clippy, TypeScript's eslint; each path a setting
 with a default), and a setup skill saying how to make the stack write the
 reports oxplow reads. Its `run_patterns:` and `file_kinds:` entries carry
@@ -120,6 +129,10 @@ languages:
   extension an earlier extension's holds is a `language.conflict` error of
   its extension, naming the earlier, and is taken out of it, so the
   extension is held and listed with why like any cross-extension conflict.
+  The packs are no exception: a pack whose id, alias or file extension
+  another enabled language holds (`oxplow-yaml` and another pack claiming
+  `.yml`, two packs that both want `.h`) is held until the person turns one of
+  them off.
 - **The script worker** gets the set's sources in a `{"languages": …}`
   message before its run and builds its own (`oxplow-script` `ToWorker::Languages`);
   `ast_query`, `code_metrics`, `markers`, `source_files` and

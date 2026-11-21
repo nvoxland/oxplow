@@ -14,7 +14,7 @@ custom_components:
 # project's own `testing:` patterns) and names no tool itself.
 run_patterns:
   # Runners no language pack covers; each pack declares its own stack's.
-  - { kind: test, patterns: [rspec, phpunit] }
+  - { kind: test, patterns: [phpunit] }
 # Kinds of file that belong to no language (the language packs name the rest).
 file_kinds:
   - { kind: ci, label: CI, globs: ['.github/workflows/**', '.gitlab-ci.yml', '.circleci/**', 'azure-pipelines.yml', 'Jenkinsfile'] }
@@ -445,25 +445,20 @@ advisories:
     once_per: row
     audience: person
     query: |
+      -- A pack with a grammar gives symbols, metrics and review signals; one with
+      -- only a language server gives that server's suggestion.
       SELECT l.extension AS key,
              'This project has ' || group_concat(l.title, ', ') || ' files. Turn on the ['
              || group_concat(l.title, ', ') || ' language pack](oxplow:oxplow/extension?name=' || l.extension
-             || ') to get its symbols, metrics and review signals.' AS message
+             || ') to get '
+             || CASE WHEN max(l.analyzable) = 1 THEN 'its symbols, metrics and review signals.'
+                     ELSE 'its language server suggestion.' END AS message
       FROM v_language l
-      WHERE l.enabled = 0 AND l.analyzable = 1
+      WHERE l.enabled = 0
         AND EXISTS (SELECT 1 FROM v_snapshot_file f, json_each(l.extensions) e
                      WHERE f.stream_id = :stream_id AND f.storage <> 'deleted'
                        AND lower(f.path) LIKE '%.' || e.value)
       GROUP BY l.extension
-languages:
-  - { id: lua, title: Lua, extensions: [lua], lsp: { package: lua-language-server } }
-  - { id: json, title: JSON, extensions: [json, jsonc], lsp: { package: json-lsp } }
-  - { id: yaml, title: YAML, extensions: [yaml, yml], lsp: { package: yaml-language-server } }
-  - { id: html, title: HTML, extensions: [html, htm], lsp: { package: html-lsp } }
-  - { id: css, title: CSS, extensions: [css], lsp: { package: css-lsp } }
-  - { id: bash, title: Bash, extensions: [sh, bash], aliases: [shell], lsp: { package: bash-language-server } }
-  - { id: ruby, title: Ruby, extensions: [rb], lsp: { package: ruby-lsp } }
-  - { id: zig, title: Zig, extensions: [zig], lsp: { package: zls } }
 panels:
   # The left nav's Go To, beside the Go To page its header opens: the
   # thread's bookmarks, recent or most visited pages, one kind at a time

@@ -1,0 +1,7 @@
+# Zig's language server is suggested, by the pack that declares it: the
+# language is declared by this pack, with no grammar.
+given: []
+when: { sql: "SELECT id, enabled, analyzable, lsp_package FROM v_language WHERE extension = 'oxplow-zig' ORDER BY id" }
+expect:
+  rows:
+    - { id: zig, enabled: 1, analyzable: 0, lsp_package: zls }

@@ -1,0 +1,13 @@
+# The suggested language servers come from the languages' declarations
+# (`v_language.lsp_package`), packs that are off included: a project with no
+# Ruby pack on is still offered Ruby's server, and Web's (HTML, CSS) is one
+# package for two languages.
+when: { page: oxplow/management, params: { area: lsp } }
+expect:
+  loaders:
+    lsp_suggestions:
+      rows:
+        contains:
+          - { package: ruby-lsp, languages: ruby }
+          - { package: css-lsp, languages: css }
+          - { package: bash-language-server, languages: "bash, shell" }

@@ -1,0 +1,14 @@
+# The Ruby pack's test conventions: `*_spec.rb` is a test file, `expect(` an
+# assertion (foundation's), and `skip "..."` a skip.
+requires: [oxplow-ruby]
+given:
+  - { files: { "README.md": "base\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "spec/util_spec.rb": "describe 'x' do\n  it 'a' do\n    expect(1).to eq(1)\n    skip 'later'\n  end\nend\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [spec/util_spec.rb] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the spec }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the spec } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, tests_after, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: spec/util_spec.rb, tests_after: 0, assertions_after: 1, skips_after: 1 }] }

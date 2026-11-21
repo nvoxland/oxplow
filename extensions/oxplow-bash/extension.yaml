@@ -1,0 +1,17 @@
+manifest: 2
+name: oxplow-bash
+namespace: oxplow
+description: "What oxplow knows about Bash: the language server to suggest. Ships with oxplow, off until a project uses Bash."
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Hold everything oxplow knows about Bash in one place, as an
+    ordinary extension a project turns on when it has these files, so core
+    names no language and a project that doesn't use one sees none of it.
+  origin: null
+  examples:
+    - name: bash-the-language-server-is-suggested
+      input: { sql: v_language }
+      expect: the Mason package of the language server
+languages:
+  - { id: bash, title: Bash, extensions: [sh, bash], aliases: [shell], lsp: { package: bash-language-server } }
