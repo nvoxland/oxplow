@@ -129,6 +129,8 @@ pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
 pub(crate) mod request_analysis;
+#[cfg(test)]
+mod review_plan_tests;
 pub(crate) mod revision_tree;
 pub mod run_context;
 #[cfg(test)]
