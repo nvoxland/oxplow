@@ -89,6 +89,12 @@ section for the column.
   the extension's deployment; its own jaq/starlark parser needs `files.read`
   (it reads a project file and can keep its text, so the approval says so,
   whichever extension declares it).
+- **One reader per report.** When several report collectors resolve to the
+  same path (normalised: `./x.json` is `x.json`), the project's own
+  extension reads it, then the checkout's other extensions, then the rest,
+  the first by extension name (then collector id) within each; the others
+  are skipped and logged (`winning_collectors`). A disabled collector claims
+  no path: its read says it is disabled and the next one reads the report.
   Every collector is readable as `v_collector` (trigger, `enabled`, `state`
   `disabled`/`failing`/`never_run`/`ok`, last run and its error; a plain view over
   `contribution`, `collector_run` and `contribution_health`).

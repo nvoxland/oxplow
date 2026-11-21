@@ -963,7 +963,9 @@ impl CollectionService {
     /// project's own extension (`project`) wins, then the checkout's other
     /// extensions, then the rest, the first by extension name (then
     /// collector id) within each; the others are skipped and logged, not errors.
-    fn winning_collectors(
+    /// A disabled collector is kept (its read says it is disabled) but claims
+    /// no path, so the next one reads it.
+    async fn winning_collectors(
         &self,
         run: RunKind,
         records: Option<Records>,
@@ -997,6 +999,10 @@ impl CollectionService {
         let mut winners = Vec::new();
         for collector in all {
             let path = self.report_path(&collector, root);
+            if self.is_disabled(&collector).await {
+                winners.push(collector);
+                continue;
+            }
             match taken.get(&path) {
                 Some((owner, id)) => tracing::info!(
                     collector = %format!("{}/{}", collector.owner, collector.spec.id),
@@ -1011,6 +1017,15 @@ impl CollectionService {
             }
         }
         winners
+    }
+
+    /// Whether `collector` is disabled (its health). Unknown is not disabled.
+    async fn is_disabled(&self, collector: &ReportCollector) -> bool {
+        let Some(log) = &self.run_log else {
+            return false;
+        };
+        let key = crate::collector_runner::contribution_key(&collector.owner, &collector.spec.id);
+        matches!(log.health().disabled_reason(&key).await, Ok(Some(_)))
     }
 
     /// [`Self::read_run_reports`] of the collectors that record `records`
@@ -1031,7 +1046,7 @@ impl CollectionService {
             cause,
         };
         let mut out = RunReports::default();
-        for collector in self.winning_collectors(run, records, root) {
+        for collector in self.winning_collectors(run, records, root).await {
             let spec = &collector.spec;
             match self.read_report(&collector, Some(window), &how, root).await {
                 ReportRead::Parsed {
@@ -7047,6 +7062,48 @@ mod tests {
             run_reads(&h, RunKind::Analysis).await;
             assert_eq!(runs_of(&h, "project", "lint.clippy").await, 1, "own wins");
             assert_eq!(runs_of(&h, "alpha", "lint").await, 0, "the other sits out");
+        }
+
+        /// One report spelled two ways (`./clippy.json`, `clippy.json`) is
+        /// one path: read once. A disabled collector doesn't claim its path,
+        /// so the next one reads it (and the disabled one says it is).
+        #[tokio::test]
+        async fn a_report_path_is_claimed_once_however_it_is_written_and_not_by_a_disabled_collector(
+        ) {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            write_extension(&h, "alpha", SHELF);
+            write_extension(
+                &h,
+                "zeta",
+                &SHELF.replace("path: clippy.json", "path: ./clippy.json"),
+            );
+            run_reads(&h, RunKind::Analysis).await;
+            assert_eq!(runs_of(&h, "alpha", "lint").await, 1, "first by name");
+            assert_eq!(runs_of(&h, "zeta", "lint").await, 0, "the same path");
+
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            write_extension(&h, "alpha", SHELF);
+            write_extension(&h, "zeta", SHELF);
+            h.service
+                .run_log
+                .as_ref()
+                .unwrap()
+                .health()
+                .disable(
+                    &crate::collector_runner::contribution_key("alpha", "lint"),
+                    "turned off",
+                )
+                .await
+                .unwrap();
+            let reads = run_reads(&h, RunKind::Analysis).await;
+            assert!(reads.analysis().is_some(), "{:?}", reads.unread);
+            assert_eq!(
+                runs_of(&h, "zeta", "lint").await,
+                1,
+                "the next one reads it"
+            );
         }
 
         /// a test run reads its `on_run: test` collectors, an
