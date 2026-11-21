@@ -1,0 +1,18 @@
+# The review's `findings` signals read the facts as they were at the change's
+# head, not the current tree's. The change (snapshot 1 to snapshot 2) added an
+# `unwrap` on line 2, which a fact collector found; a later snapshot (3) fixed
+# it and its scan found nothing. The change's head is snapshot 2, so the
+# signal is still there; a change headed at the latest snapshot has none.
+given:
+  - observe: { snapshot: { files: [{ path: src/a.rs, body: "fn a() {\n    let x = 1;\n}\n" }] } }
+  - observe: { snapshot: { files: [{ path: src/a.rs, body: "fn a() {\n    let x = z.unwrap();\n}\n" }] } }
+  - observe: { facts: { measure: oxplow.ast_hit, snapshot: 2, items: [{ value: 1, path: src/a.rs, line: 2, rule: unwrap_expect }] } }
+  - observe: { snapshot: { files: [{ path: src/a.rs, body: "fn a() {\n    let x = 3;\n}\n" }] } }
+  - observe: { facts: { measure: oxplow.ast_hit, snapshot: 3, items: [] } }
+  - observe: { analyze: { kind: range, base: "snap:1", head: "snap:2" } }
+  - observe: { analyze: { kind: range, base: "snap:1", head: "snap:3" } }
+when:
+  sql: SELECT c.head_revision, s.signal, s.line FROM v_oxplow_review_signal s JOIN v_change c ON c.id = s.change_id WHERE s.source = 'oxplow/review_signal_findings' ORDER BY c.id
+expect:
+  rows:
+    - { head_revision: "snap:2", signal: lint-unwrap_expect, line: 2 }

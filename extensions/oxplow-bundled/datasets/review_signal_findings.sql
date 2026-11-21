@@ -1,23 +1,17 @@
 -- Lint-like findings on the lines a change touched: facts with a rule or a
 -- severity at a line (the language packs' idiom collectors, a project's own
 -- fact collectors) and analyzer findings (a report collector's
--- static-analysis observation, for a request). Facts are the current tree's,
--- so they are read for a change headed at the working tree or at its
--- stream's latest snapshot; an older head gets analyzer findings only.
-WITH current_head AS (
-  SELECT c.id AS change_id, c.stream_id
-  FROM ref('change') c
-  WHERE c.status = 'done'
-    AND (c.head_revision = 'working'
-         OR c.head_revision = 'snap:' || (SELECT max(s.id) FROM ref('snapshot') s WHERE s.stream_id = c.stream_id))
-),
-facts AS (
-  SELECT h.change_id, f.path, f.line, f.rule, f.severity, f.detail, f.measure_key, f.subject
-  FROM current_head h
-  JOIN ref('change_hunk') hk ON hk.change_id = h.change_id
-  JOIN ref('tree_fact') f ON f.stream_id = h.stream_id AND f.path = hk.path
-   AND f.line BETWEEN hk.head_start AND hk.head_end
-  WHERE f.line IS NOT NULL AND (f.rule IS NOT NULL OR f.severity IS NOT NULL)
+-- static-analysis observation, for a request). Facts are the change's own:
+-- the tree's facts as of its head snapshot (`v_change_fact`), so a change
+-- headed at an older snapshot still has the findings it had then. A change
+-- headed at a commit has no snapshot to read them at and gets analyzer
+-- findings only.
+WITH facts AS (
+  SELECT cf.change_id, cf.path, cf.line, cf.rule, cf.severity, cf.detail, cf.measure_key, cf.subject
+  FROM ref('change_fact') cf
+  JOIN ref('change_hunk') hk ON hk.change_id = cf.change_id AND hk.path = cf.path
+   AND cf.line BETWEEN hk.head_start AND hk.head_end
+  WHERE cf.line IS NOT NULL AND (cf.rule IS NOT NULL OR cf.severity IS NOT NULL)
 ),
 analysis AS (
   SELECT c.id AS change_id, o.payload_json,

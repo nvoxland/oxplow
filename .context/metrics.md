@@ -503,6 +503,16 @@ welded to collection.
   nothing for it — what the tree fold expects. The tree fold
   (`latest_tree_facts`, `v_tree_fact`, so `v_file_metric` and
   `v_function`) reads what each path's winning capture **holds** for it;
+  `v_change_fact` (V59's index) is the same fold as of a change's head snapshot,
+  restricted to the change's changed paths (`v_change_file`): per (change,
+  path) it finds the producers that ever recorded a fact on the path, and per
+  producer the winning capture among the captures at or before the head
+  (`snapshot_id <= head`; a delta capture restates the paths of its own
+  snapshot, the latest such full capture the tree reconstructed as of its
+  anchor, an asserted one the paths it emitted — those bounded by the head
+  snapshot's `created_at`, none for `working`), minus exclusions and
+  tombstones; a `git:<sha>` head has no snapshot and no rows. Tests hold it to
+  `v_tree_fact` at the latest snapshot;
   `held_facts_sql` and `v_fact` read path holds as a third branch. A
   rehomed fact takes the line it has at its new home and its earlier
   `fact_line` rows go. The live history was rewritten into holds once, by

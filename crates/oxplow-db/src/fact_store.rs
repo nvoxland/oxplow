@@ -4561,6 +4561,299 @@ mod tests {
         );
     }
 
+    // --- v_change_fact: the fold as of a change's head -----------------
+
+    /// A done change on stream 1 headed at `head` with `paths` changed.
+    async fn change_headed(store: &SqliteFactStore, id: i64, head: &str, paths: &[&str]) {
+        let (head, paths): (String, Vec<String>) = (
+            head.to_string(),
+            paths.iter().map(|p| p.to_string()).collect(),
+        );
+        store
+            .db
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO change (id, stream_id, kind, target, head_revision, status)
+                     VALUES (?1, 1, 'range', ?2, ?3, 'done')",
+                    params![id, format!("t{id}"), head],
+                )?;
+                for p in &paths {
+                    conn.execute(
+                        "INSERT INTO change_file (change_id, path, status, additions, deletions, is_test)
+                         VALUES (?1, ?2, 'modified', 1, 0, 0)",
+                        params![id, p],
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    /// `(path, value)` of `v_change_fact` for `change`, sorted.
+    async fn change_facts(store: &SqliteFactStore, change: i64) -> Vec<(String, f64)> {
+        store
+            .db
+            .call(move |conn| {
+                let mut st = conn.prepare(
+                    "SELECT path, value FROM v_change_fact WHERE change_id = ?1 ORDER BY path, value",
+                )?;
+                let rows = st
+                    .query_map([change], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap()
+    }
+
+    fn pv(path: &str, v: f64) -> (String, f64) {
+        (path.to_string(), v)
+    }
+
+    /// At the latest snapshot it is `v_tree_fact` for the change's paths; at
+    /// an older one it is the facts then: a fact later fixed is still there,
+    /// a file added later is absent, a later deletion hasn't happened.
+    #[tokio::test]
+    async fn v_change_fact_is_the_fold_as_of_the_changes_head() {
+        let store = fixture().await;
+        let m = tree_measure(&store, "acme.hits").await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+        // a.rs is fixed (no fact now); c.rs is added later; b.rs is deleted.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow"), ("c.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T11:00:00.000000Z",
+            m,
+            &[("c.rs", 5.0)],
+        )
+        .await;
+        snapshot_with(&store, 3, &[("b.rs", "deleted")]).await;
+        gauge_capture(&store, "g", 3, "2026-06-30T12:00:00.000000Z", m, &[]).await;
+        let paths = ["a.rs", "b.rs", "c.rs"];
+        change_headed(&store, 1, "snap:1", &paths).await;
+        change_headed(&store, 2, "snap:2", &paths).await;
+        change_headed(&store, 3, "snap:3", &paths).await;
+        change_headed(&store, 4, "working", &paths).await;
+        change_headed(&store, 5, "git:abc", &paths).await;
+        assert_eq!(
+            change_facts(&store, 1).await,
+            [pv("a.rs", 3.0), pv("b.rs", 2.0)],
+            "then: c.rs didn't exist"
+        );
+        assert_eq!(
+            change_facts(&store, 2).await,
+            [pv("b.rs", 2.0), pv("c.rs", 5.0)],
+            "a.rs was fixed, b.rs not yet deleted"
+        );
+        assert_eq!(change_facts(&store, 3).await, [pv("c.rs", 5.0)]);
+        assert_eq!(
+            change_facts(&store, 4).await,
+            change_facts(&store, 3).await,
+            "working is the stream's latest snapshot"
+        );
+        assert!(
+            change_facts(&store, 5).await.is_empty(),
+            "a git head has no snapshot"
+        );
+        // The oracle: the latest snapshot is `v_tree_fact` over the paths.
+        let tree = store
+            .db
+            .call(move |conn| {
+                let mut st = conn.prepare(
+                    "SELECT path, value FROM v_tree_fact WHERE stream_id = 1 ORDER BY path, value",
+                )?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(change_facts(&store, 3).await, tree);
+        // Only the change's own files.
+        change_headed(&store, 6, "snap:2", &["c.rs"]).await;
+        assert_eq!(change_facts(&store, 6).await, [pv("c.rs", 5.0)]);
+    }
+
+    /// A path a capture was not given keeps its older facts; a full capture
+    /// restates the tree as of its anchor; the latest full capture at or
+    /// before the head is the one that counts.
+    #[tokio::test]
+    async fn v_change_fact_honours_exclusions_and_full_captures() {
+        let store = fixture().await;
+        let m = tree_measure(&store, "acme.hits").await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+        // A later scan of a.rs that wasn't given the file: its facts stay.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        let mut excluded = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
+        excluded.snapshot_id = Some(2);
+        excluded.captured_at = Some(at("2026-06-30T11:00:00.000000Z"));
+        excluded.excluded = vec![("a.rs".into(), "oversize".into())];
+        store.record_facts(excluded, vec![]).await.unwrap();
+        // A full baseline anchored at snapshot 3 restates both files.
+        snapshot_with(&store, 3, &[("b.rs", "oxplow")]).await;
+        let mut full = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
+        full.snapshot_id = Some(3);
+        full.scan_kind = "full".into();
+        full.captured_at = Some(at("2026-06-30T12:00:00.000000Z"));
+        store
+            .record_facts(
+                full,
+                vec![
+                    NewFact {
+                        subject: Some(oxplow_domain::uri::build::file_uri("a.rs")),
+                        path: Some("a.rs".into()),
+                        ..NewFact::new(m, 9.0)
+                    },
+                    NewFact {
+                        subject: Some(oxplow_domain::uri::build::file_uri("b.rs")),
+                        path: Some("b.rs".into()),
+                        ..NewFact::new(m, 8.0)
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        change_headed(&store, 1, "snap:2", &["a.rs", "b.rs"]).await;
+        change_headed(&store, 2, "snap:3", &["a.rs", "b.rs"]).await;
+        assert_eq!(
+            change_facts(&store, 1).await,
+            [pv("a.rs", 3.0), pv("b.rs", 2.0)],
+            "the excluded path keeps its older facts"
+        );
+        assert_eq!(
+            change_facts(&store, 2).await,
+            [pv("a.rs", 9.0), pv("b.rs", 8.0)],
+            "the full capture restates the tree as of its anchor"
+        );
+    }
+
+    /// A capture with no snapshot (an agent's `oxplow.metric.record`, a
+    /// synthetic write) restates the paths it emitted: a working change reads
+    /// it at once; a change headed at a snapshot reads only what was asserted
+    /// by then.
+    #[tokio::test]
+    async fn v_change_fact_reads_asserted_captures() {
+        let store = fixture().await;
+        let m = tree_measure(&store, "acme.hits").await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        let mut asserted = NewMetricCapture::done(1, "hook", "hook");
+        asserted.captured_at = Some(at("2026-07-01T00:00:00.000000Z"));
+        store
+            .record_facts(
+                asserted,
+                vec![NewFact {
+                    subject: Some(oxplow_domain::uri::build::file_uri("a.rs")),
+                    path: Some("a.rs".into()),
+                    ..NewFact::new(m, 4.0)
+                }],
+            )
+            .await
+            .unwrap();
+        change_headed(&store, 1, "working", &["a.rs"]).await;
+        change_headed(&store, 2, "snap:1", &["a.rs"]).await;
+        assert_eq!(
+            change_facts(&store, 1).await,
+            [pv("a.rs", 4.0)],
+            "a working change reads it"
+        );
+        assert!(
+            change_facts(&store, 2).await.is_empty(),
+            "snapshot 1 (made 2026-06-30) predates it"
+        );
+    }
+
+    /// Reading one change is a probe of that change's own paths, not a scan:
+    /// the plan uses the path and capture indexes, and the cost doesn't grow
+    /// with captures of other files.
+    #[tokio::test]
+    async fn v_change_fact_reads_only_the_changes_paths() {
+        let store = fixture().await;
+        let m = tree_measure(&store, "acme.hits").await;
+        // 300 files, each scanned across 6 snapshots by one producer (a few
+        // hundred rows). `OXPLOW_PERF=1` makes it 8 producers and 60 snapshots:
+        // 480 captures, 24,000 facts.
+        let (producers, snaps, nfiles) = if std::env::var_os("OXPLOW_PERF").is_some() {
+            (8, 60_i64, 50)
+        } else {
+            (1, 6_i64, 300)
+        };
+        let names: Vec<String> = (0..nfiles).map(|i| format!("src/f{i}.rs")).collect();
+        for snap in 1..=snaps {
+            let files: Vec<(&str, &str)> = names.iter().map(|n| (n.as_str(), "oxplow")).collect();
+            snapshot_with(&store, snap, &files).await;
+            for producer in 0..producers {
+                let facts: Vec<(&str, f64)> =
+                    names.iter().map(|n| (n.as_str(), snap as f64)).collect();
+                gauge_capture(
+                    &store,
+                    &format!("g{producer}"),
+                    snap,
+                    &format!(
+                        "2026-06-30T{:02}:{:02}:{producer:02}.000000Z",
+                        snap / 60,
+                        snap % 60
+                    ),
+                    m,
+                    &facts,
+                )
+                .await;
+            }
+        }
+        change_headed(&store, 1, "snap:3", &["src/f7.rs", "src/f9.rs"]).await;
+        let plan: String = store
+            .db
+            .call(|conn| {
+                let mut st = conn.prepare(
+                    "EXPLAIN QUERY PLAN SELECT * FROM v_change_fact WHERE change_id = 1",
+                )?;
+                let rows = st
+                    .query_map([], |r| r.get::<_, String>(3))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows.join("\n"))
+            })
+            .await
+            .unwrap();
+        assert!(
+            !plan.contains("SCAN metric_capture")
+                && !plan.contains("SCAN file_snapshot")
+                && !plan.contains("SCAN fact\n"),
+            "{plan}"
+        );
+        let started = std::time::Instant::now();
+        let got = change_facts(&store, 1).await;
+        eprintln!(
+            "v_change_fact over 2 changed files ({producers} producers, {snaps} snapshots, {nfiles} files): {:?}",
+            started.elapsed()
+        );
+        let want: Vec<(String, f64)> = (0..producers)
+            .flat_map(|_| [pv("src/f7.rs", 3.0), pv("src/f9.rs", 3.0)])
+            .collect();
+        assert_eq!(got.len(), want.len());
+        assert!(got.iter().all(|(_, v)| *v == 3.0));
+    }
+
     /// P4.11: `v_function` is each function's latest complexity —
     /// a rescan of its file replaces it, a function removed from the file
     /// goes, and a file not rescanned keeps its functions.

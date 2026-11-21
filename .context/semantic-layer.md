@@ -36,7 +36,8 @@ and agents query.
 >   metrics read in SQL through `metric_grid()` / `MEASURE()` and
 >   `metric_findings()`; results carry their `reads` and `freshness`, and
 >   views re-run when a dataset they read changed; the code datasets
->   `v_function` / `v_file_metric` over `v_tree_fact`.
+>   `v_function` / `v_file_metric` over `v_tree_fact`; `v_change_fact` is
+>   `v_tree_fact` as of an analysed change's head, for its changed files.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.

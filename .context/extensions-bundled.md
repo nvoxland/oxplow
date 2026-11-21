@@ -169,9 +169,11 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     - `review_signal_findings`: lint-like facts (a `rule` or `severity` at a
       line: the packs' idiom collectors, a project's fact collectors) on lines
       the change touched (`v_change_hunk`), and a request's analyzer findings
-      on changed lines. Facts are the current tree's, so fact signals are read
-      only for a change headed at the working tree or its stream's latest
-      snapshot; an older head gets analyzer findings only.
+      on changed lines. Facts are the change's own: `v_change_fact`, the tree's
+      facts as of its head snapshot (`working` is the stream's latest), so a
+      change headed at an older snapshot has the findings it had then. A change
+      headed at a commit (`git:<sha>`) has no snapshot to read them at and gets
+      analyzer findings only.
     - `review_signal_unused`: a **check**, not a SQL source over stored
       rows: the collector `oxplow.review.unused` (`collectors/review/unused.star`,
       `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,

@@ -825,7 +825,7 @@ pub(super) async fn observe_visit(host: &Host, body: &Value) -> Result<(), Strin
     Ok(())
 }
 
-/// `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?,
+/// `facts: { measure, producer?, snapshot?, items?: [{ value?, path?, line?, rule?,
 /// severity?, detail?, subject?, dims? }] }`: findings of `measure` (declared by
 /// core or an extension), recorded as one capture
 /// (`SqliteFactStore::record_facts`), the way a collector's run records them.
@@ -864,11 +864,12 @@ pub(super) async fn observe_facts(host: &Host, body: &Value) -> Result<(), Strin
         })
         .collect();
     let stream = first_stream(host).await?;
+    let mut capture = oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook");
+    // A capture of a snapshot is a scan of it: it restates the paths the
+    // snapshot holds, so a path it emits nothing for reads as fixed.
+    capture.snapshot_id = body.get("snapshot").and_then(Value::as_i64);
     facts
-        .record_facts(
-            oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook"),
-            rows,
-        )
+        .record_facts(capture, rows)
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())

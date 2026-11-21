@@ -1658,3 +1658,30 @@ thread's first wasm parser (its `WasmStore`) costs ~4 ms, and a parse runs at
 ~0.20 ms/KB against ~0.11 ms/KB for native Rust: about 1.8×. So no
 compiled-module cache: a grammar loads once per publication and once per
 script worker that names it.
+
+## `v_change_fact`: facts as of a change's head (V59)
+
+`v_change_fact` folds the facts as of a change's head snapshot for its changed
+files only, so a read with `WHERE change_id = ?` probes the path's own history
+instead of the whole fold (`v_tree_fact` walks every capture). It starts at
+(change, changed path), finds the producers that ever recorded a fact on the
+path through `idx_fact_measure_path`, and per producer picks the winning
+capture with one correlated probe over the path's `file_snapshot` rows and the
+producer's captures at those snapshots. The probe needs
+`idx_metric_capture_stream_producer_snapshot` (V59): without it each
+`file_snapshot` row also read every producer's capture at that snapshot.
+
+Measured with `v_change_fact_reads_only_the_changes_paths`
+(`OXPLOW_PERF=1` for the large one; release-agnostic debug build, in memory),
+reading two changed files:
+
+| History | Without the V59 index | With it |
+|---|---|---|
+| 1 producer, 6 snapshots, 300 files (1,800 facts) | 1.7 ms | 1.7 ms |
+| 8 producers, 60 snapshots, 50 files (480 captures, 24,000 facts) | 104 ms | 7 to 19 ms |
+
+The plan has no scan of `metric_capture`, `file_snapshot` or `fact` (the test
+asserts it). It is a plain view, not a materialised table: the cost follows
+the changed paths and the path's snapshot history, not the capture count, and
+a table would have to be restated when a late capture lands for an old
+snapshot.
