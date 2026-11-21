@@ -64,8 +64,8 @@ impl LspProvider {
                     CodeIntelError::NoProvider(self.sessions.no_config(language.name()).to_string())
                 }
                 None => CodeIntelError::NoProvider(format!(
-                    "no language server covers `{path}` — add an lsp.servers entry (with its \
-                     `extensions`) to .oxplow/project.yaml, or install one via \
+                    "no language server covers `{path}` — add an entry (with its \
+                     `extensions`) to the oxplow.lsp.servers setting, or install one via \
                      the `oxplow.lsp.install_server` command"
                 )),
             }

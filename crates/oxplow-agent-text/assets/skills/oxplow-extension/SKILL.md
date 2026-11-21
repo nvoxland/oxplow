@@ -41,7 +41,7 @@ shows a draft page over the project's real data: a look, not a test.
 - `references/page-format.md`: manifest, metadata, params, answers. Start here.
 - `references/loaders.md`: `loaders:`: sql, command, page, rows.
 - `references/view-nodes.md`: `view:`: layout, viz, columns, actions, embed.
-- `references/recipes.md`: data to page, a form, a dashboard, a slot mount.
+- `references/recipes.md`: page, form, dashboard, slot mount, review, language.
 - `references/dashboards.md`: pages of embeds; Pin.
 - `references/markdown-blocks.md`: `oxplow-page` blocks, `show_page`.
 - `references/testing.md`: fixtures (`given` → `when` → `expect`, `steps`, `ui`), check, answers.

@@ -292,7 +292,7 @@ mod tests {
             .unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("rust-analyzer") && msg.contains("project.yaml"),
+            msg.contains("rust-analyzer") && msg.contains("oxplow.lsp.servers"),
             "{msg}"
         );
 

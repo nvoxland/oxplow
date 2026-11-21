@@ -252,16 +252,17 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   page), `commit` and `uncommitted-changes`. What deviated and Struggled
   here are `oxplow-bundled`'s parts (`what-deviated`, `struggled`, on the
   Changes page only; they take its `uri` and show a request's rows, none
-  for a snapshot's or a turn's); Tests Weakened is still the holder's:
+  for a snapshot's or a turn's); weakened tests are a signal of the change review (below):
   - What deviated (its own dataset `v_oxplow_deviation`: each
     request's files (its turns' `v_turn_file` rows, claimed or sole)
     against its tasks' titles and bodies — a file is in
     the area when the text names it or one of its directories at least
     two levels deep; none when the item names no area. Live, not
     materialized)
-  - Tests Weakened (deleted test functions from `v_change_function`,
-    fewer assertions and new skip markers from `v_change_test_file`;
-    also mounted in the `oxplow/commit.sections` and `oxplow/uncommitted.sections` slots)
+  - Weakened tests (deleted test functions from `v_change_function`,
+    fewer assertions and new skip markers from `v_change_test_file`) are
+    the `review_signal_tests` signals of "The change review" above, shown on
+    the Review page's Tests page; no part of their own.
   - Struggled here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per request, read through each tool call's turn)
   - Context Read (`v_context_read`)
 
@@ -401,10 +402,10 @@ screens and the holder's add the review and analysis:
   definitions (the Extension page's tables, the definition pages' links to
   each other, the data catalog) links the same way, pinning the definition
   renderer, because the bare URI opens the data view.
-- **Change review.** The `change-review` page (treemap,
-  look-here-first, functions, co-change) mounted in the
+- **Change review.** The `change-review` page (Look Here, By Area, the
+  Signals, Tests and Code pages), reached from a one-line brief mounted in the
   `oxplow/diff-view.sections`, `commit.sections` and
-  `uncommitted-changes.sections` slots. The duplicate scan runs in core's
+  `uncommitted-changes.sections` slots (see "The change review" above). The duplicate scan runs in core's
   change analysis; the compare page is foundation's `duplicate-block`.
 - **Request blocks.** Blocks for a request's tests (coverage, untested
   files, test runs, failed tests, analysis findings), its metric deltas, its

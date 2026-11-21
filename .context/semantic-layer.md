@@ -1467,7 +1467,7 @@ oxplow-bundled change cards) only read them.
   first 200 changed files' contents, runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
   - files: status, +/−, `is_test` (the
-    built-in test-file conventions plus the project's `testing.testPaths`
+    the enabled extensions' `test_conventions:` plus the project's `testing.testPaths`
     globs — `change_analysis::TestPaths`, read when the analysis runs, so
     a change in config applies to the next analysis and earlier stored
     changes keep what they were computed with; a function in such a file is

@@ -347,10 +347,141 @@ so an opt-in metric costs nothing until someone wants it. Keys starting
 The project's own measures, collectors and metrics are an extension too:
 `.oxplow/extensions/project/extension.yaml`. Every extension that does not
 ship with oxplow is the project's own. Only a non-bundled extension may
-declare an `exec` fact collector, a `records:` report collector (test,
-coverage and analysis reports) or `promote:`, and it declares the permissions
-those need, like any extension. `.oxplow/project.yaml` takes only `use:` entries and
+declare an `exec` fact collector, an `exec` report collector or `promote:`,
+and it declares the permissions those need, like any extension. `.oxplow/project.yaml` takes only `use:` entries and
 `enabled: false` markers for them.
+
+### Report collectors
+
+A report collector reads a test, coverage or analysis report that a tool
+wrote. Any extension may declare one, when it reads with a parser that ships
+with oxplow or with a sandboxed `jaq` or `starlark` script. Only a
+non-bundled extension may use an `exec` program.
+
+```yaml
+collectors:
+  - id: acme.clippy_report
+    records: analysis          # tests | coverage | analysis
+    entry: "oxplow:clippy"     # a parser that ships with oxplow, or a script file
+    report: { path: { setting: /rust/clippyReport, default: target/clippy.json } }
+    on: { run: analysis }      # test | analysis, or leave out to run by hand
+```
+
+- `records` says what the report holds. `on: { run: … }` must match it:
+  `tests` and `coverage` go with `test`, `analysis` with `analysis`.
+- `report.path` is a path inside the project, or `{ setting, default }`: a
+  string setting of the extension's own `configuration:`, so a person can
+  point it elsewhere.
+- It has no `input`, `env`, `credentials` or `network`, and it writes no
+  facts or entities.
+
+### Open datasets
+
+A dataset may say `open: true`. Other extensions' datasets then add rows to
+it with `adds_to: <namespace>/<name>`. Its view is its own rows plus every
+contributor's. One extension owns the list. Many fill it.
+oxplow-bundled's `review_signal` is the first: it is the change review's list
+of signals.
+
+```yaml
+datasets:
+  - name: review_signal_schema   # this extension's namespace is acme
+    version: 1
+    adds_to: oxplow/review_signal
+    fields:
+      - { name: change_id, type: "" }
+      - { name: source, type: "" }
+      - { name: signal, type: "" }
+      - { name: severity, type: "" }
+```
+
+- A contributor gives some or all of the open dataset's fields, by name. A
+  field it leaves out is NULL.
+- An open dataset has untyped fields. It may not have a `key:`, `tests:` or
+  its own `adds_to:`.
+- A contributor's errors are its own. One that does not compile is left out.
+  An `adds_to:` in a namespace nobody has enabled joins nothing and is not an
+  error.
+- Each contributor is still a view of its own.
+
+### Languages
+
+A language is an extension's `languages:` entry. Core names no language.
+Oxplow ships a pack per language (`oxplow-rust`, `oxplow-python`, …). They
+are off by default, except JSON, YAML and web. Anyone can write one.
+
+```yaml
+languages:
+  - id: elixir                  # lowercase letters, digits and _
+    title: Elixir
+    extensions: [ex, exs]
+    aliases: [ex]
+    grammar:
+      wasm: grammars/elixir.wasm
+      source: { repository: "https://github.com/elixir-lang/tree-sitter-elixir", rev: <full sha> }
+    analysis: languages/elixir/analysis.yaml
+    symbols: languages/elixir/symbols.scm
+    lsp: { package: elixir-ls }       # the language server to suggest
+```
+
+- `grammar` is a tree-sitter grammar compiled to WebAssembly. Build it with
+  `oxplow extension grammar build <name>` and commit the `.wasm`.
+  `source` says where it came from; only that command reads it. Leave
+  `grammar` out for a language known only by its server.
+- `grammar: { native: … }` is for the packs that ship with oxplow.
+- `analysis` says which syntax nodes are functions, decisions and the
+  rest. `symbols` is a tree-sitter query that finds definitions
+  (`@definition.function` with a `@name`). Oxplow checks both against the
+  grammar when it loads the extension.
+- A language whose name, alias or file extension an earlier extension already
+  has is refused, and its extension is held.
+- `forms:` analysis was written for Clojure. A language whose `def` and `if`
+  are generic calls gets no parameter count, no visibility besides
+  `defn-` and `^:private`, and no doc from an attribute.
+- A pack that is off still lists in `v_language`. When the project has files
+  in its language, Alerts says "Turn on the X language pack".
+
+### Test conventions
+
+`test_conventions:` says what makes a file, a container or a function a
+test, and what counts as an assertion or a skip. Foundation has the rules
+for any language. A language pack adds its own.
+
+```yaml
+test_conventions:
+  - id: elixir-exunit
+    languages: [elixir]          # the language ids; leave out for any file
+    paths: ['**/*_test.exs']     # globs
+    containers: ['*Test']        # whole-name patterns: *, ? and [A-Z]
+    functions: ['test']
+    assertions: ['\bassert(_\w+)?\b']   # regular expressions
+    skips: ['@tag\s+:skip\b']
+```
+
+A bad glob, pattern or expression is an error at its line.
+
+### File kinds and run patterns
+
+`file_kinds:` says what a path is, by glob. `run_patterns:` says which
+shell commands are a test or analysis run. A technology pack with no
+language, such as a database or CI pack, needs only these two.
+
+```yaml
+file_kinds:
+  - { id: pg-migration, kind: migration, label: Migration, globs: ['db/migrate/**/*.sql'] }
+run_patterns:
+  - { id: pg-test, kind: test, patterns: ['pg_prove'] }
+```
+
+- A file `kind` is `dependency-manifest`, `lockfile`, `test-harness`, `ci`,
+  `lint-config`, `generated`, `vendored`, `migration`, `sensitive`, or any
+  lowercase name with dashes. The change review reads these kinds.
+  `v_file_kind_rule` lists the rules.
+- `*` in a glob stays in a folder. `**` crosses folders.
+- A run pattern `kind` is `test` or `analysis`. A pattern is a substring of
+  the command, matched without case.
+- `id` is optional and defaults to the `kind`. Give one when other
+  extensions share your namespace.
 
 ### Commands
 

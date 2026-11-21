@@ -2124,8 +2124,9 @@ metrics:                              # the read SPEC (the chartable metric)
   - **oxplow's code metrics** live in the bundled extension
     **oxplow-bundled** (`extensions/oxplow-bundled/extension.yaml`,
     `collectors:` and `metrics:`; scripts under
-    `extensions/oxplow-bundled/collectors/<lang>/*.star`, `<lang>` being
-    rust, ts, clojure, csharp, or `code` for the language-agnostic ones,
+    `extensions/oxplow-bundled/collectors/code/*.star` for the
+    language-agnostic ones (a language's idiom metrics are its pack's:
+    `extensions/oxplow-<lang>/collectors/<lang>/*.star`),
     embedded through `bundled_extensions.rs` like any bundled extension file).
     Nothing is built in: oxplow's own are this extension's. Their scope is `extension:oxplow-bundled`, their collector refs
     `collector:oxplow/<id>`. Each is authored through the **public**
@@ -2134,9 +2135,12 @@ metrics:                              # the read SPEC (the chartable metric)
     the request-outcome collector's script (foundation's) is held by
     fixtures in oxplow-foundation. Each metric
     names its collector (`collector: <id>`) and the collector declares its
-    `facts:`. Five are on by default (`oxplow.todos`, `fn_count`,
-    `high_complexity_fns`, `long_functions`, `duplicate_lines`); the other 11 say `default: off`
-    and a project turns one on with `metrics: - use: oxplow.<lang>.<name>`. A
+    `facts:`. Bundled's five are on by default (`oxplow.todos`, `fn_count`,
+    `high_complexity_fns`, `long_functions`, `duplicate_lines`);
+    `oxplow.doc_coverage` says `default: off`, and a project turns it on with
+    `metrics: - use: oxplow.doc_coverage`. A language's idiom metrics live in its
+    pack (`oxplow-rust`, `-typescript`, `-csharp`, `-clojure`) and are on while
+    the pack is on. A
     collector that metrics name runs only while one of them is on
     (`MetricsService::fact_collectors`). A collector's trigger is its own
     (`on` + `where` in `extension.yaml`; the Catalog shows it as
