@@ -2360,6 +2360,40 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
     }
 
+    /// V60 lets a language be a contribution that is turned off, and keeps
+    /// the health rows it had.
+    #[test]
+    fn v60_lets_a_language_have_a_health_row_and_keeps_the_rest() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(59))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO contribution_health (namespace, contribution, kind, state, updated_at)
+               VALUES ('acme', 'sync', 'collector', 'disabled', 'now');",
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO contribution_health (namespace, contribution, kind, state, updated_at)
+                 VALUES ('oxplow', 'rust', 'language', 'disabled', 'now')",
+                [],
+            )
+            .is_err());
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO contribution_health (namespace, contribution, kind, state, updated_at)
+             VALUES ('oxplow', 'rust', 'language', 'disabled', 'now')",
+            [],
+        )
+        .unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM contribution_health", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2, "the earlier row is kept");
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {

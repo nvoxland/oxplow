@@ -864,6 +864,11 @@ resources:
     label: Test convention
     params: { test_convention: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: check-square
+  - name: language
+    description: "A language oxplow can parse or suggest a server for."
+    label: Language
+    params: { language: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: file-text
   - name: implementation
     description: "One way to provide a capability, such as a task tracker or an agent."
     label: Implementation

@@ -686,6 +686,18 @@ impl ExtensionActivation {
                     live.insert(name.clone(), hash.clone());
                 }
             }
+            // The language contributions turned off on this machine: read
+            // before the publication holds the database, applied to the set it
+            // publishes.
+            let disabled_languages: crate::extension::language_set::DisabledLanguages =
+                oxplow_db::SqliteContributionHealthStore::new(svc.db.clone())
+                    .list()
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|r| r.kind == "language" && r.state == "disabled")
+                    .map(|r| (r.namespace, r.contribution))
+                    .collect();
             let db = svc.db.clone();
             let published = snapshot.clone();
             // Move the owned writer into the worker closure. Cancelling the async
@@ -793,7 +805,10 @@ impl ExtensionActivation {
                     svc.vocabulary.swap(vocabulary);
                     svc.models.swap(database.models().clone());
                     let (languages, problems) =
-                        crate::extension::language_set::of(published.extensions());
+                        crate::extension::language_set::of_without(
+                            published.extensions(),
+                            &disabled_languages,
+                        );
                     for p in &problems {
                         tracing::warn!(
                             extension = %p.extension,

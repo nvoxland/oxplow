@@ -254,6 +254,18 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         );
         out.push(d);
     }
+    for (i, l) in ext.languages.iter().enumerate() {
+        let mut d = new(ContributionKind::Language, &l.decl.id, RunsOn::Query);
+        d.source = item("languages", i);
+        d.description = Some(match l.decl.grammar {
+            Some(_) => format!(
+                "{}: parsed (symbols, metrics, review signals)",
+                l.decl.title
+            ),
+            None => format!("{}: known by its language server only", l.decl.title),
+        });
+        out.push(d);
+    }
     for (i, t) in ext.test_conventions.iter().enumerate() {
         let mut d = new(ContributionKind::TestConvention, &t.id, RunsOn::Query);
         d.source = item("test_conventions", i);
@@ -673,6 +685,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
         ContributionKind::AgentContext => ext.contexts.retain(|x| x.id != local),
         ContributionKind::TestConvention => ext.test_conventions.retain(|x| x.id != local),
+        ContributionKind::Language => ext.languages.retain(|x| x.decl.id != local),
         ContributionKind::FileKind => ext.file_kinds.retain(|k| k.id != local),
         ContributionKind::RunPattern => ext.run_patterns.retain(|r| r.id != local),
         ContributionKind::Implementation => {
@@ -1079,6 +1092,12 @@ mod catalog_tests {
         for k in KINDS {
             let key = match k.kind {
                 ContributionKind::Page => "`pages/*.yaml` (files, not a key)".to_string(),
+                // Slot mounts and replacements share the key; its entry's
+                // `at:` says which (a page's slot, or a core component).
+                ContributionKind::Replacement => {
+                    format!("`{}` (an `at:` naming a core component)", k.key)
+                }
+                ContributionKind::Slot => format!("`{}` (an `at:` naming a page's slot)", k.key),
                 _ => format!("`{}`", k.key),
             };
             table.push_str(&format!("| {key} | {} | {} |\n", k.summary, more(k.kind)));

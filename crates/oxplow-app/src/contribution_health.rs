@@ -232,13 +232,21 @@ enum Kind {
     Provider,
     Collector,
     Effect,
+    /// A language of an extension's `languages:`: off, it leaves the language
+    /// set at the next publication.
+    Language,
 }
 
 impl Kind {
     fn parse(raw: &str) -> Option<Kind> {
-        [Kind::Provider, Kind::Collector, Kind::Effect]
-            .into_iter()
-            .find(|k| k.as_str() == raw)
+        [
+            Kind::Provider,
+            Kind::Collector,
+            Kind::Effect,
+            Kind::Language,
+        ]
+        .into_iter()
+        .find(|k| k.as_str() == raw)
     }
 
     fn as_str(self) -> &'static str {
@@ -246,6 +254,7 @@ impl Kind {
             Kind::Provider => "provider",
             Kind::Collector => "collector",
             Kind::Effect => "effect",
+            Kind::Language => "language",
         }
     }
 }
@@ -292,6 +301,19 @@ async fn enable_one(
     Ok(health.get(&key).await?)
 }
 
+/// A language back on changes what is published (the language set): ask for
+/// the next publication.
+fn republish_for(
+    kind: Kind,
+    activation: &Weak<crate::extension::extension_activation::ExtensionActivation>,
+) {
+    if kind == Kind::Language {
+        if let Some(activation) = activation.upgrade() {
+            activation.request();
+        }
+    }
+}
+
 /// `oxplow.contribution.enable { namespace, kind, contribution }`: a person
 /// turns a contribution back on on this machine, clearing an automatic disable. A provider
 /// instance starts again when the project's config enables it; a
@@ -301,6 +323,7 @@ async fn enable_one(
 pub fn enable_op(
     health: ContributionHealth,
     providers: Weak<crate::providers::ProviderRegistry>,
+    activation: Weak<crate::extension::extension_activation::ExtensionActivation>,
 ) -> crate::commands::ops::Op {
     crate::commands::ops::Op::new(
         "extensions.enable",
@@ -309,7 +332,8 @@ pub fn enable_op(
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input| {
             let actor = invocation.actor().clone();
-            let (health, providers) = (health.clone(), providers.clone());
+            let (health, providers, activation) =
+                (health.clone(), providers.clone(), activation.clone());
             Box::pin(async move {
                 let EnableInput {
                     namespace,
@@ -328,6 +352,7 @@ pub fn enable_op(
                     kind: kind.as_str(),
                 };
                 let row = enable_one(&health, &providers, key, kind, &actor.source()).await?;
+                republish_for(kind, &activation);
                 Ok(HandlerOutput {
                     result: serde_json::to_value(row).expect("row serializes"),
                     ..HandlerOutput::default()
@@ -353,6 +378,7 @@ struct EnableAllInput {
 pub fn enable_all_op(
     health: ContributionHealth,
     providers: Weak<crate::providers::ProviderRegistry>,
+    activation: Weak<crate::extension::extension_activation::ExtensionActivation>,
 ) -> crate::commands::ops::Op {
     crate::commands::ops::Op::new(
         "extensions.enable",
@@ -361,7 +387,8 @@ pub fn enable_all_op(
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input| {
             let actor = invocation.actor().clone();
-            let (health, providers) = (health.clone(), providers.clone());
+            let (health, providers, activation) =
+                (health.clone(), providers.clone(), activation.clone());
             Box::pin(async move {
                 let EnableAllInput { namespace } =
                     serde_json::from_value(input).map_err(|e| CommandError::Invalid {
@@ -388,6 +415,7 @@ pub fn enable_all_op(
                     };
                     enabled
                         .extend(enable_one(&health, &providers, key, kind, &actor.source()).await?);
+                    republish_for(kind, &activation);
                 }
                 Ok(HandlerOutput {
                     result: serde_json::json!({ "enabled": enabled }),
