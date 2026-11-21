@@ -60,6 +60,11 @@ pub struct Anchors {
     /// `snapshot.id`.
     #[specta(type = Option<crate::JsNumber>)]
     pub snapshot_id: Option<i64>,
+    /// The code state the event is about, a resolved revision as
+    /// `v_change` writes them (`git:<sha>`, `snap:<id>`, `working`): the
+    /// tree a script run for the event reads (`tree.read`), when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
 }
 
 /// One event as written to the log.

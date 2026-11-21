@@ -136,8 +136,8 @@ fn insert_tx(
             &format!(
             "INSERT INTO event_log
                (id, type, v, at, source, stream_id, thread_id, turn_id, snapshot_id,
-                agent_session_id, subject, payload, payload_hash, cause, dedupe_key)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15){on_conflict}"
+                agent_session_id, subject, payload, payload_hash, cause, dedupe_key, revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16){on_conflict}"
         ),
             params![
                 env.id.as_str(),
@@ -155,6 +155,7 @@ fn insert_tx(
                 env.payload_hash,
                 env.cause.as_ref().map(|c| c.as_str()),
                 env.dedupe_key,
+                env.anchors.revision,
             ],
         )
         .map_err(map_sql_err)?;
@@ -187,6 +188,7 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {
                 thread_id: row.get::<_, Option<i64>>("thread_id")?.map(ThreadId::new),
                 turn_id: row.get("turn_id")?,
                 snapshot_id: row.get("snapshot_id")?,
+                revision: row.get("revision")?,
                 agent_session_id: row
                     .get::<_, Option<i64>>("agent_session_id")?
                     .map(AgentSessionId::new),

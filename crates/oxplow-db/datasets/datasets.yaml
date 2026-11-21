@@ -624,7 +624,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: event
-  version: 7
+  version: 8
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
   fields:
     - { name: "seq", type: "INTEGER", doc: "Insert order — the delivery order consumers checkpoint on." }
@@ -638,6 +638,7 @@
     - { name: "turn_id", type: "INTEGER", doc: "Anchor (agent_turn), when known." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Anchor, when known." }
     - { name: "agent_session_id", type: "INTEGER", doc: "Anchor (v_agent_session.id): the agent session it happened in, when known." }
+    - { name: "revision", type: "TEXT", doc: "The code state the event is about, a resolved revision (`git:<sha>`, `snap:<id>`, `working`): `change.analyzed`'s head, the tree a script run for it reads. NULL for an event about no particular one. (v8)" }
     - { name: "subject", type: "TEXT", doc: "JSON array of the canonical refs the event is about." }
     - { name: "payload", type: "TEXT", doc: "JSON, validated against `type@v`'s schema." }
     - { name: "payload_hash", type: "TEXT", doc: "Content hash when the body lives in the content store." }
