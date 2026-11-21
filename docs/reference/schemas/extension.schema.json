@@ -3916,6 +3916,15 @@
             "string",
             "null"
           ]
+        },
+        "abi": {
+          "description": "The parser ABI `tree-sitter generate` writes when the repository\ndoesn't commit `src/parser.c` (default 14; tree-sitter 0.27 reads\n13 to 15). Only `grammar build` reads it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "additionalProperties": false,

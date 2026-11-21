@@ -308,6 +308,11 @@ pub struct GrammarSource {
     /// isn't the root (a repository of several grammars).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// The parser ABI `tree-sitter generate` writes when the repository
+    /// doesn't commit `src/parser.c` (default 14; tree-sitter 0.27 reads
+    /// 13 to 15). Only `grammar build` reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi: Option<u32>,
 }
 
 /// The Mason suggestion for a language's server.

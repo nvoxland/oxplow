@@ -124,5 +124,8 @@ languages:
 Build the `.wasm` on your machine with `$OXPLOW_BIN extension grammar build
 <name> [--language mylang]`: it fetches the grammar at `rev`, gets wasi-sdk
 (or uses `WASI_SDK_PATH`) and writes the file named by `wasm`. It needs git
-and network and is never run by oxplow; commit the `.wasm`. A grammar whose
+and network and is never run by oxplow; commit the `.wasm`. A grammar repository
+that doesn't commit `src/parser.c` needs the tree-sitter CLI (`tree-sitter` on
+PATH or `$TREE_SITTER_CLI`; `brew install tree-sitter-cli`): the build runs
+`tree-sitter generate --abi 14` for you, or the `abi:` you put under `source`. A grammar whose
 scanner is C++ (`scanner.cc`) can't be built.

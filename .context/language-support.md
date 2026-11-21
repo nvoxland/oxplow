@@ -58,7 +58,8 @@ languages:
   (`wasm: grammars/x.wasm`; loading it is not built yet: such a language is
   refused, saying so). `grammar.source: { repository, rev, path? }` says where
   the `wasm` was built from (`path`: the folder whose `src/` holds
-  `parser.c`); only `oxplow extension grammar build` reads it
+  `parser.c`; `abi`: the parser ABI to generate when the repository commits no
+  `parser.c`, default 14); only `oxplow extension grammar build` reads it
   ([extensions-sdk.md](./extensions-sdk.md) "extension grammar build").
 - **`analysis.yaml`** is the data the walkers read
   (`oxplow_code_metrics::LanguageSpec::parse`):

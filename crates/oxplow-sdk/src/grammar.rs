@@ -188,6 +188,93 @@ pub fn compile_args(
     args
 }
 
+/// The parser ABI generated when the source sets none.
+pub const DEFAULT_ABI: u32 = 14;
+
+/// Whether `base` (a grammar's folder) needs its parser generated: it has no
+/// `src/parser.c` but has a `grammar.js`. A folder with neither can't be built.
+pub fn needs_generate(base: &Path) -> Result<bool, String> {
+    if base.join("src/parser.c").is_file() {
+        return Ok(false);
+    }
+    if base.join("grammar.js").is_file() {
+        return Ok(true);
+    }
+    // The same error as a missing parser with nothing to make it from.
+    scanner_of(&base.join("src")).map(|_| false)
+}
+
+/// The tree-sitter CLI: `$TREE_SITTER_CLI` when set, else `tree-sitter` on
+/// `PATH`. It is never downloaded or run through `npx`.
+pub fn tree_sitter_cli(base: &Path) -> Result<PathBuf, String> {
+    let missing = || {
+        format!(
+            "`{}` has no src/parser.c and no tree-sitter CLI to generate it: install it (`brew install tree-sitter-cli`, `cargo install tree-sitter-cli` or `npm i -g tree-sitter-cli`) or set TREE_SITTER_CLI",
+            base.display()
+        )
+    };
+    if let Some(cli) = std::env::var_os("TREE_SITTER_CLI").filter(|v| !v.is_empty()) {
+        let cli = PathBuf::from(cli);
+        return if cli.is_file() {
+            Ok(cli)
+        } else {
+            Err(missing())
+        };
+    }
+    let names: &[&str] = if cfg!(windows) {
+        &["tree-sitter.exe", "tree-sitter.cmd", "tree-sitter"]
+    } else {
+        &["tree-sitter"]
+    };
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(missing)
+}
+
+/// The arguments of the generate step, run in the grammar's folder.
+pub fn generate_args(abi: Option<u32>) -> Vec<String> {
+    vec![
+        "generate".into(),
+        "--abi".into(),
+        abi.unwrap_or(DEFAULT_ABI).to_string(),
+    ]
+}
+
+/// Make `base`'s `src/parser.c` with the tree-sitter CLI when it has none
+/// and has a `grammar.js`; nothing otherwise.
+pub fn generate_parser(
+    base: &Path,
+    abi: Option<u32>,
+    say: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    if !needs_generate(base)? {
+        return Ok(());
+    }
+    let cli = tree_sitter_cli(base)?;
+    let version = run(Command::new(&cli).arg("--version"), "tree-sitter --version")
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|_| "unknown version".into());
+    let args = generate_args(abi);
+    say(&format!(
+        "generating src/parser.c: {} {} ({version}) in {}",
+        cli.display(),
+        args.join(" "),
+        base.display()
+    ));
+    run(
+        Command::new(&cli).args(&args).current_dir(base),
+        "tree-sitter generate",
+    )?;
+    if base.join("src/parser.c").is_file() {
+        Ok(())
+    } else {
+        Err("tree-sitter generate ran but wrote no src/parser.c".into())
+    }
+}
+
 /// The scanner to compile with `src_dir`'s parser: its `scanner.c`, none
 /// when it has none. A C++ scanner (`scanner.cc`) isn't supported.
 pub fn scanner_of(src_dir: &Path) -> Result<Option<PathBuf>, String> {
@@ -368,6 +455,7 @@ pub fn build(job: &BuildJob, cache: &Path, say: &mut dyn FnMut(&str)) -> Result<
         Some(path) => repo.join(path),
         None => repo,
     };
+    generate_parser(&base, job.source.abi, say)?;
     let src = base.join("src");
     let scanner = scanner_of(&src)?;
     let name = grammar_name(&base, &job.language);
@@ -408,6 +496,7 @@ mod tests {
             repository: "https://github.com/acme/tree-sitter-acme".into(),
             rev: "v1.2/x".into(),
             path: None,
+            abi: None,
         }
     }
 
@@ -437,7 +526,8 @@ mod tests {
                 source: GrammarSource {
                     repository: "https://x/y".into(),
                     rev: "abc".into(),
-                    path: Some("sub".into())
+                    path: Some("sub".into()),
+                    abi: None
                 },
             }]
         );
@@ -596,5 +686,104 @@ mod tests {
                 .any(|w| w == b"tree_sitter_tiny"),
             "it exports the parser"
         );
+    }
+
+    #[test]
+    fn the_generate_step_is_decided_by_what_the_folder_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        // Neither: the existing error.
+        assert!(needs_generate(base).unwrap_err().contains("no parser.c"));
+        std::fs::write(
+            base.join("grammar.js"),
+            "module.exports = grammar({name: 'x', rules: {}});",
+        )
+        .unwrap();
+        assert_eq!(needs_generate(base), Ok(true));
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        std::fs::write(base.join("src/parser.c"), "").unwrap();
+        assert_eq!(
+            needs_generate(base),
+            Ok(false),
+            "a committed parser.c is used as it is"
+        );
+    }
+
+    #[test]
+    fn generate_takes_the_abi_default_or_the_sources() {
+        assert_eq!(generate_args(None), ["generate", "--abi", "14"]);
+        assert_eq!(generate_args(Some(15)), ["generate", "--abi", "15"]);
+        let dir = manifest(
+            "  - { id: a, title: A, grammar: { wasm: g.wasm, source: { repository: r, rev: v, abi: 13 } } }\n",
+        );
+        assert_eq!(jobs(dir.path(), None).unwrap()[0].source.abi, Some(13));
+    }
+
+    /// The CLI is `$TREE_SITTER_CLI`, else `tree-sitter` on PATH; with
+    /// neither the error says how to get it. One test, since it sets the
+    /// process's environment. With a stand-in CLI that writes the parser, the
+    /// generate step runs in the grammar's folder with the ABI, and says so.
+    #[cfg(unix)]
+    #[test]
+    fn the_tree_sitter_cli_is_found_or_asked_for_and_never_fetched() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tools = tempfile::tempdir().unwrap();
+        let base_dir = tempfile::tempdir().unwrap();
+        let base = base_dir.path();
+        std::fs::write(base.join("grammar.js"), "x").unwrap();
+        let (old_cli, old_path) = (
+            std::env::var_os("TREE_SITTER_CLI"),
+            std::env::var_os("PATH"),
+        );
+        // Neither set.
+        std::env::remove_var("TREE_SITTER_CLI");
+        std::env::set_var("PATH", tools.path());
+        let err = generate_parser(base, None, &mut |_| {}).unwrap_err();
+        assert!(
+            err.contains("has no src/parser.c and no tree-sitter CLI to generate it")
+                && err.contains("brew install tree-sitter-cli")
+                && err.contains("TREE_SITTER_CLI"),
+            "{err}"
+        );
+        // A stand-in on PATH.
+        let cli = tools.path().join("tree-sitter");
+        std::fs::write(
+            &cli,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'tree-sitter 0.99.0'; exit 0; fi\necho \"$@\" > args.txt\n/bin/mkdir -p src && : > src/parser.c\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut said = Vec::new();
+        generate_parser(base, Some(15), &mut |l| said.push(l.to_string())).unwrap();
+        assert!(base.join("src/parser.c").is_file());
+        assert_eq!(
+            std::fs::read_to_string(base.join("args.txt"))
+                .unwrap()
+                .trim(),
+            "generate --abi 15",
+            "run in the grammar's folder"
+        );
+        assert!(
+            said[0].contains("generate --abi 15") && said[0].contains("tree-sitter 0.99.0"),
+            "{said:?}"
+        );
+        // A parser that's there isn't generated again.
+        let mut again = Vec::new();
+        generate_parser(base, None, &mut |l| again.push(l.to_string())).unwrap();
+        assert!(again.is_empty());
+        // $TREE_SITTER_CLI names one that isn't there.
+        std::env::set_var("TREE_SITTER_CLI", tools.path().join("missing"));
+        std::fs::remove_file(base.join("src/parser.c")).unwrap();
+        assert!(generate_parser(base, None, &mut |_| {})
+            .unwrap_err()
+            .contains("no tree-sitter CLI"));
+        match old_cli {
+            Some(v) => std::env::set_var("TREE_SITTER_CLI", v),
+            None => std::env::remove_var("TREE_SITTER_CLI"),
+        }
+        match old_path {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
     }
 }
