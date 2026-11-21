@@ -188,6 +188,12 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `change.analyzed` (files) event (its `collector_run.last_event_id` is
       older than that event's seq), `failed` when that run failed, else `ok`.
       The Review page shows a pending check as still running.
+  - **Any two points.** The page reads one change, of any kind: a commit, a
+    request, a turn, the working tree, or a `range` between any two points
+    (`git:<sha>`, `snap:<id>`, `working`), which the Changes page makes for
+    the From/To it is given (its lists offer the recent commits beside the
+    snapshots). Verification and scope come from a request's runs and task,
+    so a range has none.
   - **The About rail** also says where the change's checks stand
     (`v_oxplow_review_check`: "Done", "1 running", "1 failed", or "None
     ran") and which language packs are off for the files it changed (from

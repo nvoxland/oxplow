@@ -1,0 +1,24 @@
+# The Review page works for any two points, not just one commit: a range
+# from an older commit to a later one gathers what every commit between them
+# did. Here the test deleted in the middle commit is still a signal of the
+# range, and the commit after it adds nothing of its own.
+requires: [oxplow-rust]
+given:
+  - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base }, bind: base }
+  - observe: { turn: { prompt: drop b, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert!(true);\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Drop b }, bind: middle }
+  - observe: { turn: { prompt: docs, write: { path: README.md, body: "# x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Docs }, bind: last }
+  - observe: { analyze: { kind: range, base: $base.revision, head: $last.revision } }
+when: { page: change-review, params: { change_id: 1 } }
+expect:
+  loaders:
+    change:
+      rows: [{ what: A range, analysis: Done, size: "2 files · +1 −5" }]
+    look_here:
+      rows:
+        - { path: tests/it.rs, severity: high, signals_all: '[{"text":"Fewer assertions","hint":"This file has 2 → 1 assertions."},{"text":"Test deleted: b","hint":"The file has 2 → 1 tests."}]' }

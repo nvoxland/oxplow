@@ -1,0 +1,17 @@
+# The Changes page compares any two points: besides snapshots, its From and
+# To lists offer the recent commits (`git:<sha>`), newest first.
+given:
+  - observe: { commit: { sha: "1111111111111111111111111111111111111111", at: "2026-11-01T10:00:00Z", subject: Older change } }
+  - observe: { commit: { sha: "2222222222222222222222222222222222222222", at: "2026-11-02T10:00:00Z", subject: Newer change } }
+when: { query: 'diff-view#changes_starts', params: { stream_id: 1 } }
+expect:
+  rows:
+    contains:
+      - { value: "git:2222222222222222222222222222222222222222", label: "2222222 Newer change", group: Commits }
+      - { value: "git:1111111111111111111111111111111111111111", label: "1111111 Older change", group: Commits }
+steps:
+  - when: { query: 'diff-view#changes_ends', params: { stream_id: 1 } }
+    expect:
+      rows:
+        contains:
+          - { value: "git:2222222222222222222222222222222222222222", label: "2222222 Newer change", group: Commits }

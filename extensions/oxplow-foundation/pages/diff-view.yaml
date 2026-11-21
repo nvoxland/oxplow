@@ -117,7 +117,12 @@ loaders:
         FROM v_snapshot s
         WHERE s.stream_id = :stream_id
           AND (coalesce(:end, '') NOT LIKE 'snap:%' OR s.id < CAST(substr(:end, 6) AS INTEGER))
-      ) ORDER BY k DESC, n DESC LIMIT 41
+        UNION ALL
+        -- The recent commits, newest first: any two points compare.
+        SELECT * FROM (
+          SELECT 'git:' || c.sha, substr(c.sha, 1, 7) || ' ' || c.subject, 'Commits', -1, julianday(c.committed_at)
+          FROM v_commit c ORDER BY c.committed_at DESC LIMIT 20)
+      ) ORDER BY k DESC, n DESC LIMIT 61
   changes_ends:
     sql: |
       SELECT value, label, "group" FROM (
@@ -128,7 +133,11 @@ loaders:
         FROM v_snapshot s
         WHERE s.stream_id = :stream_id
           AND (coalesce(:start, '') NOT LIKE 'snap:%' OR s.id > CAST(substr(:start, 6) AS INTEGER))
-      ) ORDER BY k DESC, n DESC LIMIT 41
+        UNION ALL
+        SELECT * FROM (
+          SELECT 'git:' || c.sha, substr(c.sha, 1, 7) || ' ' || c.subject, 'Commits', -1, julianday(c.committed_at)
+          FROM v_commit c ORDER BY c.committed_at DESC LIMIT 20)
+      ) ORDER BY k DESC, n DESC LIMIT 61
   header:
     sql: |
       WITH ends AS (
