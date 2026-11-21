@@ -3033,10 +3033,10 @@ fn config_sql(ext: &Extension) -> Vec<(String, Option<String>, &str)> {
         .collect()
 }
 
-/// A `config('/pointer')` read names a scalar key the extension's own
-/// `configuration.schema` declares, or the extension fails to load saying
-/// which: an unknown key, a key that is an object or array (no SQL literal), or
-/// a read in an extension that declares no configuration.
+/// A `config('/pointer')` read names a key the extension's own
+/// `configuration.schema` declares (a scalar reads as its literal, an object
+/// or array as its JSON text), or the extension fails to load saying which:
+/// an unknown key, or a read in an extension that declares no configuration.
 fn check_config_reads(ext: &mut Extension) {
     let mut problems = Vec::new();
     for (place, what, sql) in config_sql(ext) {
@@ -3068,12 +3068,12 @@ fn check_config_reads(ext: &mut Extension) {
                 continue;
             };
             match config_key_type(&declaration.schema, &read.pointer) {
-                Some("integer" | "number" | "string" | "boolean") => {}
+                Some("integer" | "number" | "string" | "boolean" | "object" | "array") => {}
                 Some(other) => problems.push(problem(
                     "config.not_scalar",
                     format!(
                         "config('{}') is a `{other}` in the configuration schema; \
-                         SQL reads a number, string or boolean",
+                         SQL reads a number, string, boolean, object or array",
                         read.pointer
                     ),
                 )),
@@ -3085,7 +3085,7 @@ fn check_config_reads(ext: &mut Extension) {
                             read.pointer
                         ),
                     )
-                    .fix("declare it under `properties` with a scalar `type`"),
+                    .fix("declare it under `properties` with a `type`"),
                 ),
             }
         }
@@ -7128,6 +7128,7 @@ commands:
                 "review_signal_scope",
                 "review_signal_sensitive",
                 "review_signal_shape",
+                "review_signal_shown",
                 "review_signal_tests",
                 "review_signal_verification",
                 "search_knowledge",

@@ -377,7 +377,8 @@ advisories' queries — reads its own configuration with
 - **Resolved, not a function.** Like `ref()` and `source()`, `config()` is
   not a SQL function: where the SQL is compiled or run, each call is
   replaced by the literal of its value (a number as is, a string quoted, a
-  boolean 1 or 0). Nothing registers an ambient SQL function for private
+  boolean 1 or 0, an object or array as its JSON text quoted, read with
+  `json_each(config('/list'))`). Nothing registers an ambient SQL function for private
   configuration or an arbitrary owner selector: the owner is fixed by where
   the SQL is declared
   (`ExtensionDatasets.config` for a dataset, the page's or advisory's own
@@ -410,8 +411,7 @@ advisories' queries — reads its own configuration with
   run with no republish. A check (`oxplow extension check`, the effect report)
   reads no stored settings and compiles against the schema's defaults.
 - **Errors at load.** A read must name a key of the extension's own
-  `configuration.schema` (under `properties`) whose `type` is a number,
-  string or boolean: an unknown key, an object or array, a read in an
+  `configuration.schema` (under `properties`) with a `type`: an unknown key, a read in an
   extension that declares no configuration, or a pointer that isn't a quoted
   string starting with `/` is a load error at the SQL, naming the key.
 - **A computed type.** A literal has no declared type to SQLite: a dataset

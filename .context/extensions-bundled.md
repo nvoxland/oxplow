@@ -158,6 +158,22 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     - `review_signal_duplication`: `v_change_duplicate` blocks of the
       change's files, with the copy in `why`; `info`. The scan runs after the
       rest of the analysis, so these rows come late.
+    - `review_signal_verification`: for a request, from the runs oxplow read
+      (never the agent's word): its latest test run failed (`high`), it ran no
+      test though it changed code (`medium`), and per file the changed lines
+      its latest diff coverage found no test ran (`medium`).
+    - `review_signal_findings`: lint-like facts (a `rule` or `severity` at a
+      line: the packs' idiom collectors, a project's fact collectors) on lines
+      the change touched (`v_change_hunk`), and a request's analyzer findings
+      on changed lines. Facts are the current tree's, so fact signals are read
+      only for a change headed at the working tree or its stream's latest
+      snapshot; an older head gets analyzer findings only.
+  - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),
+    never the union itself: every row with the project's severity for its
+    kind from the setting `review.signals` (`[{ signal, severity: high |
+    medium | info | off }]`, the last row for a kind wins; `off` drops it),
+    and the source's own in `source_severity`. So one setting ranks every
+    extension's signals.
   - `severity`: `high` and `medium` put a file in Look Here; `info` is
     counted in By Area and listed in the file's expansion.
   - The brief (`parts/change-review-brief.yaml`) is one line under the first

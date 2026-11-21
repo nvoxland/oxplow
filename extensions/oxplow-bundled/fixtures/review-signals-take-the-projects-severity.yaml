@@ -1,0 +1,19 @@
+# The project sets a signal kind's severity in `review.signals`, or turns it
+# off: the shown list applies it to every source's rows; the rest keep the
+# severity their source gave.
+given:
+  - command: oxplow.config.set
+    input:
+      key: oxplow.review.signals
+      level: project
+      value:
+        - { signal: ci-changed, severity: info }
+        - { signal: sensitive-path, severity: "off" }
+    confirmed: true
+  - observe: { change: { kind: commit, target: c1, files: [{ path: .github/workflows/ci.yml, status: modified }, { path: src/auth/login.rs, status: modified }, { path: db/migrations/V2__x.sql, status: added }] } }
+when:
+  sql: SELECT signal, severity, source_severity FROM v_oxplow_review_signal_shown WHERE source IN ('oxplow/review_signal_harness', 'oxplow/review_signal_sensitive') ORDER BY signal
+expect:
+  rows:
+    - { signal: ci-changed, severity: info, source_severity: high }
+    - { signal: migration-changed, severity: medium, source_severity: medium }

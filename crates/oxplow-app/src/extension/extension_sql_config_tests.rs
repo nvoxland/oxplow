@@ -207,17 +207,21 @@ async fn held_errors(fx: &ThreadFixture, name: &str) -> String {
     crate::test_fixtures::load_errors(&fx.svc, name).await
 }
 
-/// An extension's own key compiles into its dataset, and the reads are checked
-/// at load: an object value has no SQL literal.
+/// An extension's own key compiles into its dataset: a scalar as its literal,
+/// an object or array as its JSON text (for `json_each`).
 #[tokio::test(flavor = "multi_thread")]
-async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
+async fn an_own_key_reads_as_a_literal_and_an_object_as_its_json() {
     let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
-    write(&root, ".oxplow/extensions/mine/extension.yaml", CONFIGURED);
+    write(
+        &root,
+        ".oxplow/extensions/mine/extension.yaml",
+        &CONFIGURED.replace("default: {} }", "default: { a: [1, 2] } }"),
+    );
     write(
         &root,
         ".oxplow/extensions/mine/datasets/limited.sql",
-        "SELECT config('/limit') AS n",
+        "SELECT config('/limit') + (SELECT sum(value) FROM json_each(config('/nested'), '$.a')) AS n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let n = serde_json::to_value(
@@ -229,18 +233,7 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
             .rows,
     )
     .unwrap();
-    assert_eq!(n, json!([[7]]));
-
-    write(
-        &root,
-        ".oxplow/extensions/mine/datasets/limited.sql",
-        "SELECT config('/nested') AS n",
-    );
-    let load_errors = held_errors(&fx, "mine").await;
-    assert!(
-        load_errors.contains("scalar `type`") || load_errors.contains("is a `object`"),
-        "{load_errors}"
-    );
+    assert_eq!(n, json!([[10]]));
 }
 
 /// A materialized dataset that reads a setting is refilled with the new value

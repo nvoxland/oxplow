@@ -934,8 +934,8 @@ pub fn config_reads(sql: &str) -> Result<Vec<ConfigRead>, DomainError> {
 }
 
 /// The SQL literal for the value at `pointer` in `config`, or why there is
-/// none: no configuration declared, no such key, or a value that is not a
-/// scalar (an object or an array has no SQL literal).
+/// none: no configuration declared, or no such key. An object or an array
+/// is its JSON text, quoted, for `json_each` / `json_extract`.
 pub fn config_literal(config: Option<&serde_json::Value>, pointer: &str) -> Result<String, String> {
     use serde_json::Value;
     let Some(config) = config else {
@@ -953,9 +953,7 @@ pub fn config_literal(config: Option<&serde_json::Value>, pointer: &str) -> Resu
         Some(Value::Bool(b)) => Ok(if *b { "1" } else { "0" }.into()),
         Some(Value::Number(n)) => Ok(n.to_string()),
         Some(Value::String(text)) => Ok(format!("'{}'", text.replace('\'', "''"))),
-        Some(_) => Err(format!(
-            "config('{pointer}') is an object or array; read a number, string or boolean"
-        )),
+        Some(json) => Ok(format!("'{}'", json.to_string().replace('\'', "''"))),
     }
 }
 
@@ -2568,13 +2566,14 @@ fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: St
 #[cfg(test)]
 mod tests {
     /// `config('/pointer')` becomes the literal of the owner's value: a
-    /// number as it is, a string quoted, a boolean 1/0; a missing key, a
-    /// non-scalar and a call with no configuration are errors that name it.
+    /// number as it is, a string quoted, a boolean 1/0, an object or array
+    /// its JSON text quoted (read it with `json_each`); a missing key and a
+    /// call with no configuration are errors that name it.
     #[test]
     fn config_reads_become_the_owners_literals() {
         let config = serde_json::json!({
             "a": { "n": 3, "x": 0.5, "s": "it's", "on": true, "off": false },
-            "list": [1]
+            "list": [{ "k": "it's" }]
         });
         let sub = |sql: &str, config: Option<&serde_json::Value>| substitute_config(sql, config);
         assert_eq!(
@@ -2594,7 +2593,10 @@ mod tests {
             sub(sql, config).unwrap_err().to_string()
         };
         assert!(err("SELECT config('/nope')", Some(&config)).contains("names no key"));
-        assert!(err("SELECT config('/list')", Some(&config)).contains("object or array"));
+        assert_eq!(
+            sub("SELECT config('/list')", Some(&config)).unwrap(),
+            r#"SELECT '[{"k":"it''s"}]'"#
+        );
         assert!(err("SELECT config('/a/n')", None).contains("doesn't declare"));
         assert!(err("SELECT config(1)", Some(&config)).contains("quoted JSON pointer"));
         assert!(err("SELECT config('a/n')", Some(&config)).contains("quoted JSON pointer"));

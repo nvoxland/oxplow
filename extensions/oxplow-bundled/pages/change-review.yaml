@@ -46,7 +46,7 @@ loaders:
         SELECT *, CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END AS rank,
                row_number() OVER (PARTITION BY path
                                   ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, line, title) AS nth
-        FROM v_oxplow_review_signal WHERE change_id = CAST(:change_id AS INTEGER)
+        FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
       ),
       f AS (
         SELECT path, min(rank) AS rank,
@@ -72,7 +72,7 @@ loaders:
              count(*) FILTER (WHERE severity = 'high') AS high,
              count(*) FILTER (WHERE severity = 'medium') AS medium,
              count(*) FILTER (WHERE severity = 'info') AS info
-      FROM v_oxplow_review_signal WHERE change_id = CAST(:change_id AS INTEGER)
+      FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
       GROUP BY area
       ORDER BY CASE area WHEN 'tests' THEN 1 WHEN 'verification' THEN 2 WHEN 'dependencies' THEN 3
                          WHEN 'code' THEN 4 WHEN 'scope' THEN 5 WHEN 'history' THEN 6 ELSE 7 END, area

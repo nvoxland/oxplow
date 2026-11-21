@@ -9,7 +9,7 @@ loaders:
         SELECT count(*) FILTER (WHERE severity = 'high') AS high,
                count(*) FILTER (WHERE severity IN ('high', 'medium')) AS worth,
                count(DISTINCT path) FILTER (WHERE severity IN ('high', 'medium')) AS files
-        FROM v_oxplow_review_signal WHERE change_id = CAST(:change_id AS INTEGER)
+        FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
       )
       SELECT CASE
                WHEN c.status = 'failed' THEN 'The analysis of this change failed.'
