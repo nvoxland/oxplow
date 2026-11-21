@@ -1,0 +1,17 @@
+# `print` is a Python keyword for this check (the pack's `keywords:`): removing the last call to a function of that name isn't reported.
+requires: [oxplow-python]
+# (The symbols step takes a placeholder snapshot; the one with the text comes after it.)
+given:
+  - { files: { "src/lib.py": "def print():\n    return 1\n\ndef run():\n    return print()\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.py] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/lib.py": "def print():\n    return 1\n\ndef run():\n    return 2\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.py] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Change }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Change } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  - observe: { symbols: { path: src/lib.py, items: [{"name": "print", "kind": "function", "line": 1}, {"name": "run", "kind": "function", "line": 4}] } }
+  - observe: { snapshot: { files: [{ path: src/lib.py, body: "def print():\n    return 1\n\ndef run():\n    return 2\n" }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+when: { sql: "SELECT change_id, signal, severity, path, line, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_unused'" }
+expect: { rows: [] }

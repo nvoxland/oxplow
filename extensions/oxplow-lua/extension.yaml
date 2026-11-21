@@ -14,4 +14,4 @@ intent:
       input: { sql: v_language }
       expect: the Mason package of the language server
 languages:
-  - { id: lua, title: Lua, extensions: [lua], lsp: { package: lua-language-server } }
+  - { id: lua, title: Lua, extensions: [lua], lsp: { package: lua-language-server }, comments: { line: ["--"], block: [["--[[", "]]"]] } }

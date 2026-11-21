@@ -301,6 +301,22 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         Ok(eval.heap().alloc(serde_json::json!(id)))
     }
 
+    /// The words that look like a call in `language` and aren't (`if`,
+    /// `match`, `Some`), as its pack declares them (`keywords:`): a check that
+    /// reads calls out of text skips them. Empty for a language that isn't
+    /// declared.
+    fn language_keywords<'v>(
+        language: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let languages = Hosts::languages(eval);
+        let words: Vec<String> = languages
+            .by_name(language)
+            .map(|l| l.decl().keywords.clone())
+            .unwrap_or_default();
+        Ok(eval.heap().alloc(serde_json::json!(words)))
+    }
+
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
     /// the run's [`TreeHost`]. A run given no tree (one that didn't declare
     /// `tree.read`) is told so; a malformed glob is an error.

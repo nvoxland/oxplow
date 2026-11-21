@@ -14,4 +14,4 @@ intent:
       input: { sql: v_language }
       expect: the Mason package of the language server
 languages:
-  - { id: yaml, title: YAML, extensions: [yaml, yml], lsp: { package: yaml-language-server } }
+  - { id: yaml, title: YAML, extensions: [yaml, yml], lsp: { package: yaml-language-server }, comments: { line: ["#"] } }

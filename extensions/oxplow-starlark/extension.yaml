@@ -23,6 +23,8 @@ intent:
       expect: complexity of loops, ifs, elifs and comprehension filters
 languages:
   - id: starlark
+    comments: { line: ["#"] }
+    keywords: [if, for, while, return, lambda, def, elif, assert, print, len, range, str, int, float, bool, list, dict, set, tuple, not]
     title: "Starlark"
     extensions: [star, bzl, bazel]
     aliases: ["bzl"]

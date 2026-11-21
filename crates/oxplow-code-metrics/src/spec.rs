@@ -381,6 +381,75 @@ pub struct LanguageDecl {
     /// How the metric scaffold writes a sample function (none: no starter).
     #[serde(default)]
     pub starter: Option<StarterDecl>,
+    /// How a comment is written, so counting a file's assertions skips what
+    /// is commented out. Here, not in `analysis.yaml`, because a language
+    /// known only by its server (Lua, Ruby, Bash) has no analysis file and
+    /// has comments all the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<CommentsDecl>,
+    /// Words that look like a call (`name(`) and aren't: control keywords and
+    /// the built-ins nobody defines (`if`, `match`, `Some`, `print`). A check
+    /// that reads calls out of text (`oxplow.review.unused`) skips them for
+    /// this language's files; scripts read them with `language_keywords`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+}
+
+/// A language's comment syntax: `comments: { line: ["//"], block: [["/*", "*/"]] }`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentsDecl {
+    /// Markers that start a comment running to the end of the line.
+    #[serde(default)]
+    pub line: Vec<String>,
+    /// `[open, close]` pairs of comments that may span lines.
+    #[serde(default)]
+    pub block: Vec<[String; 2]>,
+}
+
+impl CommentsDecl {
+    /// `text` without its comments (each block comment leaves its newlines,
+    /// so the lines still count the same). Strings aren't read: a marker
+    /// inside one starts a comment, as it did before comments were declared.
+    pub fn strip(&self, text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while !rest.is_empty() {
+            let line = self
+                .line
+                .iter()
+                .filter(|m| !m.is_empty())
+                .filter_map(|m| rest.find(m.as_str()))
+                .min();
+            let block = self
+                .block
+                .iter()
+                .filter(|[open, close]| !open.is_empty() && !close.is_empty())
+                .filter_map(|pair| rest.find(pair[0].as_str()).map(|i| (i, pair)))
+                .min_by_key(|(i, _)| *i);
+            match (line, block) {
+                (Some(l), b) if b.is_none_or(|(i, _)| l < i) => {
+                    out.push_str(&rest[..l]);
+                    rest = rest[l..].find('\n').map_or("", |n| &rest[l + n..]);
+                }
+                (_, Some((i, [open, close]))) => {
+                    out.push_str(&rest[..i]);
+                    let body = &rest[i + open.len()..];
+                    let (skipped, after) = match body.find(close.as_str()) {
+                        Some(c) => (&body[..c], &body[c + close.len()..]),
+                        None => (body, ""),
+                    };
+                    out.extend(skipped.chars().filter(|c| *c == '\n'));
+                    rest = after;
+                }
+                _ => {
+                    out.push_str(rest);
+                    break;
+                }
+            }
+        }
+        out
+    }
 }
 
 /// A language's declaration with its files' texts: what an extension's

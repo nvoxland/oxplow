@@ -45,6 +45,8 @@ intent:
       expect: foreach and switch cases in complexity
 languages:
   - id: csharp
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, foreach, while, switch, catch, lock, using, return, nameof, typeof, sizeof, new, await, yield]
     title: "C#"
     extensions: [cs]
     aliases: ["c#", "cs"]

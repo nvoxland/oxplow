@@ -41,6 +41,8 @@ skills:
   - { name: setup-java-reports, file: skills/setup-java-reports/SKILL.md }
 languages:
   - id: java
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, switch, catch, return, new, synchronized, assert, this, super, try]
     title: "Java"
     extensions: [java]
     grammar: { native: java }

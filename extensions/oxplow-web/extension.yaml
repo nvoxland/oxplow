@@ -14,5 +14,5 @@ intent:
       input: { sql: v_language }
       expect: the Mason package of the language server
 languages:
-  - { id: html, title: HTML, extensions: [html, htm], lsp: { package: html-lsp } }
-  - { id: css, title: CSS, extensions: [css], lsp: { package: css-lsp } }
+  - { id: html, title: HTML, extensions: [html, htm], lsp: { package: html-lsp }, comments: { block: [["<!--", "-->"]] } }
+  - { id: css, title: CSS, extensions: [css], lsp: { package: css-lsp }, comments: { block: [["/*", "*/"]] } }

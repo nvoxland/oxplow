@@ -32,6 +32,7 @@ test_conventions:
 languages:
   - id: elixir
     title: Elixir
+    comments: { line: ["#"] }
     extensions: [ex, exs]
     aliases: ["ex", "exs"]
     grammar:

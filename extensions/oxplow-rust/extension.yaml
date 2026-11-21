@@ -56,6 +56,8 @@ test_conventions:
   - { id: rust-tests, languages: [rust], paths: ['**/test_*.rs'], skips: ['#\[ignore'] }
 languages:
   - id: rust
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, while, match, return, loop, fn, else, Some, Ok, Err, None, Box, Vec, String, Option, Result, Rc, Arc, await]
     title: "Rust"
     extensions: [rs]
     aliases: ["rs"]

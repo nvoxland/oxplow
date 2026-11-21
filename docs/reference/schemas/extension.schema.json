@@ -3860,6 +3860,24 @@
             }
           ],
           "default": null
+        },
+        "comments": {
+          "description": "How a comment is written, so counting a file's assertions skips what\nis commented out. Here, not in `analysis.yaml`, because a language\nknown only by its server (Lua, Ruby, Bash) has no analysis file and\nhas comments all the same.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommentsDecl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keywords": {
+          "description": "Words that look like a call (`name(`) and aren't: control keywords and\nthe built-ins nobody defines (`if`, `match`, `Some`, `print`). A check\nthat reads calls out of text (`oxplow.review.unused`) skips them for\nthis language's files; scripts read them with `language_keywords`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false,
@@ -3997,6 +4015,34 @@
         "branch",
         "tail"
       ]
+    },
+    "CommentsDecl": {
+      "description": "A language's comment syntax: `comments: { line: [\"//\"], block: [[\"/*\", \"*/\"]] }`.",
+      "type": "object",
+      "properties": {
+        "line": {
+          "description": "Markers that start a comment running to the end of the line.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "block": {
+          "description": "`[open, close]` pairs of comments that may span lines.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
     },
     "RunPatternFile": {
       "description": "A `run_patterns:` entry as the manifest holds it.",

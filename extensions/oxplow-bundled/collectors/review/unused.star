@@ -13,14 +13,6 @@
 # holds this change's rows, so a rerun replaces them: the keys it no longer
 # produces are tombstoned.
 
-# Words that look like calls and aren't.
-KEYWORDS = {
-    "if": 1, "for": 1, "while": 1, "switch": 1, "match": 1, "return": 1, "catch": 1,
-    "fn": 1, "func": 1, "function": 1, "def": 1, "defn": 1, "lambda": 1, "sizeof": 1,
-    "assert": 1, "else": 1, "do": 1, "try": 1, "new": 1, "await": 1, "yield": 1,
-    "print": 1, "println": 1, "len": 1, "range": 1, "str": 1, "Some": 1, "Ok": 1, "Err": 1,
-    "Box": 1, "Vec": 1, "String": 1, "None": 1,
-}
 KINDS = ["function", "method", "constructor", "macro"]
 MOST_NAMES = 50
 # Files per `change_diff` call: well under its 200-file and 2 MB limits.
@@ -59,6 +51,11 @@ def transform(input):
     # Each name once, with where its call was removed.
     removed = {}
     for f in diffs:
+        # Words that look like calls and aren't are the file's language's
+        # (its pack's `keywords:`), not a list of every language's.
+        keywords = {}
+        for w in language_keywords(language_of(f["path"]) or ""):
+            keywords[w] = True
         added = {}
         for h in f["hunks"]:
             for l in h["added"]:
@@ -67,7 +64,7 @@ def transform(input):
         for h in f["hunks"]:
             for l in h["removed"]:
                 for n in call_names(l["text"]):
-                    if n in KEYWORDS or n in added or n in removed:
+                    if n in keywords or n in added or n in removed:
                         continue
                     removed[n] = "%s:%d" % (f["path"], l["line"])
 

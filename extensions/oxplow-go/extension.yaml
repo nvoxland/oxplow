@@ -47,6 +47,8 @@ skills:
   - { name: setup-go-reports, file: skills/setup-go-reports/SKILL.md }
 languages:
   - id: go
+    comments: { line: ["//"], block: [["/*", "*/"]] }
+    keywords: [if, for, switch, select, func, return, go, defer, make, len, cap, append, new, panic, recover, copy, delete, close, print, println, string, int, float64, byte, rune, error]
     title: "Go"
     extensions: [go]
     aliases: ["golang"]

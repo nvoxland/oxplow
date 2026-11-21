@@ -193,8 +193,9 @@ impl TestConventions {
     }
 
     /// Count assertions and skip markers in `content`, a file at `path`.
-    /// Line comments (`//`, and `#` lines that aren't `#[attribute]`s) are
-    /// ignored, so commenting an assertion out lowers the count. A span two
+    /// Comments, as the path's language declares them (`comments:` on its
+    /// `languages:` entry), are ignored, so commenting an assertion out lowers
+    /// the count; a path in no language has none stripped. A span two
     /// conventions both match counts once.
     pub fn count(&self, path: &str, content: &str) -> TestSignals {
         let rules: Vec<&Rule> = self.applicable(path).collect();
@@ -205,8 +206,12 @@ impl TestConventions {
         {
             return out;
         }
-        for raw in content.lines() {
-            let line = code_part(raw);
+        let stripped = self
+            .languages
+            .declared_for_path(path)
+            .and_then(|l| l.decl().comments.as_ref())
+            .map(|c| c.strip(content));
+        for line in stripped.as_deref().unwrap_or(content).lines() {
             if line.is_empty() {
                 continue;
             }
@@ -221,19 +226,6 @@ impl TestConventions {
             out.skips += spans(|r| &r.skips);
         }
         out
-    }
-}
-
-/// The line without a trailing `//` comment; empty for a `#` comment line
-/// (Python, shell) — but not for a `#[attribute]` or `#!`.
-fn code_part(line: &str) -> &str {
-    let trimmed = line.trim_start();
-    if trimmed.starts_with('#') && !trimmed.starts_with("#[") && !trimmed.starts_with("#!") {
-        return "";
-    }
-    match line.find("//") {
-        Some(i) => &line[..i],
-        None => line,
     }
 }
 
@@ -295,9 +287,54 @@ mod tests {
     #[test]
     fn commented_out_assertions_do_not_count() {
         // Commenting an assertion out is a weakening, so it must drop the count.
-        assert_eq!(c("a.py", "// assert!(x);\n    # assert x == 1\n"), (0, 0));
+        assert_eq!(c("a.py", "    # assert x == 1\n"), (0, 0));
+        assert_eq!(c("a.rs", "// assert!(x);\n"), (0, 0));
         // `#[ignore]` is an attribute, not a comment.
         assert_eq!(c("a.rs", "#[ignore]\n"), (0, 1));
+    }
+
+    /// A comment is the language's own syntax: Clojure's `;` and Lua's `--`
+    /// comment out an assertion, Rust's `/* */` does across lines, and `#`
+    /// is no comment in Rust; a path in no language has no comments to strip.
+    #[test]
+    fn comments_are_the_files_languages() {
+        let any = |assertion: &str, path: &str, src: &str| {
+            let d = TestConventionDecl {
+                id: "any".into(),
+                languages: vec![],
+                paths: vec![],
+                containers: vec![],
+                functions: vec![],
+                assertions: vec![assertion.to_string()],
+                skips: vec![],
+            };
+            TestConventions::build(
+                [d].iter(),
+                Arc::new(crate::extension::language_set::shipped()),
+            )
+            .count(path, src)
+            .assertions
+        };
+        assert_eq!(any(r"\(is\b", "a.clj", "(is (= 1 1))\n; (is (= 2 2))\n"), 1);
+        assert_eq!(any(r"\bassert\b", "a.lua", "assert(x)\n-- assert(y)\n"), 1);
+        assert_eq!(
+            any(
+                r"\bassert\b",
+                "a.rs",
+                "assert!(x);\n/* assert!(y);\n   assert!(z); */\nassert!(w); /* assert!(v) */\n"
+            ),
+            2
+        );
+        assert_eq!(
+            any(r"\bassert\b", "a.rs", "# assert!(x);\n"),
+            1,
+            "`#` isn't Rust's comment"
+        );
+        assert_eq!(
+            any(r"\bassert\b", "notes.txt", "// assert x\n# assert y\n"),
+            2,
+            "no language, no comments"
+        );
     }
 
     /// A convention for one language doesn't apply to another's files, and
