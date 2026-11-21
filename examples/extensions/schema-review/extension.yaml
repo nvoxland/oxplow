@@ -5,6 +5,8 @@ engine: ">=0.7"
 version: 0.1.0
 # Its collector reads the project's migration files.
 permissions: [files.read]
+# It adds a signal to the change review, which oxplow-bundled owns.
+requires: [oxplow-bundled]
 intent:
   purpose: >-
     Know what a project's schema migrations do. It counts the DDL in each
@@ -16,6 +18,9 @@ intent:
     - name: ddl-counted
       input: { collector: ddl }
       expect: one fact per kind of statement in each migration file, none for other files
+    - name: a-migration-that-drops-a-table-is-a-high-review-signal
+      input: { sql: v_oxplow_review_signal_shown }
+      expect: a changed migration that drops a table is a high signal, any other changed migration a medium one
 # What a migration file holds, per kind of statement.
 measures:
   - key: schema_review.ddl
@@ -36,6 +41,25 @@ metrics:
     unit: statements
     displayKind: findings
     sliceableDims: [schema_review.ddl_kind]
+datasets:
+  # Its signal on oxplow's change review: rows of the open list
+  # `oxplow/review_signal`, which the Review page ranks with every other.
+  - name: review_signal_schema
+    version: 1
+    adds_to: oxplow/review_signal
+    description: "A changed migration as a change-review signal: `high` when it drops a table, else with no severity of its own (the review shows it as `medium`)."
+    fields:
+      - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
+      - { name: source, type: "", doc: "This dataset." }
+      - { name: area, type: "", doc: "`code`." }
+      - { name: signal, type: "", doc: "`drops-table` or `schema-changed`." }
+      - { name: severity, type: "", doc: "`high`, or NULL." }
+      - { name: path, type: TEXT, doc: "The migration." }
+      - { name: line, type: "", doc: "NULL." }
+      - { name: end_line, type: "", doc: "NULL." }
+      - { name: title, type: "", doc: "One line for a list." }
+      - { name: why, type: "", doc: "What its DDL does." }
+      - { name: uri, type: "", doc: "NULL." }
 collectors:
   # On each snapshot: the migration files in its tree (a fact collector
   # reads it without asking). It runs no program and asks no model.

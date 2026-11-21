@@ -1,0 +1,20 @@
+# The extension adds its own signal to oxplow's change review: a migration
+# the change touched that drops a table is `high`. A migration that only
+# creates and alters gives its signal no severity, and the review shows it
+# as `medium` rather than losing it. Its `ddl` collector finds the DDL on
+# each snapshot.
+requires: [oxplow-bundled]
+given:
+  - observe: { snapshot: { files: [{ path: migrations/0001_users.sql, body: "CREATE TABLE users (id INT);\n" }] } }
+  - observe:
+      snapshot:
+        files:
+          - { path: migrations/0001_users.sql, body: "CREATE TABLE users (id INT);\nALTER TABLE users ADD name TEXT;\n" }
+          - { path: migrations/0002_drop_old.sql, body: "DROP TABLE old_users;\n" }
+  - observe: { analyze: { kind: range, base: "snap:1", head: "snap:2" } }
+when:
+  sql: SELECT signal, severity, source_severity, path, why FROM v_oxplow_review_signal_shown WHERE source = 'schema_review/review_signal_schema' ORDER BY path
+expect:
+  rows:
+    - { signal: schema-changed, severity: medium, source_severity: null, path: migrations/0001_users.sql, why: "It creates 1, alters 1 and drops 0 tables." }
+    - { signal: drops-table, severity: high, source_severity: high, path: migrations/0002_drop_old.sql, why: "It creates 0, alters 0 and drops 1 tables." }

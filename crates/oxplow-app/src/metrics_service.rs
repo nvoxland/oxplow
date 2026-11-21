@@ -2554,6 +2554,7 @@ impl MetricsService {
                 // The reported rule/idiom — the engine reads this column as the
                 // `oxplow.rule` dimension, so a spec can `dim_eq` on it.
                 rule: gf.rule.clone(),
+                severity: gf.severity.map(|s| s.as_str().to_string()),
                 detail: gf.detail.clone(),
                 // Ratio components — carried so a `ratio` spec re-derives Σnum/Σden.
                 numerator: gf.num,
@@ -3945,7 +3946,7 @@ def transform(input):
     for f in files("**/*.rs"):
         c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
         if c > 0:
-            facts.append({"measure": "code_metrics.ast_hit", "value": c, "rule": "unsafe_block", "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "code_metrics.ast_hit", "value": c, "rule": "unsafe_block", "severity": "warning", "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -4003,6 +4004,8 @@ def transform(input):
         );
         assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
         assert_eq!(facts[0].rule.as_deref(), Some("unsafe_block"));
+        // The collector's severity is the fact's.
+        assert_eq!(facts[0].severity.as_deref(), Some("warning"));
         // The capture spine carries the run's version + branch + source.
         assert_eq!(facts[0].closest_vcs_rev.as_deref(), Some("abc1234"));
         assert_eq!(facts[0].branch.as_deref(), Some("metrics-substrate"));

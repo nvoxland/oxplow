@@ -1287,9 +1287,13 @@ scripts are unbaked (no `tree:.`/`file:` samples); the baked write path is gone.
 per-language AST idiom collectors, but they don't have a natural per-subject measure —
 so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
-carried on the fact's `rule` column via `CollectedFact.rule`). Each collector records
-one per-file `ast_hit` fact (value=that file's count, `rule`=its slug); each metric is a `Sum(oxplow.ast_hit)` spec filtered by
-`dim_eq(oxplow.rule, <slug>)` (the foundation's `metrics:` entries). Idioms
+carried on the fact's `rule` column via `CollectedFact.rule`). They live in the
+language packs. A lint-like collector records one `ast_hit` fact **per hit**
+(value 1, `rule` its slug, `line` where it is, `severity` how bad: the change
+review ranks a finding on a changed line by it); a count that isn't a finding
+(Clojure's `defn`) records one per file. Either way each metric is a
+`Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the packs'
+`metrics:` entries), so the totals are the same. Idioms
 sharing the measure never collide because every spec read applies the rule filter
 **before** it aggregates. `per_language_collector_facts_reaggregate_to_the_baked_headline`
 pins each spec's `Sum` to its baked headline. The `<slug>` in the script and the

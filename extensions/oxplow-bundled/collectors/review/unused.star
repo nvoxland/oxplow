@@ -23,6 +23,8 @@ KEYWORDS = {
 }
 KINDS = ["function", "method", "constructor", "macro"]
 MOST_NAMES = 50
+# Files per `change_diff` call: well under its 200-file and 2 MB limits.
+BATCH = 40
 
 def call_names(text):
     """The names called on a line: an identifier right before `(`."""
@@ -38,9 +40,25 @@ def transform(input):
         "params": {"c": change_id},
     })
 
+    # The files whose removed lines can hold a call: some lines removed, in
+    # a language a pack parses, not generated, vendored or a lockfile. Read
+    # in batches, since one `change_diff` call returns at most 200 files and
+    # 2 MB of text.
+    paths = [
+        r["path"]
+        for r in scope("sql.read", {
+            "sql": "SELECT f.path FROM v_change_file f WHERE f.change_id = :c AND f.deletions > 0 AND NOT EXISTS (SELECT 1 FROM v_file_kind_rule k WHERE k.kind IN ('generated', 'vendored', 'lockfile') AND glob_match(k.glob, f.path)) ORDER BY f.path",
+            "params": {"c": change_id},
+        })
+        if language_of(r["path"]) != None
+    ]
+    diffs = []
+    for at in range(0, len(paths), BATCH):
+        diffs.extend(change_diff(change_id, paths = paths[at:at + BATCH]))
+
     # Each name once, with where its call was removed.
     removed = {}
-    for f in change_diff(change_id):
+    for f in diffs:
         added = {}
         for h in f["hunks"]:
             for l in h["added"]:

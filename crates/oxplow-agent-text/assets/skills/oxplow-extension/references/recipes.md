@@ -189,7 +189,8 @@ and a dataset that adds its rows. The full recipe is "A review check" in
 
 ### A lint rule that reaches the review
 
-A **fact collector** that records a `rule` at a `line` gives a signal when the line is one the change touched. No dataset is needed:
+A **fact collector** that records a `rule` (and a `severity`) at a `line`
+gives a signal when the line is one the change touched. No dataset is needed:
 oxplow-bundled's `review_signal_findings` reads the facts.
 
 ```yaml
@@ -209,15 +210,16 @@ def transform(input):
         for i, text in enumerate(f["text"].split("\n")):
             if "print(" in text:
                 facts.append({"measure": "oxplow.ast_hit", "value": 1, "rule": "no_print",
-                              "path": f["path"], "line": i + 1})
+                              "severity": "warning", "path": f["path"], "line": i + 1})
     return {"facts": facts}
 ```
 
-- The review shows `lint-<rule>`, `medium`. A script's fact has no
-  severity; set one for the kind with the setting `review.signals` (recipe
-  "Rank the signals"). An analyzer's findings (a report collector with
-  `records: analysis`) keep their own: `error` is `high`, `warning` is
-  `medium`, the rest `info`.
+- One fact per hit, at its `line`: a fact with no `line` (a count per
+  file) can't be matched to a changed line, so it never reaches the review.
+- The review shows `lint-<rule>`. `severity` is `error`, `warning`, `info`
+  or `note` (another word fails the run): `error` is `high`, `warning`
+  `medium`, `info` and `note` `info`; none is `medium`. A project can still
+  set the kind's severity with `review.signals` (recipe "Rank the signals").
 - Facts are as of the change's head snapshot. A change headed at a commit
   has no snapshot, so it gets no lint signal from facts.
 - Test the collector with a `when: { collector: <id>, files: {...} }`

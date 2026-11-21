@@ -113,6 +113,9 @@ run in-process (no recompile):
 
 ```yaml
 # in .oxplow/extensions/project/extension.yaml
+# A parser of its own reads the report file and can keep its text, so the
+# extension says it reads files (the person approves it).
+permissions: [files.read]
 collectors:
   - id: tests.clover
     records: coverage

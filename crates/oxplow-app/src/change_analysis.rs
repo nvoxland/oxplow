@@ -1077,6 +1077,10 @@ async fn analyzed_from(
             // The languages it parsed with: a pack turned on, off or edited
             // is new input.
             "languages": format!("{:016x}", svc.languages.current().fingerprint()),
+            // What makes a file a test: the enabled conventions and the
+            // project's own globs.
+            "tests": format!("{:016x}", svc.test_conventions.current().fingerprint()),
+            "test_paths": svc.config.read().unwrap_or_else(|e| e.into_inner()).testing.test_paths.clone(),
         })
         .to_string(),
     ))
@@ -2540,6 +2544,66 @@ mod tests {
         assert_eq!(
             fns(after.id).await,
             serde_json::json!([["fresh"], ["grow"]])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_commit_is_analyzed_again_when_what_makes_a_test_changes() {
+        // Which files are tests comes from the enabled test conventions and
+        // the project's `testPaths`: a change to either is new input, so
+        // the same commit is analyzed again and its test files move.
+        let f = crate::test_fixtures::services_with_thread().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::create_dir_all(root.join("checks")).unwrap();
+        std::fs::write(root.join("tests/it.rs"), BEFORE).unwrap();
+        std::fs::write(root.join("checks/a.rs"), BEFORE).unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("tests/it.rs"), AFTER).unwrap();
+        std::fs::write(root.join("checks/a.rs"), AFTER).unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "change");
+        let target = || ChangeTarget::Commit {
+            sha: sha.clone(),
+            stream_id: None,
+        };
+        let tests = |id| {
+            let svc = f.svc.clone();
+            async move {
+                rows(
+                    &svc,
+                    "SELECT path FROM v_change_file WHERE change_id = ?1 AND is_test = 1 ORDER BY path",
+                    id,
+                )
+                .await
+            }
+        };
+        f.svc
+            .test_conventions
+            .swap(crate::test_conventions::TestConventions::default());
+        let none = ensure_change(&f.svc, target()).await.unwrap();
+        assert_eq!(tests(none.id).await, serde_json::json!([]));
+
+        f.svc
+            .test_conventions
+            .swap(crate::test_conventions::TestConventions::shipped());
+        let shipped = ensure_change(&f.svc, target()).await.unwrap();
+        assert_eq!(shipped.id, none.id);
+        assert_eq!(
+            tests(shipped.id).await,
+            serde_json::json!([["tests/it.rs"]])
+        );
+
+        f.svc
+            .config
+            .write()
+            .unwrap()
+            .testing
+            .test_paths
+            .push("checks/**".into());
+        let own = ensure_change(&f.svc, target()).await.unwrap();
+        assert_eq!(
+            tests(own.id).await,
+            serde_json::json!([["checks/a.rs"], ["tests/it.rs"]])
         );
     }
 

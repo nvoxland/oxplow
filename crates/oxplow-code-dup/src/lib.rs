@@ -373,7 +373,7 @@ fn records_of(
     let lang = languages.for_path(&file.path)?;
     let key = file.key.map(|file| CacheKey {
         file,
-        lang: lang.tag(),
+        lang: lang.fingerprint(),
         min_nodes: opts.min_nodes,
         min_lines: opts.min_lines,
         version: DETECTOR_VERSION,
