@@ -35,7 +35,13 @@ compiles a grammar, and only `build` reads `source`.
 - **Toolchain**: wasi-sdk's `clang`, `$WASI_SDK_PATH/bin/clang` when set,
   else release `WASI_SDK_VERSION` (34, Zed's) downloaded with `curl` and
   `tar` into `<cache>/wasi-sdk/<version>` on first use (macOS, Linux and
-  Windows on x86_64 and arm64).
+  Windows on x86_64 and arm64). The archive must match the sha256 pinned
+  for its platform (`wasi_sha256`, from the GitHub release's digests)
+  before it is unpacked; a new version pins its digests with it.
+- **Refused inputs**: `grammar.wasm` and `grammar.source.path` must be
+  relative with no `..` (they stay in the extension and the clone), and a
+  `repository` or `rev` that is empty or starts with `-` is refused (git
+  would read it as an option).
 - **Generate**: many grammar repositories don't commit `src/parser.c`. When
   the grammar's folder has a `grammar.js` and no `src/parser.c`, the build
   runs `tree-sitter generate --abi <N>` there (in the cache checkout) first,

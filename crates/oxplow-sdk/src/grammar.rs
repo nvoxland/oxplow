@@ -62,11 +62,18 @@ pub fn jobs(dir: &Path, language: Option<&str>) -> Result<Vec<BuildJob>, String>
         let named = language.is_some();
         match decl.grammar {
             Some(g) => match (g.wasm, g.source) {
-                (Some(wasm), Some(source)) => out.push(BuildJob {
-                    language: decl.id,
-                    wasm: dir.join(wasm),
-                    source,
-                }),
+                (Some(wasm), Some(source)) => {
+                    let wasm = dir.join(inside(&wasm, "grammar.wasm")?);
+                    if let Some(path) = &source.path {
+                        inside(path, "grammar.source.path")?;
+                    }
+                    check_source(&source)?;
+                    out.push(BuildJob {
+                        language: decl.id,
+                        wasm,
+                        source,
+                    })
+                }
                 (Some(_), None) if named => {
                     return Err(format!(
                         "language `{}` declares `grammar.wasm` but no `grammar.source`: say where to build it from (`source: {{ repository, rev, path? }}`)",
@@ -150,6 +157,81 @@ pub fn wasi_platform(os: &str, arch: &str) -> Option<&'static str> {
         ("windows", "aarch64") => "arm64-windows",
         _ => return None,
     })
+}
+
+/// The sha256 of wasi-sdk `version`'s archive for `platform`, as its GitHub
+/// release lists it: a download that differs is refused before it is
+/// unpacked or run.
+pub fn wasi_sha256(version: &str, platform: &str) -> Option<&'static str> {
+    Some(match (version, platform) {
+        ("34", "x86_64-macos") => {
+            "87d27fa8adc68dee59bfbf2e22a6d34ef717c34d6bf1d8af2a56fc929d9ce0eb"
+        }
+        ("34", "arm64-macos") => "9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9",
+        ("34", "x86_64-linux") => {
+            "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4"
+        }
+        ("34", "arm64-linux") => "f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971",
+        ("34", "x86_64-windows") => {
+            "cccb5c323a9b34f0349a9b09e8804a0a7632c68c3310f4b5f437ed57d7e71d8f"
+        }
+        ("34", "arm64-windows") => {
+            "45e1c71f3e965621e7b98ebe1d37b0e4b1f77f3e8072113ffb4534e67b1a4b7c"
+        }
+        _ => return None,
+    })
+}
+
+/// That `file`'s sha256 is `expected` (lowercase hex).
+pub fn verify_sha256(file: &Path, expected: &str) -> Result<(), String> {
+    use sha2::Digest as _;
+    let bytes = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let got: String = sha2::Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if got == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}: its sha256 is {got}, not the pinned {expected}: refusing to unpack it",
+            file.display()
+        ))
+    }
+}
+
+/// `path` (a manifest's `what`) as a relative path that stays in its
+/// folder: no absolute path, no `..`.
+pub fn inside(path: &str, what: &str) -> Result<PathBuf, String> {
+    let p = Path::new(path);
+    if p.is_absolute()
+        || p.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!(
+            "`{what}: {path}` leaves its folder: give a relative path with no `..`"
+        ));
+    }
+    Ok(p.to_path_buf())
+}
+
+/// A grammar source git can't read as an option: neither its `repository`
+/// nor its `rev` starts with `-`.
+pub fn check_source(source: &GrammarSource) -> Result<(), String> {
+    for (what, value) in [("repository", &source.repository), ("rev", &source.rev)] {
+        if value.starts_with('-') || value.is_empty() {
+            return Err(format!(
+                "`grammar.source.{what}: {value}` isn't a {what}: it is empty or starts with `-`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The release archive of wasi-sdk `version` for `platform`.
@@ -416,6 +498,12 @@ pub fn wasi_clang(cache: &Path, say: &mut dyn FnMut(&str)) -> Result<PathBuf, St
             .arg(&url),
         "curl",
     )?;
+    let digest = wasi_sha256(WASI_SDK_VERSION, platform)
+        .ok_or_else(|| format!("no pinned sha256 for wasi-sdk {WASI_SDK_VERSION} {platform}"))?;
+    if let Err(e) = verify_sha256(&archive, digest) {
+        let _ = std::fs::remove_file(&archive);
+        return Err(e);
+    }
     let temp = parent.join(format!("{WASI_SDK_VERSION}.partial"));
     let _ = std::fs::remove_dir_all(&temp);
     std::fs::create_dir_all(&temp).map_err(|e| format!("{}: {e}", temp.display()))?;
@@ -490,6 +578,65 @@ pub fn build(job: &BuildJob, cache: &Path, say: &mut dyn FnMut(&str)) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The grammar's file and its source folder stay inside the extension
+    /// and the clone: an absolute path or a `..` is refused, naming it.
+    #[test]
+    fn paths_that_leave_their_folder_are_refused() {
+        assert!(inside("grammars/x.wasm", "grammar.wasm").is_ok());
+        for bad in ["../x.wasm", "grammars/../../x.wasm", "/tmp/x.wasm"] {
+            let err = inside(bad, "grammar.wasm").unwrap_err();
+            assert!(err.contains("grammar.wasm"), "{err}");
+        }
+    }
+
+    /// A `rev` or `repository` that git would read as an option is refused.
+    #[test]
+    fn a_source_that_reads_as_a_git_option_is_refused() {
+        let source = |repository: &str, rev: &str| GrammarSource {
+            repository: repository.into(),
+            rev: rev.into(),
+            path: None,
+            abi: None,
+        };
+        assert!(check_source(&source("https://example.com/g", "abc123")).is_ok());
+        assert!(
+            check_source(&source("https://example.com/g", "--upload-pack=x"))
+                .unwrap_err()
+                .contains("rev")
+        );
+        assert!(check_source(&source("--config=x", "abc123"))
+            .unwrap_err()
+            .contains("repository"));
+    }
+
+    /// The downloaded wasi-sdk is checked against the pinned digest of its
+    /// platform before it is unpacked; one that differs is refused.
+    #[test]
+    fn the_wasi_sdk_download_must_match_its_pinned_digest() {
+        for platform in [
+            "x86_64-macos",
+            "arm64-macos",
+            "x86_64-linux",
+            "arm64-linux",
+            "x86_64-windows",
+            "arm64-windows",
+        ] {
+            assert_eq!(
+                wasi_sha256(WASI_SDK_VERSION, platform).map(str::len),
+                Some(64),
+                "{platform}"
+            );
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.tar.gz");
+        std::fs::write(&file, b"abc").unwrap();
+        // sha256("abc")
+        let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(verify_sha256(&file, abc).is_ok());
+        let err = verify_sha256(&file, &"0".repeat(64)).unwrap_err();
+        assert!(err.contains("sha256"), "{err}");
+    }
 
     fn source() -> GrammarSource {
         GrammarSource {
