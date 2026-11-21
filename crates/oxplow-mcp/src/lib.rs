@@ -1067,7 +1067,7 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
         assert!(msg.contains("oxplow.lsp.install_server"), "got: {msg}");
-        assert!(msg.contains("project.yaml"), "got: {msg}");
+        assert!(msg.contains("oxplow.lsp.servers"), "got: {msg}");
     }
 
     #[tokio::test]
