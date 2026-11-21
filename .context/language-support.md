@@ -95,6 +95,16 @@ languages:
     compiling every one was the per-run cost). The bytes are part of the
     language's fingerprint. Only lexing runs in wasm; a parse costs about
     1.8× a native one (performance.md).
+- **Known limit: a third-party scanner has no time limit.** A grammar's
+  external scanner (wasm) runs in-process, in tree-sitter's store. Its memory
+  is bounded by the store's 128 MB, and it can import nothing the host
+  doesn't give it, but nothing bounds its time: a scanner that never returns
+  hangs the parse that hit it (symbols, change analysis). tree-sitter 0.27
+  exposes no epoch or fuel on its store, so oxplow can't interrupt it, and a
+  grammar is not "safe because it is sandboxed": enabling an extension that
+  brings one trusts its scanner to return. Revisit if upstream adds a
+  limit or a real case appears (the way out would be to parse third-party
+  languages in the script worker, which is budgeted and killable).
 - **Every parse goes through `Language::parser()`** (`LangParser`): a wasm
   language's parser needs a `WasmStore`, and making one costs ~4 ms, so each
   thread keeps one and lends it to the parsers it makes. A thread's store
