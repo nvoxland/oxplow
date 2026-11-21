@@ -226,13 +226,14 @@ Settings → Extensions lists each declared reference with Set… and Revoke.
 | `run_patterns` | command substrings that mark a shell call as a test or static-analysis run |  |
 | `file_kinds` | what kind of file a path is, by glob: CI, generated, vendored, sensitive, … |  |
 | `test_conventions` | what makes a file, container or function a test, and what counts as an assertion or a skip |  |
+| `languages` | a language oxplow can parse or suggest a server for: its grammar, analysis, symbols and server |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
 | `providers` | an external program implementing a capability, such as the task tracker | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
-| `ui.mounts` | a page placed at another page's slot (`at: <namespace>/<page>.<slot>`) |  |
+| `ui.mounts` (an `at:` naming a page's slot) | a page placed at another page's slot (`at: <namespace>/<page>.<slot>`) |  |
 | `ui.decorators` | labels on core refs |  |
-| `ui.mounts` | a page placed in place of a core component (`at: <target>`, `v_replaceable`) |  |
+| `ui.mounts` (an `at:` naming a core component) | a page placed in place of a core component (`at: <target>`, `v_replaceable`) |  |
 | `custom_components` | sandboxed HTML components a page draws, fed its loaders |  |
 <!-- kinds:end -->
 

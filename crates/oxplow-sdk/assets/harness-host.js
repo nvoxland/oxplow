@@ -851,6 +851,7 @@
     "run_pattern",
     "file_kind",
     "test_convention",
+    "language",
     "skill",
     "implementation",
     "provider",

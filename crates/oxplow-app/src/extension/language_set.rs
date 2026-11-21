@@ -18,6 +18,19 @@ use crate::extension::extensions::Extension;
 /// oxplow in their order, then the rest by name. The first to claim a name
 /// or a file extension keeps it.
 pub fn of(extensions: &[Extension]) -> (Languages, Vec<LanguageProblem>) {
+    of_without(extensions, &Default::default())
+}
+
+/// The language contributions turned off on this machine (`contribution_health`
+/// rows of kind `language`), by (namespace, language id).
+pub type DisabledLanguages = std::collections::BTreeSet<(String, String)>;
+
+/// [`of`] without the languages `disabled` names: turning one language
+/// contribution off drops it from the set as turning its extension off would.
+pub fn of_without(
+    extensions: &[Extension],
+    disabled: &DisabledLanguages,
+) -> (Languages, Vec<LanguageProblem>) {
     let mut enabled: Vec<&Extension> = extensions
         .iter()
         .filter(|e| e.enabled && !e.languages.is_empty())
@@ -31,7 +44,13 @@ pub fn of(extensions: &[Extension]) -> (Languages, Vec<LanguageProblem>) {
     enabled.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.name.cmp(&b.name)));
     let sources: Vec<_> = enabled
         .into_iter()
-        .flat_map(|e| e.languages.iter().cloned())
+        .flat_map(|e| {
+            e.languages
+                .iter()
+                .filter(|l| !disabled.contains(&(e.namespace.clone(), l.decl.id.clone())))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
         .collect();
     Languages::build(&sources)
 }
@@ -205,5 +224,49 @@ mod tests {
                 "{\"imports\":1,\"merge\":1,\"duplication\":1,\"starter\":0}"
             ]])
         );
+    }
+
+    /// A language is a contribution: it is listed with its URI, and turning
+    /// one off (its health row, as a failing contribution's) drops just it
+    /// from the set at the next publication, as turning its extension off
+    /// would drop them all; turning it on brings it back.
+    #[tokio::test]
+    async fn a_disabled_language_contribution_leaves_the_set() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let uris = serde_json::to_value(
+            svc.sql
+                .query_sql(
+                    "SELECT uri FROM v_contribution WHERE kind = 'language' AND extension = 'oxplow-rust'",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows,
+        )
+        .unwrap();
+        assert_eq!(
+            uris,
+            serde_json::json!([["oxplow:oxplow/language?language=oxplow/rust"]])
+        );
+        assert!(svc.languages.current().by_name("rust").is_some());
+        let health = crate::contribution_health::ContributionHealth::new(
+            svc.db.clone(),
+            svc.vocabulary.clone(),
+        );
+        let key = oxplow_db::ContributionKey {
+            namespace: "oxplow".into(),
+            contribution: "rust".into(),
+            kind: "language",
+        };
+        health.disable(&key, "off for the test").await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
+        let set = svc.languages.current();
+        assert!(set.by_name("rust").is_none(), "rust is off");
+        assert!(set.by_name("python").is_some(), "the rest stay");
+        health.enable(&key, "human").await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
+        assert!(svc.languages.current().by_name("rust").is_some(), "back on");
     }
 }

@@ -1546,12 +1546,14 @@ impl Services {
             .add_op(contribution_health::enable_op(
                 contribution_health.clone(),
                 Arc::downgrade(&providers),
+                Arc::downgrade(&extension_activation),
             ))
             .expect("contribution.enable's op registers");
         commands
             .add_op(contribution_health::enable_all_op(
                 contribution_health.clone(),
                 Arc::downgrade(&providers),
+                Arc::downgrade(&extension_activation),
             ))
             .expect("contribution.enable_all's op registers");
         commands

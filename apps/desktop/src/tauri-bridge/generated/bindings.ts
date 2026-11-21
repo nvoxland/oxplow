@@ -1880,7 +1880,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "test_convention" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "test_convention" | "language" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
