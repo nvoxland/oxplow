@@ -27,7 +27,7 @@ pub fn sources_in(
     };
     let decls: Vec<LanguageDecl> = serde_yaml::from_value(list.clone())
         .map_err(|e| format!("{}: languages: {e}", dir.display()))?;
-    let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
+    let read = |rel: &str| std::fs::read(dir.join(rel)).ok();
     decls
         .into_iter()
         .map(|d| LanguageSource::read(extension, shipped, d, &read))

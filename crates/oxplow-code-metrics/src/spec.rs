@@ -393,19 +393,45 @@ pub struct LanguageSource {
     pub symbols: Option<String>,
     #[serde(default)]
     pub symbols_yaml: Option<String>,
+    /// Its WebAssembly grammar's bytes (`grammar: { wasm }`), base64 on the
+    /// wire to a script worker.
+    #[serde(default, with = "base64_bytes")]
+    pub wasm: Option<Vec<u8>>,
+}
+
+mod base64_bytes {
+    use base64::Engine as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(b) => s.serialize_some(&base64::engine::general_purpose::STANDARD.encode(b)),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        Option::<String>::deserialize(d)?
+            .map(|t| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(t)
+                    .map_err(serde::de::Error::custom)
+            })
+            .transpose()
+    }
 }
 
 impl LanguageSource {
     /// Read a declaration's files through `read` (a path of the
-    /// extension → its text). A file the declaration names but `read`
-    /// doesn't find is an error.
+    /// extension → its bytes). A file the declaration names but `read`
+    /// doesn't find, or a text file that isn't UTF-8, is an error.
     pub fn read(
         extension: &str,
         shipped: bool,
         decl: LanguageDecl,
-        read: &dyn Fn(&str) -> Option<String>,
+        read: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<Self, String> {
-        let need = |path: &Option<String>| -> Result<Option<String>, String> {
+        let bytes = |path: &Option<String>| -> Result<Option<Vec<u8>>, String> {
             match path {
                 None => Ok(None),
                 Some(p) => read(p).map(Some).ok_or_else(|| {
@@ -416,13 +442,28 @@ impl LanguageSource {
                 }),
             }
         };
-        let analysis = need(&decl.analysis)?;
-        let symbols = need(&decl.symbols)?;
+        let text = |path: &Option<String>| -> Result<Option<String>, String> {
+            bytes(path)?
+                .map(|b| {
+                    String::from_utf8(b).map_err(|_| {
+                        format!(
+                            "language `{}`: `{}` isn't UTF-8 text",
+                            decl.id,
+                            path.as_deref().unwrap_or_default()
+                        )
+                    })
+                })
+                .transpose()
+        };
+        let analysis = text(&decl.analysis)?;
+        let symbols = text(&decl.symbols)?;
         let symbols_yaml = decl
             .symbols
             .as_deref()
             .and_then(|p| p.strip_suffix(".scm"))
-            .and_then(|stem| read(&format!("{stem}.yaml")));
+            .and_then(|stem| read(&format!("{stem}.yaml")))
+            .and_then(|b| String::from_utf8(b).ok());
+        let wasm = bytes(&decl.grammar.as_ref().and_then(|g| g.wasm.clone()))?;
         Ok(Self {
             extension: extension.into(),
             shipped,
@@ -430,6 +471,7 @@ impl LanguageSource {
             analysis,
             symbols,
             symbols_yaml,
+            wasm,
         })
     }
 }
@@ -449,7 +491,6 @@ pub fn native_grammar(name: &str) -> Option<TsLanguage> {
         "java" => tree_sitter_java::LANGUAGE.into(),
         "c" => tree_sitter_c::LANGUAGE.into(),
         "cpp" => tree_sitter_cpp::LANGUAGE.into(),
-        "clojure" => tree_sitter_clojure_orchard::LANGUAGE.into(),
         "csharp" => tree_sitter_c_sharp::LANGUAGE.into(),
         _ => return None,
     })
@@ -526,9 +567,14 @@ impl Language {
                 })?)
             }
             Some((None, Some(path))) => {
-                return Err(format!(
-                    "language `{id}`: WebAssembly grammars (`{path}`) aren't loaded yet"
-                ))
+                let bytes = source
+                    .wasm
+                    .as_deref()
+                    .ok_or_else(|| format!("language `{id}`: its grammar `{path}` wasn't read"))?;
+                Some(
+                    crate::grammar::load_wasm(bytes)
+                        .map_err(|e| format!("language `{id}`: `{path}`: {e}"))?,
+                )
             }
         };
         let spec = match (&grammar, &source.analysis) {
@@ -583,7 +629,9 @@ impl Language {
                 source.symbols_yaml.as_deref().unwrap_or(""),
             ]
             .iter()
-            .flat_map(|t| t.bytes().chain(std::iter::once(0xff)))
+            .map(|t| t.as_bytes())
+            .chain(std::iter::once(source.wasm.as_deref().unwrap_or(&[])))
+            .flat_map(|t| t.iter().copied().chain(std::iter::once(0xff)))
             .fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
                 (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
             })
@@ -622,6 +670,12 @@ impl Language {
     /// has none).
     pub fn grammar(&self) -> Option<&TsLanguage> {
         self.0.grammar.as_ref()
+    }
+
+    /// A parser set to its grammar (a wasm grammar's parser borrows this
+    /// thread's store), or `None` when it has no grammar.
+    pub fn parser(&self) -> Option<crate::LangParser> {
+        crate::grammar::parser(self.grammar()?)
     }
 
     /// Whether oxplow can parse it.

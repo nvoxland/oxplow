@@ -66,7 +66,7 @@ fn build_shipped() -> Languages {
         for decl in decls {
             if let Ok(source) =
                 oxplow_code_metrics::LanguageSource::read(b.name, true, decl, &|rel| {
-                    b.file(rel).map(str::to_string)
+                    b.bytes(rel).map(<[u8]>::to_vec)
                 })
             {
                 sources.push(source);

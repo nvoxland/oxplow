@@ -93,13 +93,14 @@ pub(crate) fn parse_languages(
             ));
             continue;
         }
-        let source = match LanguageSource::read(extension, shipped, decl, &|rel| files.read(rel)) {
-            Ok(s) => s,
-            Err(e) => {
-                errors.push(at("language.missing_file", file, line, e));
-                continue;
-            }
-        };
+        let source =
+            match LanguageSource::read(extension, shipped, decl, &|rel| files.bytes(rel).ok()) {
+                Ok(s) => s,
+                Err(e) => {
+                    errors.push(at("language.missing_file", file, line, e));
+                    continue;
+                }
+            };
         let built = Language::build(&source).and_then(|l| l.check_symbols().map(|()| l));
         if let Err(e) = built {
             errors.push(at("language.invalid", file, line, e));

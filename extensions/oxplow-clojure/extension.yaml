@@ -47,7 +47,10 @@ languages:
     title: "Clojure"
     extensions: [clj, cljs, cljc]
     aliases: ["clj", "cljs", "cljc"]
-    grammar: { native: clojure }
+    grammar:
+      wasm: grammars/clojure.wasm
+      # The same revision as the tree-sitter-clojure-orchard crate oxplow used, so node kinds stay.
+      source: { repository: "https://codeberg.org/grammar-orchard/tree-sitter-clojure-orchard", rev: 0ae6bf0e1a3c6db2556adbb3b915ea5e410daae0 }
     analysis: languages/clojure/analysis.yaml
     symbols: languages/clojure/symbols.scm
     units: [class, module]

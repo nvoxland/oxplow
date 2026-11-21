@@ -18,7 +18,7 @@
 use oxplow_code_metrics::{Language, Languages};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 mod extractors;
 
@@ -91,13 +91,9 @@ pub fn extract_with_language(path: &str, source: &str, language: &Language) -> V
     let Some(strategy) = language.spec().imports else {
         return Vec::new(); // the language reads no imports
     };
-    let mut parser = Parser::new();
-    if parser
-        .set_language(&language.tree_sitter_language())
-        .is_err()
-    {
+    let Some(mut parser) = language.parser() else {
         return Vec::new();
-    }
+    };
     let Some(tree) = parser.parse(source, None) else {
         return Vec::new();
     };

@@ -55,11 +55,24 @@ languages:
 - **`grammar: { native: <name> }`** is for the extensions that ship with
   oxplow only (`oxplow_code_metrics::native_grammar`, the one place in core
   that names grammar crates). A third party brings a WebAssembly grammar
-  (`wasm: grammars/x.wasm`; loading it is not built yet: such a language is
-  refused, saying so). `grammar.source: { repository, rev, path? }` says where
+  (`wasm: grammars/x.wasm`), and so does the Clojure pack, to keep that path
+  exercised by a shipped language. `grammar.source: { repository, rev, path? }` says where
   the `wasm` was built from (`path`: the folder whose `src/` holds
   `parser.c`); only `oxplow extension grammar build` reads it
   ([extensions-sdk.md](./extensions-sdk.md) "extension grammar build").
+- **Loading a wasm grammar** (`oxplow_code_metrics::load_wasm`, `grammar.rs`):
+  one wasmtime engine per process (tree-sitter's `wasm` feature, which builds
+  the wasmtime C API with `cmake`), a loading store behind a lock, and the
+  grammar's name read from its own `tree_sitter_<name>` export, so the file
+  says what it is. It loads when the language is built (at publication, and
+  in a script worker, which receives the bytes base64 in its languages
+  message); a file that won't load is the language's problem, saying why.
+  The bytes are part of the language's fingerprint. Only lexing runs in
+  wasm; a parse costs about 1.8× a native one (performance.md).
+- **Every parse goes through `Language::parser()`** (`LangParser`): a wasm
+  language's parser needs a `WasmStore`, and making one costs ~4 ms, so each
+  thread keeps one and lends it to the parsers it makes. Never call
+  `tree_sitter::Parser::new()` for a language.
 - **`analysis.yaml`** is the data the walkers read
   (`oxplow_code_metrics::LanguageSpec::parse`):
   `functions { kinds, param_list_fields, parameter_kinds, form_heads }`,
@@ -324,7 +337,8 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
    `extensions/oxplow-<pack>/`, added to `BUNDLED`, `build.rs` and the debug
    `generated` functions in `bundled_extensions.rs`, `namespace: oxplow`).
 2. **Its grammar**: a shipped pack's is a workspace crate named in
-   `native_grammar`; anyone else's is a `.wasm` (not loaded yet).
+   `native_grammar` (or a `.wasm`, as Clojure's); anyone else's is a `.wasm`
+   built with `oxplow extension grammar build`.
 3. **`analysis.yaml`**: the node kinds and strategies above (the load check
    refuses a node kind the grammar doesn't have).
 4. **`symbols.scm`** (and `symbols.yaml`): the captures in "Symbols" above.
@@ -336,8 +350,7 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 
 ## Status
 
-Live: languages from extensions, the shipped packs with native grammars, the
-LSP symbol surface, generic unit listing, and tree-sitter symbols with their
-index. **Still open** (the change-review plan, milestones 2 to 5):
-one `Parsers` pool, and WebAssembly
-grammars (Clojure first).
+Live: languages from extensions, the shipped packs with native grammars and
+Clojure's WebAssembly one, the LSP symbol surface, generic unit listing, and
+tree-sitter symbols with their index. **Still open:** a third-party example
+pack (Lua) in `examples/extensions/`.

@@ -37,7 +37,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use oxplow_code_metrics::{is_function_node, Language, Languages};
-use tree_sitter::Parser;
 
 mod cache;
 mod tokenize;
@@ -151,10 +150,9 @@ fn scan_file(
     let Some(lang) = languages.for_path(path) else {
         return;
     };
-    let mut parser = Parser::new();
-    if parser.set_language(&lang.tree_sitter_language()).is_err() {
+    let Some(mut parser) = lang.parser() else {
         return;
-    }
+    };
     #[cfg(test)]
     PARSES.with(|n| n.set(n.get() + 1));
     let Some(tree) = parser.parse(source, None) else {

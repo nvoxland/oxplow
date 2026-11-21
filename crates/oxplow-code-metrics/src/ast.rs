@@ -6,7 +6,7 @@
 //! a flat list of matches (no Starlark recursion needed).
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Parser, Query, QueryCursor, Tree};
+use tree_sitter::{Query, QueryCursor, Tree};
 
 use crate::spec::{Language, Languages};
 
@@ -48,16 +48,9 @@ impl std::fmt::Display for AstQueryError {
 impl std::error::Error for AstQueryError {}
 
 /// Parse `text` as `language` into a tree-sitter [`Tree`]. Returns `None` if the
-/// grammar can't be loaded or the text can't be parsed. (The parser is built
-/// fresh per call — same as the metric walker — so this is `Send`-friendly and
-/// holds no shared state.)
+/// grammar can't be loaded or the text can't be parsed.
 pub fn parse(text: &str, language: &Language) -> Option<Tree> {
-    let grammar = language.grammar()?;
-    let mut parser = Parser::new();
-    if parser.set_language(grammar).is_err() {
-        return None;
-    }
-    parser.parse(text, None)
+    language.parser()?.parse(text, None)
 }
 
 /// Run a tree-sitter S-expression `sexpr` query over an already-parsed `tree`,

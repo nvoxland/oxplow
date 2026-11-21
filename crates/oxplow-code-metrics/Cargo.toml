@@ -16,12 +16,12 @@ tree-sitter-go = { workspace = true }
 tree-sitter-java = { workspace = true }
 tree-sitter-c = { workspace = true }
 tree-sitter-cpp = { workspace = true }
-tree-sitter-clojure-orchard = { workspace = true }
 tree-sitter-c-sharp = { workspace = true }
 # Streaming-iterator trait for tree-sitter 0.26 query cursors (re-exported by
 # tree-sitter, pinned here so `.matches(...).next()` resolves).
 streaming-iterator = "0.1"
 serde = { workspace = true }
+base64 = "0.23"
 serde_yaml = { workspace = true }
 schemars = { workspace = true }
 

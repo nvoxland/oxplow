@@ -59,7 +59,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use oxplow_code_metrics::{MergeKey, MergeSpec};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 pub use oxplow_code_metrics::{Language, Languages};
 
@@ -96,8 +96,7 @@ pub struct Item {
 /// on an untrusted tree.
 pub fn parse_top_level_items(src: &str, lang: &Language) -> Option<Vec<Item>> {
     let spec = merge_spec(lang)?;
-    let mut parser = Parser::new();
-    parser.set_language(&lang.tree_sitter_language()).ok()?;
+    let mut parser = lang.parser()?;
     let tree = parser.parse(src, None)?;
     let root = tree.root_node();
     if root.has_error() {

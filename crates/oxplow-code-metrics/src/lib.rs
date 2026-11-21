@@ -21,11 +21,13 @@ use tree_sitter::Node;
 mod ast;
 #[doc(hidden)]
 pub mod for_tests;
+mod grammar;
 pub mod language;
 mod spec;
 pub mod symbols;
 
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
+pub use grammar::{load_wasm, parser, wasm_grammar_name, LangParser};
 pub use language::UnitKind;
 pub use spec::{
     native_grammar, DocStrategy, Duplication, Forms, GrammarDecl, GrammarSource, ImportStrategy,
