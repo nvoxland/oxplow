@@ -26,9 +26,9 @@ for the user to install.
 > `list_code_quality_findings`, `read_endpoint_files_content`) are gone.
 > `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
 > behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
-> analysis"), and the holder's `change-review` part shows it in the
+> analysis"), and oxplow-bundled's `change-review` page shows it (a brief in the
 > `oxplow/commit.sections`, `oxplow/uncommitted-changes.sections` and
-> `oxplow/diff-view.sections` slots.
+> `oxplow/diff-view.sections` slots links to it).
 
 ## Per-function metrics (change analysis, not a persisted scan)
 
@@ -60,7 +60,7 @@ A change's functions are keyed by that id: base and head are matched on
 `(path, id)`, and each `v_change_function` row carries the function's
 symbol `uri` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, `build::symbol_uri`), unique per change.
 Two overloads (or two same-named functions) in one file are two rows, each
-matched to its own base. The Function Changes and Tests Weakened pages
+matched to its own base. The change review's Code and Tests pages (oxplow-bundled)
 link the function by that ref.
 
 `FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`)

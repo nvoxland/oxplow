@@ -49,7 +49,7 @@ manager owns:
   each server (`LspProxy::kill`): a request in flight holds the proxy, so
   dropping the session alone would leave it running. No orderly LSP
   `shutdown`; the session is removed first, so the pump reports no crash.
-- **Config resolution**: `.oxplow/project.yaml` `lsp.servers[]` first, then the
+- **Config resolution**: the setting `oxplow.lsp.servers` (`.oxplow/project.yaml`, settings.md) first, then the
   Mason-installed registry (`InstalledServers`, carries package
   name/version). `NoConfig { language, suggestion }` errors are
   self-describing — they embed the Mason package the language's

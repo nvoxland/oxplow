@@ -182,10 +182,10 @@ default.
 `tree-sitter 0.26` + 9 grammars are workspace deps today (root
 `Cargo.toml:128-137`), used by `oxplow-code-metrics`: **rust,
 typescript, tsx, javascript, python, go, java, c, cpp, clojure** (the
-epic note says "7" — the real count is 9 grammars / 10 `Language`
-variants). `oxplow_code_metrics::spec::language_for_path` already maps
-extensions → grammar, and each `LanguageSpec` carries a
-`grammar: || tree_sitter_*::LANGUAGE.into()` thunk. Tier-2 reuses this;
+epic note says "7"; the count then was 9 grammars). A language is no
+longer a fixed list in core: each is an enabled extension's `languages:`
+entry (`language-support.md`), and `Languages::for_path` maps extensions →
+language and its grammar. Tier-2 reuses this;
 **no new dependency is required to build it.**
 
 ### Spike (done — `crates/oxplow-git/tests/ast_merge_spike.rs`)

@@ -193,6 +193,7 @@ datasets:
 - A check runs after the analysis, so a Review page reads
   `v_oxplow_review_check` (per change and check: `pending`, `failed` or `ok`) to
   say a check is still running.
+- The other ways to shape the review (a signal from SQL, a lint rule, ranking, a section) are in `references/recipes.md` "Customize the change review".
 - Test it with a fixture: commits with real files (`- { files: { "<path>": "…" } }`,
   `oxplow.vcs.stage` and `.commit`), `observe: analyze`, `observe: symbols`, a
   `observe: snapshot` with each file's `body` (the tree the run searches),

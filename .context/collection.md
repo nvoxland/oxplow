@@ -129,8 +129,9 @@ section for the column.
   shared local/project/global settings maps, resolved independently with their
   registered defaults. `testPaths` is a list of globs (`spec/**`,
   `**/it/**`; repo-relative, `*` stays within a directory) naming test
-  files on top of the built-in conventions (`.test.` / `.spec.` files,
-  `test/` and `tests/` directories, `test_*.py|rs`, `*_test.go|clj|cljc`): change
+  files on top of the extensions' `test_conventions:` (foundation's language-neutral
+  ones, `.test.` / `.spec.` files and `test/` and `tests/` directories, and each
+  enabled language pack's own; `language-support.md` "Test conventions"): change
   analysis reads them for `is_test` on its next run (stored changes aren't
   recomputed), and a bad glob fails validation. Writes use the shared config
   APIs with an explicit level. The former nested `testing:`/`collection:` file
@@ -169,8 +170,9 @@ section for the column.
 substrings mark a test or an analysis run; core matches those of every
 *enabled* extension (`CollectionService::declared_patterns`; a disabled
 extension's are not matched), then the project's `testing.runPatterns`,
-`analysisPatterns` and its two commands. oxplow-foundation declares the
-tools core used to know (pytest, cargo test, jest, eslint, ruff, …). The
+`analysisPatterns` and its two commands. Each language pack
+declares its own tools' (`rust-test`: cargo test; `ts-test`: jest, vitest; …);
+oxplow-foundation keeps only `phpunit`, which no pack covers yet. The
 matching itself is unchanged: per sub-command, case-insensitive substring,
 read-only executables skipped, `--no-run` never a run. An empty pattern or
 a `kind` other than `test` / `analysis` is a load error at the entry's line.

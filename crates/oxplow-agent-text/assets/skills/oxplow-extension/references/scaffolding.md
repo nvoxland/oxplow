@@ -107,7 +107,7 @@ unless `permissions` has `sql: read`; the loader refuses the extension.
 
 A language is an extension's `languages:` entry (`id`, `title`,
 `extensions`, `grammar`, `analysis`, `symbols`, `lsp`, `test_conventions:` …).
-A grammar of your own is a tree-sitter grammar compiled to WebAssembly:
+A grammar of your own is a tree-sitter grammar compiled to WebAssembly (the steps, `analysis.yaml`, symbols and test conventions are in `references/recipes.md` "Add a language"):
 
 ```yaml
 languages:
