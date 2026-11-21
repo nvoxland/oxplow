@@ -62,7 +62,9 @@ pub fn query(
     sexpr: &str,
     language: &Language,
 ) -> Result<Vec<QueryMatch>, AstQueryError> {
-    let ts_lang = language.tree_sitter_language();
+    let ts_lang = language
+        .tree_sitter_language()
+        .ok_or_else(|| AstQueryError::UnknownLanguage(language.name().to_string()))?;
     let q = Query::new(&ts_lang, sexpr).map_err(|e| AstQueryError::BadQuery(e.to_string()))?;
     let names = q.capture_names();
     let mut cursor = QueryCursor::new();

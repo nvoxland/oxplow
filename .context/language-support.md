@@ -60,9 +60,9 @@ languages:
 ```
 
 - **Parsed** by `extension/extensions/languages.rs` at load: the files are
-  read, the language is built (grammar loaded, every node kind
-  `analysis.yaml` names checked against the grammar, the symbol query
-  compiled), and a wrong one is the extension's error at its line. An id is
+  read, the language is built and checked (`Language::check`: grammar loaded,
+  every node kind `analysis.yaml` names checked against the grammar, the symbol
+  query compiled), and a wrong one is the extension's error at its line. An id is
   lowercase letters, digits and `_`.
 - **`grammar: { native: <name> }`** is for the extensions that ship with
   oxplow only (`oxplow_code_metrics::native_grammar`, the one place in core
@@ -75,16 +75,31 @@ languages:
   ([extensions-sdk.md](./extensions-sdk.md) "extension grammar build").
 - **Loading a wasm grammar** (`oxplow_code_metrics::load_wasm`, `grammar.rs`):
   one wasmtime engine per process (tree-sitter's `wasm` feature, which builds
-  the wasmtime C API with `cmake`), a loading store behind a lock, and the
-  grammar's name read from its own `tree_sitter_<name>` export, so the file
-  says what it is. It loads when the language is built (at publication, and
-  in a script worker, which receives the bytes base64 in its languages
-  message); a file that won't load is the language's problem, saying why.
-  The bytes are part of the language's fingerprint. Only lexing runs in
-  wasm; a parse costs about 1.8× a native one (performance.md).
+  the wasmtime C API with `cmake`), and the grammar's name read from its own
+  `tree_sitter_<name>` export, so the file says what it is. Three rules
+  come from tree-sitter's store, which adds each load's memory to a 128 MB
+  budget and never gives it back:
+  - **Memoised by content** for the life of the process: the set is built
+    again at every publication, and a grammar loaded each time would, after
+    about a hundred loads of a large one (Elixir's is 1.3 MB), be refused
+    ("invalid memory size") and hold its extension until a restart.
+  - **Loaded in a store of its own, dropped after the load**; the language
+    instantiates in whichever store parses with it.
+  - **Lazy**: `Language::build` only checks that the file is a grammar
+    module; the first parse (`grammar()`, `parser()`) compiles it and checks
+    the node kinds `analysis.yaml` names against it. `Language::check()`
+    forces that, and the extension loader calls it, so a grammar that won't
+    load is still the extension's error at its line, saying why. A script
+    worker receives the bytes base64 in its languages message but compiles
+    only a grammar its script parses with (a fresh process per run, so
+    compiling every one was the per-run cost). The bytes are part of the
+    language's fingerprint. Only lexing runs in wasm; a parse costs about
+    1.8× a native one (performance.md).
 - **Every parse goes through `Language::parser()`** (`LangParser`): a wasm
   language's parser needs a `WasmStore`, and making one costs ~4 ms, so each
-  thread keeps one and lends it to the parsers it makes. Never call
+  thread keeps one and lends it to the parsers it makes. A thread's store
+  is dropped, not lent again, when it fails to set a language (it may be full)
+  or when another grammar has loaded since it was made. Never call
   `tree_sitter::Parser::new()` for a language.
 - **`analysis.yaml`** is the data the walkers read
   (`oxplow_code_metrics::LanguageSpec::parse`):
@@ -244,7 +259,12 @@ the snapshot). A deleted file drops out whatever its language.
 the set's fingerprint is kept in `symbol_index_state` (V57), and when the
 index is empty or was filled with another set (a pack turned on or off,
 while oxplow ran or not) it drops the symbols of languages no longer in
-the set and restates every file from each live stream's latest snapshot.
+the set and restates every file from each live stream's latest snapshot
+(parsed in `spawn_blocking`). The fingerprint is written last, once every
+stream is restated: an error or a quit in between leaves the index not
+current, and the next run restates again. A newer snapshot landing mid-read
+isn't a reason to skip a stream: that snapshot's own collection restated only
+the files it changed, and `record` keeps a newer snapshot's rows for a file.
 The first publication at boot and each one that changes the set run it
 (`extension_activation`). Columns: `.context/data-model.md`.
 

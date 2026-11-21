@@ -506,12 +506,69 @@ pub fn native_grammar(name: &str) -> Option<TsLanguage> {
 pub struct LanguageDef {
     pub decl: LanguageDecl,
     pub extension: String,
-    grammar: Option<TsLanguage>,
+    grammar: GrammarSlot,
     spec: Option<LanguageSpec>,
     symbols_src: Option<(String, Option<String>)>,
     symbols: OnceLock<Result<SymbolSpec, String>>,
     tag: u64,
     fingerprint: u64,
+}
+
+/// A language's grammar: a native one is at hand; a WebAssembly one is
+/// compiled the first time something parses with it (and checked against the
+/// analysis then), so a language set that is built often, or shipped to a
+/// script worker that parses nothing of it, doesn't pay for it.
+enum GrammarSlot {
+    None,
+    Native(TsLanguage),
+    Wasm {
+        path: String,
+        bytes: Arc<[u8]>,
+        /// The node kinds `analysis.yaml` names, for the check at load.
+        node_kinds: Vec<String>,
+        loaded: OnceLock<Result<TsLanguage, String>>,
+    },
+}
+
+impl GrammarSlot {
+    fn get(&self) -> Result<Option<&TsLanguage>, &str> {
+        match self {
+            GrammarSlot::None => Ok(None),
+            GrammarSlot::Native(g) => Ok(Some(g)),
+            GrammarSlot::Wasm {
+                bytes,
+                node_kinds,
+                loaded,
+                path,
+            } => loaded
+                .get_or_init(|| {
+                    let g =
+                        crate::grammar::load_wasm(bytes).map_err(|e| format!("`{path}`: {e}"))?;
+                    let missing: Vec<&str> = node_kinds
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|k| {
+                            g.id_for_node_kind(k, true) == 0 && g.id_for_node_kind(k, false) == 0
+                        })
+                        .collect();
+                    if missing.is_empty() {
+                        Ok(g)
+                    } else {
+                        Err(format!(
+                            "analysis.yaml names node kinds its grammar doesn't have: {}",
+                            missing.join(", ")
+                        ))
+                    }
+                })
+                .as_ref()
+                .map(Some)
+                .map_err(String::as_str),
+        }
+    }
+
+    fn present(&self) -> bool {
+        !matches!(self, GrammarSlot::None)
+    }
 }
 
 impl std::fmt::Debug for LanguageDef {
@@ -555,7 +612,7 @@ impl Language {
             .as_ref()
             .map(|g| (g.native.as_deref(), g.wasm.as_deref()))
         {
-            None => None,
+            None => GrammarSlot::None,
             Some((None, None)) | Some((Some(_), Some(_))) => {
                 return Err(format!(
                     "language `{id}`: `grammar:` names one of `native` and `wasm`"
@@ -567,7 +624,7 @@ impl Language {
                         "language `{id}`: `grammar: {{ native: {name} }}` is for the extensions that ship with oxplow; bring a WebAssembly grammar (`grammar: {{ wasm: <file> }}`)"
                     ));
                 }
-                Some(native_grammar(name).ok_or_else(|| {
+                GrammarSlot::Native(native_grammar(name).ok_or_else(|| {
                     format!("language `{id}`: oxplow has no native grammar `{name}`")
                 })?)
             }
@@ -576,44 +633,66 @@ impl Language {
                     .wasm
                     .as_deref()
                     .ok_or_else(|| format!("language `{id}`: its grammar `{path}` wasn't read"))?;
-                Some(
-                    crate::grammar::load_wasm(bytes)
-                        .map_err(|e| format!("language `{id}`: `{path}`: {e}"))?,
-                )
+                // Cheap: the module's own export says it is a grammar. Loading
+                // it is for the first parse (or `check`).
+                crate::grammar::wasm_grammar_name(bytes)
+                    .map_err(|e| format!("language `{id}`: `{path}`: {e}"))?;
+                GrammarSlot::Wasm {
+                    path: path.to_string(),
+                    bytes: bytes.into(),
+                    node_kinds: Vec::new(),
+                    loaded: OnceLock::new(),
+                }
             }
         };
-        let spec = match (&grammar, &source.analysis) {
-            (Some(g), Some(text)) => {
+        let (grammar, spec) = match (grammar, &source.analysis) {
+            (g, Some(text)) if g.present() => {
                 let spec =
                     LanguageSpec::parse(text).map_err(|e| format!("language `{id}`: {e}"))?;
-                let missing: Vec<&str> = spec
-                    .node_kinds()
-                    .into_iter()
-                    .filter(|k| {
-                        g.id_for_node_kind(k, true) == 0 && g.id_for_node_kind(k, false) == 0
-                    })
-                    .collect();
-                if !missing.is_empty() {
-                    return Err(format!(
-                        "language `{id}`: analysis.yaml names node kinds its grammar doesn't have: {}",
-                        missing.join(", ")
-                    ));
-                }
-                Some(spec)
+                let g = match g {
+                    GrammarSlot::Native(native) => {
+                        let missing: Vec<&str> = spec
+                            .node_kinds()
+                            .into_iter()
+                            .filter(|k| {
+                                native.id_for_node_kind(k, true) == 0
+                                    && native.id_for_node_kind(k, false) == 0
+                            })
+                            .collect();
+                        if !missing.is_empty() {
+                            return Err(format!(
+                                "language `{id}`: analysis.yaml names node kinds its grammar doesn't have: {}",
+                                missing.join(", ")
+                            ));
+                        }
+                        GrammarSlot::Native(native)
+                    }
+                    GrammarSlot::Wasm {
+                        path,
+                        bytes,
+                        loaded,
+                        ..
+                    } => GrammarSlot::Wasm {
+                        path,
+                        bytes,
+                        node_kinds: spec.node_kinds().into_iter().map(String::from).collect(),
+                        loaded,
+                    },
+                    GrammarSlot::None => GrammarSlot::None,
+                };
+                (g, Some(spec))
             }
-            (Some(_), None) => {
+            (g, None) if g.present() => {
                 return Err(format!(
                     "language `{id}`: a grammar needs `analysis:` (its analysis.yaml)"
                 ))
             }
-            (None, Some(_)) => {
-                return Err(format!("language `{id}`: `analysis:` needs a `grammar:`"))
-            }
-            (None, None) => None,
+            (_, Some(_)) => return Err(format!("language `{id}`: `analysis:` needs a `grammar:`")),
+            (g, None) => (g, None),
         };
-        let symbols_src = match (&grammar, &source.symbols) {
-            (Some(_), Some(scm)) => Some((scm.clone(), source.symbols_yaml.clone())),
-            (None, Some(_)) => {
+        let symbols_src = match (grammar.present(), &source.symbols) {
+            (true, Some(scm)) => Some((scm.clone(), source.symbols_yaml.clone())),
+            (false, Some(_)) => {
                 return Err(format!("language `{id}`: `symbols:` needs a `grammar:`"))
             }
             _ => None,
@@ -674,7 +753,28 @@ impl Language {
     /// Its grammar, when it has one (a language known only by its server
     /// has none).
     pub fn grammar(&self) -> Option<&TsLanguage> {
-        self.0.grammar.as_ref()
+        self.0.grammar.get().ok().flatten()
+    }
+
+    /// Why its grammar can't be used (a WebAssembly file tree-sitter
+    /// refuses, node kinds `analysis.yaml` names that it lacks): loads it if
+    /// it isn't yet.
+    pub fn grammar_error(&self) -> Option<String> {
+        self.0
+            .grammar
+            .get()
+            .err()
+            .map(|e| format!("language `{}`: {e}", self.name()))
+    }
+
+    /// Check what loading would find wrong: the grammar (loaded now) and
+    /// the symbol query. For `extension check` and the load of an extension;
+    /// a set built to parse isn't checked.
+    pub fn check(&self) -> Result<(), String> {
+        match self.grammar_error() {
+            Some(e) => Err(e),
+            None => self.check_symbols(),
+        }
     }
 
     /// A parser set to its grammar (a wasm grammar's parser borrows this
@@ -699,10 +799,8 @@ impl Language {
 
     /// The tree-sitter grammar of an [`analyzable`](Self::analyzable)
     /// language.
-    pub fn tree_sitter_language(&self) -> TsLanguage {
-        self.grammar()
-            .cloned()
-            .unwrap_or_else(|| panic!("language `{}` has no grammar", self.name()))
+    pub fn tree_sitter_language(&self) -> Option<TsLanguage> {
+        self.grammar().cloned()
     }
 
     /// A hash of its id: the duplicate detector's salt, so token streams of
@@ -923,5 +1021,59 @@ impl Languages {
         self.by_lsp_id(lsp_id)
             .map(|l| l.decl().extensions.clone())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod lazy_grammar_tests {
+    use super::*;
+
+    /// The Clojure pack's own files, read as an extension would hand them.
+    fn clojure(skip_kind: &str) -> LanguageSource {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../extensions/oxplow-clojure");
+        let manifest: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(root.join("extension.yaml")).unwrap())
+                .unwrap();
+        let decl: LanguageDecl = serde_yaml::from_value(manifest["languages"][0].clone()).unwrap();
+        let analysis = decl.analysis.clone().unwrap();
+        LanguageSource::read("oxplow-clojure", false, decl, &|rel| {
+            let bytes = std::fs::read(root.join(rel)).ok()?;
+            Some(if rel == analysis && !skip_kind.is_empty() {
+                String::from_utf8(bytes)
+                    .unwrap()
+                    .replace("skip_kinds: []", &format!("skip_kinds: [{skip_kind}]"))
+                    .into_bytes()
+            } else {
+                bytes
+            })
+        })
+        .unwrap()
+    }
+
+    /// Building a language doesn't compile its WebAssembly grammar: the first
+    /// parse does, and a set built often (or shipped to a script worker that
+    /// parses nothing of it) doesn't pay for it.
+    #[test]
+    fn a_wasm_grammar_is_loaded_on_first_use() {
+        let before = crate::grammar::loaded_count();
+        let lang = Language::build(&clojure("")).unwrap();
+        assert_eq!(crate::grammar::loaded_count(), before, "built, not loaded");
+        assert!(lang.parser().is_some());
+        assert_eq!(crate::grammar::loaded_count(), before + 1);
+        assert!(lang.check().is_ok());
+    }
+
+    /// A node kind the analysis names that the grammar lacks is found when
+    /// the grammar loads (`check`, `extension check`), not at every build.
+    #[test]
+    fn analysis_naming_a_missing_node_kind_fails_the_check() {
+        let lang = Language::build(&clojure("no_such_node")).unwrap();
+        let e = lang.check().unwrap_err();
+        assert!(
+            e.contains("node kinds its grammar doesn't have: no_such_node"),
+            "{e}"
+        );
+        assert!(lang.parser().is_none(), "such a grammar isn't used");
     }
 }

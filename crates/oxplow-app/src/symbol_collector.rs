@@ -138,7 +138,7 @@ pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
         .filter(|l| l.analyzable())
         .map(|l| l.name().to_string())
         .collect();
-    svc.symbol_store.restate_languages(ids, fingerprint).await?;
+    svc.symbol_store.restate_languages(ids).await?;
     let keeps_contents = svc.snapshot_captures.no_contents_reason().is_none();
     let project_dir = svc.snapshot_files().project_dir;
     let mut filled = 0;
@@ -164,32 +164,34 @@ pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
         };
         let supported = |p: &str| languages.for_path(p).is_some();
         let corpus = svc.trees.corpus(&ws, &rev, supported).await?;
-        let files: Vec<FileSymbols> = corpus
-            .iter()
-            .filter_map(|(path, text)| {
-                let language = languages.for_path(path)?;
-                Some(file_symbols(path, text, language))
-            })
-            .collect();
+        // Parsing is CPU work over every file: off the async threads.
+        let parse_with = languages.clone();
+        let files: Vec<FileSymbols> = tokio::task::spawn_blocking(move || {
+            corpus
+                .iter()
+                .filter_map(|(path, text)| {
+                    let language = parse_with.for_path(path)?;
+                    Some(file_symbols(path, text, language))
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| DomainError::Invalid(format!("the symbol parse stopped: {e}")))?;
         let capture = SymbolCapture {
             files_collected: files.len() as i64,
             files_failed: 0,
         };
-        // A newer snapshot came while it read: that snapshot's collection
-        // restates what changed, and this one would only be older.
-        if svc
-            .snapshot_store
-            .latest_snapshot_id_for_stream(stream.id)
-            .await?
-            != Some(snapshot)
-        {
-            continue;
-        }
+        // A snapshot newer than this one may have landed while it read: its
+        // own collection restated only the files it changed, so this stream's
+        // other files get their symbols from here. `record` keeps a newer
+        // snapshot's rows for a file it did restate.
         filled += files.len();
         svc.symbol_store
             .record(stream.id.value(), snapshot, files, capture)
             .await?;
     }
+    // Every stream is restated: now the index is current for this set.
+    svc.symbol_store.mark_languages_indexed(fingerprint).await?;
     Ok(filled)
 }
 
@@ -420,5 +422,46 @@ mod tests {
             ])
         );
         assert_eq!(backfill(&svc).await.unwrap(), 0);
+    }
+
+    /// The set is written as the index's only once every stream is restated:
+    /// a restate that fails (or is cut short by a quit) leaves the index not
+    /// current, and the next run restates again.
+    #[tokio::test]
+    async fn a_failed_backfill_leaves_the_index_not_current() {
+        let (svc, _dir, stream) = fixture().await;
+        snapshot(&svc, stream, &[("a.py", Some(WIDGET))]).await;
+        let sql = |sql: &'static str| {
+            let db = svc.db.clone();
+            async move {
+                db.transaction(move |tx| tx.execute_batch(sql).map_err(oxplow_db::map_sql_err))
+                    .await
+                    .unwrap()
+            }
+        };
+        sql("DELETE FROM symbol; DELETE FROM symbol_index_state;").await;
+        sql("CREATE TRIGGER refuse_symbols BEFORE INSERT ON symbol BEGIN SELECT RAISE(ABORT, 'refused'); END;")
+            .await;
+        assert!(backfill(&svc).await.is_err());
+        let fingerprint = format!("{:016x}", svc.languages.current().fingerprint());
+        assert_ne!(
+            svc.symbol_store
+                .indexed_languages()
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(fingerprint.as_str()),
+            "a failed restate isn't recorded as done"
+        );
+        sql("DROP TRIGGER refuse_symbols;").await;
+        assert_eq!(backfill(&svc).await.unwrap(), 1, "it restates again");
+        assert_eq!(
+            svc.symbol_store
+                .indexed_languages()
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(fingerprint.as_str())
+        );
     }
 }

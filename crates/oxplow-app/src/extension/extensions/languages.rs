@@ -101,7 +101,7 @@ pub(crate) fn parse_languages(
                     continue;
                 }
             };
-        let built = Language::build(&source).and_then(|l| l.check_symbols().map(|()| l));
+        let built = Language::build(&source).and_then(|l| l.check().map(|()| l));
         if let Err(e) = built {
             errors.push(at("language.invalid", file, line, e));
             continue;

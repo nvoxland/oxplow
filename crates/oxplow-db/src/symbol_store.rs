@@ -156,13 +156,10 @@ impl SqliteSymbolStore {
     }
 
     /// Drop every symbol whose language isn't in `languages` (its pack was
-    /// turned off), and record `fingerprint` as the set the index holds.
-    /// One transaction.
-    pub async fn restate_languages(
-        &self,
-        languages: Vec<String>,
-        fingerprint: String,
-    ) -> Result<(), DomainError> {
+    /// turned off). The set the index holds is [`Self::mark_languages_indexed`]'s:
+    /// it is written once every stream is restated, so an error or a quit in
+    /// between leaves the index "not current" and the next run restates again.
+    pub async fn restate_languages(&self, languages: Vec<String>) -> Result<(), DomainError> {
         self.db
             .transaction(move |tx| {
                 let keep = serde_json::to_string(&languages)
@@ -172,6 +169,15 @@ impl SqliteSymbolStore {
                     [keep],
                 )
                 .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Record `fingerprint` as the language set the index now holds.
+    pub async fn mark_languages_indexed(&self, fingerprint: String) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
                 tx.execute(
                     "INSERT INTO symbol_index_state (id, languages) VALUES (1, ?1)
                      ON CONFLICT (id) DO UPDATE SET languages = excluded.languages",
@@ -240,10 +246,13 @@ mod tests {
             )
             .await
             .unwrap();
-        store
-            .restate_languages(vec!["rust".into()], "f1".into())
-            .await
-            .unwrap();
+        store.restate_languages(vec!["rust".into()]).await.unwrap();
+        assert_eq!(
+            store.indexed_languages().await.unwrap(),
+            None,
+            "restating alone doesn't say the index is current"
+        );
+        store.mark_languages_indexed("f1".into()).await.unwrap();
         let paths: Vec<String> = db
             .call(|c| {
                 let mut st = c.prepare("SELECT path FROM symbol ORDER BY path")?;
@@ -257,7 +266,8 @@ mod tests {
             store.indexed_languages().await.unwrap().as_deref(),
             Some("f1")
         );
-        store.restate_languages(vec![], "f2".into()).await.unwrap();
+        store.restate_languages(vec![]).await.unwrap();
+        store.mark_languages_indexed("f2".into()).await.unwrap();
         assert!(store.is_empty().await.unwrap());
         assert_eq!(
             store.indexed_languages().await.unwrap().as_deref(),

@@ -15,7 +15,9 @@
 //! [`native_grammar`]: crate::native_grammar
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use tree_sitter::{wasmtime, Language as TsLanguage, Parser, WasmStore};
@@ -25,21 +27,60 @@ fn engine() -> &'static wasmtime::Engine {
     ENGINE.get_or_init(wasmtime::Engine::default)
 }
 
+/// How many distinct grammars this process has loaded: a thread's lending
+/// store is dropped when it moves, since a store only ever fills.
+static LOADED: AtomicU64 = AtomicU64::new(0);
+
+/// How many distinct grammars this process has loaded.
+#[cfg(test)]
+pub(crate) fn loaded_count() -> u64 {
+    LOADED.load(Ordering::SeqCst)
+}
+
+/// A 64-bit FNV-1a of the module's bytes, and its length: the key a loaded
+/// grammar is kept under.
+fn content_key(bytes: &[u8]) -> (u64, usize) {
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
+        (acc ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    (hash, bytes.len())
+}
+
+/// Loaded grammars (or why one didn't load), by content.
+type Loaded = HashMap<(u64, usize), Result<TsLanguage, String>>;
+
 /// Load a WebAssembly grammar. The error says why: not wasm, no
 /// `tree_sitter_<name>` export, or what tree-sitter refused (an ABI it
 /// doesn't read, an import a scanner may not use).
+///
+/// Memoised by the module's content for the life of the process: tree-sitter's
+/// store adds each load's memory to a 128 MB budget and never gives it back, so
+/// loading the same file at every publication would, after about a hundred
+/// loads of a large grammar, refuse it. A grammar is loaded in a store of its
+/// own that is dropped after the load; the language then instantiates in
+/// whichever store parses with it.
 pub fn load_wasm(bytes: &[u8]) -> Result<TsLanguage, String> {
+    static LOADED_BY_CONTENT: OnceLock<Mutex<Loaded>> = OnceLock::new();
+    let key = content_key(bytes);
+    let mut loaded = LOADED_BY_CONTENT
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(done) = loaded.get(&key) {
+        return done.clone();
+    }
+    let done = load_wasm_in_a_new_store(bytes);
+    if done.is_ok() {
+        LOADED.fetch_add(1, Ordering::SeqCst);
+    }
+    loaded.insert(key, done.clone());
+    done
+}
+
+fn load_wasm_in_a_new_store(bytes: &[u8]) -> Result<TsLanguage, String> {
     let name = wasm_grammar_name(bytes)?;
-    static LOADER: OnceLock<Result<Mutex<WasmStore>, String>> = OnceLock::new();
-    let loader = LOADER
-        .get_or_init(|| {
-            WasmStore::new(engine())
-                .map(Mutex::new)
-                .map_err(|e| e.message)
-        })
-        .as_ref()
-        .map_err(|e| format!("the WebAssembly engine didn't start: {e}"))?;
-    let mut store = loader.lock().unwrap_or_else(|p| p.into_inner());
+    let mut store = WasmStore::new(engine())
+        .map_err(|e| format!("the WebAssembly engine didn't start: {}", e.message))?;
     store
         .load_language(&name, bytes)
         .map_err(|e| format!("the grammar `{name}` didn't load: {}", e.message))
@@ -109,7 +150,8 @@ fn wasm_exports(bytes: &[u8]) -> Option<Vec<String>> {
 thread_local! {
     /// The store this thread lends to the parsers it makes for wasm
     /// languages.
-    static STORE: RefCell<Option<WasmStore>> = const { RefCell::new(None) };
+    /// With the number of grammars loaded when it was made.
+    static STORE: RefCell<Option<(u64, WasmStore)>> = const { RefCell::new(None) };
 }
 
 /// A parser set to one language; derefs to tree-sitter's [`Parser`]. A wasm
@@ -133,8 +175,14 @@ impl DerefMut for LangParser {
 
 impl Drop for LangParser {
     fn drop(&mut self) {
+        // `try_with`: a parser dropped while the thread's locals are being
+        // torn down has nowhere to give the store back.
         if let Some(store) = self.parser.take_wasm_store() {
-            STORE.with(|s| *s.borrow_mut() = Some(store));
+            let _ = STORE.try_with(|s| {
+                if let Ok(mut s) = s.try_borrow_mut() {
+                    *s = Some((LOADED.load(Ordering::SeqCst), store));
+                }
+            });
         }
     }
 }
@@ -144,14 +192,26 @@ impl Drop for LangParser {
 pub fn parser(grammar: &TsLanguage) -> Option<LangParser> {
     let mut parser = Parser::new();
     if grammar.is_wasm() {
-        let store = match STORE.with(|s| s.borrow_mut().take()) {
+        // A store only fills (each grammar it instantiates adds its memory),
+        // so one made before the last grammar loaded is let go and remade.
+        let lent = STORE
+            .try_with(|s| s.try_borrow_mut().ok().and_then(|mut s| s.take()))
+            .ok()
+            .flatten()
+            .filter(|(loaded, _)| *loaded == LOADED.load(Ordering::SeqCst))
+            .map(|(_, store)| store);
+        let store = match lent {
             Some(store) => store,
             None => WasmStore::new(engine()).ok()?,
         };
         parser.set_wasm_store(store).ok()?;
     }
     let mut parser = LangParser { parser };
-    parser.set_language(grammar).ok()?;
+    if parser.set_language(grammar).is_err() {
+        // The store may be full: it isn't lent again.
+        drop(parser.parser.take_wasm_store());
+        return None;
+    }
     Some(parser)
 }
 
@@ -175,6 +235,29 @@ mod tests {
             assert!(!tree.root_node().has_error());
         }
         assert!(STORE.with(|s| s.borrow().is_some()));
+    }
+
+    /// The same grammar loaded over and over (every publication builds the
+    /// language set again) must not run the process out of wasm memory:
+    /// tree-sitter's store never gives a load's memory back.
+    #[test]
+    fn loading_one_grammar_many_times_keeps_working() {
+        // Elixir's is 1.3 MB: about 100 loads fill the store's 128 MB.
+        let elixir = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/extensions/elixir-pack/grammars/elixir.wasm"
+        ))
+        .unwrap();
+        let first = load_wasm(&elixir).unwrap();
+        for _ in 0..200 {
+            let again = load_wasm(&elixir).unwrap_or_else(|e| panic!("{e}"));
+            assert_eq!(
+                again.id_for_node_kind("call", true),
+                first.id_for_node_kind("call", true)
+            );
+        }
+        let mut p = parser(&first).unwrap();
+        assert!(p.parse("defmodule A do\nend\n", None).is_some());
     }
 
     /// The grammar's name comes from its export; bytes that aren't a

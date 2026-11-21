@@ -33,7 +33,9 @@ fn an_unsupported_or_unparseable_file_has_no_definitions() {
 #[test]
 fn a_query_capturing_an_unknown_name_is_refused() {
     let err = SymbolSpec::compile(
-        &crate::for_tests::lang("rust").tree_sitter_language(),
+        &crate::for_tests::lang("rust")
+            .tree_sitter_language()
+            .unwrap(),
         "(function_item name: (identifier) @name) @definition.lambda",
         None,
     )
@@ -41,7 +43,9 @@ fn a_query_capturing_an_unknown_name_is_refused() {
     .unwrap();
     assert!(err.contains("`definition.lambda`"), "{err}");
     let err = SymbolSpec::compile(
-        &crate::for_tests::lang("rust").tree_sitter_language(),
+        &crate::for_tests::lang("rust")
+            .tree_sitter_language()
+            .unwrap(),
         "(function_item name: (identifier) @title) @definition.function",
         None,
     )
