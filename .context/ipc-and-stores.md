@@ -320,8 +320,8 @@ orphaned, an agent's status, `ConfigChanged` for the Settings view).
 Settings list (Extensions, Data, Capabilities, Integrations) loads each
 part on its own trigger: the catalog or config change
 (`extensionsChanged`) for extensions and their checks, entities and
-collectors; `useRerunOnChange` over the datasets the part read (`v_collector_run` for
-the collector list, `v_extension_run` for the last runs); and a dataset's
+collectors; `useRerunOnChange` over the datasets the part read (such as
+`v_collector_run` for the collector list); and a dataset's
 row count when that dataset's own `DatasetsChanged` names it
 (each loader re-runs on its own reads). A collector run (frequent) therefore re-lists the collectors and nothing else.
 The daemon still re-reads `project.yaml` on each extension-catalog call;

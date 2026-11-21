@@ -341,16 +341,6 @@ markdown itself, nor edits it in a `<textarea>`.
   destructive, so they are on right-click** like the other row actions,
   and a row action that adds a permission asks inline, where the person
   clicked.
-- **The Extensions page shows each extension's last run.** One line under
-  the row from `v_extension_run` (`latest = 1` per contribution): the **worst
-  current warning** (denied, then stale, then failed; the newest of equals) so a
-  failing contribution isn't hidden behind another's later ok run, else the
-  most recent run: "Last run: ok · collector pull · <when>".
-  Failed, denied and stale are in the warning color (`--severity-medium`) and
-  say why — a failed or stale run's `error`, a denied run's refusing decision
-  from `decisions` ("host evil.example: it isn't in the grant"). An extension
-  that has never run shows no line. `lastRuns` in `extensionRowModel.ts`; the
-  line re-reads when a run commits (`useRerunOnChange` on the read's datasets).
 - **The Extensions page says what each script is given.** Under the
   row, one muted line per Starlark script that has services: its name, then
   the service titles ("Collector triage — Read the captured tree · Ask a

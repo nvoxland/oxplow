@@ -91,8 +91,7 @@ linking to Extension problems filtered to it) and a link to its
 running `extension.yaml`; then its pages (each linking to the Definition of
 the running file, `v_page.running_uri`), the other contributions by count,
 what it may reach, its deployments (newest first, Roll Back to This) and the
-slot `oxplow/extension.runs`, which oxplow-bundled fills with
-`extension-runs` (foundation never depends on bundled). Deploy, Roll Back,
+slot `oxplow/extension.runs` for extensions to fill. Deploy, Roll Back,
 Enable, Disable, Share with the Team, Stop Sharing and Remove are the page's
 actions (the ☰ menu), each offered by a `can_*` column of its first loader;
 one that adds permissions asks inline like any deploy.
@@ -202,16 +201,6 @@ its scope trace.
   started it. A person's `oxplow.effect.retry` / `backfill` links the
   reaction's run to theirs (`under`) without making it theirs: the
   effect still runs as itself.
-  **Reading it:** the bundled `runs` page (`oxplow/runs`, titled
-  "Extension runs", in the launcher under Activity) lists, per extension
-  and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
-  model calls, the ones needing attention first. The Extensions page
-  shows each extension's worst current run (`v_extension_run`, `latest =
-  1`). Opening an extension's row (the `oxplow/extension-runs`
-  page, which has no category, param `extension`) lists its runs one by one for the same week:
-  contribution, version, generation (blank for a run that holds none),
-  actor, causing event, outcome, error, wall and CPU time, model calls — the
-  small inspector, with no log or secret to read.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
   (launcher, Activity) is a dashboard of three tables over the last 30 days:
   `interface-tool-calls` (oxplow's MCP tools by tool and harness, from

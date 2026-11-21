@@ -4,7 +4,7 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the agent-interface, extension-run, job-run, merge and branch pages, Explore Data, the history graph and the shared-files advisories.
+description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the agent-interface, job-run, merge and branch pages, Explore Data, the history graph and the shared-files advisories.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
@@ -16,7 +16,7 @@ build: { run: "bun install --frozen-lockfile && bun run build", output: dist, ex
 intent:
   purpose: >-
     Hold oxplow's own pages and components that haven't been reviewed yet:
-    the agent interface, extension and job runs, merge readiness and remote
+    the agent interface, job runs, merge readiness and remote
     branches, Explore Data and the history graph.
   origin: null
   examples:
@@ -29,9 +29,6 @@ intent:
     - name: remote-branches-lists-the-latest-first
       input: { page: remote-branches, params: { stream_id: 1 } }
       expect: the remote's branches newest first, and no local branch
-    - name: extension runs over the last week
-      input: { page: runs, params: {} }
-      expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
     - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
       input: { page: oxplow/git-history }
       expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
@@ -49,7 +46,6 @@ intent:
       expect: Settings → Data lists bundled's four effects
 ui:
   mounts:
-    - { page: extension-runs, at: oxplow/extension.runs }
     # Git History's commits drawn as a graph, in place of oxplow's plain
     # list (`vcs.history.graph`, a target no provider binds). It only shows
     # and opens commits, so it isn't a program to approve.
