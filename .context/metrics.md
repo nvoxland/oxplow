@@ -1288,10 +1288,11 @@ per-language AST idiom collectors, but they don't have a natural per-subject mea
 so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
 carried on the fact's `rule` column via `CollectedFact.rule`). They live in the
-language packs. A lint-like collector records one `ast_hit` fact **per hit**
-(value 1, `rule` its slug, `line` where it is, `severity` how bad: the change
-review ranks a finding on a changed line by it); a count that isn't a finding
-(Clojure's `defn`) records one per file. Either way each metric is a
+language packs. Each records one `ast_hit` fact **per file** (value its
+count, `rule` its slug); a lint-like one adds `severity` and its hits' lines
+in `detail` (`{"lines": [3, 17]}`), which the change review matches to the
+changed lines. Not a fact per hit: that multiplied the facts the metric cube
+folds (41k on this repo) and pinned the daemon's CPU. Either way each metric is a
 `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the packs'
 `metrics:` entries), so the totals are the same. Idioms
 sharing the measure never collide because every spec read applies the rule filter

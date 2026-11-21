@@ -15,7 +15,8 @@ given:
         measure: oxplow.ast_hit
         producer: oxplow.rust.panic_macros
         items:
-          - { value: 1, path: src/a.rs, line: 2, rule: panic_macro, severity: warning }
+          # As the pack's collector records it: one fact per file, its hits' lines in detail.
+          - { value: 2, path: src/a.rs, detail: '{"lines":[2,9]}', rule: panic_macro, severity: warning }
 when:
   sql: SELECT signal, severity, path, line FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_findings'
 expect:

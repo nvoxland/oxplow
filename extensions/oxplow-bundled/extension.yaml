@@ -292,7 +292,7 @@ datasets:
       - { name: signal, type: "", doc: "`lint-<rule or measure>` or `analyzer-<rule>`." }
       - { name: severity, type: "", doc: "`high`, `medium` or `info`." }
       - { name: path, type: BLOB, doc: "The file, or NULL for the whole change." }
-      - { name: line, type: BLOB, doc: "The line, or NULL." }
+      - { name: line, type: "", doc: "The line, or NULL." }
       - { name: end_line, type: "", doc: "NULL." }
       - { name: title, type: "", doc: "One line for a list." }
       - { name: why, type: "", doc: "The evidence." }

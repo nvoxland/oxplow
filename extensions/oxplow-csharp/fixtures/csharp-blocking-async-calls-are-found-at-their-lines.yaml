@@ -7,5 +7,4 @@ when:
     "src/Util.cs": "class Util {\n    static void Noop() { try { } catch { } }\n}\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "line": 6, "rule": "blocking_async", "severity": "warning", "dims": {"oxplow.language": "csharp"}}
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "line": 7, "rule": "blocking_async", "severity": "warning", "dims": {"oxplow.language": "csharp"}}
+    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "rule": "blocking_async", "severity": "warning", "detail": "{\"lines\":[6,7]}", "dims": {"oxplow.language": "csharp"}}

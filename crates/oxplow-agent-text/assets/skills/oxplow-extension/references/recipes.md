@@ -214,8 +214,10 @@ def transform(input):
     return {"facts": facts}
 ```
 
-- One fact per hit, at its `line`: a fact with no `line` (a count per
-  file) can't be matched to a changed line, so it never reaches the review.
+- The review needs the hits' lines: a fact at a `line`, or a fact per file
+  whose `detail` is `{"lines": [3, 17]}`. Prefer the second for a check that
+  hits often (one fact per file keeps the metric cube small); a count with
+  neither can't be matched to a changed line.
 - The review shows `lint-<rule>`. `severity` is `error`, `warning`, `info`
   or `note` (another word fails the run): `error` is `high`, `warning`
   `medium`, `info` and `note` `info`; none is `medium`. A project can still

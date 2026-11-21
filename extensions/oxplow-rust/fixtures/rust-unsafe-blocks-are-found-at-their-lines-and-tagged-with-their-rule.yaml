@@ -7,5 +7,4 @@ when:
     "src/b.rs": "// FIXME later\nfn c() { let s = \"a TODO in a string is ignored\"; }\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "line": 4, "rule": "unsafe_block", "severity": "warning", "dims": {"oxplow.language": "rust"}}
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "line": 10, "rule": "unsafe_block", "severity": "warning", "dims": {"oxplow.language": "rust"}}
+    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "rule": "unsafe_block", "severity": "warning", "detail": "{\"lines\":[4,10]}", "dims": {"oxplow.language": "rust"}}
