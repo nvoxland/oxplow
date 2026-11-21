@@ -1,0 +1,28 @@
+# A change's head is an older commit than the worktree: the second commit
+# removes `b`'s call to `helper`, and `a` still calls it there, so nothing is
+# said — even though the third commit (what the worktree holds now) removed
+# `a`'s call too. The check reads the change's head tree, not the worktree's.
+requires: [oxplow-rust]
+given:
+  - { files: { "src/lib.rs": "fn helper() -> u32 {\n    1\n}\n\npub fn a() -> u32 {\n    helper()\n}\n", "src/b.rs": "pub fn b() -> u32 {\n    helper()\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs, src/b.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/b.rs": "pub fn b() -> u32 {\n    2\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/b.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Drop b's call }, bind: change }
+  - { files: { "src/lib.rs": "fn helper() -> u32 {\n    1\n}\n\npub fn a() -> u32 {\n    2\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Drop a's call } }
+  - observe: { commit: { sha: $change.rev, subject: Drop b's call } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  - observe: { snapshot: { files: [{ path: src/lib.rs, body: "fn helper() -> u32 {\n    1\n}\n\npub fn a() -> u32 {\n    2\n}\n" }, { path: src/b.rs, body: "pub fn b() -> u32 {\n    2\n}\n" }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1, revision: "git:$change.rev" } } }
+when: { sql: "SELECT change_id, signal, path FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_unused'" }
+expect: { rows: [] }
+steps:
+  # The same event with no revision reads the worktree's tree (the latest
+  # snapshot), where no call is left: now it is flagged.
+  - given:
+      - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+    when: { sql: "SELECT change_id, signal, path FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_unused'" }
+    expect: { rows: [{ change_id: 1, signal: possibly-unused, path: src/lib.rs }] }

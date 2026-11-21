@@ -175,6 +175,9 @@ datasets:
     adds_to: oxplow/review_signal    # the open list; fields by name, untyped in the list
 ```
 
+- The script's tree (`files()`, `grep_tree()`) is the change's head, whatever the worktree
+  holds now: the event's `anchors.revision`. `language_of(path)` names a file's language
+  for `code_metrics`.
 - The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)`
   gives the hunks with their added and removed lines, `grep_tree(pattern)` the
   tree, `scope("sql.read", …)` the semantic layer (`v_symbol` of the stream in

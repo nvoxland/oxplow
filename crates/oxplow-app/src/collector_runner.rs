@@ -168,7 +168,11 @@ impl<'a> Collectors<'a> {
             layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
             ai: svc.ai_compute.clone(),
-            trees: Some(std::sync::Arc::new(svc.metrics.clone())),
+            trees: Some(crate::revision_tree::RevisionTrees::new(
+                std::sync::Arc::new(svc.metrics.clone()),
+                svc.trees.clone(),
+                svc.worktrees.clone(),
+            )),
             changes: Some(svc.change_diffs.clone()),
             models: svc.models.clone(),
             languages: svc.languages.clone(),
@@ -2127,6 +2131,8 @@ pub struct CollectorRunner {
     pub metrics: crate::metrics_service::MetricsService,
     /// Reads a change's lines for `change_diff`.
     pub change_diffs: Arc<crate::change_diff::ChangeDiffReader>,
+    /// Reads a commit's files for a run whose event is about it.
+    pub trees: Arc<crate::trees::Trees>,
 }
 
 /// What a store's command just wrote: its own SQLite file, or a file in
@@ -2248,7 +2254,11 @@ impl CollectorRunner {
             layer: self.layer.clone(),
             catalog: &self.catalog,
             ai: self.ai.clone(),
-            trees: Some(std::sync::Arc::new(self.metrics.clone())),
+            trees: Some(crate::revision_tree::RevisionTrees::new(
+                std::sync::Arc::new(self.metrics.clone()),
+                self.trees.clone(),
+                self.worktrees.clone(),
+            )),
             changes: Some(self.change_diffs.clone()),
             models: self.models.clone(),
             languages: self.languages.clone(),

@@ -1143,6 +1143,9 @@ async fn log_analyzed(
     )
     .with_anchors(oxplow_domain::events::Anchors {
         stream_id: Some(oxplow_domain::StreamId::new(row.stream_id)),
+        // The code state the change ends at: a run for this event reads that
+        // tree, not the worktree's.
+        revision: row.head_revision.as_ref().map(ToString::to_string),
         ..Default::default()
     });
     if let Err(error) = events.append(env).await {

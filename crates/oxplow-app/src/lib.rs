@@ -129,6 +129,7 @@ pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
 pub(crate) mod request_analysis;
+pub(crate) mod revision_tree;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;
@@ -1596,6 +1597,7 @@ impl Services {
         ));
         let collector_runner = collector_runner::CollectorRunner {
             change_diffs: change_diffs.clone(),
+            trees: trees.clone(),
             global_dir: machine
                 .config_dir
                 .clone()

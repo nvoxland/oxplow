@@ -345,9 +345,13 @@ scoped replace: `sync: upsert`, its script reads its entity's current keys
 with `scope("sql.read", …)` (`needs: [sql.read]`) and returns the ones it no
 longer produces in `deleted`.
 
+`language_of(path)` says which language a path is in (`rust`), `None` when no
+enabled pack parses it: what `code_metrics(text, language, path)` takes.
+
 `grep_tree(pattern, paths=None, max=200, regex=False)` (`tree.read`) searches
-the run's tree (the files `files()` reads: the anchored stream's latest
-snapshot) and returns `[{path, line, text}]` in path then line order, at most
+the run's tree (the files `files()` reads: the anchored snapshot, else the
+stream's latest; for an event with an `anchors.revision`, such as
+`change.analyzed`, that revision's tree: extensions-events.md) and returns `[{path, line, text}]` in path then line order, at most
 `max` (never over 1000); `text` is the trimmed line, cut at 300 characters. A
 literal `pattern` matches as a whole word (`foo` finds `foo(`, not `food`);
 `regex = True` takes a regular expression; `paths` limits it to files matching

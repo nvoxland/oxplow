@@ -4,9 +4,12 @@
 #
 # For each call-shaped name (`name(`) on a line the change removed, that
 # isn't also called on a line it added in the same file (a call that moved
-# isn't removed): a symbol the head tree defines (a library call has none),
-# with no mention in the head tree besides its definition (a text search,
-# so a mention in a comment or a string keeps it), is a row. The entity
+# isn't removed): a function the change's head tree defines (a hit that
+# starts a function of that name, by `code_metrics`; a library call has no
+# such hit), with no mention in the head tree besides its definition (a text
+# search, so a mention in a comment or a string keeps it), is a row. The
+# tree is the change's head (`grep_tree` and `files` read the event's
+# revision), not the worktree's. The entity
 # holds this change's rows, so a rerun replaces them: the keys it no longer
 # produces are tombstoned.
 
@@ -30,7 +33,6 @@ def call_names(text):
 
 def transform(input):
     change_id = input["event"]["payload"]["change_id"]
-    stream_id = input["rows"][0]["stream_id"]
     earlier = scope("sql.read", {
         "sql": "SELECT id FROM v_oxplow_review_unused WHERE change_id = :c",
         "params": {"c": change_id},
@@ -53,27 +55,39 @@ def transform(input):
 
     rows = []
     for name in sorted(removed.keys())[:MOST_NAMES]:
-        defined = scope("sql.read", {
-            "sql": "SELECT uri, path, line FROM v_symbol WHERE stream_id = :s AND name = :n AND kind IN ('function', 'method', 'constructor', 'macro') ORDER BY path, line",
-            "params": {"s": stream_id, "n": name},
-        })
-        if not defined:
-            continue  # a library call: nothing here defines it
+        # The change's head tree decides, whatever the worktree holds now:
+        # every whole-word mention of the name there, and which of them is
+        # the start of a function with that name.
+        hits = grep_tree(name, max = 50)
+        parsed = {}
         definitions = {}
-        for d in defined:
-            definitions["%s:%d" % (d["path"], d["line"])] = True
-        mentions = [
-            h for h in grep_tree(name, max = 20)
-            if ("%s:%d" % (h["path"], h["line"])) not in definitions
-        ]
+        mentions = 0
+        for h in hits:
+            path = h["path"]
+            language = language_of(path)
+            if language == None:
+                mentions += 1  # a file oxplow can't parse: a mention, never a definition
+                continue
+            if path not in parsed:
+                text = files(path)
+                parsed[path] = code_metrics(text[0]["text"], language, path) if text else []
+            starts = [m for m in parsed[path] if m["name"] == name and m["start_line"] == h["line"]]
+            if starts:
+                if "first" not in definitions:
+                    definitions["first"] = starts[0]
+                    definitions["path"] = path
+            else:
+                mentions += 1
+        if not definitions:
+            continue  # a library call: the head defines no such function
         if mentions:
             continue
-        first = defined[0]
+        first = definitions["first"]
         rows.append({
-            "id": "%d|%s|%d|possibly-unused" % (change_id, first["path"], first["line"]),
+            "id": "%d|%s|%d|possibly-unused" % (change_id, definitions["path"], first["start_line"]),
             "change_id": change_id,
-            "path": first["path"],
-            "line": first["line"],
+            "path": definitions["path"],
+            "line": first["start_line"],
             "signal": "possibly-unused",
             "title": "Possibly unused now: %s" % name,
             "why": "The change removed the last call to %s (%s); no other mention was found (a text search)." % (name, removed[name]),

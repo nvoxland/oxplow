@@ -178,9 +178,10 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `needs: [tree.read, sql.read]`) reads `change_diff` for the lines the
       change removed, takes the call-shaped names (`name(`) that aren't also
       called on an added line of the same file, keeps those the head tree
-      defines (`v_symbol`; a library call has no symbol) and finds no other
-      mention of with `grep_tree` (a text search over the stream's latest
-      snapshot, so it says "possibly"), and writes one row per function:
+      defines (a `grep_tree` hit that starts a function of that name by `code_metrics`;
+      a library call has none) and finds no other mention of with `grep_tree`
+      (a text search of the change's head tree, `anchors.revision`, not the worktree's,
+      so it says "possibly"), and writes one row per function:
       `code`, `medium`, `possibly-unused`, at the definition. Its entity
       `review_unused` (key `change_id|path|line|signal`) holds the rows; a rerun
       reads the change's earlier keys and tombstones the ones it no longer

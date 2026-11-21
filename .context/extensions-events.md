@@ -16,7 +16,7 @@ An extension sees an event as one shape, `EventView`
 | `at` | when it happened (RFC 3339) |
 | `source` | what emitted it: `human`, `agent:thr3`, `system:<c>`, `collector:<namespace>/<id>`, `effect:<namespace>/<id>`, `provider:<id>` |
 | `subject` | the URIs it's about |
-| `anchors` | `stream_id`, `thread_id`, `turn_id`, `agent_session_id`, `snapshot_id` |
+| `anchors` | `stream_id`, `thread_id`, `turn_id`, `agent_session_id`, `snapshot_id`, `revision` |
 | `payload` | its payload, carried to `v` |
 | `cause` | the id of the event that caused it |
 
@@ -82,6 +82,17 @@ event_types:
       summary: A pull request merged, with its reviewers.
       upcast: event_types/merged.star      # required past v1: transform({from_v, payload}) → the v2 payload
 ```
+
+**`anchors.revision`** (V58, `v_event.revision`) is the code state an event is about,
+a resolved revision as `v_change` writes them: `git:<sha>`, `snap:<id>` or
+`working`; NULL for an event about no particular one. `change.analyzed`
+anchors its change's head. A script run for an event with a revision reads
+that code state as its `tree.read` tree (`revision_tree::RevisionTrees`):
+`snap:<id>` is that snapshot's tree, `git:<sha>` the commit's files through the
+VCS (text files up to 5 MB, as the worktree reader leaves out the rest),
+`working` or none the snapshot the run is anchored to, else the stream's
+latest. It is read only when a script uses `files()` or `grep_tree()`; the
+runs one event triggers share it.
 
 **`change.analyzed@1`** is a core type (namespace `change`): a change's
 analysis was stored (`phase: files`) or its duplicate scan was

@@ -286,6 +286,21 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         )?;
         Ok(eval.heap().alloc(value))
     }
+    /// The id of the language `path` is in (`rust`), when oxplow can parse
+    /// it (an enabled pack declares its file extension and has a grammar),
+    /// else `None`: what to pass `code_metrics` and `ast_query` as `language`.
+    fn language_of<'v>(
+        path: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let languages = Hosts::languages(eval);
+        let id = languages
+            .for_path(path)
+            .filter(|l| l.analyzable())
+            .map(|l| l.name().to_string());
+        Ok(eval.heap().alloc(serde_json::json!(id)))
+    }
+
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
     /// the run's [`TreeHost`]. A run given no tree (one that didn't declare
     /// `tree.read`) is told so; a malformed glob is an error.

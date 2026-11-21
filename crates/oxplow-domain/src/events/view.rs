@@ -158,6 +158,8 @@ struct FixtureAnchors {
     turn_id: Option<i64>,
     agent_session_id: Option<AgentSessionId>,
     snapshot_id: Option<i64>,
+    #[serde(default)]
+    revision: Option<String>,
 }
 
 impl From<FixtureAnchors> for Anchors {
@@ -168,6 +170,7 @@ impl From<FixtureAnchors> for Anchors {
             turn_id: a.turn_id,
             agent_session_id: a.agent_session_id,
             snapshot_id: a.snapshot_id,
+            revision: a.revision,
         }
     }
 }
