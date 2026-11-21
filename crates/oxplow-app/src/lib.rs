@@ -1155,6 +1155,7 @@ impl Services {
             worktrees.clone(),
             workspace_files.clone(),
             config_arc.clone(),
+            languages.clone(),
         )));
 
         // Snapshot capture singleton — owned here so anything in
@@ -1212,12 +1213,17 @@ impl Services {
                 machine.config_dir.clone(),
             ),
         );
-        let temp = Arc::new(filesystems::temp::TempFs::new(&layout.project_dir));
+        let temp = Arc::new(
+            filesystems::temp::TempFs::new(&layout.project_dir).with_languages(languages.clone()),
+        );
         filesystems.register(temp.clone());
-        filesystems.register(Arc::new(filesystems::extensions::ExtensionsFs::new(
-            layout.project_dir.clone(),
-            extension_catalog.clone(),
-        )));
+        filesystems.register(Arc::new(
+            filesystems::extensions::ExtensionsFs::new(
+                layout.project_dir.clone(),
+                extension_catalog.clone(),
+            )
+            .with_languages(languages.clone()),
+        ));
         // The service is built before the catalog: its AI profiles are
         // whatever the active extensions declare, read live.
         ai.set_profiles({
@@ -1523,6 +1529,7 @@ impl Services {
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
                 Arc::new(providers::filesystems::FileSystemsHost::new(
                     filesystems.clone(),
+                    languages.clone(),
                 )),
                 Arc::new(providers::snapshots::SnapshotsHost {
                     registry: snapshots.clone(),

@@ -52,6 +52,8 @@ pub fn page_running_uri(name: &str, kind: PageKind, file: &str, hash: &str) -> S
 pub struct ExtensionsFs {
     project: PathBuf,
     catalog: Arc<ExtensionCatalog>,
+    /// Says what the editor draws a file as (`stat.language`).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 /// Where a path lands: an extension's deployment and a path inside it.
@@ -64,7 +66,20 @@ struct Target {
 
 impl ExtensionsFs {
     pub fn new(project: PathBuf, catalog: Arc<ExtensionCatalog>) -> Self {
-        Self { project, catalog }
+        Self {
+            project,
+            catalog,
+            languages: Default::default(),
+        }
+    }
+
+    /// With the language set that names the editor's id for a file.
+    pub fn with_languages(
+        mut self,
+        languages: crate::extension::language_set::LanguagesHandle,
+    ) -> Self {
+        self.languages = languages;
+        self
     }
 
     /// The hash an extension runs.
@@ -250,12 +265,13 @@ impl FileSystem for ExtensionsFs {
             return Ok(None);
         };
         let dir = self.dir_of(&target);
+        let languages = self.languages.clone();
         blocking(move || {
             let Some((root, found)) = canonical(&dir, &target.inside)? else {
                 return Ok(None);
             };
             let inside = found.strip_prefix(&root).unwrap_or(Path::new(""));
-            stat_on_disk(&root, &inside.to_string_lossy()).map_err(storage)
+            stat_on_disk(&languages, &root, &inside.to_string_lossy()).map_err(storage)
         })
         .await?
     }

@@ -44,6 +44,7 @@ test_conventions:
   - { id: clojure-tests, languages: [clojure], paths: ['**/*_test.clj', '**/*_test.cljc'] }
 languages:
   - id: clojure
+    editor: { monaco: clojure }
     comments: { line: [";"] }
     title: "Clojure"
     extensions: [clj, cljs, cljc]

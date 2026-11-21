@@ -415,11 +415,16 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             .files
             .iter()
             .filter(|(path, _)| languages.is_supported_path(path.as_str()))
-            // Codegen output (generated/ path, do-not-edit header) is
-            // not hand-written code — keep it out of the code-shape
-            // corpus so a 3k-line bindings file can't dominate the
-            // fn_length/complexity tails.
-            .filter(|(path, text)| !oxplow_code_metrics::is_generated_source(path.as_str(), text))
+            // Codegen and vendored files are not hand-written code — keep
+            // them out of the code-shape corpus so a 3k-line bindings file
+            // can't dominate the fn_length/complexity tails. Where they live
+            // is the enabled `generated` and `vendored` file kinds' (the set
+            // carries their globs); a do-not-edit header is the one generic
+            // signal a path rule can't see.
+            .filter(|(path, text)| {
+                !languages.is_excluded(path.as_str())
+                    && !oxplow_code_metrics::has_generated_header(text)
+            })
             .collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
         let arr: Vec<serde_json::Value> = entries

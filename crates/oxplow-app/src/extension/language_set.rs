@@ -111,16 +111,55 @@ pub fn every_pack_on_yaml() -> String {
         .collect()
 }
 
+/// Read the enabled `generated` and `vendored` file kinds' globs
+/// (`v_file_kind_rule`: the foundation's, each enabled extension's, the
+/// project's own `oxplow.files.kinds`) and give them to the language set.
+pub async fn refresh_excluded(svc: &crate::Services) {
+    let rows = svc
+        .db
+        .read(|c| {
+            let mut st = c
+                .prepare(
+                    "SELECT glob FROM v_file_kind_rule WHERE kind IN ('generated', 'vendored') ORDER BY glob",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(oxplow_db::map_sql_err)
+        })
+        .await;
+    match rows {
+        Ok(globs) => svc.languages.set_excluded(globs),
+        Err(error) => {
+            tracing::warn!(%error, "reading the generated and vendored file kinds failed")
+        }
+    }
+}
+
 /// The set the app reads, swapped whole when what runs changes.
 #[derive(Clone, Default)]
 pub struct LanguagesHandle(
     Arc<RwLock<Arc<Languages>>>,
     Arc<std::sync::atomic::AtomicBool>,
+    /// The globs of the enabled `generated` and `vendored` file kinds, kept
+    /// across swaps of the set ([`LanguagesHandle::set_excluded`]).
+    Arc<RwLock<Vec<String>>>,
 );
 
 impl LanguagesHandle {
     pub fn current(&self) -> Arc<Languages> {
         self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The editor's language id for `path`: its declaring language's
+    /// `editor.monaco` when a language claims the extension, else core's
+    /// highlighting fallback for undeclared ones.
+    pub fn editor_language(&self, path: &str) -> Option<String> {
+        self.current()
+            .editor_id_for_path(path)
+            .map(str::to_string)
+            .or_else(|| {
+                oxplow_domain::language_id::highlighting_fallback_for_path(path).map(str::to_string)
+            })
     }
 
     /// oxplow's shipped packs' languages, for a test.
@@ -132,7 +171,20 @@ impl LanguagesHandle {
     }
 
     pub fn swap(&self, languages: Languages) {
-        *self.0.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(languages);
+        let excluded = self.2.read().unwrap_or_else(|e| e.into_inner()).clone();
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) =
+            Arc::new(languages.with_excluded(excluded));
+    }
+
+    /// The files a corpus leaves out (the `generated` and `vendored` file
+    /// kinds' globs): carried by the set, so a script worker is told them with it.
+    pub fn set_excluded(&self, globs: Vec<String>) {
+        let current = self.current();
+        if current.excluded_globs() == globs.as_slice() {
+            return;
+        }
+        *self.2.write().unwrap_or_else(|e| e.into_inner()) = globs.clone();
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(current.with_excluded(globs));
     }
 
     /// [`swap`](Self::swap), saying whether what is indexed by the set needs
@@ -268,5 +320,48 @@ mod tests {
         health.enable(&key, "human").await.unwrap();
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(svc.languages.current().by_name("rust").is_some(), "back on");
+    }
+
+    /// The editor draws a file as its declaring language says (`editor:
+    /// { monaco }`), which wins over core's fallback table for the same
+    /// extension; an undeclared extension still highlights by the table.
+    #[test]
+    fn a_declared_editor_id_wins_over_the_fallback() {
+        let source = |id: &str, ext: &str, monaco: &str| {
+            let decl: oxplow_code_metrics::LanguageDecl = serde_yaml::from_str(&format!(
+                "{{ id: {id}, title: {id}, extensions: [{ext}], editor: {{ monaco: {monaco} }} }}"
+            ))
+            .unwrap();
+            oxplow_code_metrics::LanguageSource {
+                extension: format!("{id}-pack"),
+                shipped: false,
+                decl,
+                analysis: None,
+                symbols: None,
+                symbols_yaml: None,
+                wasm: None,
+            }
+        };
+        let handle = super::LanguagesHandle::default();
+        let (set, problems) = oxplow_code_metrics::Languages::build(&[
+            source("zeta", "zz", "zeta-mono"),
+            source("kotlin2", "kt", "kotlin-pack"),
+        ]);
+        assert!(problems.is_empty(), "{problems:?}");
+        handle.swap(set);
+        assert_eq!(
+            handle.editor_language("lib/a.zz").as_deref(),
+            Some("zeta-mono")
+        );
+        assert_eq!(
+            handle.editor_language("src/a.kt").as_deref(),
+            Some("kotlin-pack")
+        );
+        assert_eq!(
+            handle.editor_language("src/a.rs").as_deref(),
+            Some("rust"),
+            "the fallback"
+        );
+        assert_eq!(handle.editor_language("Makefile"), None);
     }
 }

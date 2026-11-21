@@ -1,9 +1,12 @@
-//! The editor's language id of a file, by its extension: the id a
-//! filesystem's `stat` reports as `language`. This is the Monaco id space
-//! (`apps/desktop/src/editor-language.ts` is the desktop's copy of the
-//! table, which draws the editor and stays there: a test below holds the
-//! two equal), not the analysis `Language` of `oxplow-code-metrics`, which
-//! names only the languages oxplow parses (`.context/language-support.md`).
+//! The editor's syntax highlighting by file extension, for the files no
+//! enabled language pack declares: the Monaco id a filesystem's `stat`
+//! reports as `language` when no language claims the extension. A language
+//! that declares its files (`languages: - { editor: { monaco } }`) always
+//! wins over this table, and no oxplow analysis language relies on it: it
+//! is Monaco's own id space (`apps/desktop/src/editor-language.ts` is the
+//! desktop's copy, which draws the editor: a test below holds the two
+//! equal), not the `Language` of `oxplow-code-metrics`, which names only
+//! the languages a pack declares (`.context/language-support.md`).
 
 /// Extension suffix → language id, first match wins (the order of the
 /// desktop's table).
@@ -81,9 +84,9 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
     (".fish", "shell"),
 ];
 
-/// The language id of `path`, or `None` for an unrecognized extension
-/// (the desktop draws that as `plaintext`).
-pub fn language_id_for_path(path: &str) -> Option<&'static str> {
+/// The highlighting fallback for `path`, or `None` for an unrecognized
+/// extension (the desktop draws that as `plaintext`).
+pub fn highlighting_fallback_for_path(path: &str) -> Option<&'static str> {
     let lower = path.to_lowercase();
     EXTENSION_MAP
         .iter()
@@ -97,11 +100,11 @@ mod tests {
 
     #[test]
     fn an_extension_names_its_language_case_insensitively() {
-        assert_eq!(language_id_for_path("src/a.rs"), Some("rust"));
-        assert_eq!(language_id_for_path("A.TSX"), Some("typescript"));
-        assert_eq!(language_id_for_path("a.yaml"), Some("yaml"));
-        assert_eq!(language_id_for_path("Makefile"), None);
-        assert_eq!(language_id_for_path("a.bin"), None);
+        assert_eq!(highlighting_fallback_for_path("src/a.rs"), Some("rust"));
+        assert_eq!(highlighting_fallback_for_path("A.TSX"), Some("typescript"));
+        assert_eq!(highlighting_fallback_for_path("a.yaml"), Some("yaml"));
+        assert_eq!(highlighting_fallback_for_path("Makefile"), None);
+        assert_eq!(highlighting_fallback_for_path("a.bin"), None);
     }
 
     /// The desktop keeps its own copy of the table (Monaco is its own

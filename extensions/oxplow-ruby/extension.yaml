@@ -32,4 +32,4 @@ file_kinds:
 run_patterns:
   - { id: ruby-test, kind: test, patterns: [rspec] }
 languages:
-  - { id: ruby, title: Ruby, extensions: [rb], lsp: { package: ruby-lsp }, comments: { line: ["#"], block: [["=begin", "=end"]] } }
+  - { id: ruby, title: Ruby, extensions: [rb], lsp: { package: ruby-lsp }, comments: { line: ["#"], block: [["=begin", "=end"]] }, editor: { monaco: ruby } }

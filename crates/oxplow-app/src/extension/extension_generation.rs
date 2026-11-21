@@ -552,6 +552,7 @@ fn language_rows(
             aliases: decl.aliases.clone(),
             lsp_ids: decl.lsp_ids.clone(),
             lsp_package: decl.lsp.as_ref().map(|l| l.package.clone()),
+            monaco: decl.editor.as_ref().map(|e| e.monaco.clone()),
             facets: serde_json::json!({
                 "imports": has(spec.as_ref().is_some_and(|s| s.imports.is_some())),
                 "merge": has(spec.as_ref().is_some_and(|s| s.merge.is_some())),

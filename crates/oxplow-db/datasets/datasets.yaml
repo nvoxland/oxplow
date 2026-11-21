@@ -1925,7 +1925,7 @@
     - { name: "label", type: "TEXT", doc: "What a person calls the kind, when the rule says; NULL otherwise." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares the rule; `project-settings` for the project's own." }
 - name: language
-  version: 1
+  version: 2
   description: "Every language the loaded extensions declare, on or off: what oxplow knows about each (its grammar, language server and facets) and whether the extension that declares it is on. A shipped language pack that is off is listed, so a page can offer to turn it on. Match a path or a name to one by `extensions`, `aliases` or `lsp_ids`."
   fields:
     - { name: "id", type: "TEXT", doc: "The stored name (`rust`): `symbol.language`, the `oxplow.language` dimension." }
@@ -1938,6 +1938,7 @@
     - { name: "lsp_ids", type: "TEXT", doc: "JSON array of the LSP `languageId`s that are this language." }
     - { name: "lsp_package", type: "TEXT", doc: "The Mason package to suggest as its language server; NULL when it declares none." }
     - { name: "facets", type: "TEXT", doc: "JSON object `{ imports, merge, duplication, starter }`: 1 for each facet it has." }
+    - { name: "monaco", type: "TEXT", doc: "The editor's (Monaco's) language id for its files, from its `editor: { monaco }`; NULL when it declares none (the editor then falls back to its table of well-known extensions)." }
 - name: model_store
   version: 4
   description: "Each live store of a shared model, as the enabled extensions fill it: who fills it, and how a reader links its records without knowing the model (a record's URI is `oxplow:<resource>?<key>=<id>&<store_param>=<store>`; a loose `tsk12` in text is a link to its item)."

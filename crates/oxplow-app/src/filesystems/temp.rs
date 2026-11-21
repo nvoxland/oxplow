@@ -55,6 +55,8 @@ impl Default for Limits {
 pub struct TempFs {
     dir: PathBuf,
     limits: Limits,
+    /// Says what the editor draws a file as (`stat.language`).
+    languages: crate::extension::language_set::LanguagesHandle,
 }
 
 impl TempFs {
@@ -66,7 +68,17 @@ impl TempFs {
         Self {
             dir: project.join(TEMP_DIR),
             limits,
+            languages: Default::default(),
         }
+    }
+
+    /// With the language set that names the editor's id for a file.
+    pub fn with_languages(
+        mut self,
+        languages: crate::extension::language_set::LanguagesHandle,
+    ) -> Self {
+        self.languages = languages;
+        self
     }
 
     /// Replace the file `name` with `bytes`, then drop what is too old or
@@ -154,6 +166,7 @@ impl TempFs {
         let this = Self {
             dir: self.dir.clone(),
             limits: self.limits,
+            languages: self.languages.clone(),
         };
         blocking(move || this.gc(now))
             .await?
@@ -235,8 +248,8 @@ impl FileSystem for TempFs {
             }));
         }
         valid_name(path)?;
-        let (dir, path) = (self.dir.clone(), path.to_string());
-        blocking(move || stat_on_disk(&dir, &path))
+        let (dir, path, languages) = (self.dir.clone(), path.to_string(), self.languages.clone());
+        blocking(move || stat_on_disk(&languages, &dir, &path))
             .await?
             .map_err(storage)
     }

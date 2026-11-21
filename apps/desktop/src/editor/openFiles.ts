@@ -15,6 +15,7 @@ import { WORKING } from "../revision.js";
 import { watchFileEvents } from "../watchFileEvents.js";
 import { createBufferStore, type ModelHandle } from "./buffers.js";
 import { LspMirror } from "./lspMirror.js";
+import { startEditorLanguages } from "../editorLanguages.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -24,6 +25,8 @@ let monaco: any = null;
 export async function loadMonaco(): Promise<any> {
   if (!monaco) {
     monaco = await import("monaco-editor");
+    // The declared languages first, so the providers cover their ids too.
+    await startEditorLanguages();
     registerLspProviders(monaco, providerDeps(monaco));
   }
   return monaco;

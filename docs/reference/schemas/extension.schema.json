@@ -3878,6 +3878,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "editor": {
+          "description": "How the editor draws its files. A declared `editor.monaco` always wins\nover core's highlighting fallback for undeclared extensions.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EditorDecl"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -4043,6 +4054,20 @@
         }
       },
       "additionalProperties": false
+    },
+    "EditorDecl": {
+      "description": "`editor: { monaco: elixir }`: what the editor knows the language as.",
+      "type": "object",
+      "properties": {
+        "monaco": {
+          "description": "Its Monaco language id (`typescript`, `shell`, `plaintext`): what\nhighlights its files and what a language server is asked for.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "monaco"
+      ]
     },
     "RunPatternFile": {
       "description": "A `run_patterns:` entry as the manifest holds it.",

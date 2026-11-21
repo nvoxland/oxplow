@@ -931,7 +931,7 @@ fn only_harness_implementations_name_a_harness() {
 #[rustfmt::skip]
 const LANGUAGE_NAMERS: &[(&str, &str)] = &[
     ("crates/oxplow-code-metrics/src/spec.rs", "`native_grammar`: the one table of the grammars compiled into oxplow"),
-    ("crates/oxplow-domain/src/language_id.rs", "the editor's Monaco ids by file extension, not analysis languages"),
+    ("crates/oxplow-domain/src/language_id.rs", "highlighting fallback for undeclared extensions"),
 ];
 
 /// Every language id the checkout's extensions declare (each `languages:`

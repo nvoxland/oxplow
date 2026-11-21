@@ -348,6 +348,7 @@ impl ScriptWorkers {
         if let Some(languages) = &hosts.languages {
             worker.send(&ToWorker::Languages {
                 sources: languages.sources().to_vec(),
+                excluded: languages.excluded_globs().to_vec(),
             });
         }
         let mut host = Answering {

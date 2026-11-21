@@ -1,7 +1,9 @@
 /// Monaco LSP provider registration, extracted from EditorPane.
 ///
-/// Registration strategy: providers register ONCE, for every language
-/// id in `editor-language.ts`'s extension map, and each callback first
+/// Registration strategy: providers register ONCE per language id, for
+/// every id in `editor-language.ts` (the declared languages' and the
+/// fallback table's; a language declared later is registered when it
+/// appears, never again), and each callback first
 /// checks `hasServer(languageId)` — returning null when no server is
 /// configured. Re-registering providers when the server list changes
 /// would race Monaco's open widgets; inert providers are cheap.
@@ -10,7 +12,7 @@
 /// before issuing its request (`flushDoc`) so the server never answers
 /// against stale text — the didChange debounce makes this load-bearing.
 
-import { allKnownLanguageIds } from "../editor-language.js";
+import { allKnownLanguageIds, onDeclaredEditorLanguagesChanged } from "../editor-language.js";
 import type { LspClientLike } from "../editor/lspMirror.js";
 import {
   completionResultToMonacoList,
@@ -96,7 +98,10 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
     },
   );
 
-  for (const languageId of allKnownLanguageIds()) {
+  const registered = new Set<string>();
+  const registerFor = (languageId: string) => {
+    if (registered.has(languageId)) return;
+    registered.add(languageId);
     const active = (model: any): boolean =>
       deps.hasServer(languageId) && model.getLanguageId() === languageId;
 
@@ -274,7 +279,13 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
         return documentSymbolsToMonaco(monaco, result);
       },
     });
-  }
+  };
+  for (const languageId of allKnownLanguageIds()) registerFor(languageId);
+  // A language declared after Monaco loaded (a pack turned on) gets its
+  // providers too: registered once per id, never again.
+  onDeclaredEditorLanguagesChanged(() => {
+    for (const languageId of allKnownLanguageIds()) registerFor(languageId);
+  });
 }
 
 function reportSkippedOps(deps: LspProviderDeps, uri: string, normalized: NormalizedWorkspaceEdit): void {
