@@ -8,10 +8,8 @@ WITH checks AS (
    WHERE c.kind = 'collector' AND json_extract(c.runs_on, '$.on') = 'events'
      AND t.value = 'change.analyzed'),
 latest AS (
-  SELECT CAST(json_extract(e.payload, '$.change_id') AS INTEGER) AS change_id, max(e.seq) AS seq
-    FROM ref('event') e
-   WHERE e.type = 'change.analyzed' AND json_extract(e.payload, '$.phase') = 'files'
-   GROUP BY 1)
+  SELECT id AS change_id, files_analyzed_seq AS seq
+    FROM ref('change') WHERE files_analyzed_seq IS NOT NULL)
 SELECT CAST(l.change_id AS INTEGER) AS change_id, CAST(k.collector AS TEXT) AS collector,
        CAST(k.collector_uri AS TEXT) AS collector_uri,
        CAST(CASE WHEN r.last_event_id IS NULL OR r.last_event_id < l.seq THEN 'pending'

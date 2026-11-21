@@ -1685,3 +1685,30 @@ asserts it). It is a plain view, not a materialised table: the cost follows
 the changed paths and the path's snapshot history, not the capture count, and
 a table would have to be restated when a late capture lands for an old
 snapshot.
+
+## Per-change datasets read one change (measured 2026-11-20)
+
+SQLite pushes `WHERE change_id = ?` into a subquery it reads once, but not
+into a CTE it reads twice or one marked `MATERIALIZED` (`NOT MATERIALIZED`
+doesn't help): that CTE is computed for every change first. `v_change_fact`
+(both UNION arms read `winners`), `v_oxplow_change_co_change`,
+`…_review_signal_tests`, `…_verification`, `v_oxplow_change_interest` and
+`v_oxplow_review_check` all did.
+
+- Before (the review of the plan's commits): 1,500 changes × 10 files, 300k
+  facts: 5–9 s per read of `v_oxplow_review_signal_shown WHERE change_id = ?`
+  against 12 ms with the id pushed in.
+- After: the same read among 1,500 changes of 10 files is 9 ms (debug build).
+- What changed: each CTE is read once, or each arm of a UNION spells its own
+  join, and the lookups go by an indexed key (`commit_file.path`,
+  `co_change_pair.path`, `change_duplicate.change_id` — V61). The latest
+  analysed event of a change is a column (`v_change.files_analyzed_seq`, kept
+  by a trigger on the log) instead of a `json_extract` scan of every
+  `change.analyzed` event.
+- The guard is `review_plan_tests`: it reads the plan of `v_change_fact` and of
+  `v_oxplow_review_signal_shown` (and each source on its own) for one change
+  among 300 and refuses a `SCAN` of any per-change table. A new review source
+  that reads a CTE twice fails it.
+- `glob_match(glob, path)` cached only a constant glob; the review passes a
+  column, so each row compiled it. It now keeps compiled globs by text (256 per
+  thread).

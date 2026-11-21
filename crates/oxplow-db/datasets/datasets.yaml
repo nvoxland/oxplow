@@ -373,7 +373,7 @@
     - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
-  version: 5
+  version: 6
   description: "Analyzed changes: a commit (vs its parent), an agent turn (start → end snapshot: what the turn changed), a stream's working tree (vs HEAD) or a range (any two revisions). Created on demand by `oxplow_ensure_change`, or by a query that names one by `kind` and `target` (`kind = 'commit' AND target = <sha>`; `kind = 'working' AND target = ''` for the query's stream; `kind = 'range' AND target = :start || '..' || :end`, each side `working`, `snap:<id>` or `git:<rev>`, the start '' for the whole tree at the end), its analysis then run in the background; a working tree's, a running request's and a range's headed at the working tree are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   fields:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
@@ -389,6 +389,7 @@
     - { name: "events_to", type: "INTEGER", doc: "The event log's highest seq when the last analysis began: what its inputs had seen." }
     - { name: "files_at", type: "TEXT", doc: "When its changed files (stage one: v_change_file's paths, status and line counts) were last listed (RFC 3339); kept current on every move, apart from the deeper analysis." }
     - { name: "files_events_to", type: "INTEGER", doc: "The event log's highest seq when the files were last listed: what that list had seen." }
+    - { name: "files_analyzed_seq", type: "INTEGER", doc: "The event log seq of the latest `change.analyzed` (phase `files`) logged for it; NULL before one." }
     - { name: "conflicted", type: "INTEGER", doc: "For a working tree, how many files git reports conflicted; NULL for other kinds." }
     - { name: "in_progress", type: "TEXT", doc: "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds." }
     - { name: "elapsed_ms", type: "INTEGER", doc: "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)." }
@@ -2098,8 +2099,8 @@
     - { not_null: id }
     - { unique: id }
 - name: change_fact
-  version: 1
-  description: "The per-path facts of an analysed change's changed files as of the change's head: `v_tree_fact`'s fold bounded to the captures at or before the head's snapshot (`snap:<id>`, or `working`: the stream's latest snapshot), for the files in `v_change_file` only. A fact fixed later is still here, a file added later is absent. A change headed at a commit (`git:<sha>`) has no snapshot to bound by and no rows. Read it with `WHERE change_id = ?`."
+  version: 2
+  description: "The per-path facts of an analysed change's changed files as of the change's head: `v_tree_fact`'s fold bounded to the captures at or before the head's snapshot (`snap:<id>`, or `working`: the snapshot its analysis ran against, `v_change.snapshot_id`, so the facts and the change's hunks are of one code state), for the files in `v_change_file` only. A fact fixed later is still here, a file added later is absent. A change headed at a commit (`git:<sha>`) has no snapshot to bound by and no rows. Read it with `WHERE change_id = ?`."
   fields:
     - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
     - { name: "id", type: "INTEGER", doc: "Fact id." }

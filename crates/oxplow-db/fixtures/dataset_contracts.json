@@ -3796,6 +3796,96 @@
         }
       ],
       "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Change id (the change_id in v_change_*)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream whose repo it's in."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`commit`, `turn`, `request`, `working` or `range`."
+        },
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The commit sha, the turn row id, the request row id, '' for the working tree, or `<base>..<head>` for a range (each side a revision as resolved: `git:<full sha>`, `snap:<id>`, `working`; the base empty for the whole tree at the head)."
+        },
+        {
+          "name": "base_revision",
+          "type": "TEXT",
+          "doc": "What it's compared against, as a revision: `git:<sha>`, `git:HEAD`, `snap:<id>`; NULL for a root commit or a range from nothing."
+        },
+        {
+          "name": "head_revision",
+          "type": "TEXT",
+          "doc": "The newer side, as a revision: `git:<sha>`, `snap:<id>` or `working`."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`pending`, `running`, `done` or `failed`."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, if it did."
+        },
+        {
+          "name": "computed_at",
+          "type": "TEXT",
+          "doc": "When the analysis last finished (RFC 3339)."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The stream's snapshot it was computed against (the head's for a turn or a finished request); NULL for a commit."
+        },
+        {
+          "name": "events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the last analysis began: what its inputs had seen."
+        },
+        {
+          "name": "files_at",
+          "type": "TEXT",
+          "doc": "When its changed files (stage one: v_change_file's paths, status and line counts) were last listed (RFC 3339); kept current on every move, apart from the deeper analysis."
+        },
+        {
+          "name": "files_events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the files were last listed: what that list had seen."
+        },
+        {
+          "name": "files_analyzed_seq",
+          "type": "INTEGER",
+          "doc": "The event log seq of the latest `change.analyzed` (phase `files`) logged for it; NULL before one."
+        },
+        {
+          "name": "conflicted",
+          "type": "INTEGER",
+          "doc": "For a working tree, how many files git reports conflicted; NULL for other kinds."
+        },
+        {
+          "name": "in_progress",
+          "type": "TEXT",
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
+        },
+        {
+          "name": "elapsed_ms",
+          "type": "INTEGER",
+          "doc": "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)."
+        }
+      ],
+      "key": []
     }
   },
   "change_duplicate": {
@@ -35906,6 +35996,111 @@
   },
   "change_fact": {
     "1": {
+      "columns": [
+        {
+          "name": "change_id",
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
+        },
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Fact id."
+        },
+        {
+          "name": "capture_id",
+          "type": "INTEGER",
+          "doc": "Producing capture (v_capture.id)."
+        },
+        {
+          "name": "measure_key",
+          "type": "TEXT",
+          "doc": "Measure this is a value of (v_measure.key)."
+        },
+        {
+          "name": "value",
+          "type": "REAL",
+          "doc": "The measured value."
+        },
+        {
+          "name": "numerator",
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
+        },
+        {
+          "name": "denominator",
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT",
+          "doc": "The subject URI's resource: `oxplow/file` or `oxplow/symbol`."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The subject as one ref."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File path."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Line number, when it has one."
+        },
+        {
+          "name": "severity",
+          "type": "TEXT",
+          "doc": "Finding severity, for lint-like facts."
+        },
+        {
+          "name": "rule",
+          "type": "TEXT",
+          "doc": "Rule id, for lint-like facts."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Free-text detail."
+        },
+        {
+          "name": "dims_json",
+          "type": "TEXT",
+          "doc": "Extra dimensions as a JSON object."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it describes."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it was measured in, from the capture."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When the capture that holds it ran."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "From the capture."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "change_id",

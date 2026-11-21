@@ -12,7 +12,9 @@
 //!   `testing.testPaths` use: `globset` with `literal_separator`, so `*`
 //!   stays within a folder and `**` crosses them (`**/tests/**`, `*.rs`
 //!   against `src/a.rs` is 0). A `\` in the path reads as `/`. A glob that
-//!   doesn't parse is an error. The compiled glob is kept per statement.
+//!   doesn't parse is an error. Compiled globs are kept by their text (a bounded
+//!   cache per thread, which runs a connection's query), so a glob read from a
+//!   column compiles once, not once per row.
 //! - `first_sentence(markdown)` is a description's opening for a card or a
 //!   list row to draw as markdown (a `markdown` column, the kit's
 //!   `renderMarkdown`): the first line that isn't a heading, the list and
@@ -40,22 +42,40 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("read_measure", 1, flags, read_measure)
 }
 
+/// How many compiled globs a thread keeps; the cache is dropped when it fills.
+const GLOB_CACHE: usize = 256;
+
+thread_local! {
+    static GLOBS: std::cell::RefCell<std::collections::HashMap<String, globset::GlobMatcher>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 /// `glob_match(glob, path)`: see the module's doc.
 fn glob_match(ctx: &Context<'_>) -> rusqlite::Result<Option<bool>> {
-    if matches!(ctx.get_raw(0), ValueRef::Null) {
+    let Some(glob) = text(ctx, 0)? else {
         return Ok(None);
-    }
-    let matcher = ctx.get_or_create_aux(0, |glob| -> Result<globset::GlobMatcher, Error> {
-        let glob = glob
-            .as_str()
-            .map_err(|e| Error::UserFunctionError(e.into()))?;
-        globset::GlobBuilder::new(glob)
+    };
+    let Some(path) = text(ctx, 1)? else {
+        return Ok(None);
+    };
+    let path = path.replace('\\', "/");
+    GLOBS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(matcher) = cache.get(glob.as_str()) {
+            return Ok(Some(matcher.is_match(&path)));
+        }
+        let matcher = globset::GlobBuilder::new(&glob)
             .literal_separator(true)
             .build()
             .map(|g| g.compile_matcher())
-            .map_err(|e| Error::UserFunctionError(format!("`{glob}` isn't a glob: {e}").into()))
-    })?;
-    Ok(text(ctx, 1)?.map(|path| matcher.is_match(path.replace('\\', "/"))))
+            .map_err(|e| Error::UserFunctionError(format!("`{glob}` isn't a glob: {e}").into()))?;
+        if cache.len() >= GLOB_CACHE {
+            cache.clear();
+        }
+        let hit = matcher.is_match(&path);
+        cache.insert(glob, matcher);
+        Ok(Some(hit))
+    })
 }
 
 /// The datasets whose reads `read_measure()` scopes to a measure: the facts
@@ -494,6 +514,25 @@ mod tests {
             assert_eq!(first(body).as_deref(), says, "{body:?}");
         }
         assert_eq!(run("SELECT first_sentence(NULL)").unwrap(), None);
+    }
+
+    /// A glob read from a column (not a constant) matches each row by its
+    /// own glob, and the cache doesn't mix them up when it fills.
+    #[test]
+    fn glob_match_takes_its_glob_from_a_column() {
+        let c = Connection::open_in_memory().unwrap();
+        register(&c).unwrap();
+        let hits: i64 = c
+            .query_row(
+                "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 999)
+                 SELECT sum(glob_match('dir' || (i % 300) || '/*.rs', 'dir' || (i % 300) || '/a.rs')
+                          + glob_match('dir' || (i % 300) || '/*.rs', 'dir' || ((i + 1) % 300) || '/a.rs'))
+                   FROM n",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1000);
     }
 
     /// `glob_match` is `testPaths`' dialect: `*` stays in a folder, `**`

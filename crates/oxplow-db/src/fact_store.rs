@@ -4565,6 +4565,17 @@ mod tests {
 
     /// A done change on stream 1 headed at `head` with `paths` changed.
     async fn change_headed(store: &SqliteFactStore, id: i64, head: &str, paths: &[&str]) {
+        change_headed_at(store, id, head, None, paths).await;
+    }
+
+    /// [`change_headed`] with the snapshot its analysis ran against.
+    async fn change_headed_at(
+        store: &SqliteFactStore,
+        id: i64,
+        head: &str,
+        snapshot: Option<i64>,
+        paths: &[&str],
+    ) {
         let (head, paths): (String, Vec<String>) = (
             head.to_string(),
             paths.iter().map(|p| p.to_string()).collect(),
@@ -4573,9 +4584,9 @@ mod tests {
             .db
             .call(move |conn| {
                 conn.execute(
-                    "INSERT INTO change (id, stream_id, kind, target, head_revision, status)
-                     VALUES (?1, 1, 'range', ?2, ?3, 'done')",
-                    params![id, format!("t{id}"), head],
+                    "INSERT INTO change (id, stream_id, kind, target, head_revision, status, snapshot_id)
+                     VALUES (?1, 1, 'range', ?2, ?3, 'done', ?4)",
+                    params![id, format!("t{id}"), head, snapshot],
                 )?;
                 for p in &paths {
                     conn.execute(
@@ -4645,7 +4656,7 @@ mod tests {
         change_headed(&store, 1, "snap:1", &paths).await;
         change_headed(&store, 2, "snap:2", &paths).await;
         change_headed(&store, 3, "snap:3", &paths).await;
-        change_headed(&store, 4, "working", &paths).await;
+        change_headed_at(&store, 4, "working", Some(3), &paths).await;
         change_headed(&store, 5, "git:abc", &paths).await;
         assert_eq!(
             change_facts(&store, 1).await,
@@ -4661,7 +4672,15 @@ mod tests {
         assert_eq!(
             change_facts(&store, 4).await,
             change_facts(&store, 3).await,
-            "working is the stream's latest snapshot"
+            "working is the snapshot its analysis ran against"
+        );
+        // A snapshot landing after the analysis doesn't move its facts: the
+        // hunks are of snapshot 2, so the facts are too.
+        change_headed_at(&store, 7, "working", Some(2), &paths).await;
+        assert_eq!(
+            change_facts(&store, 7).await,
+            change_facts(&store, 2).await,
+            "a working change reads its analysis snapshot, not the latest"
         );
         assert!(
             change_facts(&store, 5).await.is_empty(),
@@ -4771,7 +4790,7 @@ mod tests {
             )
             .await
             .unwrap();
-        change_headed(&store, 1, "working", &["a.rs"]).await;
+        change_headed_at(&store, 1, "working", Some(1), &["a.rs"]).await;
         change_headed(&store, 2, "snap:1", &["a.rs"]).await;
         assert_eq!(
             change_facts(&store, 1).await,
