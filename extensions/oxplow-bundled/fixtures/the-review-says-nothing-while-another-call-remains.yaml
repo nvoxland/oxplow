@@ -1,0 +1,17 @@
+# A change removes one call to `helper`, but another call stays: it is still used, so nothing is said.
+requires: [oxplow-rust]
+# (The symbols step takes a placeholder snapshot; the one with the text comes after it.)
+given:
+  - { files: { "src/lib.rs": "fn helper() -> u32 {\n    1\n}\n\npub fn run() -> u32 {\n    helper()\n}\n\npub fn again() -> u32 {\n    helper()\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/lib.rs": "fn helper() -> u32 {\n    1\n}\n\npub fn run() -> u32 {\n    2\n}\n\npub fn again() -> u32 {\n    helper()\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Change }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Change } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  - observe: { symbols: { path: src/lib.rs, items: [{"name": "helper", "kind": "function", "line": 1}, {"name": "run", "kind": "function", "line": 5}, {"name": "again", "kind": "function", "line": 9}] } }
+  - observe: { snapshot: { files: [{ path: src/lib.rs, body: "fn helper() -> u32 {\n    1\n}\n\npub fn run() -> u32 {\n    2\n}\n\npub fn again() -> u32 {\n    helper()\n}\n" }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+when: { sql: "SELECT change_id, signal, severity, path, line, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_unused'" }
+expect: { rows: [] }

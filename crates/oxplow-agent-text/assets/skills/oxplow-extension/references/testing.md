@@ -235,7 +235,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      own to fill), `{ observe: { test_run: { at?, cases?: [{ name,
      status }], asserted_failed? } } }` (a test run: a
      capture with a fact per case) and `{ observe: { snapshot: { trigger?,
-     elapsed_ms?, budget_ms?, files?: [{ path, hash, blob? }] } } }` (one take in
+     elapsed_ms?, budget_ms?, files?: [{ path, hash, blob?, body? }] } } }` (one take in
      the stream's snapshot log; its parent is the take before it,
      `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
      col? }] } } }` (what a language server reported for a file),
