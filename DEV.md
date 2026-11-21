@@ -12,6 +12,12 @@
     librsvg2-dev patchelf build-essential`.
   - Windows: WebView2 (preinstalled on modern Windows; Microsoft
     redistributable otherwise) + MSVC build tools.
+- **cmake** — tree-sitter's `wasm` feature builds the wasmtime C API with it
+  (`brew install cmake`, `apt install cmake`, or cmake.org on Windows).
+- **tree-sitter CLI** (optional, for language-pack authors): `oxplow extension
+  grammar build` runs `tree-sitter generate` for a grammar repository that
+  doesn't commit `src/parser.c` (`brew install tree-sitter-cli`, `cargo install
+  tree-sitter-cli` or `npm i -g tree-sitter-cli`; or set `TREE_SITTER_CLI`).
 - **Git** — oxplow's git features expect the workspace root to be a
   repo.
 

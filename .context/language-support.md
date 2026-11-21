@@ -58,7 +58,8 @@ languages:
   (`wasm: grammars/x.wasm`), and so does the Clojure pack, to keep that path
   exercised by a shipped language. `grammar.source: { repository, rev, path? }` says where
   the `wasm` was built from (`path`: the folder whose `src/` holds
-  `parser.c`); only `oxplow extension grammar build` reads it
+  `parser.c`; `abi`: the parser ABI to generate when the repository commits no
+  `parser.c`, default 14); only `oxplow extension grammar build` reads it
   ([extensions-sdk.md](./extensions-sdk.md) "extension grammar build").
 - **Loading a wasm grammar** (`oxplow_code_metrics::load_wasm`, `grammar.rs`):
   one wasmtime engine per process (tree-sitter's `wasm` feature, which builds

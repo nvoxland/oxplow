@@ -36,6 +36,15 @@ compiles a grammar, and only `build` reads `source`.
   else release `WASI_SDK_VERSION` (34, Zed's) downloaded with `curl` and
   `tar` into `<cache>/wasi-sdk/<version>` on first use (macOS, Linux and
   Windows on x86_64 and arm64).
+- **Generate**: many grammar repositories don't commit `src/parser.c`. When
+  the grammar's folder has a `grammar.js` and no `src/parser.c`, the build
+  runs `tree-sitter generate --abi <N>` there (in the cache checkout) first,
+  with `grammar.source.abi` (default 14; tree-sitter 0.27 reads 13 to 15). The
+  CLI is an author-side requirement: `$TREE_SITTER_CLI` when set, else
+  `tree-sitter` on `PATH`; it is never downloaded or run through `npx`, and
+  without it the build stops saying how to install it. The step prints the
+  command and `tree-sitter --version`. A committed `parser.c` is used as it
+  is; a folder with neither is refused.
 - **Compile**, as Zed's `compile_grammar`: `clang -fPIC -shared -Os
   -Wl,--export=tree_sitter_<name> -Wl,--max-memory=4294967296 -o <wasm> -I
   <src> <src>/parser.c [<src>/scanner.c]`; no `--target` (wasi-sdk's clang
