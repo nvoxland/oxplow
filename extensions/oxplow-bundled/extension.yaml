@@ -704,6 +704,8 @@ ui:
     - { page: change-review-brief, at: oxplow/diff-view.sections, position: { after: header } }
     - { page: change-review-brief, at: oxplow/commit.sections, position: { after: detail } }
     - { page: change-review-brief, at: oxplow/uncommitted-changes.sections, position: { after: clean } }
+    # Above a file's diff: the files it usually changes with, left alone here.
+    - { page: file-co-change, at: oxplow/diff.file-header }
     - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: struggled, at: oxplow/diff-view.sections }
 configuration:

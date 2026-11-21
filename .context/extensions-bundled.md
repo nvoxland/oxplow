@@ -182,7 +182,30 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     files to look at · Open Review".
   - Page SQL binds `CAST(:change_id AS INTEGER)`: the union's columns are
     untyped, and an MCP caller may pass the id as text.
-  - Fixtures: `review-signals-*`, `the-review-page-*`. A commit's message
+  - Three pages go deeper, each with param `change_id`, all reached from
+    By Area (the area cell links to Signals narrowed to that area, a
+    Details cell links to Tests or Code) and from the Go Deeper line:
+    - `change-review-signals` ("Signals"): every signal in one table,
+      worst first, then path and line. Filter params `area`, `severity`
+      and `source` (role `filter`, default `''` = all; a link sets one with
+      `#area=tests`).
+    - `change-review-tests` ("Tests"): the `tests` signals, each test file's
+      tests/assertions/skips before and after (`v_change_test_file`), a
+      request's test runs (`v_test_run` through `v_agent_turn.request_id`)
+      and its `uncovered-lines` signals. Linked from the `tests` and
+      `verification` rows.
+    - `change-review-code` ("Code"): the non-test functions the change
+      touched with their deltas (`v_change_function`), the
+      `review_signal_api` signals and `v_change_duplicate` blocks. Linked
+      from the `code` row.
+  - `file-co-change` ("Usually Changes With", `parts/file-co-change.yaml`):
+    one line above a file's diff (slot `oxplow/diff.file-header`, params
+    `path`, `left`, `right`): "Usually changes with: a.rs, b.rs (unchanged
+    here)", from `v_oxplow_change_co_change` (`usual-co-changers-absent`)
+    of the change whose base and head revisions are `left` and `right`.
+    No row, so nothing drawn, when there is nothing to say.
+  - Fixtures: `review-signals-*`, `the-review-page-*`, `the-signals-page-*`,
+    `the-tests-*`, `the-diff-header-*`. A commit's message
     in a fixture needs `observe: { commit: { sha, subject } }` (the
     indexer doesn't run there).
 - **The review packet**. Its pages, mounted in

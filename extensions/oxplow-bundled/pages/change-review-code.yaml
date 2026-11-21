@@ -1,0 +1,75 @@
+title: Code
+description: What a change did to the code's shape. Read it to see which functions grew, which public API moved and which blocks were copied.
+label: Code
+params:
+- name: change_id
+  label: Change
+loaders:
+  functions:
+    sql: |
+      SELECT f.path, f.start_line AS line,
+             CASE WHEN f.container <> '' THEN f.container || '::' ELSE '' END || f.name AS function,
+             f.status, f.visibility,
+             f.complexity_delta, f.length_delta,
+             CASE WHEN f.params_before IS NULL OR f.params_after IS NULL OR f.params_before = f.params_after THEN ''
+                  ELSE printf('%d → %d', f.params_before, f.params_after) END AS params,
+             CASE WHEN f.complexity_delta > 0 OR f.signature_changed = 1 THEN 'warning' END AS tone,
+             c.base_revision, c.head_revision
+      FROM v_change_function f JOIN v_change c ON c.id = f.change_id
+      WHERE f.change_id = CAST(:change_id AS INTEGER) AND f.is_test = 0
+      ORDER BY coalesce(f.complexity_delta, 0) DESC, coalesce(f.length_delta, 0) DESC, f.path, f.start_line
+  api:
+    sql: |
+      SELECT s.path, s.line, s.title, s.why, c.base_revision, c.head_revision
+      FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
+      WHERE s.change_id = CAST(:change_id AS INTEGER) AND s.source = 'oxplow/review_signal_api'
+      ORDER BY s.path, s.line
+  duplicates:
+    sql: |
+      SELECT d.path, d.start_line AS line, d.lines,
+             d.peer_path, printf('%s:%d-%d', d.peer_path, d.peer_start_line, d.peer_end_line) AS peer,
+             c.base_revision, c.head_revision
+      FROM v_change_duplicate d JOIN v_change c ON c.id = d.change_id
+      WHERE d.change_id = CAST(:change_id AS INTEGER)
+      ORDER BY d.lines DESC, d.path, d.start_line
+view:
+  stack:
+  - id: functions
+    title: Functions
+    description: The functions the change added, removed or changed, the ones that got more complex first. A parameter count that moved is marked.
+    from: functions
+    viz: table
+    columns:
+    - key: function
+      label: Function
+      link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+    - { key: path, label: File }
+    - { key: status, label: Change }
+    - { key: complexity_delta, label: Complexity, tone: tone }
+    - { key: length_delta, label: Lines }
+    - { key: params, label: Parameters, tone: tone }
+    empty: The change added, removed and changed no function.
+  - id: api
+    title: Public API
+    description: Public functions whose signature changed or that were removed. Callers outside the change may break.
+    from: api
+    viz: table
+    columns:
+    - key: title
+      label: Change
+      link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+    - { key: why, label: Why }
+    empty: No public function changed its signature or was removed.
+  - id: duplicates
+    title: Duplicates
+    description: Blocks in the changed files that copy code elsewhere in the tree. Decide whether to share the code.
+    from: duplicates
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+    - { key: line, label: From Line }
+    - { key: lines, label: Lines }
+    - { key: peer, label: Copy Of }
+    empty: No duplicated block was found. The scan finishes after the rest of the analysis.

@@ -1,0 +1,46 @@
+# The Signals page is every signal of a change in one table, worst first;
+# an empty filter means all, a set one narrows.
+requires: [oxplow-rust]
+given:
+  - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
+  - observe: { turn: { prompt: base lib, write: { path: src/lib.rs, body: "pub fn grow(a: u32) -> u32 {\n    a\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs, src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: weaken, write: { path: tests/it.rs, body: "#[test]\n#[ignore]\nfn a() {\n    assert_eq!(1, 1);\n}\n" } } }
+  - observe: { turn: { prompt: widen, write: { path: src/lib.rs, body: "pub fn grow(a: u32, b: u32) -> u32 {\n    a + b\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs, src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: "Make grow add two numbers" }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Make grow add two numbers } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+steps:
+  # Worst first, then by path and line.
+  - when: { page: change-review-signals, params: { change_id: 1 } }
+    expect:
+      loaders:
+        signals:
+          rows:
+            - { path: tests/it.rs, severity: high, signal: fewer-assertions, line: null }
+            - { path: tests/it.rs, severity: high, signal: skip-added, line: null }
+            - { path: tests/it.rs, severity: high, signal: test-deleted, line: 8 }
+            - { path: src/lib.rs, severity: medium, signal: signature-changed, line: 1 }
+            - { path: src/lib.rs, severity: info }
+            - { path: src/lib.rs, severity: info }
+            - { path: tests/it.rs, severity: info }
+  - when: { page: change-review-signals, params: { change_id: 1, area: history } }
+    expect:
+      loaders:
+        signals:
+          rows:
+            - { path: src/lib.rs, area: history }
+            - { path: tests/it.rs, area: history }
+  - when: { page: change-review-signals, params: { change_id: 1, severity: medium } }
+    expect:
+      loaders:
+        signals:
+          rows:
+            - { path: src/lib.rs, signal: signature-changed }
+  - when: { page: change-review-signals, params: { change_id: 1, source: oxplow/review_signal_tests } }
+    expect:
+      loaders:
+        signals:
+          rows: 3

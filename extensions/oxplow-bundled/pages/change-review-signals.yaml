@@ -1,0 +1,47 @@
+title: Signals
+description: Every review signal of one change in one table, worst first. Narrow it by area, severity or source to work through one kind at a time.
+label: Signals
+params:
+- name: change_id
+  label: Change
+- name: area
+  label: Area
+  role: filter
+  default: ''
+- name: severity
+  label: Severity
+  role: filter
+  default: ''
+- name: source
+  label: Source
+  role: filter
+  default: ''
+loaders:
+  signals:
+    sql: |
+      -- An empty filter means all.
+      SELECT s.path, s.line, s.severity,
+             CASE s.severity WHEN 'high' THEN 'danger' WHEN 'medium' THEN 'warning' ELSE 'muted' END AS tone,
+             s.signal, s.title, s.why, s.source, s.area,
+             c.base_revision, c.head_revision
+      FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
+      WHERE s.change_id = CAST(:change_id AS INTEGER)
+        AND (coalesce(:area, '') = '' OR s.area = :area)
+        AND (coalesce(:severity, '') = '' OR s.severity = :severity)
+        AND (coalesce(:source, '') = '' OR s.source = :source)
+      ORDER BY CASE s.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+               s.path, s.line, s.title
+view:
+  from: signals
+  viz: table
+  columns:
+  - key: path
+    label: File
+    link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+  - { key: line, label: Line }
+  - { key: severity, label: Severity, format: badge, tone: tone }
+  - { key: signal, label: Signal }
+  - { key: title, label: Title }
+  - { key: why, label: Why }
+  - { key: source, label: Source }
+  empty: No signal matches. Clear a filter, or the change has none.

@@ -66,12 +66,23 @@ loaders:
       LEFT JOIN v_oxplow_change_interest i ON i.change_id = CAST(:change_id AS INTEGER) AND i.path = f.path
       WHERE f.rank <= 2
       ORDER BY f.rank, coalesce(i.interest, 0) DESC, f.path
+  all_signals:
+    sql: |
+      SELECT '[All signals](' || uri('oxplow/page', 'page', 'change-review-signals', 'change_id', CAST(:change_id AS INTEGER)) || ') · '
+             || '[Tests](' || uri('oxplow/page', 'page', 'change-review-tests', 'change_id', CAST(:change_id AS INTEGER)) || ') · '
+             || '[Code](' || uri('oxplow/page', 'page', 'change-review-code', 'change_id', CAST(:change_id AS INTEGER)) || ')' AS text
   by_area:
     sql: |
+      -- `signals` opens the Signals page narrowed to the area; `more` opens
+      -- the page that goes deeper into it (Tests, Code), if there is one.
       SELECT area,
              count(*) FILTER (WHERE severity = 'high') AS high,
              count(*) FILTER (WHERE severity = 'medium') AS medium,
-             count(*) FILTER (WHERE severity = 'info') AS info
+             count(*) FILTER (WHERE severity = 'info') AS info,
+             uri('oxplow/page', 'page', 'change-review-signals', 'change_id', CAST(:change_id AS INTEGER)) || '#area=' || area AS signals,
+             CASE WHEN area IN ('tests', 'verification') THEN uri('oxplow/page', 'page', 'change-review-tests', 'change_id', CAST(:change_id AS INTEGER))
+                  WHEN area = 'code' THEN uri('oxplow/page', 'page', 'change-review-code', 'change_id', CAST(:change_id AS INTEGER)) END AS more,
+             CASE WHEN area IN ('tests', 'verification') THEN 'Tests' WHEN area = 'code' THEN 'Code' END AS more_label
       FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
       GROUP BY area
       ORDER BY CASE area WHEN 'tests' THEN 1 WHEN 'verification' THEN 2 WHEN 'dependencies' THEN 3
@@ -111,9 +122,20 @@ view:
     from: by_area
     viz: table
     columns:
-    - { key: area, label: Area }
+    - key: area
+      label: Area
+      link: { kind: page, from: signals }
     - { key: high, label: High }
     - { key: medium, label: Medium }
     - { key: info, label: Info }
+    - key: more_label
+      label: Details
+      link: { kind: page, from: more }
     empty: No signals.
+  - id: pages
+    title: Go Deeper
+    description: Every signal in one table, and the pages for what the change did to its tests and its code.
+    from: all_signals
+    viz: markdown
+    markdown: { text: text }
   - slot: sections

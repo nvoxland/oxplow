@@ -1,0 +1,17 @@
+# A request's test runs are the ones its turns made, newest first.
+given:
+  - observe: { snapshot: { trigger: manual, files: [{ path: src/a.rs, hash: h0 }] } }
+  - observe:
+      turn:
+        prompt: Change a and run the tests
+        tools:
+          - { name: Edit, kind: edit, paths: [src/a.rs], ok: true }
+  - observe: { test_run: { turn: 1, cases: [{ name: a::grows, status: passed }, { name: a::shrinks, status: failed }] } }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/a.rs, hash: h1 }] } }
+  - observe: { analyze: { kind: request, requestId: req1 } }
+when: { page: change-review-tests, params: { change_id: 1 } }
+expect:
+  loaders:
+    runs:
+      rows:
+        - { passed: 1, failed: 1 }

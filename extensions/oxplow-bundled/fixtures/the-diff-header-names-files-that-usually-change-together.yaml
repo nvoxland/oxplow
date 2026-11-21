@@ -1,0 +1,26 @@
+# Above a file's diff: the files it usually changes with that this change
+# does not touch. Nothing is drawn for a file with none. (The fixture's
+# working change has no base revision, so `left` is left out.)
+given:
+  - observe: { commit: { sha: ab0, at: "2026-10-22T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ab1, at: "2026-10-17T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ab2, at: "2026-10-07T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe:
+      change:
+        kind: working
+        target: ""
+        files:
+          - { path: src/a.rs, additions: 1 }
+          - { path: src/c.rs, additions: 1 }
+steps:
+  - when: { part: oxplow/file-co-change, params: { path: src/a.rs, right: working } }
+    expect:
+      loaders:
+        co_change:
+          rows:
+            - { text: "Usually changes with: src/b.rs (unchanged here)" }
+  # No partners in history: nothing to say.
+  - when: { part: oxplow/file-co-change, params: { path: src/c.rs, right: working } }
+    expect:
+      loaders:
+        co_change: { rows: 0 }

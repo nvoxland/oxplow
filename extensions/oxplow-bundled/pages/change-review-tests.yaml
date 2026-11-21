@@ -1,0 +1,99 @@
+title: Tests
+description: What a change did to its tests, and what checked it. Read it to tell a test that was weakened from one that was only moved.
+label: Tests
+params:
+- name: change_id
+  label: Change
+loaders:
+  weakened:
+    sql: |
+      SELECT s.path, s.line, s.severity,
+             CASE s.severity WHEN 'high' THEN 'danger' WHEN 'medium' THEN 'warning' ELSE 'muted' END AS tone,
+             s.title, s.why, c.base_revision, c.head_revision
+      FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
+      WHERE s.change_id = CAST(:change_id AS INTEGER) AND s.area = 'tests'
+      ORDER BY CASE s.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, s.path, s.line, s.title
+  test_files:
+    sql: |
+      SELECT t.path,
+             printf('%d → %d', t.tests_before, t.tests_after) AS tests,
+             printf('%d → %d', t.assertions_before, t.assertions_after) AS assertions,
+             printf('%d → %d', t.skips_before, t.skips_after) AS skips,
+             CASE WHEN t.assertions_after < t.assertions_before OR t.skips_after > t.skips_before
+                    OR t.tests_after < t.tests_before THEN 'warning' END AS tone,
+             c.base_revision, c.head_revision
+      FROM v_change_test_file t JOIN v_change c ON c.id = t.change_id
+      WHERE t.change_id = CAST(:change_id AS INTEGER)
+      ORDER BY (t.assertions_after - t.assertions_before), t.path
+  runs:
+    sql: |
+      -- Only a request has test runs: they are the ones its turns made.
+      SELECT r.id, r.command, r.exit_code, r.passed, r.failed, r.skipped, r.total, r.duration_ms,
+             r.captured_at, uri('oxplow/run', 'id', r.id) AS run_uri
+      FROM v_change c
+      JOIN v_agent_turn t ON c.kind = 'request' AND t.request_id = CAST(c.target AS INTEGER)
+      JOIN v_test_run r ON r.turn_id = t.id
+      WHERE c.id = CAST(:change_id AS INTEGER)
+      ORDER BY r.captured_at DESC, r.id DESC
+  uncovered:
+    sql: |
+      SELECT s.path, s.line, s.title, s.why, c.base_revision, c.head_revision
+      FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
+      WHERE s.change_id = CAST(:change_id AS INTEGER)
+        AND s.area = 'verification' AND s.signal = 'uncovered-lines'
+      ORDER BY s.path, s.line
+view:
+  stack:
+  - id: weakened
+    title: Weakened
+    description: Tests the change removed, skipped or checked less. Open the file to see the lines.
+    from: weakened
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+    - { key: severity, label: Severity, format: badge, tone: tone }
+    - { key: title, label: Signal }
+    - { key: why, label: Why }
+    empty: No test was weakened, and no other test signal was raised.
+  - id: test-files
+    title: Test Files
+    description: Each test file the change touched, with its tests, assertions and skip markers before and after. Fewer assertions or more skips is highlighted.
+    from: test_files
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link: { kind: diff-at, from: path, base: base_revision, head: head_revision }
+    - { key: tests, label: Tests }
+    - { key: assertions, label: Assertions, tone: tone }
+    - { key: skips, label: Skips, tone: tone }
+    empty: The change touched no test file.
+  - id: runs
+    title: Runs
+    description: The test runs the request's agent made. A run that did not pass, or none at all, means nothing checked the change.
+    from: runs
+    viz: table
+    columns:
+    - key: command
+      label: Command
+      link: { kind: page, from: run_uri }
+    - { key: passed, label: Passed }
+    - { key: failed, label: Failed }
+    - { key: skipped, label: Skipped }
+    - { key: duration_ms, label: Took, format: duration }
+    - { key: captured_at, label: When, format: relative }
+    empty: No test run was seen. Only a request has runs, so a commit or a range shows none.
+  - id: uncovered
+    title: Uncovered
+    description: Changed lines that ran in no test, from the request's diff coverage. Open the file to see them.
+    from: uncovered
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+    - { key: line, label: From Line }
+    - { key: why, label: Why }
+    empty: No changed line is known to be untested. Without a coverage report, none is known either way.
