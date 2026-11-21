@@ -353,5 +353,15 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
 
 Live: languages from extensions, the shipped packs with native grammars and
 Clojure's WebAssembly one, the LSP symbol surface, generic unit listing, and
-tree-sitter symbols with their index. **Still open:** a third-party example
-pack (Lua) in `examples/extensions/`.
+tree-sitter symbols with their index, and a third-party example pack,
+`examples/extensions/elixir-pack/` (its own namespace, a wasm grammar with a
+C scanner, `forms:` analysis, symbols, test conventions, fixtures; the SDK's
+`every_example` test checks it).
+
+**Known limits of `forms:`** (found writing the Elixir example): the form
+strategies are Clojure-shaped. A call-based language gets no parameter count
+(it reads Clojure's argument vector), `form_meta` visibility knows only
+`defn-` / `^:private` (so Elixir's `defp` is `unknown`), `form_string` docs
+read a string literal (not an `@doc` attribute), and a decision kind can't
+filter a `binary_operator` by its operator (`and` / `or` add nothing). Each
+is a new strategy in core when a pack needs it.

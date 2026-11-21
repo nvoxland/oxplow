@@ -1,0 +1,29 @@
+# Elixir: what oxplow's code analysis knows about its syntax.
+# tree-sitter-elixir has no node kind for `def` or `if`: every one is a
+# `call` whose target is an identifier, as in Clojure's generic lists. So
+# function and decision detection runs through the call's head
+# (`form_heads`), under `forms:`.
+#
+# Limits of that shared path (it was written for Clojure): the parameter
+# count is read from a `vec_lit`, so it is 0 here; `form_meta` visibility
+# knows only `defn-` and `^:private`, so visibility is `unknown`; and the
+# doc strategy `form_string` reads a `str_lit`, while an Elixir doc is an
+# `@doc` attribute, so doc is `none`.
+functions:
+  kinds: []
+  form_heads: [def, defp, defmacro, defmacrop, defguard, defguardp, defdelegate]
+decisions:
+  # Each `->` clause of a `case`, `cond`, `receive` or `fn` is a branch.
+  kinds: [stab_clause, rescue_block, catch_block]
+  form_heads: [if, unless, with, for, try]
+forms:
+  list: call
+  symbol: identifier
+  name: identifier
+visibility:
+  strategy: unknown
+doc:
+  strategy: none
+duplication:
+  skip_kinds: []
+  skip_form_heads: [alias, import, require, use]

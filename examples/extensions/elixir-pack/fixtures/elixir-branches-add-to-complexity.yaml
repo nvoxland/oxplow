@@ -1,0 +1,10 @@
+# `if`, each `case` clause and `with` add one to a function's complexity;
+# a plain function is 1.
+when:
+  language: elixir
+  path: lib/acme/shape.ex
+  body: "defmodule Acme.Shape do\n  def plain(x), do: x\n\n  def area(shape) do\n    if shape == nil do\n      0\n    else\n      case shape do\n        {:square, s} -> s * s\n        {:circle, r} -> 3 * r * r\n      end\n    end\n  end\nend\n"
+expect:
+  functions:
+    - { name: plain, complexity: 1 }
+    - { name: area, complexity: 4 }

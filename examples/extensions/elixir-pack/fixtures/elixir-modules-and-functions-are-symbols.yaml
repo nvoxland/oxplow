@@ -1,0 +1,14 @@
+# A `defmodule` is a module symbol; each `def`, `defp` (with or without a
+# guard, a body or `do:`) is a function inside it and `defmacro` a macro.
+when:
+  language: elixir
+  path: lib/acme/math.ex
+  body: "defmodule Acme.Math do\n  @moduledoc \"Maths.\"\n\n  def add(a, b), do: a + b\n\n  def positive?(n) when n > 0 do\n    true\n  end\n\n  def zero do\n    0\n  end\n\n  defp helper(x), do: x\n\n  defmacro twice(x) do\n    quote do: unquote(x) * 2\n  end\nend\n"
+expect:
+  symbols:
+    - { kind: module, id: Acme.Math }
+    - { kind: function, id: "Acme.Math::add" }
+    - { kind: function, id: "Acme.Math::positive?" }
+    - { kind: function, id: "Acme.Math::zero" }
+    - { kind: function, id: "Acme.Math::helper" }
+    - { kind: macro, id: "Acme.Math::twice" }

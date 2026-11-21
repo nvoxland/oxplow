@@ -1,0 +1,42 @@
+manifest: 2
+name: elixir-pack
+namespace: acme
+description: "Elixir for oxplow, as a third-party language pack: grammar, code analysis, symbols and ExUnit test conventions."
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Show how anyone adds a language to oxplow. Elixir is a language oxplow
+    ships no pack for, so this extension brings a WebAssembly grammar, the
+    files that say what code analysis and symbols read, and the ExUnit
+    test conventions.
+  origin: null
+  examples:
+    - name: elixir-modules-and-functions-are-symbols
+      input: { language: elixir }
+      expect: a module symbol and a function symbol per def and defp
+    - name: elixir-branches-add-to-complexity
+      input: { language: elixir }
+      expect: the complexity of a function with if, case and with
+    - name: elixir-test-files-are-found-by-their-name
+      input: { sql: v_change_test_file }
+      expect: a *_test.exs file counted as a test file, with its tests and assertions
+test_conventions:
+  - id: elixir-exunit
+    languages: [elixir]
+    paths: ['**/*_test.exs']
+    containers: ['*Test']
+    functions: ['test']
+    assertions: ['\bassert(_\w+)?\b', '\brefute(_\w+)?\b']
+    skips: ['@tag\s+:skip\b']
+languages:
+  - id: elixir
+    title: Elixir
+    extensions: [ex, exs]
+    aliases: ["ex", "exs"]
+    grammar:
+      wasm: grammars/elixir.wasm
+      source: { repository: "https://github.com/elixir-lang/tree-sitter-elixir", rev: e2d9e6e0e76b0c436fa48a0b8c32a031d0cbdf49 }
+    analysis: languages/elixir/analysis.yaml
+    symbols: languages/elixir/symbols.scm
+    units: [module]

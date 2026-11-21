@@ -1,0 +1,13 @@
+# The pack's test conventions: `*_test.exs` is a test file, an `assert` is
+# an assertion and `@tag :skip` a skip.
+given:
+  - observe: { turn: { prompt: base, write: { path: README.md, body: "base\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [README.md] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: add the test file, write: { path: test/math_test.exs, body: "defmodule MathTest do\n  use ExUnit.Case\n\n  test \"adds\" do\n    assert 1 + 1 == 2\n  end\n\n  @tag :skip\n  test \"later\" do\n    assert true\n  end\nend\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [test/math_test.exs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add the test file }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Add the test file } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { sql: "SELECT path, assertions_after, skips_after FROM v_change_test_file" }
+expect: { rows: [{ path: test/math_test.exs, assertions_after: 2, skips_after: 1 }] }
