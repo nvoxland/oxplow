@@ -509,7 +509,7 @@ pub(super) async fn command_run(
         .svc
         .sql
         .query_sql(
-            "SELECT COALESCE(MAX(id), 0) FROM v_command_audit",
+            "SELECT COALESCE(MAX(id), 0) FROM v_command_run",
             vec![],
             None,
         )
@@ -556,11 +556,18 @@ pub(super) async fn command_run(
         }
         Err(e) => json!({ "ok": false, "refused": e.to_string() }),
     };
+    // The result already lists the composed steps. Read the other audited
+    // writes here, including sequences started by effects.
     let mut audited: Vec<(String, Option<i64>)> = host
         .svc
         .sql
         .query_sql(
-            "SELECT command, id FROM v_command_audit WHERE id > ?1 ORDER BY id",
+            "SELECT child.command, child.id
+             FROM v_command_run child
+             LEFT JOIN v_command_run parent
+               ON parent.run_id = child.parent_run_id AND parent.id > ?1
+             WHERE child.id > ?1 AND child.changed = 1 AND parent.id IS NULL
+             ORDER BY child.id",
             vec![head],
             None,
         )

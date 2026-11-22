@@ -1345,10 +1345,10 @@ retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
 and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
-ten minutes after boot, then daily; it also deletes refused runs'
-`command_audit` rows — `invalid` / `denied`, which nothing points at —
-older than `REFUSED_AUDIT_DAYS` (30), through the partial index
-`command_audit_refused` (V33), [commands.md](./commands.md) "Retention"; batches of 5,000 rows per transaction
+ten minutes after boot, then daily. Refused command runs age out after
+`REFUSED_AUDIT_DAYS` (30) through `contribution_run_refused_command`. Their
+details cascade. See [commands.md](./commands.md) "Retention"). The event
+payload sweep works in batches of 5,000 rows per transaction
 through the partial index `event_log_live_payload (type, at) WHERE
 payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
 can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
@@ -1500,18 +1500,18 @@ the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 
-`command_audit` (who ran which command, the input, outcome, the undo as
-`inverse_json`, `undone_by`, `scopes_json` — V27, named so in V34: the scopes the run called and how often,
-NULL for none — `session_id`, V40: the agent session that ran it, NULL
-for anyone else; `via`, which named what an actor acted through, was
-dropped in V50 with the Assistant, its only writer) is written by the command bus through
-`command_audit_store::insert_tx` / `set_event_id_tx` / `mark_undone_tx`
-inside the run's transaction; `SqliteCommandAuditStore` reads it. See
-[commands.md](./commands.md). V147 rebuilt it (an `effect` actor kind in
-the CHECK) with `INSERT … SELECT` into the new AUTOINCREMENT table, which
-set `sqlite_sequence` to `max(id)` — any higher high-water mark was lost.
-Harmless while nothing deletes audit rows; a future rebuild that must
-keep it copies the old `sqlite_sequence` row too.
+`command_audit` is the command detail table from V64. Its unique,
+required `run_id` names a `contribution_run`. It keeps the integer
+`id`, the command's name, `input_json`, `result_json`, `event_id`,
+`inverse_json` and `undone_by`. Reads and no-ops leave the payload and
+inverse columns NULL. The bus writes the run and its details through
+`command_audit_store::insert_tx`, then links an event or undo when there
+is one. A nested write's details land with its transaction. A rolled-back
+child keeps its outcome without payloads or an inverse.
+`SqliteCommandAuditStore` joins the run for the common fields, and
+`v_command_run` publishes them. V64 preserves existing audit IDs and the
+old AUTOINCREMENT high-water mark before backfilling detail rows.
+See [commands.md](./commands.md).
 
 **Event cores.** A store core that logs an event in its own transaction
 (`open_turn_tx` and `close_turn_tx` log `agent.turn.started@3` and
@@ -1959,10 +1959,11 @@ own run fields until their detail records move to the shared table.
   credentials the run received.
 - **Readers.** `v_contribution_run` publishes the shared fields, with
   `scopes` and `decisions` for the two JSON columns, and the run's URI.
-  `command_audit`, `effect_run`, `collector_run` and `ai_call` can name
-  a run in `run_id`.
-- **Retention.** `event_retention::sweep` removes finished rows that began
-  more than 90 days ago (`CONTRIBUTION_RUN_DAYS`), in batches of 5,000.
+  `command_audit.run_id` names its shared run. `effect_run`,
+  `collector_run` and `ai_call` can name a run in `run_id`.
+- **Retention.** `event_retention::sweep` uses a 90-day window
+  (`CONTRIBUTION_RUN_DAYS`) in batches of 5,000. Commands with recorded
+  input stay, except refusals, which age out after 30 days.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 

@@ -120,7 +120,7 @@ impl CommandBus {
             preview.destructive,
         );
         let effect = match &origin {
-            RunOrigin::Effect(key, _) => Some(key.clone()),
+            RunOrigin::Effect(key, _, _) => Some(key.clone()),
             _ => None,
         };
         let stored = self

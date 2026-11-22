@@ -97,11 +97,11 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 |---|---|
 | `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value and that field's `description`), and quotes the schema's example input, so a caller fixes it in one more call. The example is JSON Schema's own `examples` keyword, from the command's declaration (`example:` in its manifest, kept over its operation's schema by `Op::command`; a script command's first example that runs when it declares none; `oxplow.command.sequence`'s in `compose.rs`). Every command an agent is offered has one that fits (`every_command_an_agent_is_offered_has_an_example_that_fits`) |
 | `job` | a model's tool call inside one of its extension's jobs may run it (`job: true`; `false` unless said, and only on a command with its extension's own handler — `Op::command` refuses it over a scope's operation, so none of core's commands takes a job). Who else may run a command isn't the command's to say: **anyone** — a person, an agent, a page acting for either. oxplow puts no wall between a person and their agent; what an agent may call is its harness's to decide (its permission mode) |
-| `confirm` | `Never`, `Always`, or `Destructive` — a **person's** run asks them first (the second click). An agent's run doesn't ask (`commands::asks`); an effect's is kept as a proposal; a job's or oxplow's is refused. A command that only reads (`View` / `Read`) may not ask (`Command::new` / `with_confirm_for` refuse it — so a read or view scope's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
+| `confirm` | `Never`, `Always`, or `Destructive` — a **person's** run asks them first (the second click). An agent's run doesn't ask (`commands::asks`); an effect's is kept as a proposal; a job's or oxplow's is refused. A command that only reads (`View` / `Read`) may not ask (`Command::new` / `with_confirm_for` refuse it — so a read or view scope's command can't declare `confirm`): its detail has no execution event or proposal link |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External` (against a system the bus doesn't own — a VCS, a process, an outside system), or `Dispatch` — a composite, which its calls decide ("Composition") |
-| `access` | `oxplow_domain::Access`: `View`, `Read`, `Record` or `Write` (the default); a scope operation's command takes its scope's. `View` (changes only what the person sees) and `Read` are unrecorded (`Access::reads_only`): no audit row or `command.executed`, so a polling agent doesn't fill the log, and a closed thread can still run one (`oxplow.config.list_keys`, `oxplow.config.get`). `Record` and `Write` are audited (`Access::records`). A `Record` changes oxplow's own records (a store's `task.*`) and is open to any thread; a `Write` is refused to an agent whose thread is closed or missing (`Access::needs_thread`) |
+| `access` | `oxplow_domain::Access`: `View`, `Read`, `Record` or `Write` (the default); a scope operation's command takes its scope's. `View` (changes only what the person sees) and `Read` keep a run and detail row (`Access::reads_only`) with NULL input, result and inverse and no `command.executed`. A polling agent does not fill the event log, and a closed thread can still run one (`oxplow.config.list_keys`, `oxplow.config.get`). `Record` and `Write` are audited (`Access::records`). A `Record` changes oxplow's own records (a store's `task.*`) and is open to any thread; a `Write` is refused to an agent whose thread is closed or missing (`Access::needs_thread`) |
 | `unrecorded` | top-level input fields its audit row leaves out, kept as their size (`{ "omitted_bytes": n }`; an op's `with_unrecorded` — `oxplow.file.save`'s `content` — or an extension command's `unrecorded: [field…]`, each a property of its input or `*`, checked at load): still audited, the log not grown by every file saved. A page form's `secret` field must be one of them |
 | `needs` | the **scopes** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, features or shared models (`model:oxplow/task_record`) it needs active — the grammar pages use. Unmet, it isn't offered and doesn't run (pipeline step 0). oxtask's `oxtask.task.*` commands need the task model |
 
@@ -250,16 +250,18 @@ so oxplow's own commands can do nothing an extension's can't.
 
 Composed children capture their own RunContext during routing, alongside the
 retained command handler. A registered contribution factory supplies that child's
-identity, package version, generation and declared authority; a command without
-one inherits the caller in a new child context. Nested composers run pure under
+identity, package version, generation and declared authority. A command without
+a contribution factory gets a core command identity and inherits the caller's
+authority in its child context. Nested composers run pure under
 their own contribution, transactional leaves use transactional mode, and external
 steps use their own context for provider invocation. Cancellation and host live
 guards remain inherited. Check authority before composition and again before
 each child executes; a later registry replacement cannot relabel a retained
 handler. Native scope operations also include their implicit backing scope in
 the captured declaration. This prevents namespace services from mistaking the
-parent composer's extension for the child command's owner. Parent audit and event
-atomicity are unchanged; this does not implement generation-wide reader pinning.
+parent composer's extension for the child command's owner. Each child has its own
+run and detail row. Its `parent_run_id` links to the sender's run when that run
+is recorded.
 
 The native `state.read/snapshot` operation reads its owning contribution's private
 namespace from the command's connection. Its scope/area input contains no owner
@@ -297,16 +299,16 @@ candidate into `.oxplow/tmp`; it changes no record),
 `collectors.preview/preview`, and `ai.compute/{decide,summarize}` (recorded
 calls whose caller is the asking thread). `pages.write/run_action`
 (`oxplow.page.run_action`) is a `record` that composes, running as the
-page's actor. A read runs unrecorded, for any thread, and the operation
+page's actor. A read can run for any thread. The operation
 reads the stream it names, else the actor's own
 (`agent_reads::stream_or_actors`). The `v_scope` live dataset lists every
 scope (id, access, host, summary); `v_command` lists every registered command (the registry `list_commands` reads) with its summary, scope, confirmation and undoability, under the URI `v_contribution` holds for an extension's own. The MCP tools that carried these
 reads are thin calls to the commands (`OxplowMcp::read_command`).
 
 A command's access is the strongest among the scopes it needs
-(`strongest_access`): a `view` or a `read` runs unrecorded, a `record` or
-a `write` is audited. The access says what a run changes, not where its
-handler runs: that is the operation's handler — in the bus's transaction (`Tx`) or against a system
+(`strongest_access`). A `view` or `read` keeps a detail without input,
+result or inverse. A `record` or `write` can keep all three. The
+operation's handler decides where it runs — in the bus's transaction (`Tx`) or against a system
 it doesn't own (`External`, pinned by `the_external_commands_are_the_reviewed_ones`).
 They do not follow each other: `config.write`'s `set` is `External`
 (the shared settings service writes the chosen level), while
@@ -452,14 +454,14 @@ its scope calls. A `Tx` run's attempt keeps its own (`TxCtx::trace`,
 fresh per attempt, shared by the runs nested in it). The routing pass
 composes a composite once, through the gateway, as a pure child of the run,
 and what that child called becomes the plan's scopes, which the run
-records; steps add each step's. An `External` call's is its
-`Invocation::run`, a child of the command's run: a provider's
+records; steps add each step's. An `External` call uses the trace on
+`Invocation::run`: a provider's
 `host/call`s during it count there — its own command's (`run_op`) and a
 capability verb's, which the `task.<verb>` run hands its verbs in
 `VerbCall::run` ([providers.md](./providers.md) "The protocol"). Its
 summary — per scope, how many calls (`{"sql.read": 2}`) — is written on
-the run's audit row (`command_audit.scopes_json`, V27, named so in V34;
-NULL when it used none). Later: each call's detail (what it touched),
+the shared run row (`contribution_run.scopes_json`), along with permission
+decisions. Later: each call's detail (what it touched),
 sampled or on by setting, and approvals by scope.
 
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
@@ -539,56 +541,49 @@ skipping.
    person and isn't theirs is `Denied` (a proposal is a plain call and
    would lose the row it undoes); an agent's undo asks nothing, as its
    runs don't.
-5. **Run and record in one transaction**: the handler, a `command_audit`
-   row (`crates/oxplow-db/src/command_audit_store.rs`: actor — an
-   agent's session too, `session_id`, V40 — input,
-   outcome, the handler's `result` — V114, so a run's answer, such as a
-   merge's conflicts, stays readable after the fact — inverse, and the
-   scopes it called, "Scopes"), `command.executed@4` in the event log
-   pointing at the audit row, the handler's domain events (with `cause` =
-   the executed event, and the actor's thread/stream/agent session —
-   `Actor::anchors()` —
-   filled into any anchor the handler left empty), and the audit row's
-   `event_id`. A handler failure
-   rolls all of it back and is audited as `error` in a transaction of its
-   own. A handler that found **nothing to change** and wrote nothing
-   returns `HandlerOutput::unchanged`: a plain call then leaves
-   no record — no audit row, no `command.executed`, `audit_id: None` —
-   like a read (a re-run that finds the state already as asked is the case). The bus enforces it: an unchanged call's
-   transaction is **rolled back**, so nothing it wrote lands unaudited,
-   and one that also returns events or an inverse is refused (audited as
-   `error`). An undo, an approval or an effect's reaction is recorded
-   regardless: its row must be marked (`an_undo_or_approval_that_changes_
-   nothing_is_still_recorded`). Only `Tx` handlers may say it; an
-   `External` run is always recorded.
+5. **Run and record.** The bus writes a `contribution_run` row and a
+   `command_audit` detail row linked by `run_id`
+   (`command_audit_store::insert_tx`). The shared row holds the actor,
+   anchors, timing, outcome, error, cost and authority. The detail row
+   holds the command's input, result, inverse, event link and undo marker.
+   For a `Tx` write, the handler, both rows, `command.executed@5` and the
+   handler's effects commit together. The event's `audit_id` names the
+   detail row's integer ID. The handler's events take the executed event
+   as their cause and inherit any missing thread and stream anchors.
+   A handler failure rolls back its writes and gets its own record with
+   outcome `failed`. Refused input and authority use `invalid` and
+   `denied`.
 6. Post-commit: wake the event pump.
 
-**Retention.** A refused run's audit row (`invalid`, `denied` — input
-that didn't fit, a caller turned away) wrote nothing and nothing points
-at it, so the daily retention sweep deletes those older than
-`event_retention::REFUSED_AUDIT_DAYS` (30) through the partial index
-`command_audit_refused` (V33); a confused or polling agent makes many.
-Runs that did something (`ok`, `error`) stay — undo, approvals, effect
-runs and `command.executed` name them.
+Plain reads and unchanged calls still get a run and a detail row
+(`ran_unaudited`). Their `input_json`, `result_json` and `inverse_json`
+are NULL. They emit no `command.executed` and return no `audit_id` or
+`event_id`. A `Tx` read runs in a snapshot that rolls back. A call that
+returns `HandlerOutput::unchanged` also rolls back its transaction, then
+the bus records its run separately. The bus rejects an unchanged result
+that also carries events or an inverse. Undo, approval and effect
+reactions keep their detail and event links even when nothing changes.
+An external read also receives the command's run ID, so model calls can
+link to it.
 
-**Reading it.** `v_command_audit` (command, actor kind and id, outcome,
-error, time, thread, session) is the agent-facing read of the audit. The
-bundled Agent Interface page (Activity) counts the agents' runs by
-command with the share invalid, denied or failed, and opens a command for
-its most common errors, so a command an agent keeps getting wrong shows.
-The refused rows' 30-day retention is why that page looks back 30 days.
+**Retention.** The sweep removes refused runs (`invalid` or `denied`)
+after 30 days (`REFUSED_AUDIT_DAYS`). Other rows with NULL input age out
+after the 90-day `CONTRIBUTION_RUN_DAYS` window. Runs with recorded input
+stay for undo, approvals and event links. Deleting a shared run cascades
+to its command detail.
 
-A command that only reads (`View` / `Read`) stops after step 4: its handler runs in
-`Database::read` — a snapshot that is always rolled back, so a write it
-makes never lands (nothing would audit it) — and the outcome has
-`audit_id: None`, `event_id: None`.
-An external read handler receives the command's run ID too, so model calls
-can link to the command's contribution run.
+**Reading it.** `v_command_run` joins the command detail to the shared
+run and exposes every recorded command, including reads and unchanged
+calls. `changed = 1` means the detail has recorded input. The Command data
+page filters on that field and a row opens Run details. The bundled-todo
+Agent Interface page counts all completed runs over the last 30 days,
+including reads, when it shows the share that ended invalid, denied or
+failed.
 
-`CommandBus::undo(actor, audit_id, confirmed)` loads the row, refuses a
-run that didn't complete, was already undone or has no inverse, runs the
-inverse through the same pipeline, and marks the row `undone_by` the new
-run. The original row is claimed **with** the inverse run
+`CommandBus::undo(actor, audit_id, confirmed)` loads the command detail and its shared run. It refuses a
+run that didn't complete, was already undone or has no inverse. It runs the
+inverse through the same pipeline and sets `undone_by` to the new detail
+row's ID. The original row is claimed **with** the inverse run
 — marked `undone_by` inside the run's transaction for a `Tx` inverse,
 or claimed (`undone_by = 0`, pending) before an `External` inverse and
 released if it fails — so two concurrent undos can't both apply it
@@ -688,7 +683,7 @@ a `Composed` tree — each composite call's own composition beside it —
 and **that is what runs**: the composer is never asked again, so the
 calls checked are the calls run (an extension's script runs once; a
 composer that would answer differently later isn't asked). Every call
-inside → **one run in one transaction**, below; any outside →
+inside → **one transaction**, below; any outside →
 **steps** (next section).
 
 **In one transaction** (`steps::run_composed`, the `Tx` handler the bus
@@ -702,10 +697,8 @@ destructive }`) unless the run was confirmed. Then every handler runs on
 the parent's transaction one level deeper (`TxCtx.depth`), with its own
 captured child RunContext; routing refuses a
 composite more than `MAX_NESTING` (8) deep ("does a command compose
-itself?") instead of recursing until the stack overflows. The parent has
-the **one audit row** and `command.executed` (children are not audited
-separately — a child row would be an independently undoable unit
-fighting the parent's inverse); its `result` is `{ result, children: [{
+itself?") instead of recursing until the stack overflows. Each child has its own run and detail row in the transaction. The parent
+owns `command.executed` and the combined inverse. Its `result` is `{ result, children: [{
 name, result }] }` — no child's `input` (the caller sent it) or `inverse`
 (the parent's is the undo): echoing both cost an agent filing twenty
 tasks 23k characters back; the children's events ride out on the
@@ -718,7 +711,7 @@ inverse asks makes the undo ask. A child that says `unchanged` (an
 `oxplow.config.set` to the value already there) has nothing to undo and
 doesn't veto the rest; one that says so but returns events or an inverse
 is refused; a composite whose every child changed nothing, with no events
-of its own, is `unchanged` itself and leaves no record. A child's `Busy`
+of its own, is `unchanged` itself and records a detail without input, result or inverse. A child's `Busy`
 propagates and the bus retries the whole parent (handlers are pure).
 A `Tx` handler doesn't compose by hand: composing is a composite's, so
 it reads through the gateway outside the transaction.
@@ -735,11 +728,11 @@ the preview), and an effect's run is a proposal **with no dry run**
 **In order**, each landing as it runs: a step inside oxplow in its own
 transaction (its events caused by the run's `command.executed`, whose id
 is fixed first), an external one through its system; the first failure
-stops the run, and the steps before it **stand**. (3) **Recorded once**:
-one audit row and one `command.executed` with `result { result,
+stops the run, and the steps before it **stand**. (3) **Recorded with their parent**:
+each step has its own run and detail. The parent owns `command.executed` with `result { result,
 children: [the landed steps], failed?: { name, input, error } }` and the
 landed steps' events, caused by it. A run that stopped partway is
-recorded as an `error` with what landed, and returns `Failed` naming the
+recorded as `failed` with what landed, and returns `Failed` naming the
 failed step and the ones that stand; a run that failed at its first
 step is audited like any failure. **Not undoable by itself** (no
 inverse of its own): a system outside the bus can't be rolled back with
@@ -932,7 +925,7 @@ whose state can't join the bus's transaction; the bus audits it after it returns
 record is logged, never reported as the run failing); its audit row
 holds the handler's `result` like a `Tx` run's. It is
 `Fn(Invocation, Value)`: `Invocation { run, idempotency_key }` (its
-actor is `run.actor()`; the run is a child of the command's), the key
+actor is `run.actor()`; the run is the command's), the key
 set for a step of an effect's reaction (`effect_step_key`:
 `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
 every attempt at it — P10) and `None` otherwise; an external provider's
@@ -965,7 +958,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 |---|---|---|
 | `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Dispatch`: the extension's Starlark script composes core commands — once, when the bus routes the run — run as any composite's (`extension_commands.rs`, P6b.B2; "Composition") | declared confirm / access, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions-commands.md](./extensions-commands.md) → "Commands" |
 | *(tasks)* | — | Core has no task commands: a task store's commands are its extension's (`oxtask.task.*`) and join bundled's task points (`.context/tasks.md`). |
-| `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | `Write`, `Confirm::Never` — the children decide. Each child's own policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`steps::run_composed`), undoable as the reversed children that changed something; a call outside it (a `task.*` verb, any list's) → steps, in order, not undoable. The one composition mechanism (an extension's command runs on it). See "Composition" |
+| `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | `Write`, `Confirm::Never` — the children decide. Each child's own policy and confirmation; each command has its own run and detail. The parent's `result` lists its children. Every call in oxplow's records → one transaction (`steps::run_composed`), undoable as the reversed children that changed something; a call outside it (a `task.*` verb, any list's) → steps, in order, not undoable. The one composition mechanism (an extension's command runs on it). See "Composition" |
 | `oxplow.test.record_run { thread?, command, duration_ms?, passed?, failed?, total? }` | `External` over the `CollectionService` (`commands/test_runs.rs`): the capture commits in the collector's own transaction | `Record`, not undoable. An agent's goes on its own thread whatever it names; a person names one. The `asserted` run whose counts oxplow couldn't parse; it belongs to the request of the turn that reported it. A report oxplow parses itself is a report collector's, run by hand with `oxplow.collector.sync`. See [collection.md](./collection.md) |
 | `oxplow.extension.write_page { extension, page, spec, deploy? }` | `External` (`commands/extension_deploy.rs`, scope `pages.author`): writes `pages/<page>.yaml` (the YAML text in `spec`) into the extension's source in the primary checkout, scaffolding the manifest when the extension is new; `spec` must parse (`pages::schema::parse_page`) and the extension must load with it, else nothing stays written; a bundled extension and a caller in another stream (in-project source) are refused; `deploy: true` then deploys | `Write`, not undoable. Returns `{ page, path, deployed }`. What the app's Save as Page and dashboard edits call |
 | `oxplow.extension.deploy { name }` (from the primary checkout; refused from another stream when the source is inside the project), `rollback { name, to? }`, `enable { name }`, `disable { name }`, `remove { name }`, `share { name }`, `unshare { name }` | `External` (`commands/extension_deploy.rs`): copies a source into `.oxplow/runtime/extensions/<name>/<hash>/`, publishes the live set, and edits `.oxplow/local.yaml`, `.oxplow/project.yaml` and `.oxplow/.gitignore` | `Write`, not undoable. `deploy` returns once the deployment runs; it fails, keeping the old one, when the extension does not prepare. `enable` / `disable` write a local `oxplow.extensions.<name>.enabled` boolean and are what the Extensions page calls; `remove` forgets deployments, state and settings and never deletes the source; `share` / `unshare` un-ignore a source and write or remove its project enabled override. See [extensions-deploy.md](./extensions-deploy.md) → "Sources and deployments" |
@@ -985,7 +978,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.metric.enable { keys, enabled }` | `External`: turns metrics on or off — computes the new `metrics:` list with `MetricsService::apply_metric_enabled` (a bundled code metric is off until a `use:` names it; a producer/extension metric is on until an `enabled: false` marker) starting from the project's list (or the global one it inherits, never a local one), and writes `oxplow.metrics` at project level through the one settings write; an unknown key (not in `metric_catalog`) is refused | undoable (restores the prior list); logs `config.changed@3 { key: oxplow.metrics, … }`; the `config.metrics` reactor reseeds |
 | `oxplow.metric.record { key, value, subject?, dims?, stream? }` | `Tx` over `fact_store::record_facts_tx` (`commands/metric.rs`, P4.8) | not undoable. An asserted fact on the metric's source measure, stamped to match its filter, anchored to the stream's latest snapshot; the fact and the audit commit together. A formula or `count` metric, an unknown key, or another stream (for an agent) is refused. After commit: clears the fact memo (the change loop announces `MetricSamplesChanged` for the measure) |
 | `oxplow.metric.rebuild { force }` | `External` over `MetricsService::rebuild_baseline` | not undoable. Every snapshot fact collector's whole-tree baseline. It drives snapshot captures and collector scripts, which own their own transactions. (Running one collector is `oxplow.collector.sync`; `metric.run` is deleted.) |
-| `oxplow.vcs.commit` / `oxplow.vcs.stage` / `oxplow.vcs.discard` / `oxplow.vcs.fetch` / `oxplow.vcs.pull` / `oxplow.vcs.push` / `oxplow.vcs.merge` / `oxplow.vcs.checkout_branch` / `oxplow.vcs.rename_branch` / `oxplow.vcs.delete_branch` / `oxplow.vcs.resolve_conflict`; `oxplow.git.rebase` / `oxplow.git.cherry_pick` / `oxplow.git.revert` / `oxplow.git.ignore` | `External` over the `Vcs` trait (`git.*`: the git provider's own ops) (`commands/vcs.rs`, P5.B6) | any caller's, a page's too — an agent's on its own stream only (its terminal's `git` reaches only its own worktree; `vcs_op` refuses another stream), not undoable. Each takes the `stream` it acts on, by URI (`oxplow:oxplow/stream?id=str1`), resolved strictly (an unknown stream is refused, never the primary's). `oxplow.vcs.discard`, `oxplow.vcs.merge`, `oxplow.vcs.delete_branch`, `oxplow.git.rebase` and `oxplow.git.revert` are `Destructive` (confirmed); `oxplow.vcs.pull` and `oxplow.vcs.push` don't ask (routine, the person's own click). The spec is the one rule: the Git Dashboard arms its confirm from it (`SpecConfirm`). The result — and the audit row's — is the VCS's `OpOutcome { success, log, conflicts, auto_resolved }` (`oxplow.vcs.commit`: `{ success, revision }`); an op that failed outright (a rejected push, an unreachable remote) is the run's `Failed`, git's log its message, audited `error` — never an `ok` row whose result says it failed — while one that stopped at conflicts answers with them (the repository is mid-merge for a person). Once a run is recorded (its `after_commit`; at once for one that failed, which may have touched the workspace too) the stream's `WorkspaceChanged` (and `VcsRefsChanged`; every stream's after a fetch, push, rename or delete) is announced. See [vcs.md](./vcs.md) |
+| `oxplow.vcs.commit` / `oxplow.vcs.stage` / `oxplow.vcs.discard` / `oxplow.vcs.fetch` / `oxplow.vcs.pull` / `oxplow.vcs.push` / `oxplow.vcs.merge` / `oxplow.vcs.checkout_branch` / `oxplow.vcs.rename_branch` / `oxplow.vcs.delete_branch` / `oxplow.vcs.resolve_conflict`; `oxplow.git.rebase` / `oxplow.git.cherry_pick` / `oxplow.git.revert` / `oxplow.git.ignore` | `External` over the `Vcs` trait (`git.*`: the git provider's own ops) (`commands/vcs.rs`, P5.B6) | any caller's, a page's too — an agent's on its own stream only (its terminal's `git` reaches only its own worktree; `vcs_op` refuses another stream), not undoable. Each takes the `stream` it acts on, by URI (`oxplow:oxplow/stream?id=str1`), resolved strictly (an unknown stream is refused, never the primary's). `oxplow.vcs.discard`, `oxplow.vcs.merge`, `oxplow.vcs.delete_branch`, `oxplow.git.rebase` and `oxplow.git.revert` are `Destructive` (confirmed); `oxplow.vcs.pull` and `oxplow.vcs.push` don't ask (routine, the person's own click). The spec is the one rule: the Git Dashboard arms its confirm from it (`SpecConfirm`). The result — and the audit row's — is the VCS's `OpOutcome { success, log, conflicts, auto_resolved }` (`oxplow.vcs.commit`: `{ success, revision }`); an op that failed outright (a rejected push, an unreachable remote) is the run's `Failed`, git's log its message, recorded as `failed` — never an `ok` row whose result says it failed — while one that stopped at conflicts answers with them (the repository is mid-merge for a person). Once a run is recorded (its `after_commit`; at once for one that failed, which may have touched the workspace too) the stream's `WorkspaceChanged` (and `VcsRefsChanged`; every stream's after a fetch, push, rename or delete) is announced. See [vcs.md](./vcs.md) |
 | `<provider>.<name>` (an enabled external provider's own declared commands — not its capability's verbs: the fake's `estimate`) | `External` over the provider process's `invoke` (`providers/registry.rs`, P5.D3) | registered while its instance is enabled (and removed when it stops), `Experimental`; `confirm`, `access` and `undoable` as the provider declares (its `inverse` becomes `<provider>.<command>`). The events its `invoke` returns are logged caused by the run — only types it declares, and a record event only for its own items. See [providers.md](./providers.md) |
 | `oxplow.collector.sync { collector, thread? }` | `External` over the collector's program or script (`collector_runner.rs`, P7.B3; was `source.sync`) | `Write`, not undoable. Runs a collector from the primary worktree and commits its rows, its `collector_run` row and `collector.synced@2` in one transaction (a failed run commits the failure). It never admits anything: a collector whose extension lacks a permission it needs (`process` for an exec one) is `Invalid`. Run by the system it's the `every:` schedule's run (`trigger: every`); by anyone else, `manual`. **The one manual run for every collector** (it replaced `source.sync` and `metric.run`): a fact collector (`facts:`, owner an extension, the project's own `project` among them) runs through the fact engine (`MetricsService::run_collector_by_key`) against the stream's latest snapshot, recording its capture, `collector_run` and `collector.synced@2` (the engine's own writes). Result `{ owner, id, rowCounts, facts }` — `rowCounts` for an entity collector, `facts` (count recorded) for a fact collector. A **report collector** (`records:`) is read by the collection service in `thread` (an agent's own; a person names one): `{ owner, id, recorded: { status, records, run, … } }` |
 | `oxplow.provider.sync { instance, collector? }` | `External` over the provider process's `read` (`providers/sync.rs`, P7.A3) | `Record` (it restates items, never claims), not undoable. Reads a running instance's collectors (all, or one — an undeclared one is `Invalid` at `/collector`) from their last checkpoints; the records land as record events, each batch committed with its `$/state`. The one way to read: Settings → Integrations' Sync Now, an agent, the schedule (as the system) and the read an instance gets when it starts. Result `{ reads: [{ collector, records }] }`. See [providers.md](./providers.md) |
@@ -1008,7 +1001,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.contribution.enable_all { extension? }` | `External` over `contribution_health.rs` and the provider registry, like `enable` | Not undoable. Enables every contribution a failure policy disabled (`contribution_health.state = 'disabled'`) — `extension`'s, or every extension's — each exactly as `oxplow.contribution.enable` does (a provider instance resets and reconciles; a collector runs at its next trigger), logging one `contribution.enabled@1` apiece. Returns `{ enabled: [<contribution_health row>…] }`, empty when nothing was disabled. Extension problems and Data → Collectors offer it as **Enable All Disabled (N)**. |
 | `oxplow.page.show { page?, spec?, params? }` | `External` | Shows a page beside the conversation (an agent's `oxplow_show_page`): a page by id opens at its URI; an inline `spec` is checked (`parse_temp_page`: read-only, no `for:`), written as the page file `v<hash of the YAML>.yaml` on `oxplow:temp` through `Services.temp.put` and shown as `oxplow:oxplow/page?page=temp/<id>` (the same YAML is the same page; a daemon restart keeps it; the GC removes it after 7 idle days). It opens as a tab of the caller's thread when a window is open (`opened`, else `why`) and returns the page's text. Saving it is `oxplow.extension.write_page` (Save as Page) or a knowledge page with an `oxplow-page` block. See [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | `oxplow.ui.report_error { label, command?, message?, exit_code?, thread?, stream?, signal?, duration_ms?, stderr?, stdout?, audit_id?, proposal? }` | `Tx` (`commands/ui.rs`) | `Record`, not undoable. The app's runner (`commands/runForPerson.ts`, usability.md "A person's command that fails") runs it once for each person's command that fails, and `recordOpError` for any other failure; its result's `event` is the row's id, which the window uses to tell a failure it showed beside its control from one the toast announces; the Alerts page lists `v_op_error`, not a client copy. `audit_id` is the audit row of the person's run that failed: the daemon's dispatch puts it on the IPC error (`IpcError.audit_id`, from `oxplow_app::commands::tracking_failed_audit`, which `audit_only` feeds) and the runner passes it on; `proposal` is an approval's, also the event's subject. Logs `ui.op_failed@2` (v2 added both; v1 upcasts unchanged) anchored to `thread` (and its stream), or, from no thread, to the `stream` on screen so its agent can read the output (not both: `Invalid` at `/stream`); stderr / stdout stored as its `output` body (`put_json_tx`, namespace `ui`); the agent reads them as `v_op_error` and `read_event_content(event_id, output)` |
-| `oxplow.op_error.mark_seen { event }`, `oxplow.op_error.dismiss { event }`, `oxplow.op_error.dismiss_all {}` (`Tx`) | `commands/op_error.rs` over `oxplow_db::op_error_store` | `Record`, not undoable: the person opened a failed operation's output, or cleared it from the app's list. Each logs `ui.op_error.seen@1` / `ui.op_error.dismissed@1 { event }`, anchored as the failure and kept as long (the `ui` window), read back as `v_op_error.seen` / `dismissed` (dismissing is seeing). `event` that isn't a `ui.op_failed` event is `Invalid` at `/event`; one already in that state is `unchanged` (no record); `dismiss_all` logs one per failure not dismissed, `{ dismissed: n }` |
+| `oxplow.op_error.mark_seen { event }`, `oxplow.op_error.dismiss { event }`, `oxplow.op_error.dismiss_all {}` (`Tx`) | `commands/op_error.rs` over `oxplow_db::op_error_store` | `Record`, not undoable: the person opened a failed operation's output, or cleared it from the app's list. Each logs `ui.op_error.seen@1` / `ui.op_error.dismissed@1 { event }`, anchored as the failure and kept as long (the `ui` window), read back as `v_op_error.seen` / `dismissed` (dismissing is seeing). `event` that isn't a `ui.op_failed` event is `Invalid` at `/event`; one already in that state is `unchanged` (a run without an execution event); `dismiss_all` logs one per failure not dismissed, `{ dismissed: n }` |
 | `oxplow.metric.scaffold { name, language?, glob?, origin? }` | `Tx`, `Read` | the files of a code metric extension (`{ name, dir, files: [{ path, content }] }`: manifest, collector script, page, fixture — the template `oxplow extension new metric` writes); writes nothing (the agent writes them, then `extension check` / `extension test`) |
 
 **Callers.** A task edit or stage change is a store's command

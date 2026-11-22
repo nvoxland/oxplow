@@ -717,7 +717,7 @@ datasets:
     - { name: "stdout", type: "TEXT", doc: "Captured stdout, if any." }
     - { name: "truncated", type: "INT", doc: "1 when only the first part was kept (bodies are capped)." }
 - name: op_error
-  version: 3
+  version: 4
   key: [event_id]
   description: "Operations that failed in front of the person in the app (a merge, a save, a query), as the app showed them: one row per `ui.op_failed` event. The captured stderr and stdout are the event's `output` body — `read_event_content(event_id, output)`. Kept 30 days, the output 14; past that the row stays with its details NULL."
   fields:
@@ -732,7 +732,7 @@ datasets:
     - { name: "signal", type: "TEXT", doc: "The signal that killed the process (`SIGKILL`), if any." }
     - { name: "duration_ms", type: "INT", doc: "How long it ran, in milliseconds, if measured." }
     - { name: "output_size", type: "INT", doc: "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured." }
-    - { name: "audit_id", type: "INT", doc: "A command whose run failed: the audit row that recorded it (v_command_audit.id); NULL for anything else. (v3)" }
+    - { name: "audit_id", type: "INT", doc: "The failed command's run (`v_command_run.id`), if any. (v4)" }
     - { name: "proposal_id", type: "INT", doc: "An approval that failed: its proposal (v_command_proposal.id); NULL otherwise. (v3)" }
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention expired its details (they read NULL); NULL while kept." }
     - { name: "seen", type: "INT", doc: "1 once the person opened its output on the Alerts page (`oxplow.op_error.mark_seen`), or dismissed it. (v2)" }
@@ -1708,23 +1708,21 @@ datasets:
   tests:
     - { not_null: capability }
     - { not_null: provider }
-- name: command_audit
-  version: 5
+- name: command_run
+  version: 1
   key: [id]
-  description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, pages and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
+  description: "Every command run on the bus, including reads and refusals. Each row names the command, who ran it, how it ended and the contribution run that holds its cost and authority."
+  groups: [contribution_run]
   fields:
-    - { name: "id", type: "INTEGER", doc: "Audit row id, in run order." }
-    - { name: "at", type: "TEXT", doc: "When it ran (RFC 3339)." }
+    - { name: "id", type: "INTEGER", doc: "The command run's integer detail id." }
     - { name: "command", type: "TEXT", doc: "The command id (`oxtask.task.create`)." }
-    - { name: "actor_kind", type: "TEXT", doc: "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`." }
-    - { name: "actor_id", type: "TEXT", doc: "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system." }
-    - { name: "outcome", type: "TEXT", doc: "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)." }
-    - { name: "error", type: "TEXT", doc: "What went wrong, for an outcome other than `ok`." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it ran on, if any (v_thread.id)." }
-    - { name: "session_id", type: "INTEGER", doc: "The agent session that ran it, if any (v_agent_session.id)." }
+    - { name: "changed", type: "INT", doc: "1 when the command recorded its input. Reads and unchanged commands record no input." }
+    - { name: "undone", type: "INT", doc: "1 when another command run has undone this run." }
+    - { name: "uri", type: "TEXT", doc: "The contribution run's URI (`oxplow:oxplow/contribution_run?id=<run_id>`)." }
   tests:
-    - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
-    - { accepted_values: { column: actor_kind, values: [human, agent, page, component, system, effect, job] } }
+    - { not_null: run_id }
+    - { unique: run_id }
+    - { accepted_values: { column: outcome, values: [ok, skipped, failed, denied, cancelled, invalid, interrupted] } }
 - name: config_value
   version: 7
   key: [key]

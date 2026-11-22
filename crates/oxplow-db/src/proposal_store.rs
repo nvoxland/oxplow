@@ -456,19 +456,18 @@ mod tests {
             .transaction(|tx| {
                 crate::command_audit_store::insert_tx(
                     tx,
+                    &crate::command_audit_store::test_command_run(
+                        "oxplow.config.set",
+                        oxplow_domain::Actor::Human,
+                    ),
                     &crate::NewCommandAudit {
                         command: "oxplow.config.set".into(),
-                        actor_kind: ActorKind::Human,
-                        actor_id: None,
-                        thread_id: None,
-                        session_id: None,
-                        input: json!({}),
+                        input: Some(json!({})),
                         outcome: oxplow_domain::events::schema::CommandOutcome::Ok,
                         error: None,
                         result: None,
                         inverse: None,
                         scopes: Default::default(),
-                        run_id: None,
                     },
                 )
             })
@@ -509,19 +508,18 @@ mod tests {
             .transaction(|tx| {
                 crate::command_audit_store::insert_tx(
                     tx,
+                    &crate::command_audit_store::test_command_run(
+                        "oxplow.config.set",
+                        oxplow_domain::Actor::Human,
+                    ),
                     &crate::NewCommandAudit {
                         command: "oxplow.config.set".into(),
-                        actor_kind: ActorKind::Human,
-                        actor_id: None,
-                        thread_id: None,
-                        session_id: None,
-                        input: json!({}),
+                        input: Some(json!({})),
                         outcome: oxplow_domain::events::schema::CommandOutcome::Ok,
                         error: None,
                         result: None,
                         inverse: None,
                         scopes: Default::default(),
-                        run_id: None,
                     },
                 )
             })

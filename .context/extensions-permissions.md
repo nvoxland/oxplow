@@ -167,7 +167,7 @@ its scope trace.
   deployment, `run_context::live_owner`), so a run carries no "stale" outcome: it ends
   `cancelled`.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
-  — an `External` call's run is a child of the command's), scope calls
+  — an `External` call carries the command's run), scope calls
   (`scope_calls::Calls::new(run, needs, read)`, counted on its trace;
   `.with_host(layer, runtime)` is the one way every script host —
   commands, effects, triggers, entity and fact collectors — attaches the
@@ -189,22 +189,26 @@ its scope trace.
   the parent extension's namespace or declaration. Transactional leaves narrow
   their mode; all children inherit cancellation and live guards. Native scope
   operations capture their implicit backing scope in declared authority.
-  Routing and dispatch check run authority. This is handler attribution, not
-  a coordinated DB/catalog activation or a new per-child command audit.
+  Routing and dispatch check run authority. A child command has its own run
+  and detail row. Its `parent_run_id` links to the command, effect or job
+  that sent it when the sender has a recorded run. Recording the child leaves
+  the sender's permission checks and the handler's own authority in place.
 - **Contribution runs have a shared record** (`contribution_run`,
   `v_contribution_run`). It holds identity, actor, anchors, cause, outcome,
   cost, scopes used and model call count. It excludes the contents a run
   read or wrote. Nested work of the same contribution adds to its parent's
-  usage (`child()` shares it). A child run of another contribution has its
-  own row. `parent_run_id` is set when the parent has a recorded row.
+  usage when it shares the same run accounting. A child command has its own
+  usage, and the parent's cost includes its children's cost. `parent_run_id`
+  is set when the parent has a recorded row.
   `oxplow.effect.retry` and `backfill` still run the effect as itself.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
   (launcher, Activity) is a dashboard of three tables over the last 30 days:
   `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
   `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
   no record of reads harness `unknown`), `interface-commands` (agents' runs by
-  command from `v_command_audit`: runs, invalid, denied, failed and the share
-  not ok; opening a command shows the `interface-command-errors` page (no category),
+  command from `v_command_run`: all completed runs including reads, counts
+  for invalid, denied and failed, and the share that ended in those outcomes.
+  Opening a command shows the `interface-command-errors` page (no category),
   its most common error texts counted together up to the "Expected one of"
   list) and `interface-hints` (`v_hint_stat` per hint, those that never fired
   first). The bundled `hint-never-fires` advisory tells the person, once per
@@ -225,8 +229,9 @@ its scope trace.
   `v_contribution_health` — its rows are the last good run's — and a failed
   attempt keeps its own `contribution_run` row, reachable from its data effects
   (`effect_run.run_id`, `collector_run.run_id`). Program errors redact
-  credentials the run received. Finished runs are kept 90 days
-  (`CONTRIBUTION_RUN_DAYS`). Pinned by `contribution_run_tests.rs`
+  credentials the run received. Finished runs have a 90-day window
+  (`CONTRIBUTION_RUN_DAYS`), with separate rules for command runs
+  ([commands.md](./commands.md) "Retention"). Pinned by `contribution_run_tests.rs`
   and `event_retention::tests::contribution_runs_past_their_window_are_swept`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;

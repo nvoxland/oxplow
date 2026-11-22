@@ -1280,7 +1280,7 @@ view:
         svc.db
             .read(|c| {
                 c.query_row(
-                    "SELECT actor_kind, actor_id FROM command_audit ORDER BY id DESC LIMIT 1",
+                    "SELECT actor_kind, actor_id FROM v_command_run WHERE changed = 1 ORDER BY id DESC LIMIT 1",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )

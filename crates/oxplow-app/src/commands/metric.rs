@@ -451,7 +451,7 @@ mod tests {
             .db
             .read(|tx| {
                 tx.query_row(
-                    "SELECT count(*) FROM command_audit
+                    "SELECT count(*) FROM v_command_run
                      WHERE command = 'oxplow.metric.record' AND actor_kind = 'agent' AND outcome = 'ok'",
                     [],
                     |r| r.get(0),

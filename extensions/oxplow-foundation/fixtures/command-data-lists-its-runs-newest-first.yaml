@@ -1,8 +1,14 @@
-# The Command data page lists a command's runs from the audit, newest first, narrowed by
-# outcome, who ran it and when.
+# The Command data page lists runs newest first, including reads and their costs.
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: One } }
   - { command: oxplow.thread.create, input: { stream: str1, title: Two } }
+  - command: oxplow.sql.query
+    input:
+      sql: >
+        SELECT run_id FROM v_command_run
+        WHERE command = 'oxplow.thread.create'
+        ORDER BY id DESC
+    bind: writes
 when:
   page: oxplow/command-data
   params: { uri: "oxplow:oxplow/command?command=oxplow.thread.create" }
@@ -10,7 +16,10 @@ expect:
   label: oxplow.thread.create data
   loaders:
     about: { rows: [{ name: oxplow.thread.create }] }
-    runs: { rows: 2 }
+    runs:
+      rows:
+        - { run_id: "$writes.rows[0][0]", started_at: $any, version: $any, cpu_ms: $any, changed: 1, extension: null }
+        - { run_id: "$writes.rows[1][0]", started_at: $any, version: $any, cpu_ms: $any, changed: 1, extension: null }
 steps:
   - params: { outcome: failed }
     expect:
@@ -24,3 +33,13 @@ steps:
     expect:
       loaders:
         runs: { rows: 2 }
+  - params: { uri: "oxplow:oxplow/command?command=oxplow.sql.query" }
+    expect:
+      loaders:
+        runs:
+          rows:
+            - { run_id: $any, started_at: $any, version: $any, cpu_ms: $any, changed: 0 }
+  - params: { uri: "oxplow:oxplow/command?command=oxplow.sql.query", changed: changed }
+    expect:
+      loaders:
+        runs: { rows: 0 }

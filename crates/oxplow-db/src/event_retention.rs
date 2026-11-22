@@ -287,16 +287,17 @@ async fn sweep_in_batches(
             }
         }
     }
-    // Refused runs past their window, through `command_audit_refused`.
+    // Refused commands past their shorter window. Their detail rows cascade.
     let cutoff = before(REFUSED_AUDIT_DAYS);
     loop {
         let cutoff = cutoff.clone();
         let n = db
             .transaction(move |tx| {
                 tx.execute(
-                    "DELETE FROM command_audit WHERE id IN (
-                       SELECT id FROM command_audit INDEXED BY command_audit_refused
-                        WHERE outcome IN ('invalid', 'denied') AND at < ?1 LIMIT ?2)",
+                    "DELETE FROM contribution_run WHERE run_id IN (
+                       SELECT run_id FROM contribution_run
+                        WHERE kind = 'command' AND outcome IN ('invalid', 'denied')
+                          AND started_at < ?1 LIMIT ?2)",
                     params![cutoff, batch],
                 )
                 .map_err(map_sql_err)
@@ -361,17 +362,24 @@ mod tests {
             ("invalid", at(REFUSED_AUDIT_DAYS + 1)),
             ("denied", at(REFUSED_AUDIT_DAYS + 1)),
             ("ok", at(365)),
-            ("error", at(365)),
+            ("failed", at(365)),
             ("invalid", at(1)),
         ];
         db.transaction(move |tx| {
-            for (outcome, at) in &rows {
+            for (id, (outcome, at)) in rows.iter().enumerate() {
                 tx.execute(
-                    "INSERT INTO command_audit (at, command, actor_kind, input_json, outcome)
-                       VALUES (?1, 'oxplow.x.y', 'agent', '{}', ?2)",
-                    params![at, outcome],
+                    "INSERT INTO contribution_run
+                       (run_id, extension, kind, contribution, mode, actor_kind, started_at, finished_at, outcome)
+                     VALUES (?1, 'core', 'command', 'oxplow:oxplow/command?command=oxplow.x.y',
+                             'external', 'agent', ?2, ?2, ?3)",
+                    params![id.to_string(), at, outcome],
                 )
                 .map_err(map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO command_audit (command, run_id, input_json)
+                     VALUES ('oxplow.x.y', ?1, '{}')",
+                    [id.to_string()],
+                ).map_err(map_sql_err)?;
             }
             Ok(())
         })
@@ -382,7 +390,7 @@ mod tests {
         let left: Vec<String> = db
             .read(|tx| {
                 let mut st = tx
-                    .prepare("SELECT outcome FROM command_audit ORDER BY id")
+                    .prepare("SELECT r.outcome FROM command_audit a JOIN contribution_run r USING (run_id) ORDER BY a.id")
                     .map_err(map_sql_err)?;
                 let rows = st
                     .query_map([], |r| r.get(0))
@@ -393,7 +401,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(left, ["ok", "error", "invalid"]);
+        assert_eq!(left, ["ok", "failed", "invalid"]);
     }
 
     /// Extension runs are kept for [`CONTRIBUTION_RUN_DAYS`]: a sweep drops the

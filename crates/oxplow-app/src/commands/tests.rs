@@ -210,9 +210,9 @@ async fn a_read_commands_write_never_lands() {
     assert_eq!(kv_value(&db, "a").await, None);
 }
 
-/// A `View` runs as a `Read` does: neither is recorded.
+/// A read has a detail row without recording the command's payload.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_read_command_is_not_recorded() {
+async fn a_read_command_has_details_without_its_payload() {
     for access in [Access::View, Access::Read] {
         let (_db, bus) = bus();
         let mut spec = kv_spec("oxplow.kv.get", Confirm::Never);
@@ -242,7 +242,12 @@ async fn a_read_command_is_not_recorded() {
         assert_eq!(out.result["k"], "a");
         assert_eq!((out.audit_id, out.event_id), (None, None), "{access:?}");
         assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
-        assert!(bus.audit_store().list_recent(10).await.unwrap().is_empty());
+        let rows = bus.audit_store().list_recent(10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].command, "oxplow.kv.get");
+        assert!(rows[0].input.is_null());
+        assert!(rows[0].result.is_none());
+        assert!(rows[0].inverse.is_none());
     }
 }
 
@@ -692,14 +697,16 @@ async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
         .unwrap_err();
     assert!(err.to_string().contains("changed nothing"), "{err}");
     assert_eq!(kv_value(&db, "b").await, None);
-    // The refused call is audited as the failure it is; the unchanged
-    // one left nothing.
+    // The refused call keeps its failure, and the genuine no-op keeps only
+    // its run details.
     let rows = audits(&db).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows.len(), 2, "{rows:?}");
     assert_eq!(
         rows[0].outcome,
         oxplow_domain::events::schema::CommandOutcome::Error
     );
+    assert_eq!(rows[1].outcome, Outcome::Ok);
+    assert!(rows[1].input.is_null());
 }
 
 /// an undo, or a person's approval, whose run changes nothing
@@ -1494,11 +1501,10 @@ async fn a_child_that_changed_nothing_doesnt_keep_the_composite_from_undoing() {
         )
         .await
         .unwrap();
-    assert_eq!(out.audit_id, None, "nothing changed, nothing recorded");
-    assert_eq!(
-        audits_of(&db, "oxplow.command.sequence").await.len(),
-        before
-    );
+    assert_eq!(out.audit_id, None, "the no-op has no public audit ID");
+    let recorded = audits_of(&db, "oxplow.command.sequence").await;
+    assert_eq!(recorded.len(), before + 1);
+    assert!(recorded[0].input.is_null());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1607,12 +1613,8 @@ async fn a_composite_with_an_external_step_runs_its_steps_in_order() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].outcome, Outcome::Ok);
     assert!(rows[0].inverse.is_none());
-    for child in ["oxplow.kv.set", "oxplow.kv.external"] {
-        assert!(
-            audits_of(&db, child).await.is_empty(),
-            "{child} has no row of its own"
-        );
-    }
+    assert_eq!(audits_of(&db, "oxplow.kv.set").await.len(), 2);
+    assert_eq!(audits_of(&db, "oxplow.kv.external").await.len(), 1);
 }
 
 /// P8.D4: a composite's own events, on the steps path, are recorded
@@ -1848,7 +1850,7 @@ async fn a_nested_run_asks_when_any_child_asks() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_nested_run_is_one_transaction_with_one_audit_row() {
+async fn a_nested_run_is_one_transaction_with_details_for_each_child() {
     let (db, bus) = composing_bus();
     let err = bus
         .run(
@@ -1865,6 +1867,11 @@ async fn a_nested_run_is_one_transaction_with_one_audit_row() {
         None,
         "the first child rolled back with the second"
     );
+    let children = audits_of(&db, "oxplow.kv.set").await;
+    assert_eq!(children.len(), 2);
+    assert!(children
+        .iter()
+        .all(|child| child.input.is_null() && child.inverse.is_none()));
 
     let out = bus
         .run(
@@ -1884,8 +1891,8 @@ async fn a_nested_run_is_one_transaction_with_one_audit_row() {
         .collect();
     assert_eq!(
         rows.len(),
-        1,
-        "one audit row for the parent, none for the children"
+        3,
+        "one row each for the parent and its two children"
     );
     assert_eq!(rows[0].command, "oxplow.command.sequence");
 }
@@ -2106,7 +2113,11 @@ async fn a_composite_an_agent_runs_is_proposed_with_its_children() {
     let p = proposal(&db, rows[0].id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
     assert_eq!(p.audit_id, out.audit_id);
-    assert_eq!(audits(&db).await.len(), 1, "one row for the composite");
+    assert_eq!(
+        audits(&db).await.len(),
+        3,
+        "one row each for the composite and its two children"
+    );
 }
 
 /// Two people approve one proposal at once: it runs once; the other

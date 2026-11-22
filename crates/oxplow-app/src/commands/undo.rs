@@ -57,7 +57,7 @@ impl CommandBus {
             // A step will leave the transaction: claim the reaction first,
             // so a redelivery finds it — keeping what it composed when it
             // may be sent again by itself.
-            RunOrigin::Effect(key, resend) => {
+            RunOrigin::Effect(key, resend, _) => {
                 let (key, resend, now) = (
                     key.clone(),
                     resend.clone(),
@@ -126,7 +126,7 @@ pub(super) fn lost_race(
             "{} was already decided",
             oxplow_domain::uri::build::proposal_uri(*id)
         ),
-        RunOrigin::Effect(key, _) => format!(
+        RunOrigin::Effect(key, _, _) => format!(
             "effect `{}` {} {}",
             key.effect,
             crate::effects::ALREADY_REACTED,

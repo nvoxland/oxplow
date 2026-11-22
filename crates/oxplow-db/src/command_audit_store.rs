@@ -12,8 +12,9 @@ use specta::Type;
 use oxplow_domain::events::schema::{ActorKind, CommandOutcome as Outcome};
 use oxplow_domain::{AgentSessionId, CommandCall, DomainError, EventId, ThreadId, Timestamp};
 
+use crate::database::string_to_ts;
 use crate::database::{map_sql_err, Database};
-use crate::database::{string_to_ts, ts_to_string};
+use oxplow_domain::run::{Outcome as RunOutcome, RunContext};
 
 pub(crate) fn actor_kind_str(k: ActorKind) -> &'static str {
     match k {
@@ -40,21 +41,12 @@ pub(crate) fn parse_actor_kind(s: &str) -> Result<ActorKind, DomainError> {
     })
 }
 
-fn outcome_str(o: Outcome) -> &'static str {
-    match o {
-        Outcome::Ok => "ok",
-        Outcome::Denied => "denied",
-        Outcome::Invalid => "invalid",
-        Outcome::Error => "error",
-    }
-}
-
 fn parse_outcome(s: &str) -> Result<Outcome, DomainError> {
     Ok(match s {
         "ok" => Outcome::Ok,
         "denied" => Outcome::Denied,
         "invalid" => Outcome::Invalid,
-        "error" => Outcome::Error,
+        "failed" | "skipped" | "cancelled" | "interrupted" => Outcome::Error,
         other => return Err(DomainError::Invalid(format!("outcome `{other}`"))),
     })
 }
@@ -90,53 +82,82 @@ pub struct CommandAudit {
 #[derive(Debug, Clone)]
 pub struct NewCommandAudit {
     pub command: String,
-    pub actor_kind: ActorKind,
-    pub actor_id: Option<String>,
-    pub thread_id: Option<ThreadId>,
-    pub session_id: Option<AgentSessionId>,
-    pub input: Value,
+    /// A read or unchanged command keeps no input, result or inverse.
+    pub input: Option<Value>,
     pub outcome: Outcome,
     pub error: Option<String>,
     pub result: Option<Value>,
     pub inverse: Option<CommandCall>,
-    /// The scopes the run called, and how often.
+    /// The scopes the command called, as counted by its handlers.
     pub scopes: BTreeMap<String, u32>,
-    /// The run it was (`contribution_run.run_id` when an extension's).
-    pub run_id: Option<String>,
 }
 
-/// Insert one audit row; returns its id.
-pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, DomainError> {
-    let inverse = row
-        .inverse
-        .as_ref()
-        .map(|c| serde_json::to_string(c).expect("CommandCall serializes"));
+/// Record the run and its command details in the caller's transaction.
+pub fn insert_tx(
+    conn: &Connection,
+    run: &RunContext,
+    row: &NewCommandAudit,
+) -> Result<i64, DomainError> {
+    let outcome = match row.outcome {
+        Outcome::Ok => RunOutcome::Ok,
+        Outcome::Denied => RunOutcome::Denied,
+        Outcome::Invalid => RunOutcome::Invalid,
+        Outcome::Error => RunOutcome::Failed,
+    };
+    crate::contribution_run_store::record_tx(conn, run, outcome, row.error.as_deref())?;
+    if !row.scopes.is_empty() {
+        conn.execute(
+            "UPDATE contribution_run SET scopes_json = json_patch(scopes_json, ?2) WHERE run_id = ?1",
+            params![run.run().as_str(), serde_json::to_string(&row.scopes).expect("scopes serialize")],
+        )
+        .map_err(map_sql_err)?;
+    }
     conn.execute(
-        "INSERT INTO command_audit
-           (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json,
-            result_json, scopes_json, session_id, run_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO command_audit (command, run_id, input_json, result_json, inverse_json)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
-            ts_to_string(Timestamp::now()),
             row.command,
-            actor_kind_str(row.actor_kind),
-            row.actor_id,
-            row.thread_id.map(|t| t.value()),
-            serde_json::to_string(&row.input).expect("input serializes"),
-            outcome_str(row.outcome),
-            row.error,
-            inverse,
-            row.result
+            run.run().as_str(),
+            row.input.as_ref().map(Value::to_string),
+            row.result.as_ref().map(Value::to_string),
+            row.inverse
                 .as_ref()
-                .map(|r| serde_json::to_string(r).expect("result serializes")),
-            (!row.scopes.is_empty())
-                .then(|| { serde_json::to_string(&row.scopes).expect("scopes serialize") }),
-            row.session_id.map(|s| s.value()),
-            row.run_id,
+                .map(|call| serde_json::to_string(call).expect("CommandCall serializes")),
         ],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Keep observations of handlers that ran inside a rolled-back composite.
+/// Payloads and inverses belong only to changes that landed.
+pub fn insert_rolled_back_children_tx(
+    conn: &Connection,
+    run: &RunContext,
+) -> Result<(), DomainError> {
+    for (child, outcome) in run.rollback_observations() {
+        let Some(contribution) = child.contribution_ref() else {
+            continue;
+        };
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM contribution_run WHERE run_id = ?1)",
+                [child.run().as_str()],
+                |row| row.get(0),
+            )
+            .map_err(map_sql_err)?;
+        if exists {
+            continue;
+        }
+        let error = (outcome != RunOutcome::Ok).then_some("parent command transaction rolled back");
+        crate::contribution_run_store::record_tx(conn, &child, outcome, error)?;
+        conn.execute(
+            "INSERT INTO command_audit (command, run_id) VALUES (?1, ?2)",
+            params![contribution.id.local, child.run().as_str()],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
 }
 
 /// Attach the `command.executed` event to the row, once appended.
@@ -172,7 +193,7 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
     let at: String = row.get("at")?;
     let actor_kind: String = row.get("actor_kind")?;
     let outcome: String = row.get("outcome")?;
-    let input: String = row.get("input_json")?;
+    let input: Option<String> = row.get("input_json")?;
     let inverse: Option<String> = row.get("inverse_json")?;
     let result: Option<String> = row.get("result_json")?;
     let event_id: Option<String> = row.get("event_id")?;
@@ -187,8 +208,11 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
         session_id: row
             .get::<_, Option<i64>>("session_id")?
             .map(AgentSessionId::new),
-        input: serde_json::from_str(&input)
-            .map_err(|e| conv(DomainError::Storage(format!("input json: {e}"))))?,
+        input: input
+            .map(|input| serde_json::from_str(&input))
+            .transpose()
+            .map_err(|e| conv(DomainError::Storage(format!("input json: {e}"))))?
+            .unwrap_or(Value::Null),
         outcome: parse_outcome(&outcome).map_err(conv)?,
         error: row.get("error")?,
         result: result
@@ -209,9 +233,14 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
     })
 }
 
+const AUDIT_WITH_RUN: &str =
+    "SELECT a.*, r.started_at AS at, r.actor_kind, r.actor_id, r.thread_id, r.session_id,
+            r.outcome, r.error, r.scopes_json
+     FROM command_audit a JOIN contribution_run r ON r.run_id = a.run_id";
+
 pub fn get_tx(conn: &Connection, id: i64) -> Result<Option<CommandAudit>, DomainError> {
     conn.query_row(
-        "SELECT * FROM command_audit WHERE id = ?1",
+        &format!("{AUDIT_WITH_RUN} WHERE a.id = ?1"),
         params![id],
         row_to_audit,
     )
@@ -222,7 +251,7 @@ pub fn get_tx(conn: &Connection, id: i64) -> Result<Option<CommandAudit>, Domain
 /// Newest first.
 pub fn list_recent_tx(conn: &Connection, limit: usize) -> Result<Vec<CommandAudit>, DomainError> {
     let mut stmt = conn
-        .prepare("SELECT * FROM command_audit ORDER BY id DESC LIMIT ?1")
+        .prepare(&format!("{AUDIT_WITH_RUN} ORDER BY a.id DESC LIMIT ?1"))
         .map_err(map_sql_err)?;
     let rows = stmt
         .query_map(params![limit as i64], row_to_audit)
@@ -253,6 +282,23 @@ impl SqliteCommandAuditStore {
 }
 
 #[cfg(test)]
+pub(crate) fn test_command_run(command: &str, actor: oxplow_domain::Actor) -> RunContext {
+    use oxplow_domain::contribution::{ContributionId, ContributionKind};
+    use oxplow_domain::run::{ContributionRef, Mode};
+    RunContext::contribution(
+        ContributionRef {
+            id: ContributionId::new("oxplow", ContributionKind::Command, command),
+            extension: "core".into(),
+            version: None,
+            generation: None,
+            deployment: None,
+        },
+        actor,
+        Mode::External,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -269,13 +315,17 @@ mod tests {
                 move |tx| {
                     let id = insert_tx(
                         tx,
+                        &test_command_run(
+                            "oxplow.task.transition",
+                            oxplow_domain::Actor::Agent {
+                                thread_id: Some(ThreadId::new(3)),
+                                session_id: Some(AgentSessionId::new(5)),
+                                stream_id: None,
+                            },
+                        ),
                         &NewCommandAudit {
                             command: "oxplow.task.transition".into(),
-                            actor_kind: ActorKind::Agent,
-                            actor_id: Some("thr3".into()),
-                            thread_id: Some(ThreadId::new(3)),
-                            session_id: Some(AgentSessionId::new(5)),
-                            input: json!({"id": "tsk1", "to": "done"}),
+                            input: Some(json!({"id": "tsk1", "to": "done"})),
                             outcome: Outcome::Ok,
                             error: None,
                             result: Some(json!({"id": "tsk1"})),
@@ -284,25 +334,20 @@ mod tests {
                                 input: json!({"id": "tsk1", "to": "ready"}),
                             }),
                             scopes: [("sql.read".to_string(), 2)].into(),
-                            run_id: None,
                         },
                     )?;
                     set_event_id_tx(tx, id, &event)?;
                     let undo_id = insert_tx(
                         tx,
+                        &test_command_run("oxplow.task.transition", oxplow_domain::Actor::Human),
                         &NewCommandAudit {
                             command: "oxplow.task.transition".into(),
-                            actor_kind: ActorKind::Human,
-                            actor_id: None,
-                            thread_id: None,
-                            session_id: None,
-                            input: json!({"id": "tsk1", "to": "ready"}),
+                            input: Some(json!({"id": "tsk1", "to": "ready"})),
                             outcome: Outcome::Ok,
                             error: None,
                             result: None,
                             inverse: None,
                             scopes: BTreeMap::new(),
-                            run_id: None,
                         },
                     )?;
                     mark_undone_tx(tx, id, undo_id)?;
@@ -339,19 +384,21 @@ mod tests {
         db.transaction(|tx| {
             insert_tx(
                 tx,
+                &test_command_run(
+                    "oxplow.config.set",
+                    oxplow_domain::Actor::Page {
+                        page_id: "acme/x".into(),
+                        on_behalf_of: Box::new(oxplow_domain::Actor::Human),
+                    },
+                ),
                 &NewCommandAudit {
                     command: "oxplow.config.set".into(),
-                    actor_kind: ActorKind::Page,
-                    actor_id: Some("acme/x".into()),
-                    thread_id: None,
-                    session_id: None,
-                    input: json!({}),
+                    input: Some(json!({})),
                     outcome: Outcome::Denied,
                     error: Some("pages may not run oxplow.config.set".into()),
                     result: None,
                     inverse: None,
                     scopes: BTreeMap::new(),
-                    run_id: None,
                 },
             )
         })

@@ -2433,6 +2433,62 @@ mod tests {
             .unwrap());
     }
 
+    #[test]
+    fn command_run_migration_pairs_every_audit_and_command_run() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(63))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO contribution_run
+                 (run_id, extension, contribution, kind, actor_kind, started_at,
+                  finished_at, outcome, cpu_ms, mode)
+             VALUES
+                 ('existing', 'example', 'oxplow:oxplow/command?command=example.item.write',
+                  'command', 'agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'failed', 10, 'external'),
+                 ('effect', 'example', 'oxplow:oxplow/effect?effect=example/react',
+                  'effect', 'effect', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'ok', 20, 'external'),
+                 ('read', 'example', 'oxplow:oxplow/command?command=example.item.read',
+                  'command', 'human', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'ok', 2, 'pure');
+             INSERT INTO command_audit
+                 (id, at, command, actor_kind, actor_id, input_json, outcome, run_id, undone_by, event_id)
+             VALUES
+                 (1, '2026-01-01T00:00:01Z', 'example.item.write', 'agent', 'thr1', '{}', 'invalid', 'existing', NULL, NULL),
+                 (2, '2026-01-01T00:00:01Z', 'example.item.write', 'effect', 'example/react', '{}', 'ok', 'effect', 3, 'event'),
+                 (3, '2026-01-01T00:00:01Z', 'example.item.undo', 'human', NULL, '{}', 'ok', 'missing', NULL, NULL);
+             UPDATE sqlite_sequence SET seq = 50 WHERE name = 'command_audit';",
+        ).unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
+        assert_eq!(count("SELECT count(*) FROM command_audit"), 4);
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM command_audit a JOIN contribution_run r USING (run_id)
+                           WHERE a.id = 1 AND r.run_id = 'existing' AND r.outcome = 'invalid'
+                             AND r.actor_id = 'thr1' AND r.cpu_ms = 10"
+            ),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM command_audit a JOIN contribution_run r USING (run_id)
+                           WHERE a.id = 2 AND r.parent_run_id = 'effect' AND r.kind = 'command'
+                             AND r.outcome = 'ok' AND r.cpu_ms IS NULL AND a.event_id = 'event' AND a.undone_by = 3"), 1);
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM command_audit a JOIN contribution_run r USING (run_id)
+                           WHERE a.id = 3 AND r.parent_run_id IS NULL AND r.cpu_ms IS NULL"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM command_audit
+                           WHERE id > 50 AND run_id = 'read' AND input_json IS NULL"
+            ),
+            1
+        );
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {

@@ -645,9 +645,15 @@ pub(crate) async fn run_reaction(
         .run_effect(&run, key.clone(), kept, command, input)
         .await
     {
-        Ok(_) => Ok(Reacted::Ran),
+        Ok(_) => {
+            record_run(svc, &run, oxplow_domain::run::Outcome::Ok, None).await;
+            Ok(Reacted::Ran)
+        }
         // Recorded with its proposal: a person decides.
-        Err(CommandError::Proposed { .. }) => Ok(Reacted::Proposed),
+        Err(CommandError::Proposed { .. }) => {
+            record_run(svc, &run, oxplow_domain::run::Outcome::Skipped, None).await;
+            Ok(Reacted::Proposed)
+        }
         Err(CommandError::Busy { message }) => Err(DomainError::Busy(message)),
         // Another delivery recorded it: not this effect's failure.
         Err(CommandError::Invalid { message, .. })
@@ -660,7 +666,16 @@ pub(crate) async fn run_reaction(
         // been passing (`Unavailable`), that is safe, and it has
         // retries left.
         Err(e) => {
-            let reason = e.to_string();
+            let reason = if run.used_private_config() {
+                "command using private configuration failed".to_string()
+            } else {
+                e.to_string()
+            };
+            let outcome = match &e {
+                CommandError::Denied { .. } => oxplow_domain::run::Outcome::Denied,
+                _ => oxplow_domain::run::Outcome::Failed,
+            };
+            record_run(svc, &run, outcome, Some(&reason)).await;
             let retry = match e {
                 CommandError::Unavailable { retry_after_ms, .. } if safe => Some(Retry {
                     resend,
@@ -890,6 +905,16 @@ async fn record_run(
     if let Err(e) = svc
         .db
         .transaction(move |tx| {
+            let recorded: bool = tx
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM contribution_run WHERE run_id = ?1)",
+                    [run.run().as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            if recorded {
+                return Ok(());
+            }
             oxplow_db::contribution_run_store::record_tx(tx, &run, outcome, error.as_deref())
         })
         .await

@@ -241,7 +241,7 @@ mod tests {
             .db
             .read(move |c| {
                 c.query_row(
-                    "SELECT command, outcome FROM command_audit WHERE id = ?1",
+                    "SELECT command, outcome FROM v_command_run WHERE id = ?1",
                     [audit],
                     |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
                 )

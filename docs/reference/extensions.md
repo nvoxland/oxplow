@@ -502,6 +502,11 @@ dataset row is truthy (not null, 0, empty or false), for a command whose
 operation refuses some states. In a page's ☰ it sits at the top level among
 the page's own actions, sorted by label.
 
+`v_command_run` lists command history, including reads and refusals. Filter
+on `command` and order by `started_at` and `id` for the latest runs.
+`changed = 1` selects runs that recorded their input. The row's URI opens
+the run's cost, permissions and model calls.
+
 - A script reaches oxplow only through the scopes in `needs`. Today a
   script can call `sql.read`; naming another scope is a load error.
 - `scope("sql.read", { sql, params })` returns a list of row objects.

@@ -3692,7 +3692,7 @@ def finish(x):
             .iter()
             .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
             .collect();
-        assert_eq!(ok.len(), 1, "one audit row for the run");
+        assert_eq!(ok.len(), 3, "one row for the composer and each child");
         assert_eq!(ok[0].command, "my_review.review.finish");
         assert_eq!(
             ok[0].scopes,

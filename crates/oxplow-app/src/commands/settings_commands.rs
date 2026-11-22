@@ -508,7 +508,7 @@ mod ownership_tests {
             "a failed replacement is returned to the caller"
         );
         assert_eq!(std::fs::read(&path).unwrap(), before);
-        let successful=fx.svc.db.read(|tx|tx.query_row("SELECT count(*) FROM command_audit WHERE command='oxplow.config.update' AND outcome='ok'",[],|row|row.get::<_,i64>(0)).map_err(oxplow_db::map_sql_err)).await.unwrap();
+        let successful=fx.svc.db.read(|tx|tx.query_row("SELECT count(*) FROM v_command_run WHERE command='oxplow.config.update' AND outcome='ok'",[],|row|row.get::<_,i64>(0)).map_err(oxplow_db::map_sql_err)).await.unwrap();
         assert_eq!(
             successful, 1,
             "the failed batch must not gain a successful audit"

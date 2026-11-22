@@ -8,10 +8,10 @@ loaders:
       SELECT outcome,
              substr(error, 1, coalesce(nullif(instr(error, '. Expected'), 0) - 1, length(error))) AS error,
              count(*) AS runs,
-             max(at) AS last_at
-      FROM v_command_audit
+             max(started_at) AS last_at
+      FROM v_command_run
       WHERE actor_kind = 'agent' AND command = :command AND outcome <> 'ok' AND error IS NOT NULL
-        AND at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+        AND started_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
       GROUP BY outcome, 2
       ORDER BY runs DESC, last_at DESC
 view:

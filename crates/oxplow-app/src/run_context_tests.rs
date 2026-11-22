@@ -180,7 +180,8 @@ async fn every_run_is_recorded_once_as_itself() {
         svc,
         "SELECT r.actor_kind, r.actor_id, r.cause_event_id, r.outcome,
                 (SELECT count(*) FROM effect_run e WHERE e.run_id = r.run_id),
-                (SELECT count(*) FROM command_audit a WHERE a.run_id = r.run_id)
+                (SELECT count(*) FROM command_audit a JOIN contribution_run child USING (run_id)
+                  WHERE child.parent_run_id = r.run_id AND child.kind = 'command')
            FROM contribution_run r WHERE r.contribution = 'oxplow:oxplow/effect?effect=acme/note'",
     )
     .await;

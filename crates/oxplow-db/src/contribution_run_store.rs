@@ -89,6 +89,13 @@ pub fn finish_tx(
             run.run()
         )));
     }
+    for child in run.recorded_children() {
+        conn.execute(
+            "UPDATE contribution_run SET parent_run_id = ?2 WHERE run_id = ?1 AND parent_run_id IS NULL",
+            params![child.as_str(), run.run().as_str()],
+        )
+        .map_err(map_sql_err)?;
+    }
     Ok(())
 }
 
@@ -124,7 +131,12 @@ pub fn sweep_tx(
 ) -> Result<usize, DomainError> {
     conn.execute(
         "DELETE FROM contribution_run WHERE run_id IN
-           (SELECT run_id FROM contribution_run WHERE started_at < ?1 AND finished_at IS NOT NULL LIMIT ?2)",
+           (SELECT r.run_id FROM contribution_run r
+            WHERE r.started_at < ?1 AND r.finished_at IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM command_audit a WHERE a.run_id = r.run_id AND a.input_json IS NOT NULL
+              )
+            LIMIT ?2)",
         params![cutoff, limit as i64],
     )
     .map_err(map_sql_err)
@@ -214,6 +226,40 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn a_parent_accounts_for_a_child_that_finished_first() {
+        let db = Database::in_memory();
+        let parent = effect_run();
+        let child = parent.core_command_child(
+            ContributionRef {
+                id: ContributionId::new("example", ContributionKind::Command, "example.item.write"),
+                extension: "example".into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            },
+            Mode::Transactional,
+        );
+        parent.track_child(&child);
+        parent.used_cpu(5, 512);
+        child.used_cpu(9, 1024);
+        db.transaction_now(|tx| {
+            record_tx(tx, &child, Outcome::Ok, None)?;
+            record_tx(tx, &parent, Outcome::Ok, None)?;
+            let totals: (i64, i64) = tx.query_row(
+                "SELECT sum(cpu_ms), max(peak_bytes) FROM contribution_run WHERE parent_run_id IS NULL",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(map_sql_err)?;
+            assert_eq!(totals, (14, 1024));
+            let child_cost: i64 = tx.query_row(
+                "SELECT cpu_ms FROM contribution_run WHERE parent_run_id = ?1",
+                [parent.run().as_str()], |row| row.get(0),
+            ).map_err(map_sql_err)?;
+            assert_eq!(child_cost, 9);
+            Ok(())
+        }).unwrap();
     }
 
     async fn rows(db: &Database) -> Vec<(String, String, Option<i64>, String, i64, String)> {

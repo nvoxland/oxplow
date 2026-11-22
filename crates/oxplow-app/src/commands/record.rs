@@ -5,6 +5,30 @@
 use super::*;
 use oxplow_domain::run::RunContext;
 
+pub(super) fn record_effect_tx(
+    tx: &rusqlite::Connection,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    key: &oxplow_db::effect_run_store::EffectRunKey,
+    effect: &RunContext,
+    command: &Recorded,
+    failed: Option<String>,
+) -> Result<(), oxplow_domain::DomainError> {
+    use oxplow_domain::run::Outcome as RunOutcome;
+    let outcome = if failed.is_some() {
+        RunOutcome::Failed
+    } else {
+        RunOutcome::Ok
+    };
+    oxplow_db::contribution_run_store::record_tx(tx, effect, outcome, failed.as_deref())?;
+    crate::effects::finished_tx(
+        tx,
+        vocabulary,
+        key,
+        &crate::effects::ran(command.audit_id, failed),
+        Some(command.event_id.clone()),
+    )
+}
+
 tokio::task_local! {
     /// The audit row of the last run that failed in this task (a caller's
     /// [`tracking_failed_audit`] scope).
@@ -40,8 +64,7 @@ impl CommandBus {
         outcome: Outcome,
         error: Option<String>,
     ) {
-        let actor = run.actor();
-        let private_input = run.trace().summary().contains_key("config.secret")
+        let private_input = run.used_private_config()
             || spec.atomicity == oxplow_domain::Atomicity::Dispatch
             || spec
                 .unrecorded
@@ -56,41 +79,25 @@ impl CommandBus {
         };
         let row = NewCommandAudit {
             command: spec.id.clone(),
-            actor_kind: actor.kind(),
-            actor_id: actor.id(),
-            thread_id: actor.thread_id(),
-            session_id: actor.session_id(),
-            // Before a failed composite is fully routed, private descendants
-            // may be unknown. Its original input cannot safely be recorded.
-            input: if private_input || spec.atomicity == oxplow_domain::Atomicity::Dispatch {
-                super::steps::private_composite_spec(spec).recorded_input(input)
-            } else {
-                spec.recorded_input(input)
-            },
+            input: Some(
+                if private_input || spec.atomicity == oxplow_domain::Atomicity::Dispatch {
+                    super::steps::private_composite_spec(spec).recorded_input(input)
+                } else {
+                    spec.recorded_input(input)
+                },
+            ),
             outcome,
             error,
             result: None,
             inverse: None,
             scopes: Default::default(),
-            run_id: Some(run.run().to_string()),
         };
-        // An extension's run that was refused or failed is its run's end.
-        let ended = match outcome {
-            Outcome::Denied => oxplow_domain::run::Outcome::Denied,
-            _ => oxplow_domain::run::Outcome::Failed,
-        };
-        let (run_c, error_c) = (run.clone(), row.error.clone());
+        let run_c = run.clone();
         match self
             .db
             .transaction(move |tx| {
-                let id = insert_tx(tx, &row)?;
-                oxplow_db::contribution_run_store::record_tx(
-                    tx,
-                    &run_c,
-                    ended,
-                    error_c.as_deref(),
-                )?;
-                Ok(id)
+                oxplow_db::command_audit_store::insert_rolled_back_children_tx(tx, &run_c)?;
+                insert_tx(tx, &run_c, &row)
             })
             .await
         {
@@ -143,13 +150,9 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
-                    RunOrigin::Effect(key, _) => crate::effects::finished_tx(
-                        tx,
-                        &vocabulary.current(),
-                        key,
-                        &crate::effects::ran(recorded.audit_id, None),
-                        Some(recorded.event_id.clone()),
-                    )?,
+                    RunOrigin::Effect(key, _, effect) => {
+                        record_effect_tx(tx, &vocabulary.current(), key, effect, &recorded, None)?
+                    }
                     RunOrigin::Approval(id) => {
                         let id = *id;
                         proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
@@ -314,17 +317,14 @@ pub(super) fn record_tx(
     };
     let audit_id = insert_tx(
         tx,
+        &run,
         &NewCommandAudit {
             command: spec.id.clone(),
-            actor_kind: actor.kind(),
-            actor_id: actor.id(),
-            thread_id: actor.thread_id(),
-            session_id: actor.session_id(),
-            input: if sensitive {
+            input: Some(if sensitive {
                 super::steps::private_composite_spec(spec).recorded_input(input)
             } else {
                 spec.recorded_input(input)
-            },
+            }),
             outcome,
             error: failed.clone(),
             // A secret configuration read returns sensitive data. A composite may
@@ -337,18 +337,7 @@ pub(super) fn record_tx(
             }),
             inverse: inverse.clone(),
             scopes,
-            run_id: Some(run.run().to_string()),
         },
-    )?;
-    // An extension's run (its command's, a policy's call) ends with it.
-    oxplow_db::contribution_run_store::record_tx(
-        tx,
-        &run,
-        match failed {
-            Some(_) => oxplow_domain::run::Outcome::Failed,
-            None => oxplow_domain::run::Outcome::Ok,
-        },
-        failed.as_deref(),
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),

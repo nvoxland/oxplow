@@ -1,5 +1,5 @@
 title: Agent Interface
-description: How agents use oxplow's interface over the last 30 days — which tools they call, which commands they run and how often those are refused or fail, and which hints fire.
+description: How agents use oxplow's interface over the last 30 days — which tools they call, which commands they run (including reads), how those runs end, and which hints fire.
 category: Activity
 loaders:
   interface_tool_calls:
@@ -20,11 +20,12 @@ loaders:
              count(*) AS runs,
              sum(outcome = 'invalid') AS invalid,
              sum(outcome = 'denied') AS denied,
-             sum(outcome = 'error') AS errors,
+             sum(outcome = 'failed') AS errors,
              round(100.0 * sum(outcome <> 'ok') / count(*), 1) AS refused_pct
-      FROM v_command_audit
+      FROM v_command_run
       WHERE actor_kind = 'agent'
-        AND at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+        AND started_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+        AND outcome IS NOT NULL
       GROUP BY command
       ORDER BY sum(outcome <> 'ok') DESC, runs DESC, command
   interface_hints:
@@ -66,7 +67,7 @@ view:
         kind: page
         from: errors_ref
     - key: runs
-      label: Runs
+      label: Runs (including reads)
     - key: invalid
       label: Invalid
     - key: denied

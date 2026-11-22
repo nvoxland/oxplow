@@ -1,5 +1,5 @@
 title: Command data
-description: The runs of one command from the audit log, newest first, with who ran it and how it ended.
+description: The runs of one command, newest first, with who ran it, how it ended and what it cost.
 label: '{{row.name}} data'
 icon: terminal
 for: oxplow/command
@@ -19,6 +19,12 @@ params:
   label: Who
   options: [{ value: all, label: Anyone }, { value: person, label: A person }, { value: agent, label: An agent }]
   default: all
+- name: changed
+  type: choice
+  role: filter
+  label: Changes
+  options: [{ value: all, label: All runs }, { value: changed, label: Changed only }]
+  default: all
 - name: range
   type: date_range
   role: filter
@@ -30,18 +36,23 @@ answers:
 loaders:
   about:
     sql: |
-      SELECT k.id AS name, k.summary AS description FROM v_command k WHERE k.id = uri_param(:uri, 'command')
+      SELECT k.id AS name, k.summary AS description, k.extension
+      FROM v_command k WHERE k.id = uri_param(:uri, 'command')
   runs:
     sql: |
-      SELECT a.at, CASE a.actor_kind WHEN 'human' THEN 'A person' WHEN 'agent' THEN 'Agent ' || COALESCE(a.actor_id, '')
-                                     ELSE a.actor_kind || COALESCE(' ' || a.actor_id, '') END AS who,
-             a.outcome, a.error
-      FROM about k JOIN v_command_audit a ON a.command = k.name
+      SELECT a.run_id, a.started_at,
+             CASE a.actor_kind WHEN 'human' THEN 'A person' WHEN 'agent' THEN 'Agent ' || COALESCE(a.actor_id, '')
+                               ELSE a.actor_kind || COALESCE(' ' || a.actor_id, '') END AS who,
+             a.outcome, a.error, a.version, a.cpu_ms, a.ai_calls, a.changed,
+             NULLIF(a.extension, COALESCE(k.extension, 'core')) AS extension,
+             uri('oxplow/extension', 'name', a.extension) AS extension_uri
+      FROM about k JOIN v_command_run a ON a.command = k.name
       WHERE (:outcome <> 'failed' OR a.outcome <> 'ok')
         AND (:who = 'all' OR (:who = 'person' AND a.actor_kind = 'human') OR (:who = 'agent' AND a.actor_kind = 'agent'))
-        AND (:range_from IS NULL OR a.at >= :range_from)
-        AND (:range_to IS NULL OR a.at <= :range_to)
-      ORDER BY a.at DESC, a.id DESC LIMIT 500
+        AND (:changed <> 'changed' OR a.changed = 1)
+        AND (:range_from IS NULL OR a.started_at >= :range_from)
+        AND (:range_to IS NULL OR a.started_at <= :range_to)
+      ORDER BY a.started_at DESC, a.id DESC LIMIT 500
 view:
   stack:
   - id: about
@@ -57,8 +68,12 @@ view:
     viz: table
     from: runs
     columns:
-    - { key: at, label: When, format: datetime }
+    - { key: started_at, label: When, format: datetime, expand: oxplow/run-details }
     - { key: who, label: Who }
     - { key: outcome, label: Outcome }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_uri } }
+    - { key: version, label: Version }
+    - { key: cpu_ms, label: CPU, format: duration }
+    - { key: ai_calls, label: Model calls }
     - { key: error, label: Error }
     empty: No runs in this range.

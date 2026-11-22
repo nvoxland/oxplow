@@ -36,8 +36,8 @@ use serde_json::{json, Value};
 use super::compose::{Compose, StepAnswer, SEQUENCE};
 use super::{
     finish_undo_claim_tx, log_approved_tx, proposal_store, record_tx, Command, CommandBus,
-    Executed, Gates, Handler, HandlerOutput, NestedChild, Resolved, RunOrigin, TxCtx, TxHandler,
-    MAX_NESTING,
+    Executed, Gates, Handler, HandlerOutput, Invocation, NestedChild, Resolved, RunOrigin, TxCtx,
+    TxHandler, MAX_NESTING,
 };
 use crate::agent_policy::AgentPolicy;
 
@@ -65,6 +65,7 @@ pub(super) struct Composed {
 }
 
 /// One call of a [`Composed`].
+#[derive(Clone)]
 pub(super) struct ComposedCall {
     command: Arc<Command>,
     call: CommandCall,
@@ -92,6 +93,29 @@ impl Composed {
 }
 
 impl ComposedCall {
+    fn audit_detail(
+        &self,
+        out: &HandlerOutput,
+        scopes: BTreeMap<String, u32>,
+    ) -> super::NewCommandAudit {
+        let private = self.has_private_input();
+        super::NewCommandAudit {
+            command: self.call.name.clone(),
+            input: (!out.unchanged).then(|| self.recorded_input()),
+            outcome: Outcome::Ok,
+            error: None,
+            result: (!out.unchanged).then(|| {
+                if private {
+                    json!({ "redacted": true })
+                } else {
+                    out.result.clone()
+                }
+            }),
+            inverse: None,
+            scopes,
+        }
+    }
+
     fn has_private_input(&self) -> bool {
         self.run.trace().summary().contains_key("config.secret")
             || self
@@ -342,17 +366,7 @@ impl Router<'_> {
                 Handler::Tx(_) => oxplow_domain::run::Mode::Transactional,
                 _ => oxplow_domain::run::Mode::External,
             };
-            let run = match &command.contribution {
-                Some(named) => {
-                    let owned = named(parent);
-                    if owned.mode() == mode {
-                        owned
-                    } else {
-                        owned.child(None, mode)
-                    }
-                }
-                None => parent.child(None, mode),
-            };
+            let run = command.run_under(parent, mode);
             if own_settings && run.composed_by().is_none() {
                 decide()?;
             }
@@ -584,6 +598,7 @@ fn run_tree(
         c.run
             .check_authority()
             .map_err(|reason| CommandError::Denied { reason })?;
+        let trace = oxplow_domain::scope::ScopeTrace::default();
         let inner = TxCtx {
             conn: ctx.conn,
             run: &c.run,
@@ -591,7 +606,7 @@ fn run_tree(
             confirmed: ctx.confirmed,
             may_write: ctx.may_write,
             depth: ctx.depth + 1,
-            trace: ctx.trace,
+            trace: &trace,
         };
         let out = match (&c.nested, &c.command.handler) {
             (Some(nested), _) => run_tree(&inner, &c.call.name, nested),
@@ -602,13 +617,33 @@ fn run_tree(
                 });
             }
         };
+        c.run.trace().add(&trace.summary());
         ctx.trace.add(&c.run.trace().summary());
         if ctx.trace.summary().contains_key("config.secret")
             && !ctx.run.trace().summary().contains_key("config.secret")
         {
             ctx.run.trace().count("config.secret");
         }
-        let mut out = honest(out?, &c.call.name)?;
+        use oxplow_domain::run::Outcome as RunOutcome;
+        let checked = out.and_then(|out| honest(out, &c.call.name));
+        c.run.observe_rollback_outcome(match &checked {
+            Ok(out) if out.unchanged => RunOutcome::Ok,
+            Ok(_) => RunOutcome::Cancelled,
+            Err(CommandError::Denied { .. }) => RunOutcome::Denied,
+            Err(CommandError::Invalid { .. }) => RunOutcome::Invalid,
+            Err(_) => RunOutcome::Failed,
+        });
+        let mut out = checked?;
+        if ctx.trace.summary().contains_key("config.secret")
+            && !c.run.trace().summary().contains_key("config.secret")
+        {
+            c.run.trace().count("config.secret");
+        }
+        super::insert_tx(
+            ctx.conn,
+            &c.run,
+            &c.audit_detail(&out, c.run.trace().summary()),
+        )?;
         if let Some(after) = out.after_commit.take() {
             afters.push(after);
         }
@@ -942,21 +977,17 @@ impl CommandBus {
                 (None, Handler::Tx(handler)) => Some(handler.clone()),
                 (None, _) => None,
             };
+            let recorded_in_transaction = tx.is_some();
             let ran = match (tx, &step.command.handler) {
                 (Some(handler), _) => {
-                    self.run_step_tx(
-                        handler,
-                        &step.run,
-                        &step.call.input,
-                        &executed_id,
-                        confirmed,
-                        gates,
-                    )
-                    .await
+                    self.run_step_tx(handler, step, &executed_id, confirmed, gates)
+                        .await
                 }
                 (None, Handler::External(handler)) => {
-                    let invocation =
-                        origin.invocation(&step.run, index, &step.call.name, &step.call.input);
+                    let invocation = Invocation {
+                        run: step.run.clone(),
+                        ..origin.invocation(&step.run, index, &step.call.name, &step.call.input)
+                    };
                     let key = invocation.idempotency_key.clone();
                     let called = invocation.run.clone();
                     let answer = handler(invocation, step.call.input.clone()).await;
@@ -977,6 +1008,17 @@ impl CommandBus {
             let ran = ran.and_then(|(out, used)| Ok((honest(out, &step.call.name)?, used)));
             match ran {
                 Ok((mut out, used)) => {
+                    if !recorded_in_transaction {
+                        let row = step.audit_detail(&out, used.clone());
+                        let child = step.run.clone();
+                        if let Err(error) = self
+                            .db
+                            .transaction(move |tx| super::insert_tx(tx, &child, &row).map(|_| ()))
+                            .await
+                        {
+                            tracing::error!(%error, command = %step.call.name, "external step landed without a command run record");
+                        }
+                    }
                     oxplow_domain::scope::add_counts(&mut scopes, used);
                     if let Some(after) = out.after_commit.take() {
                         after();
@@ -990,6 +1032,22 @@ impl CommandBus {
                     });
                 }
                 Err(err) => {
+                    if !matches!(&err, CommandError::NeedsConfirmation { .. }) {
+                        self.audit_only(
+                            &step.run,
+                            &step.command.spec,
+                            &step.call.input,
+                            if matches!(&err, CommandError::Denied { .. }) {
+                                Outcome::Denied
+                            } else if matches!(&err, CommandError::Invalid { .. }) {
+                                Outcome::Invalid
+                            } else {
+                                Outcome::Error
+                            },
+                            Some(err.to_string()),
+                        )
+                        .await;
+                    }
                     failure = Some((step, err));
                     break;
                 }
@@ -1112,12 +1170,13 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
-                    RunOrigin::Effect(key, _) => crate::effects::finished_tx(
+                    RunOrigin::Effect(key, _, effect) => super::record_effect_tx(
                         tx,
                         &vocabulary.current(),
                         key,
-                        &crate::effects::ran(recorded.audit_id, failed_c.clone()),
-                        Some(recorded.event_id.clone()),
+                        effect,
+                        &recorded,
+                        failed_c.clone(),
                     )?,
                     RunOrigin::Approval(id) => {
                         let id = *id;
@@ -1160,24 +1219,24 @@ impl CommandBus {
 
     /// One step inside oxplow: its handler in its own transaction, its
     /// events caused by the run's `command.executed` (recorded after the
-    /// last step). Nothing is audited here; the run is.
+    /// last step). The step's run and detail land with its own write.
     async fn run_step_tx(
         &self,
         handler: Arc<TxHandler>,
-        run: &RunContext,
-        input: &Value,
+        step: &ComposedCall,
         cause: &oxplow_domain::EventId,
         confirmed: bool,
         gates: Gates,
     ) -> Result<(HandlerOutput, BTreeMap<String, u32>), CommandError> {
-        let (run, input, cause) = (run.clone(), input.clone(), cause.clone());
+        let (step, cause) = (step.clone(), cause.clone());
         let vocabulary = self.log.vocabulary().clone();
         self.db
             .transaction_or(move |tx| {
+                let run = &step.run;
                 let trace = oxplow_domain::scope::ScopeTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
-                    run: &run,
+                    run,
                     events: oxplow_db::EventCtx {
                         vocabulary: &vocabulary.current(),
                         source: run.actor().source(),
@@ -1188,10 +1247,16 @@ impl CommandBus {
                     depth: 1,
                     trace: &trace,
                 };
-                let answer = handler(&ctx, input.clone());
+                let answer = handler(&ctx, step.call.input.clone())
+                    .and_then(|out| honest(out, &step.call.name));
                 run.trace().add(&trace.summary());
                 match answer {
-                    Ok(out) => Ok((out, trace.summary())),
+                    Ok(out) => {
+                        let used = trace.summary();
+                        super::insert_tx(tx, run, &step.audit_detail(&out, used.clone()))
+                            .map_err(TxError::Storage)?;
+                        Ok((out, used))
+                    }
                     Err(CommandError::Busy { message }) => {
                         Err(TxError::Storage(oxplow_domain::DomainError::Busy(message)))
                     }

@@ -85,7 +85,9 @@ use serde_json::Value;
 use crate::agent_policy::AgentPolicy;
 use crate::event_pump::EventPump;
 use proposals::log_approved_tx;
-use record::{command_error, finish, record_tx, unrecorded, Abort, Executed, Recorded};
+use record::{
+    command_error, finish, record_effect_tx, record_tx, unrecorded, Abort, Executed, Recorded,
+};
 use undo::{finish_undo_claim_tx, lost_race};
 
 /// What a handler produced.
@@ -440,6 +442,28 @@ impl Command {
         self
     }
 
+    fn run_under(&self, parent: &RunContext, mode: Mode) -> RunContext {
+        let run = match &self.contribution {
+            Some(named) => named(parent).in_mode(mode),
+            None => parent.core_command_child(
+                oxplow_domain::run::ContributionRef {
+                    id: oxplow_domain::contribution::ContributionId::new(
+                        "oxplow",
+                        oxplow_domain::contribution::ContributionKind::Command,
+                        &self.spec.id,
+                    ),
+                    extension: "core".into(),
+                    version: None,
+                    generation: None,
+                    deployment: None,
+                },
+                mode,
+            ),
+        };
+        parent.track_child(&run);
+        run
+    }
+
     /// This command with its check before the transaction ([`Precheck`]).
     pub fn with_precheck(mut self, f: Arc<Precheck>) -> Self {
         self.precheck = Some(f);
@@ -776,6 +800,7 @@ enum RunOrigin {
     Effect(
         Arc<oxplow_db::effect_run_store::EffectRunKey>,
         Option<Arc<str>>,
+        Arc<RunContext>,
     ),
 }
 
@@ -785,7 +810,7 @@ impl RunOrigin {
     /// trigger).
     fn cause(&self, run: &RunContext) -> Option<oxplow_domain::EventId> {
         match self {
-            RunOrigin::Effect(key, _) => Some(oxplow_domain::EventId(key.event_id.clone())),
+            RunOrigin::Effect(key, _, _) => Some(oxplow_domain::EventId(key.event_id.clone())),
             _ => run.cause().cloned(),
         }
     }
@@ -795,7 +820,7 @@ impl RunOrigin {
         Invocation {
             run: run.child(None, Mode::External),
             idempotency_key: match self {
-                RunOrigin::Effect(key, _) => Some(effect_step_key(key, index, call, input)),
+                RunOrigin::Effect(key, _, _) => Some(effect_step_key(key, index, call, input)),
                 _ => None,
             },
             confirmed: false,
@@ -1201,7 +1226,7 @@ impl CommandBus {
             Arc::new(command),
             input,
             false,
-            RunOrigin::Effect(Arc::new(key), resend.map(Arc::from)),
+            RunOrigin::Effect(Arc::new(key), resend.map(Arc::from), Arc::new(run.clone())),
         )
         .await
     }
@@ -1246,7 +1271,7 @@ impl CommandBus {
         let result = self
             .run_prepared(run, command, input, confirmed, origin)
             .await;
-        if result.is_err() && run.trace().summary().contains_key("config.secret") {
+        if result.is_err() && run.used_private_config() {
             if matches!(&result, Err(CommandError::Denied { .. })) {
                 return Err(CommandError::Denied {
                     reason: "private configuration access was denied".into(),
@@ -1305,19 +1330,20 @@ impl CommandBus {
         origin: RunOrigin,
     ) -> Result<Flow, CommandError> {
         let spec = &command.spec;
-        let run = &match self.resolved(run).await {
+        let command_run = command.run_under(run, run.mode());
+        let run = &match self.resolved(&command_run).await {
             Ok(run) => run,
             Err(err) => {
-                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
-                    .await;
+                self.audit_only(
+                    &command_run,
+                    spec,
+                    &input,
+                    Outcome::Denied,
+                    Some(err.to_string()),
+                )
+                .await;
                 return Err(err);
             }
-        };
-        // An extension's command runs as that contribution: a child of the
-        // run that called it.
-        let run = &match &command.contribution {
-            Some(named) => named(run),
-            None => run.clone(),
         };
         let actor = run.actor();
 
@@ -1459,7 +1485,7 @@ impl CommandBus {
         // 5a. A read runs without a record: no audit row, no event.
         if spec.access.reads_only() {
             let read = self.run_read(&resolved, run, input).await;
-            self.ran_unaudited(run, read.as_ref().err()).await;
+            self.ran_unaudited(run, &spec.id, read.as_ref().err()).await;
             return read.map(Flow::Done);
         }
         // 5'. A composite's steps run outside one transaction: each lands
@@ -1572,12 +1598,13 @@ impl CommandBus {
                             RunOrigin::Approval(id) => {
                                 proposal_store::approve_tx(tx, *id, recorded.audit_id).map(|_| ())
                             }
-                            RunOrigin::Effect(key, _) => crate::effects::finished_tx(
+                            RunOrigin::Effect(key, _, effect) => record_effect_tx(
                                 tx,
                                 &vocabulary.current(),
                                 key,
-                                &crate::effects::ran(recorded.audit_id, None),
-                                Some(recorded.event_id.clone()),
+                                effect,
+                                &recorded,
+                                None,
                             ),
                         };
                         if let Err(e) = marked {
@@ -1601,7 +1628,7 @@ impl CommandBus {
                 match ran {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
                     Err(TxError::Aborted(Abort::Unchanged(out))) => {
-                        self.ran_unaudited(run, None).await;
+                        self.ran_unaudited(run, &spec.id, None).await;
                         return Ok(Flow::Done(unrecorded(*out)));
                     }
                     Err(TxError::Aborted(Abort::Lost(e))) => return Err(e),
@@ -1731,6 +1758,7 @@ impl CommandBus {
                 // denial, not an error.
                 let recorded = match err {
                     CommandError::Denied { .. } => Outcome::Denied,
+                    CommandError::Invalid { .. } => Outcome::Invalid,
                     _ => Outcome::Error,
                 };
                 self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
@@ -1743,15 +1771,16 @@ impl CommandBus {
     /// A run that leaves no audit row — a read, or one that changed
     /// nothing — is still an extension's run when it is one: recorded as
     /// such ([`oxplow_db::contribution_run_store`]).
-    async fn ran_unaudited(&self, run: &RunContext, failed: Option<&CommandError>) {
-        if run.contribution_ref().is_none() {
-            return;
-        }
+    async fn ran_unaudited(&self, run: &RunContext, command: &str, failed: Option<&CommandError>) {
         let (ended, error) = match failed {
-            None => (oxplow_domain::run::Outcome::Ok, None),
+            None => (Outcome::Ok, None),
             Some(e) => (
-                oxplow_domain::run::Outcome::Failed,
-                Some(if run.trace().summary().contains_key("config.secret") {
+                match e {
+                    CommandError::Invalid { .. } => Outcome::Invalid,
+                    CommandError::Denied { .. } => Outcome::Denied,
+                    _ => Outcome::Error,
+                },
+                Some(if run.used_private_config() {
                     "secret configuration consumer failed".into()
                 } else {
                     e.to_string()
@@ -1759,10 +1788,20 @@ impl CommandBus {
             ),
         };
         let run = run.clone();
+        let row = NewCommandAudit {
+            command: command.to_owned(),
+            input: None,
+            outcome: ended,
+            error,
+            result: None,
+            inverse: None,
+            scopes: run.trace().summary(),
+        };
         if let Err(e) = self
             .db
             .transaction(move |tx| {
-                oxplow_db::contribution_run_store::record_tx(tx, &run, ended, error.as_deref())
+                oxplow_db::command_audit_store::insert_rolled_back_children_tx(tx, &run)?;
+                insert_tx(tx, &run, &row).map(|_| ())
             })
             .await
         {

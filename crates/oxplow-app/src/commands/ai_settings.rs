@@ -305,7 +305,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT error FROM v_command_audit WHERE command = 'oxplow.ai.set_provider' \
+                "SELECT error FROM v_command_run WHERE command = 'oxplow.ai.set_provider' \
                  AND outcome != 'ok'",
                 vec![],
                 None,

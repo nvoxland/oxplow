@@ -136,6 +136,26 @@ pub struct Usage {
     pub observed_wall_time: Option<Duration>,
 }
 
+#[derive(Debug, Default)]
+struct RunAccounting {
+    usage: Usage,
+    children: Vec<RunContext>,
+    rolled_back: Option<Outcome>,
+}
+
+impl RunAccounting {
+    fn totals(&self) -> Usage {
+        let mut usage = self.usage.clone();
+        for child in &self.children {
+            let child = child.usage();
+            usage.cpu_ms = usage.cpu_ms.saturating_add(child.cpu_ms);
+            usage.peak_bytes = usage.peak_bytes.max(child.peak_bytes);
+            usage.ai_calls = usage.ai_calls.saturating_add(child.ai_calls);
+        }
+        usage
+    }
+}
+
 /// How a run ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -264,7 +284,7 @@ pub struct RunContext {
     began: crate::time::Timestamp,
     cancel: Cancel,
     trace: Arc<ScopeTrace>,
-    usage: Arc<std::sync::Mutex<Usage>>,
+    usage: Arc<std::sync::Mutex<RunAccounting>>,
     authority: Option<Arc<Authority>>,
     authority_guard: Option<AuthorityGuard>,
     host_generation: Option<HostGenerationPin>,
@@ -272,6 +292,8 @@ pub struct RunContext {
     /// An undo replaying an inverse the bus recorded: what its children
     /// write was authorized when the run it undoes was composed.
     replaying: bool,
+    /// Accounting for a native command must preserve the actual composer.
+    core_command: bool,
 }
 
 impl RunContext {
@@ -282,6 +304,7 @@ impl RunContext {
             contribution,
             composed_by: None,
             replaying: false,
+            core_command: false,
             anchors: actor.anchors(),
             actor,
             subject: Vec::new(),
@@ -502,9 +525,11 @@ impl RunContext {
             run: RunId::generate(),
             parent: Some(self.run.clone()),
             composed_by: match &contribution {
+                Some(_) if self.core_command => self.composed_by.clone(),
                 Some(_) => self.contribution.clone(),
                 None => self.composed_by.clone(),
             },
+            core_command: contribution.is_none() && self.core_command,
             contribution: contribution.or_else(|| self.contribution.clone()),
             actor: self.actor.clone(),
             anchors: self.anchors.clone(),
@@ -525,6 +550,61 @@ impl RunContext {
             host_generation: self.host_generation.clone(),
             decided,
             replaying: self.replaying,
+        }
+    }
+
+    /// A command implemented in core owns a run while keeping the sender's authority.
+    pub fn core_command_child(&self, contribution: ContributionRef, mode: Mode) -> Self {
+        let mut child = self.child(Some(contribution), mode);
+        child.authority = self.authority.clone();
+        child.core_command = true;
+        child
+    }
+
+    /// Count the child's use separately and include its cost in this run.
+    pub fn track_child(&self, child: &Self) {
+        if child.parent() == Some(self.run()) && !Arc::ptr_eq(&self.usage, &child.usage) {
+            self.accounting().children.push(child.clone());
+        }
+    }
+
+    /// Child rows that may have landed before this parent was recorded.
+    pub fn recorded_children(&self) -> Vec<RunId> {
+        self.accounting()
+            .children
+            .iter()
+            .map(|child| child.run.clone())
+            .collect()
+    }
+
+    pub fn used_private_config(&self) -> bool {
+        self.trace.summary().contains_key("config.secret")
+            || self
+                .accounting()
+                .children
+                .iter()
+                .any(Self::used_private_config)
+    }
+
+    /// The status to record if this child's transaction rolls back.
+    pub fn observe_rollback_outcome(&self, outcome: Outcome) {
+        self.accounting().rolled_back = Some(outcome);
+    }
+
+    /// Attempted descendants, with children before their parents so the
+    /// store can link them as it records the enclosing runs.
+    pub fn rollback_observations(&self) -> Vec<(RunContext, Outcome)> {
+        let mut observed = Vec::new();
+        self.collect_rollback_observations(&mut observed);
+        observed
+    }
+
+    fn collect_rollback_observations(&self, observed: &mut Vec<(RunContext, Outcome)>) {
+        for child in &self.accounting().children {
+            child.collect_rollback_observations(observed);
+            if let Some(outcome) = child.accounting().rolled_back {
+                observed.push((child.clone(), outcome));
+            }
         }
     }
 
@@ -638,26 +718,35 @@ impl RunContext {
         usage: Usage,
         decisions: Vec<crate::grant::Decided>,
     ) -> Self {
-        self.usage = Arc::new(std::sync::Mutex::new(usage));
+        self.usage = Arc::new(std::sync::Mutex::new(RunAccounting {
+            usage,
+            ..RunAccounting::default()
+        }));
         self.decided = Arc::new(std::sync::Mutex::new(decisions));
         self
     }
 
     /// It called scope `id`.
     pub fn used_scope(&self, id: &str) {
-        *self.usage_lock().scopes.entry(id.to_string()).or_insert(0) += 1;
+        *self
+            .accounting()
+            .usage
+            .scopes
+            .entry(id.to_string())
+            .or_insert(0) += 1;
     }
 
     /// One of its scripts ran, costing `cpu_ms` and holding `peak_bytes`.
     pub fn used_cpu(&self, cpu_ms: u64, peak_bytes: u64) {
-        let mut u = self.usage_lock();
-        u.cpu_ms += cpu_ms;
-        u.peak_bytes = u.peak_bytes.max(peak_bytes);
+        let mut accounting = self.accounting();
+        let usage = &mut accounting.usage;
+        usage.cpu_ms += cpu_ms;
+        usage.peak_bytes = usage.peak_bytes.max(peak_bytes);
     }
 
     /// It called a model.
     pub fn used_ai(&self) {
-        self.usage_lock().ai_calls += 1;
+        self.accounting().usage.ai_calls += 1;
     }
 
     /// Decide `need` against its authority and record it. A run with no
@@ -723,10 +812,10 @@ impl RunContext {
 
     /// What it has used so far.
     pub fn usage(&self) -> Usage {
-        self.usage_lock().clone()
+        self.accounting().totals()
     }
 
-    fn usage_lock(&self) -> std::sync::MutexGuard<'_, Usage> {
+    fn accounting(&self) -> std::sync::MutexGuard<'_, RunAccounting> {
         self.usage.lock().unwrap_or_else(|e| e.into_inner())
     }
 
