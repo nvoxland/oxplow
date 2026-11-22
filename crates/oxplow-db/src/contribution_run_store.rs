@@ -58,6 +58,16 @@ pub fn finish_tx(
     outcome: Outcome,
     error: Option<&str>,
 ) -> Result<(), DomainError> {
+    finish_at_tx(conn, run, outcome, error, Timestamp::now())
+}
+
+pub(crate) fn finish_at_tx(
+    conn: &rusqlite::Connection,
+    run: &RunContext,
+    outcome: Outcome,
+    error: Option<&str>,
+    finished_at: Timestamp,
+) -> Result<(), DomainError> {
     if run.contribution_ref().is_none() {
         return Ok(());
     }
@@ -71,7 +81,7 @@ pub fn finish_tx(
          WHERE run_id = ?1 AND finished_at IS NULL",
             params![
                 run.run().as_str(),
-                Timestamp::now().to_string(),
+                finished_at.to_string(),
                 outcome.as_str(),
                 error,
                 i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX),
@@ -111,13 +121,15 @@ pub fn record_tx(
 }
 
 /// Close live runs left behind by the previous daemon. The effect ledger
-/// recovers its own claims so it can publish a result and schedule a retry.
+/// and job ledgers recover their own claims so they can emit results and
+/// enforce their retry and lease rules.
 pub fn interrupt_unfinished_tx(conn: &rusqlite::Connection) -> Result<usize, DomainError> {
     conn.execute(
         "UPDATE contribution_run
          SET finished_at = ?1, outcome = ?2, error = 'oxplow stopped before the run finished'
          WHERE finished_at IS NULL
-           AND NOT EXISTS (SELECT 1 FROM effect_run WHERE run_id = contribution_run.run_id)",
+           AND NOT EXISTS (SELECT 1 FROM effect_run WHERE run_id = contribution_run.run_id)
+           AND NOT EXISTS (SELECT 1 FROM extension_job_attempt WHERE run_id = contribution_run.run_id)",
         params![Timestamp::now().to_string(), Outcome::Interrupted.as_str()],
     )
     .map_err(map_sql_err)
@@ -142,6 +154,9 @@ pub fn sweep_tx(
               )
               AND NOT EXISTS (
                   SELECT 1 FROM effect_run e WHERE e.run_id = r.run_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM extension_job_attempt j WHERE j.run_id = r.run_id
               )
             LIMIT ?2)",
         params![cutoff, limit as i64],

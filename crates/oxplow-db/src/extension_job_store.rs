@@ -12,9 +12,9 @@ use oxplow_domain::{
         JobOutputKind, JobOwner, JobState, JobTransition, NewJobOutput, ReplayPolicy,
         TransitionError,
     },
-    extension_job_context::JobInvocationContext,
-    run::RunId,
-    DomainError,
+    extension_job_context::{JobExecutionIdentity, JobInvocationContext},
+    run::{ContributionRef as RunContribution, Mode, Outcome, RunContext, RunId},
+    Actor, DomainError, Timestamp,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
@@ -342,7 +342,7 @@ pub fn get_context_tx(conn: &Connection, id: &JobId) -> StoreResult<JobInvocatio
     validate_uuid_v7(id.as_str())?;
     let row = conn
         .query_row(
-            "SELECT j.run_id, c.originating_run_id, c.context_json
+            "SELECT j.queued_by_run_id, c.originating_run_id, c.context_json
              FROM extension_job j LEFT JOIN extension_job_context c ON c.job_id = j.id
              WHERE j.id = ?1",
             [id.as_str()],
@@ -403,7 +403,7 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
     let insert = conn.execute(
         "INSERT INTO extension_job (
             id, contribution_id, package_version, contract_version,
-            operation, invoker, run_id, intent_key, replay_policy, state, attempt,
+            operation, invoker, queued_by_run_id, intent_key, replay_policy, state, attempt,
             fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
             updated_at_ms, revision, request_json, deployment_hash
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
@@ -469,7 +469,7 @@ pub fn get_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<StoredExtensi
     let raw = conn
         .query_row(
             "SELECT id, contribution_id, package_version, contract_version,
-                    operation, invoker, run_id, intent_key, replay_policy, state, attempt,
+                    operation, invoker, queued_by_run_id, intent_key, replay_policy, state, attempt,
                     fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
                     updated_at_ms, revision, request_json, deployment_hash
              FROM extension_job WHERE id = ?1",
@@ -487,7 +487,7 @@ pub fn metadata_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<Recovery
     let raw = conn
         .query_row(
             "SELECT j.id, j.contribution_id, j.package_version, j.contract_version,
-                    j.run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
+                    j.queued_by_run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                     j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
                     j.updated_at_ms, j.operation, j.invoker, j.revision, j.deployment_hash
              FROM extension_job j WHERE j.id = ?1",
@@ -505,6 +505,19 @@ pub fn transition_tx(
     expected_revision: u64,
     event: &JobEvent,
     result: Option<&Value>,
+) -> StoreResult<StoredExtensionJob> {
+    transition_with_run_tx(conn, id, expected_revision, event, result, None)
+}
+
+/// Apply the job transition and begin or finish the authorized attempt's
+/// run in the same savepoint as the fence and revision update.
+pub fn transition_with_run_tx(
+    conn: &Connection,
+    id: &JobId,
+    expected_revision: u64,
+    event: &JobEvent,
+    result: Option<&Value>,
+    run: Option<&RunContext>,
 ) -> StoreResult<StoredExtensionJob> {
     ensure_transaction(conn)?;
     if expected_revision == 0 || expected_revision > i64::MAX as u64 {
@@ -536,6 +549,7 @@ pub fn transition_tx(
             &transition,
             event,
             result_json.as_deref(),
+            run,
         )?;
         let next = &transition.job;
         let changed = conn
@@ -910,7 +924,7 @@ fn candidates_tx(
     };
     let sql = format!(
         "SELECT j.id, j.contribution_id, j.package_version, j.contract_version,
-                j.run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
+                j.queued_by_run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                 j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
                 j.updated_at_ms, j.operation, j.invoker, j.revision, j.deployment_hash
          FROM extension_job j
@@ -1149,14 +1163,58 @@ fn apply_attempt_change(
     transition: &JobTransition,
     event: &JobEvent,
     result_json: Option<&str>,
+    run: Option<&RunContext>,
 ) -> StoreResult<()> {
     let new = &transition.job;
     match event {
         JobEvent::Claim { now_ms, .. } => {
+            let identity = JobExecutionIdentity::new(
+                old.id.clone(),
+                AttemptFence {
+                    attempt: new.attempt,
+                    fence: new.fence,
+                },
+            )
+            .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+            let fallback;
+            let run = match run {
+                Some(run) => {
+                    let attributed = run
+                        .contribution_ref()
+                        .is_some_and(|r| r.id == old.owner.contribution)
+                        && run.parent() == Some(&old.run_id)
+                        && matches!(run.actor(), Actor::Job { job_id, attempt, fence, .. }
+                            if job_id == old.id.as_str() && *attempt == new.attempt && *fence == new.fence);
+                    if !attributed {
+                        return Err(ExtensionJobStoreError::InvalidData);
+                    }
+                    run
+                }
+                None => {
+                    fallback = fallback_attempt_run(conn, old, &identity)?;
+                    &fallback
+                }
+            };
+            crate::contribution_run_store::begin_tx(
+                conn,
+                &run.clone().began_at(Timestamp::from_unix_ms(*now_ms)),
+            )
+            .map_err(ExtensionJobStoreError::Storage)?;
+            // Low-level jobs may have a durable queuing ID and no saved
+            // invocation context. Keep the parent link when that run exists.
+            if run.parent().is_none() {
+                conn.execute(
+                    "UPDATE contribution_run SET parent_run_id =
+                        (SELECT run_id FROM contribution_run WHERE run_id = ?2) WHERE run_id = ?1",
+                    params![run.run().as_str(), old.run_id.as_str()],
+                )
+                .map_err(map_sql_err)?;
+            }
             conn.execute(
-                "INSERT INTO extension_job_attempt (job_id, attempt, fence, started_at_ms, lease_until_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![old.id.as_str(), i64::from(new.attempt), i64::try_from(new.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?, now_ms, new.lease_until_ms],
+                "INSERT INTO extension_job_attempt (job_id, attempt, fence, started_at_ms, lease_until_ms, run_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![old.id.as_str(), i64::from(new.attempt), i64::try_from(new.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                        now_ms, new.lease_until_ms, run.run().as_str()],
             ).map_err(map_sql_err)?;
         }
         JobEvent::Renew { .. } => {
@@ -1171,12 +1229,27 @@ fn apply_attempt_change(
         }
         JobEvent::Complete {
             now_ms, outcome, ..
-        } => close_attempt(conn, old, *now_ms, completion_name(*outcome), result_json)?,
-        JobEvent::ConfirmStopped { now_ms, .. } => {
-            close_attempt(conn, old, *now_ms, "cancelled", result_json)?
-        }
+        } => close_attempt(
+            conn,
+            old,
+            *now_ms,
+            match outcome {
+                Completion::Succeeded => AttemptOutcome::Succeeded,
+                Completion::Failed => AttemptOutcome::Failed,
+            },
+            result_json,
+            run,
+        )?,
+        JobEvent::ConfirmStopped { now_ms, .. } => close_attempt(
+            conn,
+            old,
+            *now_ms,
+            AttemptOutcome::Cancelled,
+            result_json,
+            run,
+        )?,
         JobEvent::RecoverExpired { now_ms } => {
-            close_attempt(conn, old, *now_ms, "interrupted", None)?
+            close_attempt(conn, old, *now_ms, AttemptOutcome::Interrupted, None, None)?
         }
         JobEvent::RequestCancellation { .. }
         | JobEvent::RetryInterrupted { .. }
@@ -1185,26 +1258,96 @@ fn apply_attempt_change(
     Ok(())
 }
 
+fn fallback_attempt_run(
+    conn: &Connection,
+    job: &ExtensionJob,
+    identity: &JobExecutionIdentity,
+) -> StoreResult<RunContext> {
+    let extension: Option<String> = conn
+        .query_row(
+            "SELECT extension FROM contribution WHERE id = ?1 AND kind = 'job'",
+            [job.owner.contribution.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    let owner = RunContribution {
+        id: job.owner.contribution.clone(),
+        extension: extension.unwrap_or_else(|| job.owner.contribution.namespace.clone()),
+        version: job.owner.package_version.clone(),
+        generation: None,
+        deployment: job.owner.deployment.clone(),
+    };
+    match get_context_tx(conn, &job.id) {
+        Ok(provenance) => RunContext::job(owner, identity, &provenance)
+            .map_err(|_| ExtensionJobStoreError::InvalidData),
+        Err(ExtensionJobStoreError::MissingContext) => Ok(RunContext::contribution(
+            owner,
+            Actor::job(identity, None, None),
+            Mode::External,
+        )),
+        Err(error) => Err(error),
+    }
+}
+
 fn close_attempt(
     conn: &Connection,
     job: &ExtensionJob,
     now_ms: i64,
-    outcome: &str,
+    outcome: AttemptOutcome,
     result: Option<&str>,
+    run: Option<&RunContext>,
 ) -> StoreResult<()> {
-    let changed = conn
-        .execute(
+    let (status, outcome, error) = match outcome {
+        AttemptOutcome::Succeeded => ("succeeded", Outcome::Ok, None),
+        AttemptOutcome::Failed => ("failed", Outcome::Failed, Some("job operation failed")),
+        AttemptOutcome::Cancelled => ("cancelled", Outcome::Cancelled, None),
+        AttemptOutcome::Interrupted => (
+            "interrupted",
+            Outcome::Interrupted,
+            Some("job attempt lease expired"),
+        ),
+    };
+    let (run_id, started_ms): (String, i64) = conn
+        .query_row(
             "UPDATE extension_job_attempt SET closed_at_ms=?1, outcome=?2, result_json=?3
-         WHERE job_id=?4 AND attempt=?5 AND fence=?6 AND closed_at_ms IS NULL
-             AND lease_until_ms IS ?7",
+             WHERE job_id=?4 AND attempt=?5 AND fence=?6 AND closed_at_ms IS NULL
+               AND lease_until_ms IS ?7
+             RETURNING run_id, started_at_ms",
             params![
                 now_ms,
-                outcome,
+                status,
                 result,
                 job.id.as_str(),
                 i64::from(job.attempt),
                 i64::try_from(job.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
-                job.lease_until_ms
+                job.lease_until_ms,
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(map_sql_err)?
+        .ok_or(ExtensionJobStoreError::Conflict)?;
+    let finished_at = Timestamp::from_unix_ms(now_ms);
+    if let Some(run) = run {
+        if run.run().as_str() != run_id {
+            return Err(ExtensionJobStoreError::Conflict);
+        }
+        return crate::contribution_run_store::finish_at_tx(conn, run, outcome, error, finished_at)
+            .map_err(ExtensionJobStoreError::Storage);
+    }
+    // Recovery and callbacks without a live worker have durable lease
+    // timing and no measured CPU, memory or model costs.
+    let changed = conn
+        .execute(
+            "UPDATE contribution_run SET finished_at = ?2, outcome = ?3, error = ?4, wall_ms = ?5
+         WHERE run_id = ?1 AND outcome IS NULL",
+            params![
+                run_id,
+                finished_at.to_string(),
+                outcome.as_str(),
+                error,
+                now_ms - started_ms
             ],
         )
         .map_err(map_sql_err)?;

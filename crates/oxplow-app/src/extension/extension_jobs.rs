@@ -168,7 +168,7 @@ impl ExtensionJobs {
         }
         let intent_key = IntentKey::new(input.intent_key.clone())
             .map_err(|_| invalid("invalid job intent key"))?;
-        let (owner, operation, policy, profiles) = self
+        let (owner, extension, operation, policy, profiles) = self
             .ownership
             .with_owner(ctx.run, "jobs.write", |extension| {
                 extension
@@ -187,6 +187,7 @@ impl ExtensionJobs {
                                 contract_version: Some(job.version),
                                 deployment: extension.deployment.hash().map(str::to_owned),
                             },
+                            extension.name.clone(),
                             job.operation.as_str().to_owned(),
                             replay(job.replay),
                             extension
@@ -232,11 +233,10 @@ impl ExtensionJobs {
             let (project, package): (i64, i64) = ctx
                 .conn
                 .query_row(
-                    // A job's extension is its run's.
-                    "SELECT count(*), COALESCE(sum(r.extension = ?1), 0)
-                FROM extension_job j LEFT JOIN contribution_run r ON r.run_id = j.run_id
+                    "SELECT count(*), COALESCE(sum(c.extension = ?1), 0)
+                FROM extension_job j LEFT JOIN contribution c ON c.id = j.contribution_id
                 WHERE j.state IN ('queued', 'running')",
-                    [ctx.run.extension().unwrap_or_default()],
+                    [&extension],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .map_err(oxplow_db::map_sql_err)?;

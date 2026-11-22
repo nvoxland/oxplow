@@ -25623,6 +25623,213 @@
       "key": [
         "id"
       ]
+    },
+    "8": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run's UUIDv7, ordered by start time."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The recorded run that started it, if any."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares the contribution."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's URI (v_contribution.uri)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "The contribution kind, such as collector, command, effect, job or implementation."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared version when it ran, if any."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog generation it ran against, if any."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `page`, `component`, `system`, `effect` or `job`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The actor's id for its kind, such as `thr3` for an agent. NULL when the actor has no id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for (v_stream.id), if any."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for (v_thread.id), if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for (v_agent_turn.id), if any."
+        },
+        {
+          "name": "session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for (v_agent_session.id), if any."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over, if any."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (v_event.id), if any."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure`, `transactional` or `external`."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339). NULL while live."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied`, `cancelled`, `invalid` (input refused) or `interrupted` (oxplow stopped before it ended). NULL while live."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it did not end `ok`, if known."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "Elapsed time in milliseconds. NULL while live or when unmeasured."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Script CPU time in milliseconds, summed. NULL while live or when unmeasured."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "Peak script memory in bytes. NULL while live or when unmeasured."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "Model calls it made. NULL while live or when unmeasured."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it used and their counts, as a JSON object."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "Permission decisions as a JSON array of `{ need, decision, reason? }`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The queued job's id (a UUIDv7), shared by all of its attempts."
+        },
+        {
+          "name": "job",
+          "type": "TEXT",
+          "doc": "The job declaration's URI (`v_contribution.uri`)."
+        },
+        {
+          "name": "intent_key",
+          "type": "TEXT",
+          "doc": "The intentKey supplied on enqueue. Each declaration has one job per key."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The job declaration's own `version:`."
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "doc": "What it runs: `ai.complete_typed`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted` (it stopped without a known end: oxplow restarted, or it lost its lease)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Its current attempt, 0 before the first starts."
+        },
+        {
+          "name": "cancellation_requested",
+          "type": "INT",
+          "doc": "1 once someone asked it to stop."
+        },
+        {
+          "name": "queued_at",
+          "type": "TEXT",
+          "doc": "When the job entered the queue (RFC 3339)."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The queued job's URI (`oxplow:oxplow/job_run?id=<id>`), used by snapshot and cancellation commands."
+        },
+        {
+          "name": "rounds",
+          "type": "INT",
+          "doc": "Model rounds its current attempt has finished, counted from its streamed usage rows."
+        },
+        {
+          "name": "tool_calls",
+          "type": "INT",
+          "doc": "Tools the model called in its current attempt."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INT",
+          "doc": "Input tokens its current attempt's rounds reported (observed usage only)."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INT",
+          "doc": "Output tokens likewise."
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "job_run_output": {

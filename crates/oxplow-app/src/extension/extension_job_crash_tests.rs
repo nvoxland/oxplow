@@ -79,6 +79,16 @@ async fn cut_off_at(stage: Stage, idempotent: bool) {
     let fx = fixture_idle(&manifest, vec![reply("the answer")]).await;
     let d = dispatcher(&fx, Some(crash_once(stage)));
     let id = ask(&fx, "crash").await;
+    let queued = rows(
+        &fx,
+        "SELECT extension, run_id, outcome FROM v_job_run WHERE id = ?1",
+        vec![json!(id)],
+    )
+    .await;
+    assert_eq!(
+        queued,
+        vec![vec![json!("triage"), Value::Null, Value::Null]]
+    );
 
     let crashed = dispatch(&d, &id).await;
     match stage {
@@ -96,6 +106,13 @@ async fn cut_off_at(stage: Stage, idempotent: bool) {
 
     expire_lease(&fx.svc, &id).await;
     let (interrupted, requeued) = recover(&d).await;
+    let attempt = rows(
+        &fx,
+        "SELECT outcome FROM v_job_run WHERE id = ?1",
+        vec![json!(id)],
+    )
+    .await;
+    assert_eq!(attempt, vec![vec![json!("interrupted")]]);
     if idempotent {
         assert_eq!((interrupted, requeued), (0, 1));
         assert_eq!(state(&fx, &id).await["state"], json!("queued"));
@@ -233,7 +250,7 @@ async fn the_queue_is_bounded_across_the_project_and_a_changed_duplicate_conflic
             let mut insert = tx
                 .prepare(
                     "INSERT INTO extension_job (
-                        id, contribution_id, operation, invoker, run_id,
+                        id, contribution_id, operation, invoker, queued_by_run_id,
                         intent_key, replay_policy, state, attempt, fence,
                         created_at_ms, updated_at_ms, revision, request_json)
                      VALUES (?1, 'oxplow:oxplow/job?job=other/backlog', 'ai.complete_typed', 'human',

@@ -9,11 +9,12 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 
 What a job is and how it runs: [extensions-jobs.md](./extensions-jobs.md) "Jobs".
 The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
-`oxplow-db/src/extension_job_store.rs`. Tables (V52, V56):
+`oxplow-db/src/extension_job_store.rs`. V67 links each attempt to its
+shared contribution run.
 
 - **`extension_job`** — one row per job: owner (`contribution_id`, package
   version, generation, contract version), operation, invoker, the run that
-  asked (`run_id`), `intent_key` (`UNIQUE (contribution_id, intent_key)`:
+  asked (`queued_by_run_id`), `intent_key` (`UNIQUE (contribution_id, intent_key)`:
   one intent is one job), replay policy, `state` (`queued`, `running`,
   `succeeded`, `failed`, `cancelled`, `interrupted`), `attempt` and `fence`,
   the lease, the first cancellation request, `revision` and the private
@@ -25,7 +26,13 @@ The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
   without it doesn't run. No grant or credential is in it.
 - **`extension_job_attempt`** — one row per attempt, its odd fence kept
   after recovery; closed once (succeeded, failed, cancelled with stop
-  evidence, interrupted) with its result (≤ 1 MiB).
+  evidence, interrupted) with its result (≤ 1 MiB). Its unique `run_id`
+  references the shared run with a delete cascade. The claim begins the
+  run in the same transaction as the fence update. The dispatcher
+  rechecks authority before executing under that identity. Completion
+  closes the run with the attempt and records measured usage. Lease
+  recovery closes the shared run as `interrupted` and leaves CPU,
+  memory and model costs unknown.
 - **`extension_job_output`** (V56) — what an attempt produced as it ran,
   `(job_id, attempt, seq)`: `kind` `text` | `tool_call` | `tool_result` |
   `usage`, `content_json` (≤ 256 KiB). Append-only; a trigger refuses rows
@@ -35,9 +42,10 @@ The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
   finished after its attempt was fenced off records what it had here, never
   on the job.
 
-Published as **`v_job_run`** (no request, no result: state, attempt, the current
-attempt's model rounds, tool calls and tokens) and **`v_job_run_output`**. A
-job's request and result are read only through its extension's
+**`v_job_run`** publishes the job's state and current attempt's shared
+run, with live rounds, tool calls and tokens from **`v_job_run_output`**.
+The queued job gets its package and version from its declaration and
+persisted version. A job's request and result are read through its extension's
 `jobs.read/snapshot`. The writers are on the thin-caller clippy deny lists:
 jobs change through their commands and the dispatcher.
 
@@ -1961,8 +1969,8 @@ own run fields until their detail records move to the shared table.
   in one transaction. A run that spans transactions can use `begin_tx`
   and `finish_tx`. A live row has NULL `finished_at`, `outcome` and cost.
   The store refuses a second finish. Startup recovery ends stray live
-  rows as `interrupted` with unknown cost. The effect ledger handles its
-  own claims so it can publish results and schedule retries.
+  rows as `interrupted` with unknown cost. The effect and job ledgers
+  recover their claims through their delivery and lease rules.
 - **End and cost.** `started_at` and `finished_at` are RFC 3339.
   `outcome` is `ok`, `skipped`, `failed`, `denied`, `cancelled`,
   `invalid` or `interrupted`. The row records `error`, `wall_ms`,
@@ -1973,15 +1981,16 @@ own run fields until their detail records move to the shared table.
 - **Readers.** `v_contribution_run` publishes the shared fields, with
   `scopes` and `decisions` for the two JSON columns, and the run's URI.
   `command_audit.run_id`, `collector_run.run_id` and `effect_run.run_id`
-  name their shared runs. `ai_call.run_id` names the run behind a call
-  when one is known.
+  name their shared runs. `extension_job_attempt.run_id` names the
+  attempt's run. `ai_call.run_id` names the run behind a call when one is
+  known.
 - **Retention.** `event_retention::sweep` uses a 90-day window
   (`CONTRIBUTION_RUN_DAYS`) in batches of 5,000. Commands with recorded
   input stay, except refusals, which age out after 30 days. A collector's
   run ages out with its detail row. The finished run named by
   `collector_checkpoint.last_run_id` is retained. Effect attempts and
   their shared runs are retained to prevent delivery or backfill from
-  repeating a reaction.
+  repeating a reaction. Job attempts and their runs stay with the job.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 

@@ -84,9 +84,10 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
 
 ## Jobs
 
-A **job** is what an extension declares (`job:<namespace>/<id>`); a **job
-run** is one execution of it (`job_run:<id>`, a row of `v_job_run`). A job
-is model work an extension asks for that runs outside any
+A **job** is what an extension declares (`job:<namespace>/<id>`). Each
+enqueued job has a `job_run:<id>` URI and a row in `v_job_run`. It keeps
+its own state machine across retries. Each claimed attempt has a separate
+`contribution_run` row. A job is model work an extension asks for that runs outside any
 transaction and outlives a restart (`operation: ai.complete_typed`). It
 streams its reply as it comes, may call tools the extension declares,
 can be cancelled mid-reply, and says how it ended with an event. The
@@ -146,8 +147,11 @@ commands:
 - **Running.** The scheduler (four at a time, polling each second)
   claims a queued job, resolves its authority afresh — the declaration
   and permissions as they are now, the thread's open-thread gate (a Write-scope need must be bound to an open thread: `JobExecution.needs_thread`) — and runs it
-  as `Actor::Job` (`job:<id>:<attempt>:<fence>`) on a run of its own,
-  linked to the run that asked. Each model round streams on the role
+  as `Actor::Job` (`job:<id>:<attempt>:<fence>`). Claiming begins the
+  attempt's run and links it to the run that enqueued the job when that
+  parent was recorded. Closing the attempt records its outcome in the
+  same transaction. Lease recovery closes the run as `interrupted`.
+  Each model round streams on the role
   (`AiCompute::stream_typed`, a recorded computation: the same request
   reads its recorded answer, replayed at once). What comes is the
   attempt's **output** (`extension_job_output`, `v_job_run_output`): text
@@ -297,12 +301,13 @@ commands:
   cause the job was asked with. It carries no request or result: an
   effect reads the result with `scope("jobs.read", { job_run })` and writes
   what it says (the triage example's `publish-summary`).
-- **Seeing job runs.** `v_job_run` (state, attempt, rounds, tool calls,
-  tokens so far, its `uri`) and `v_job_run_output` are published datasets, so
-  a page or component over them follows a run live. oxplow-bundled's **Job
-  Runs** page (Activity) lists the running and the last day's, with Cancel;
-  a row opens its **Job Run Output**. A job run acts as `Actor::Job`, its
-  source the run's URI (`job_run:<id>`); attempt and fence are on the row.
+- **Seeing job runs.** `v_job_run` publishes each enqueued job with
+  `queued_at`, its current state and shared run fields for the current
+  attempt. Before its first claim, the only shared fields available are
+  the declaring extension and package version. A succeeded job's
+  attempt has outcome `ok`. `rounds` counts completed rounds from
+  streamed usage rows. `ai_calls` comes from the attempt's run.
+  `v_job_run_output` follows the streamed output live.
 - **What a job can't do**: drive an agent session, ask a person (a
   command that needs confirmation is refused, never proposed), write
   (its tools read), run core's commands, or call a model its extension's

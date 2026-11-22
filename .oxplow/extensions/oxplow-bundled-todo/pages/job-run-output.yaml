@@ -3,6 +3,11 @@ description: What a job run produced as it ran, in order — its model's text as
 params:
 - name: job_run
 loaders:
+  job_details:
+    sql: |
+      SELECT id, state, outcome, actor_kind, rounds, queued_at
+      FROM v_job_run
+      WHERE uri = uri('oxplow/job_run', 'id', :job_run)
   job_run_output:
     sql: |
       SELECT o.attempt,
@@ -18,18 +23,25 @@ loaders:
                                         json_extract(o.data, '$.outputTokens'))
              END AS content
       FROM v_job_run_output o
-      WHERE o.job_id = (SELECT id FROM v_job_run WHERE uri = uri('oxplow/job_run', 'id', :job_run))
+      WHERE o.job_id IN (SELECT id FROM job_details)
       ORDER BY o.attempt, o.seq
 view:
-  from: job_run_output
-  viz: table
-  columns:
-  - key: attempt
-    label: Attempt
-  - key: at
-    label: At
-  - key: kind
-    label: Kind
-  - key: content
-    label: Content
-  empty: Nothing yet — it hasn't started, or it is waiting for its model.
+  stack:
+  - id: job_details
+    from: job_details
+    viz: detail
+    columns:
+    - { key: state, label: State }
+    - { key: outcome, label: Outcome }
+    - { key: actor_kind, label: Actor }
+    - { key: rounds, label: Model rounds }
+    - { key: queued_at, label: Queued, format: datetime }
+  - id: job_run_output
+    from: job_run_output
+    viz: table
+    columns:
+    - { key: attempt, label: Attempt }
+    - { key: at, label: At }
+    - { key: kind, label: Kind }
+    - { key: content, label: Content }
+    empty: Output appears as the job runs.

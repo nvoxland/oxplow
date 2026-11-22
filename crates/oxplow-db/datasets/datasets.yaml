@@ -1118,29 +1118,25 @@ datasets:
     - { not_null: run_id }
     - { unique: run_id }
 - name: job_run
-  version: 7
+  version: 8
   key: [id]
-  description: "Each job run: one execution of a job an extension declares (a `jobs:` declaration, run through its `jobs.write/enqueue` command) — which job, its state and its current attempt, and what that attempt has used so far. A job is the declaration (`oxplow:oxplow/job?job=<extension>/<id>`); a job run is one execution of it (`oxplow:oxplow/job_run?id=<id>`). What it was asked and what it answered stay private to the extension (`jobs.read/snapshot`); what it streams is in `v_job_run_output`."
+  description: "One row per job enqueued through `jobs.write/enqueue`, with its state, current attempt and live output counts. Shared run fields describe that attempt. Before the first claim, only the declaring extension and package version are available among the shared run fields. The request and result are private to `jobs.read/snapshot`. Streamed output is in `v_job_run_output`."
+  groups: [contribution_run]
   fields:
-    - { name: "id", type: "TEXT", doc: "The run's id (a UUIDv7)." }
-    - { name: "job", type: "TEXT", doc: "The job it runs: `oxplow:oxplow/job?job=<extension>/<id>` (`v_contribution.uri`)." }
-    - { name: "intent_key", type: "TEXT", doc: "What it is about: the `intentKey` it was started with, one run per key and job (`review:oxplow:oxplow/request?id=req12`). (v2)" }
-    - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it was started; NULL when it declares none." }
+    - { name: "id", type: "TEXT", doc: "The queued job's id (a UUIDv7), shared by all of its attempts." }
+    - { name: "job", type: "TEXT", doc: "The job declaration's URI (`v_contribution.uri`)." }
+    - { name: "intent_key", type: "TEXT", doc: "The intentKey supplied on enqueue. Each declaration has one job per key." }
     - { name: "contract_version", type: "INTEGER", doc: "The job declaration's own `version:`." }
     - { name: "operation", type: "TEXT", doc: "What it runs: `ai.complete_typed`." }
     - { name: "state", type: "TEXT", doc: "`queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted` (it stopped without a known end: oxplow restarted, or it lost its lease)." }
     - { name: "attempt", type: "INTEGER", doc: "Its current attempt, 0 before the first starts." }
     - { name: "cancellation_requested", type: "INT", doc: "1 once someone asked it to stop." }
-    - { name: "invoker", type: "TEXT", doc: "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …" }
-    - { name: "run_id", type: "TEXT", doc: "The run that started it (`v_contribution_run.run_id`)." }
-    - { name: "created_at", type: "TEXT", doc: "When it was started (RFC 3339)." }
-    - { name: "updated_at", type: "TEXT", doc: "When its state last changed (RFC 3339)." }
-    - { name: "ai_calls", type: "INT", doc: "Model rounds its current attempt has finished." }
+    - { name: "queued_at", type: "TEXT", doc: "When the job entered the queue (RFC 3339)." }
+    - { name: "uri", type: "TEXT", doc: "The queued job's URI (`oxplow:oxplow/job_run?id=<id>`), used by snapshot and cancellation commands." }
+    - { name: "rounds", type: "INT", doc: "Model rounds its current attempt has finished, counted from its streamed usage rows." }
     - { name: "tool_calls", type: "INT", doc: "Tools the model called in its current attempt." }
     - { name: "input_tokens", type: "INT", doc: "Input tokens its current attempt's rounds reported (observed usage only)." }
     - { name: "output_tokens", type: "INT", doc: "Output tokens likewise." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/job_run?id=<id>`: its URI — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }

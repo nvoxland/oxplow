@@ -8,14 +8,15 @@ use std::{sync::Arc, time::Duration};
 
 use oxplow_db::{
     extension_job_store::{
-        transition_tx, ExtensionJobStoreError, LateOutcomeObservation, RecoveryCursor,
-        SqliteExtensionJobStore, StoredExtensionJob,
+        transition_tx, transition_with_run_tx, ExtensionJobStoreError, LateOutcomeObservation,
+        RecoveryCursor, SqliteExtensionJobStore, StoredExtensionJob,
     },
     map_sql_err, Database, TxError,
 };
 use oxplow_domain::{
     extension_job::{AttemptFence, Completion, JobEvent, JobId, JobState},
     extension_job_context::JobExecutionIdentity,
+    run::RunContext,
     time::Timestamp,
     DomainError,
 };
@@ -162,6 +163,7 @@ impl ExtensionJobDispatcher {
                     candidate.revision,
                     JobEvent::RecoverExpired { now_ms: now_ms() },
                     None,
+                    None,
                 )
                 .await
             {
@@ -222,6 +224,7 @@ impl ExtensionJobDispatcher {
                                 owner: next.key().owner().clone(),
                             },
                             None,
+                            None,
                         )
                         .await
                     {
@@ -254,11 +257,11 @@ impl ExtensionJobDispatcher {
         let token = prospective.token.ok_or(DispatchError::InvalidData)?;
         let identity =
             JobExecutionIdentity::new(id.clone(), token).map_err(|_| DispatchError::InvalidData)?;
-        match self.host.authorize(&stored, &identity, &context).await {
-            Ok(execution) if execution.run().check_authority().is_ok() => {}
+        let claimed_run = match self.host.authorize(&stored, &identity, &context).await {
+            Ok(execution) if execution.run().check_authority().is_ok() => execution.run().clone(),
             Err(JobAuthorityError::Storage(error)) => return Err(error.into()),
             _ => return Ok(DispatchOutcome::Skipped),
-        }
+        };
 
         let claimed = match self
             .transition_announced(
@@ -270,6 +273,7 @@ impl ExtensionJobDispatcher {
                     intent_key: stored.job.intent_key.clone(),
                 },
                 None,
+                Some(claimed_run.clone()),
             )
             .await
         {
@@ -291,12 +295,16 @@ impl ExtensionJobDispatcher {
 
         // The authority that approved the prospective claim is never reused
         // as the authority for the external operation.
-        let execution = match self.host.authorize(&claimed, &identity, &context).await {
-            Ok(execution) if execution.run().check_authority().is_ok() => execution,
-            _ => {
-                self.request_cancellation(&id).await?;
-                return self.confirm_stopped(&id, token, None).await;
-            }
+        let execution = self
+            .host
+            .authorize(&claimed, &identity, &context)
+            .await
+            .ok()
+            .filter(|execution| execution.run().check_authority().is_ok())
+            .and_then(|execution| execution.for_claimed_attempt(&claimed_run));
+        let Some(execution) = execution else {
+            self.request_cancellation(&id).await?;
+            return self.confirm_stopped(&id, token, None, None).await;
         };
         let work = JobWork::new(
             identity,
@@ -347,7 +355,7 @@ impl ExtensionJobDispatcher {
                         }
                         Ok(JobWorkOutcome::Stopped { result }) => {
                             self.request_cancellation(&id).await?;
-                            return self.confirm_stopped(&id, token, result).await;
+                            return self.confirm_stopped(&id, token, result, Some(execution.run())).await;
                         }
                         Ok(JobWorkOutcome::Uncertain) | Err(_) => {
                             self.request_cancellation(&id).await?;
@@ -459,7 +467,7 @@ impl ExtensionJobDispatcher {
                         savepoint_execution
                             .check_publication(tx)
                             .map_err(publication_failure)?;
-                        let completed = transition_tx(
+                        let completed = transition_with_run_tx(
                             tx,
                             &job_id,
                             expected_revision,
@@ -469,6 +477,7 @@ impl ExtensionJobDispatcher {
                                 outcome,
                             },
                             Some(&result_for_tx),
+                            Some(savepoint_execution.run()),
                         )
                         .map_err(PublishFailure::Store)?;
                         #[cfg(test)]
@@ -531,7 +540,9 @@ impl ExtensionJobDispatcher {
                     self.record_late(id, token, completion, evidence).await?;
                     self.request_cancellation(id).await?;
                     execution.run().cancel().cancel();
-                    return self.confirm_stopped(id, token, Some(partial)).await;
+                    return self
+                        .confirm_stopped(id, token, Some(partial), Some(execution.run()))
+                        .await;
                 }
                 Err(TxError::Aborted(PublishAbort::Store(ExtensionJobStoreError::Conflict))) => {
                     continue;
@@ -555,6 +566,7 @@ impl ExtensionJobDispatcher {
         id: &JobId,
         token: AttemptFence,
         result: Option<Value>,
+        run: Option<&RunContext>,
     ) -> Result<DispatchOutcome, DispatchError> {
         let result = result.filter(bounded_json);
         match self
@@ -565,6 +577,7 @@ impl ExtensionJobDispatcher {
                     token,
                 },
                 result,
+                run,
             )
             .await
         {
@@ -596,6 +609,7 @@ impl ExtensionJobDispatcher {
                     id.clone(),
                     current.revision,
                     JobEvent::RequestCancellation { now_ms: now_ms() },
+                    None,
                     None,
                 )
                 .await
@@ -669,6 +683,7 @@ impl ExtensionJobDispatcher {
         expected_revision: u64,
         event: JobEvent,
         result: Option<Value>,
+        run: Option<RunContext>,
     ) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
         let vocabulary = self.vocabulary.clone();
         self.db
@@ -677,9 +692,15 @@ impl ExtensionJobDispatcher {
                     ExtensionJobStoreError::Storage(storage) => TxError::Storage(storage),
                     other => TxError::Aborted(other),
                 };
-                let mut changed =
-                    transition_tx(tx, &id, expected_revision, &event, result.as_ref())
-                        .map_err(aborted)?;
+                let mut changed = transition_with_run_tx(
+                    tx,
+                    &id,
+                    expected_revision,
+                    &event,
+                    result.as_ref(),
+                    run.as_ref(),
+                )
+                .map_err(aborted)?;
                 if matches!(event, JobEvent::RecoverExpired { .. }) {
                     changed = requeue_tx(tx, changed).map_err(aborted)?;
                 }
@@ -735,6 +756,7 @@ impl ExtensionJobDispatcher {
                     latest.revision,
                     event_at(event.clone(), now_ms()),
                     None,
+                    None,
                 )
                 .await
             {
@@ -751,6 +773,7 @@ impl ExtensionJobDispatcher {
         id: &JobId,
         event: JobEvent,
         result: Option<Value>,
+        run: Option<&RunContext>,
     ) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
         for _ in 0..MAX_CAS_RETRIES {
             let latest = self.store.metadata(id.clone()).await?;
@@ -760,6 +783,7 @@ impl ExtensionJobDispatcher {
                     latest.revision,
                     event_at(event.clone(), now_ms()),
                     result.clone(),
+                    run.cloned(),
                 )
                 .await
             {

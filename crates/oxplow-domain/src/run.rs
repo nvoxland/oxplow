@@ -360,6 +360,26 @@ impl RunContext {
         Ok(run)
     }
 
+    /// Preserve the identity allocated at claim after authorizing the same
+    /// job attempt again. All authority and accounting come from the fresh
+    /// context.
+    pub fn continue_job_attempt(
+        mut self,
+        claimed: &Self,
+    ) -> Result<Self, crate::extension_job_context::JobContextError> {
+        if !matches!(&self.actor, Actor::Job { .. })
+            || self.actor != claimed.actor
+            || self.contribution != claimed.contribution
+            || self.parent != claimed.parent
+        {
+            return Err(crate::extension_job_context::JobContextError::Invalid);
+        }
+        self.run = claimed.run.clone();
+        self.started = claimed.started;
+        self.began = claimed.began;
+        Ok(self)
+    }
+
     /// Caused by `event` (its trigger).
     pub fn caused_by(mut self, event: EventId) -> Self {
         self.cause = Some(event);

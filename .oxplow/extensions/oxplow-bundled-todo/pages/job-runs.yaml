@@ -5,21 +5,22 @@ loaders:
   job_runs:
     sql: |
       SELECT uri,
-             uri('oxplow/page', 'page', 'job-run-output', 'job_run', uri_param(uri, 'id')) AS output_ref,
+             uri('oxplow/page', 'page', 'job-run-output', 'job_run', id) AS output_ref,
              job,
              intent_key,
              state,
+             outcome,
+             actor_kind,
              attempt,
-             ai_calls,
+             rounds,
              tool_calls,
              input_tokens + output_tokens AS tokens,
-             created_at,
-             updated_at,
-             uri_param(uri, 'id') AS run_id
+             queued_at,
+             id AS job_id
       FROM v_job_run
       WHERE state IN ('queued', 'running')
-         OR updated_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')
-      ORDER BY state NOT IN ('queued', 'running'), updated_at DESC
+         OR COALESCE(finished_at, queued_at) >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')
+      ORDER BY state NOT IN ('queued', 'running'), COALESCE(finished_at, started_at, queued_at) DESC
 view:
   from: job_runs
   viz: table
@@ -33,21 +34,26 @@ view:
     label: About
   - key: state
     label: State
+  - key: outcome
+    label: Outcome
+  - key: actor_kind
+    label: Actor
   - key: attempt
     label: Attempt
-  - key: ai_calls
+  - key: rounds
     label: Model rounds
   - key: tool_calls
     label: Tool calls
   - key: tokens
     label: Tokens
-  - key: created_at
-    label: Started
+  - key: queued_at
+    label: Queued
+    format: datetime
   empty: No job has run in the last day.
   actions:
   - id: cancel
     label: Cancel
     command: oxplow.job_run.cancel
     input:
-      job_run: '{{row.run_id}}'
+      job_run: '{{row.job_id}}'
     row: true

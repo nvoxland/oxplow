@@ -242,7 +242,7 @@ async fn a_job_streams_its_reply_as_output_rows() {
     assert!(text_rows[0][0].as_i64().unwrap() > 1, "streamed in pieces");
     let job = rows(
         &fx,
-        "SELECT state, ai_calls, extension, job, intent_key FROM v_job_run WHERE id = ?1",
+        "SELECT state, outcome, ai_calls, rounds, extension, job, intent_key FROM v_job_run WHERE id = ?1",
         vec![json!(id)],
     )
     .await;
@@ -250,6 +250,8 @@ async fn a_job_streams_its_reply_as_output_rows() {
         job[0],
         [
             json!("succeeded"),
+            json!("ok"),
+            json!(1),
             json!(1),
             json!("triage"),
             json!("oxplow:oxplow/job?job=triage/review"),
@@ -347,8 +349,7 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
         ["tool_call", "usage", "tool_result", "text", "usage"]
     );
 
-    // The command ran as the job. The job attempt does not yet record a
-    // contribution run of its own.
+    // The command ran under the job attempt's shared run.
     let ran = rows(
         &fx,
         "SELECT actor_kind, actor_id, parent_run_id FROM v_contribution_run
@@ -362,7 +363,14 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
         ran[0][1].as_str().unwrap().starts_with(&format!("{id}:")),
         "the job run is the actor: {ran:?}"
     );
-    assert_eq!(ran[0][2], Value::Null);
+    let parent = rows(
+        &fx,
+        "SELECT run_id FROM v_job_run WHERE id = ?1",
+        vec![json!(id)],
+    )
+    .await;
+    assert!(parent[0][0].is_string());
+    assert_eq!(ran[0][2], parent[0][0]);
 }
 
 /// A tool call the command refuses, one with input its schema doesn't

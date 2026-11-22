@@ -139,6 +139,11 @@ impl JobExecution {
         &self.run
     }
 
+    pub(super) fn for_claimed_attempt(self, claimed: &RunContext) -> Option<Self> {
+        let run = self.run.continue_job_attempt(claimed).ok()?;
+        Some(Self { run, ..self })
+    }
+
     /// Actual completion may win a pending cancellation. This checks live
     /// ownership/grants independently of the cancellation flag; it does not
     /// authorize another host call or confirmation after cancellation.

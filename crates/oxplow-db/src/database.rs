@@ -2489,6 +2489,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn job_attempt_migration_keeps_the_context_fence_and_its_origin() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(66))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO contribution_run
+                (run_id, extension, contribution, kind, actor_kind, mode, started_at, finished_at, outcome)
+             VALUES ('01234567-89ab-7def-8123-456789abcdef', 'core', 'command', 'command',
+                     'system', 'transactional', 'start', 'end', 'ok');
+             INSERT INTO extension_job
+                (id, contribution_id, operation, invoker, run_id, intent_key, replay_policy,
+                 state, attempt, fence, lease_until_ms, created_at_ms, updated_at_ms, revision, request_json)
+             VALUES ('job', 'oxplow:oxplow/job?job=acme/review', 'model', 'human',
+                     '01234567-89ab-7def-8123-456789abcdef', 'key', 'never', 'running', 1, 1, 200, 0, 100, 2, '{}');
+             INSERT INTO extension_job
+                (id, contribution_id, package_version, operation, invoker, run_id, intent_key, replay_policy,
+                 state, attempt, fence, created_at_ms, updated_at_ms, revision, request_json)
+             VALUES ('queued', 'oxplow:oxplow/job?job=acme/review', '1.0', 'model', 'human',
+                     '01234567-89ab-7def-8123-456789abcdef', 'queued', 'never', 'queued', 0, 0, 0, 0, 1, '{}');
+             INSERT INTO contribution
+                (id, extension, kind, local, origin, runs_on_json, needs_json, after_json, file, namespace)
+             VALUES ('oxplow:oxplow/job?job=acme/review', 'acme-models', 'job', 'review', 'declared',
+                     '{}', '[]', '[]', 'extension.yaml', 'acme');
+             INSERT INTO extension_job_attempt
+                (job_id, attempt, fence, started_at_ms, lease_until_ms)
+             VALUES ('job', 1, 1, 100, 200);
+             INSERT INTO extension_job_output
+                (job_id, attempt, fence, seq, kind, at_ms, content_json)
+             VALUES ('job', 1, 1, 1, 'text', 150, '{}');",
+        )
+        .unwrap();
+        with_foreign_keys_off(&mut conn, |conn| {
+            embedded::migrations::runner().run(conn).unwrap();
+            Ok(true)
+        })
+        .unwrap();
+        let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(count(
+            "SELECT count(*) FROM extension_job_attempt a JOIN contribution_run r USING (run_id)
+              JOIN extension_job j ON j.id = a.job_id
+              WHERE r.parent_run_id = j.queued_by_run_id AND r.kind = 'job' AND r.outcome IS NULL
+                AND a.fence = 1 AND a.lease_until_ms = 200",
+        ), 1);
+        assert_eq!(count("SELECT count(*) FROM extension_job_output"), 1);
+        let refused = conn
+            .execute_batch(
+                "INSERT INTO extension_job_context (job_id, originating_run_id, context_json)
+                 VALUES ('job', 'fedcba98-7654-7321-8123-456789abcdef',
+                         '{\"schema_version\":1,\"originating_run_id\":\"fedcba98-7654-7321-8123-456789abcdef\"}');",
+            )
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("extension job context origin"),
+            "{refused}"
+        );
+        crate::sql_functions::register(&conn).unwrap();
+        crate::datasets::compile_core(&mut conn).unwrap();
+        let queued: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT extension, version, run_id FROM v_job_run WHERE id = 'queued'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(queued, ("acme-models".into(), "1.0".into(), None));
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {
