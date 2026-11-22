@@ -1925,17 +1925,20 @@ view marks the run named by the checkpoint with `latest = 1`. See
 
 ### `effect_run` — `crates/oxplow-db/src/effect_run_store.rs`
 
-V149 (P8.D10), rebuilt by V156 (P9.D4). Each **attempt** at an
-extension effect's reaction to an event: `effect` (`<namespace>/<id>`),
-`event_id` / `event_seq`, `attempt` (from 1), `origin` (`live` — the
-event's delivery; `retry` — a person's `oxplow.effect.retry`; `backfill`),
-`state` (`started` / `ok` / `skipped` / `proposed` / `failed`), `reason`,
-`audit_id`, `proposal_id`, `started_at`, `finished_at`. `UNIQUE (effect,
-event_id, attempt)`: an attempt is made once, and the reaction's state is
-its latest attempt's (`latest_tx`; `v_effect_run.latest`). The command
-bus writes an attempt's row in its run's transaction, or claims it
-`started` first when a step runs outside it (`claim_tx` / `finish_tx`).
-See [extensions-events.md](./extensions-events.md) "Effects".
+V66 gives each **attempt** at an effect's reaction a shared run.
+`effect_run` keeps its integer `id`, `effect` (`<namespace>/<id>`),
+`event_id`, `event_seq`, `attempt` (from 1), `origin` (`live`, `retry`,
+`backfill` or `auto`), `audit_id`, `proposal_id`, `retry_at` and
+`resend_json`. The unique key `(effect, event_id, attempt)` prevents an
+attempt from landing twice. The highest attempt number describes the
+reaction's current state (`latest_tx` and `v_effect_run.latest`).
+
+`effect_run.run_id` uniquely references `contribution_run` with a delete
+cascade. A claimed attempt begins the shared row in the claim transaction.
+A transaction that finishes the attempt also finishes the shared row.
+A live attempt has NULL `outcome`. Its recovery ends it as `interrupted`.
+An attempt that asked for confirmation records `skipped` and its proposal
+ID. [Effect delivery and retry](./extensions-events.md)
 
 ### `contribution_run` — `crates/oxplow-db/src/contribution_run_store.rs`
 
@@ -1957,8 +1960,9 @@ own run fields until their detail records move to the shared table.
 - **Lifecycle.** Commands and collectors use `record_tx` to begin and end
   in one transaction. A run that spans transactions can use `begin_tx`
   and `finish_tx`. A live row has NULL `finished_at`, `outcome` and cost.
-  The store refuses a second finish. At boot, recovery ends stray live
-  rows as `interrupted` and leaves their cost unknown.
+  The store refuses a second finish. Startup recovery ends stray live
+  rows as `interrupted` with unknown cost. The effect ledger handles its
+  own claims so it can publish results and schedule retries.
 - **End and cost.** `started_at` and `finished_at` are RFC 3339.
   `outcome` is `ok`, `skipped`, `failed`, `denied`, `cancelled`,
   `invalid` or `interrupted`. The row records `error`, `wall_ms`,
@@ -1968,13 +1972,16 @@ own run fields until their detail records move to the shared table.
   credentials the run received.
 - **Readers.** `v_contribution_run` publishes the shared fields, with
   `scopes` and `decisions` for the two JSON columns, and the run's URI.
-  `command_audit.run_id` and `collector_run.run_id` name their shared runs.
-  `effect_run` and `ai_call` can name a run in `run_id`.
+  `command_audit.run_id`, `collector_run.run_id` and `effect_run.run_id`
+  name their shared runs. `ai_call.run_id` names the run behind a call
+  when one is known.
 - **Retention.** `event_retention::sweep` uses a 90-day window
   (`CONTRIBUTION_RUN_DAYS`) in batches of 5,000. Commands with recorded
   input stay, except refusals, which age out after 30 days. A collector's
   run ages out with its detail row. The finished run named by
-  `collector_checkpoint.last_run_id` is retained.
+  `collector_checkpoint.last_run_id` is retained. Effect attempts and
+  their shared runs are retained to prevent delivery or backfill from
+  repeating a reaction.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 

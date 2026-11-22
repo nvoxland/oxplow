@@ -81,7 +81,7 @@ export function useUndelivered(): UndeliveredEvent[] {
 
 /** An effect's reaction to an event whose latest attempt failed. */
 export interface FailedReaction {
-  /** `<extension>/<id>`. */
+  /** `<namespace>/<id>`. */
   effect: string;
   eventId: string;
   eventSeq: number;
@@ -111,9 +111,9 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
 /** The reactions whose latest attempt failed, newest first, and what was read. */
 export async function readFailedReactions(): Promise<{ reactions: FailedReaction[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.reason, e.type AS event_type, r.retry_at
+    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.error AS reason, e.type AS event_type, r.retry_at
        FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
-      WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC`,
+      WHERE r.latest = 1 AND r.outcome = 'failed' ORDER BY r.id DESC`,
     [],
     200,
   );

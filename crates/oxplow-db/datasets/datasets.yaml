@@ -1089,26 +1089,21 @@ datasets:
     - { not_null: id }
     - { unique: id }
 - name: effect_run
-  version: 3
+  version: 4
   key: [effect, event_id, attempt]
-  description: "Each attempt at an extension effect's reaction to an event: the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` — and a person's `effect.retry` of a failed one makes the next. A failed attempt whose every step was a write to a provider keeping `idempotent_writes` is sent again by itself, at most twice (`auto`; `retry_at` says when); any other waits for a person. A reaction's state is its latest attempt's (`latest = 1`)."
+  description: "Each attempt at an effect's reaction to an event, with its shared run fields. The run names the extension that declares the effect. The live consumer makes one attempt, and a person's `effect.retry` of a failed attempt makes the next. A reaction's latest attempt has `latest = 1`. A run in progress has a NULL outcome. When a command asks a person, the run has outcome `skipped` and `proposal_id` identifies the proposal."
+  groups: [contribution_run]
   fields:
     - { name: "id", type: "INTEGER", doc: "Attempt id." }
-    - { name: "effect", type: "TEXT", doc: "The effect: `<extension>/<id>`." }
-    - { name: "extension", type: "", doc: "The extension that declares it." }
+    - { name: "effect", type: "TEXT", doc: "The effect's `<namespace>/<id>`." }
     - { name: "event_id", type: "TEXT", doc: "The event it reacted to (`v_event.id`)." }
     - { name: "event_seq", type: "INTEGER", doc: "That event's log position." }
     - { name: "attempt", type: "INTEGER", doc: "Which attempt at the reaction, from 1." }
     - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)." }
-    - { name: "latest", type: "", doc: "1 when it is the reaction's latest attempt: its state is where the reaction stands." }
-    - { name: "state", type: "TEXT", doc: "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`." }
-    - { name: "reason", type: "TEXT", doc: "Why it skipped or failed." }
-    - { name: "audit_id", type: "INTEGER", doc: "Its run's `command_audit` row, when its commands ran." }
+    - { name: "latest", type: "INT", doc: "1 for the highest attempt number for this effect and event." }
+    - { name: "audit_id", type: "INTEGER", doc: "The `command_audit` detail row for its composed command, when recorded." }
     - { name: "proposal_id", type: "INTEGER", doc: "The proposal it left, when a command asked a person." }
-    - { name: "started_at", type: "TEXT", doc: "When it started (RFC 3339)." }
-    - { name: "finished_at", type: "TEXT", doc: "When it ended; NULL while `started`." }
-    - { name: "retry_at", type: "TEXT", doc: "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed." }
-    - { name: "run_id", type: "TEXT", doc: "The attempt's run (`v_contribution_run.run_id`). (v2)" }
+    - { name: "retry_at", type: "TEXT", doc: "When an automatic retry was scheduled (RFC 3339). NULL if no automatic retry was scheduled." }
   tests:
     - { not_null: effect }
 - name: contribution_run

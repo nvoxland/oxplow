@@ -120,7 +120,7 @@ impl CommandBus {
             preview.destructive,
         );
         let effect = match &origin {
-            RunOrigin::Effect(key, _, _) => Some(key.clone()),
+            RunOrigin::Effect(key, _, run) => Some((key.clone(), run.clone())),
             _ => None,
         };
         let stored = self
@@ -143,17 +143,18 @@ impl CommandBus {
                 .with_subject([proposal_uri(inserted.id), command_uri(&row.command)]);
                 append_tx(tx, &vocabulary.current(), &proposed)?;
                 // An effect's reaction ends here: a person decides the rest.
-                if let Some(key) = &effect {
+                if let Some((key, run)) = &effect {
                     crate::effects::finished_tx(
                         tx,
                         &vocabulary.current(),
                         key,
                         &oxplow_db::effect_run_store::Finished {
-                            state: oxplow_db::effect_run_store::RunState::Proposed,
+                            outcome: oxplow_domain::run::Outcome::Skipped,
                             reason: None,
                             audit_id: None,
                             proposal_id: Some(inserted.id),
                         },
+                        Some(run),
                         Some(proposed.id.clone()),
                     )?;
                 }

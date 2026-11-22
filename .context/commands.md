@@ -626,10 +626,11 @@ has no `job`: a job can't leave a proposal). The log holds only these
 versions (V70 rewrote older rows). An effect's reaction runs
 through `CommandBus::run_effect` (P8.D10) with `RunOrigin::Effect`, the
 fourth origin beside a call, an undo and an approval: like those, its
-record (`effect_run` + `effect.result@5`) lands in the run's transaction,
-or is claimed before a step outside it (`claim`), and its
-`command.executed` is caused by the triggering event (extensions-events.md
-"Effects").
+effect attempt and shared run finish in the same transaction as its
+`effect.result@5`. Before an external step, `claim` starts the shared
+row and inserts the attempt together. A reaction awaiting a proposal
+decision ends as `skipped` and records the proposal ID. Its
+`command.executed` is caused by the triggering event. [Effects](./extensions-events.md)
 
 **An `External` run whose recording fails** (its effects already
 committed in the service's own transaction) is reported as done and

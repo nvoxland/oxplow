@@ -57,15 +57,11 @@ impl CommandBus {
             // A step will leave the transaction: claim the reaction first,
             // so a redelivery finds it — keeping what it composed when it
             // may be sent again by itself.
-            RunOrigin::Effect(key, resend, _) => {
-                let (key, resend, now) = (
-                    key.clone(),
-                    resend.clone(),
-                    oxplow_domain::Timestamp::now().to_string(),
-                );
+            RunOrigin::Effect(key, resend, run) => {
+                let (key, resend, run) = (key.clone(), resend.clone(), run.clone());
                 self.db
                     .transaction(move |tx| {
-                        oxplow_db::effect_run_store::claim_tx(tx, &key, &now, resend.as_deref())
+                        oxplow_db::effect_run_store::claim_tx(tx, &key, &run, resend.as_deref())
                     })
                     .await
                     .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))

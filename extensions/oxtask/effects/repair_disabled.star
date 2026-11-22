@@ -33,10 +33,10 @@ SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution WHERE uri = 
              AND json_extract(payload, '$.status') = 'error'
              AND json_extract(payload, '$.error') IS NOT NULL
            ORDER BY seq DESC LIMIT 5)) AS collector_errors,
-       (SELECT json_group_array(reason) FROM (
-          SELECT reason FROM v_effect_run
+       (SELECT json_group_array(error) FROM (
+          SELECT error FROM v_effect_run
            WHERE :kind = 'effect' AND effect = :namespace || '/' || :contribution
-             AND state = 'failed' AND reason IS NOT NULL AND latest = 1
+             AND outcome = 'failed' AND error IS NOT NULL AND latest = 1
            ORDER BY id DESC LIMIT 5)) AS effect_errors,
        (SELECT last_error FROM v_contribution_health
          WHERE namespace = :namespace AND contribution = :contribution AND kind = :kind) AS last_error

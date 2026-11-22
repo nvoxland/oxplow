@@ -13,18 +13,12 @@ pub(super) fn record_effect_tx(
     command: &Recorded,
     failed: Option<String>,
 ) -> Result<(), oxplow_domain::DomainError> {
-    use oxplow_domain::run::Outcome as RunOutcome;
-    let outcome = if failed.is_some() {
-        RunOutcome::Failed
-    } else {
-        RunOutcome::Ok
-    };
-    oxplow_db::contribution_run_store::record_tx(tx, effect, outcome, failed.as_deref())?;
     crate::effects::finished_tx(
         tx,
         vocabulary,
         key,
         &crate::effects::ran(command.audit_id, failed),
+        Some(effect),
         Some(command.event_id.clone()),
     )
 }

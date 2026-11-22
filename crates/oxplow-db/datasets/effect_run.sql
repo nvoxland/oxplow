@@ -1,7 +1,13 @@
-SELECT r.id, r.effect, substr(r.effect, 1, instr(r.effect, '/') - 1) AS extension,
-       r.event_id, r.event_seq, r.attempt, r.origin,
-       r.attempt = (SELECT max(l.attempt) FROM source('effect_run') l
-                     WHERE l.effect = r.effect AND l.event_id = r.event_id) AS latest,
-       r.state, r.reason, r.audit_id, r.proposal_id,
-       r.started_at, r.finished_at, r.retry_at, r.run_id
-FROM source('effect_run') r
+SELECT r.run_id, r.parent_run_id, r.extension, r.contribution, r.kind, r.version,
+       r.generation, r.actor_kind, r.actor_id, r.stream_id, r.thread_id,
+       r.turn_id, r.session_id, r.snapshot_id, r.cause_event_id, r.mode,
+       r.started_at, r.finished_at, r.outcome, r.error, r.wall_ms, r.cpu_ms,
+       r.peak_bytes, r.ai_calls, r.scopes_json AS scopes, r.decisions_json AS decisions,
+       e.id, e.effect, e.event_id, e.event_seq, e.attempt, e.origin,
+       CAST(NOT EXISTS (
+           SELECT 1 FROM source('effect_run') later
+           WHERE later.effect = e.effect AND later.event_id = e.event_id
+             AND later.attempt > e.attempt
+       ) AS INTEGER) AS latest,
+       e.audit_id, e.proposal_id, e.retry_at
+FROM source('effect_run') e JOIN source('contribution_run') r ON r.run_id = e.run_id

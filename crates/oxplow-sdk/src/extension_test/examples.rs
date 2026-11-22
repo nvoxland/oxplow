@@ -120,7 +120,12 @@ pub(super) async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Valu
         other => format!("{other:?}"),
     };
     let effects: Vec<Value> = rows(&format!(
-        "SELECT effect, state, reason FROM v_effect_run WHERE event_seq {at} ?1 AND latest = 1 \
+        "SELECT effect, CASE
+           WHEN proposal_id IS NOT NULL THEN 'proposed'
+           WHEN outcome IS NULL THEN 'started'
+           WHEN outcome IN ('ok', 'skipped') THEN outcome
+           ELSE 'failed' END, error
+         FROM v_effect_run WHERE event_seq {at} ?1 AND latest = 1 \
          ORDER BY effect"
     ))
     .await

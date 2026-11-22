@@ -209,7 +209,7 @@ event-triggered code. Walking an event's causes, a *hop* is an effect's
 run (`command.executed` from `effect:…`) or a collector's run for an
 event (`collector.synced` with `trigger: on`). Nothing reacts to an event
 its **own** run led to, or to one `MAX_CHAIN` (4) hops already led to. A
-guarded effect reaction is `skipped` in `effect_run`; a guarded collector
+guarded effect reaction has outcome `skipped` in `v_effect_run`. A guarded collector
 run is `collector_run.status = skipped` with the reason in `error` (V154;
 its last good counts stay, and it isn't a failure toward a disable).
 
@@ -515,28 +515,23 @@ there is no bundled branch in the gate.
 runs an event's effects in their compiled order and waits, through the
 pump's `after_for`, for the consumers they name ("Ordering"). Per
 event, each enabled effect whose `on`/`where` match **reacts at most
-once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
-1. a row exists — a redelivery: nothing. A `started` row the live
-   consumer claimed is a run that claimed a step outside oxplow and was
-   cut off (`effect_triggers::cut_off`): recorded `failed`
-   ("interrupted"). When its claim kept what it composed — every step a
-   write to a provider keeping `idempotent_writes` (`claim_tx` writes
-   `resend_json` then, P11) — it is **sent again by itself** like
+once**, keyed by `(effect, event_id)` in `effect_run`:
+1. A redelivery that finds an attempt leaves it alone. An attempt the
+   live consumer claimed with a NULL run outcome is still open. On
+   redelivery, `effect_triggers::cut_off` finishes that attempt as
+   `interrupted`. When its claim kept what it composed because every
+   step was a write to a provider keeping `idempotent_writes`
+   (`claim_tx` stores `resend_json`), it is **sent again by itself** like
    a failure that may pass, its delay counted from when it started (so
    one found more than an hour late is a person's, and so is one whose
    start can't be read); otherwise it is a person's, never sent
    again by itself. Recording the failure and scheduling its retry are one
    transaction (`effect_triggers::fail`), here and for a failure
-   that may pass. One a person's retry or
-   backfill claimed is theirs, under way, and the pump leaves it be
-   A person's retry or backfill — or an automatic attempt — is
-   no pump delivery, so nothing redelivers one cut off between its claim
-   and its record: at start (`boot.rs`,
-   `effect_triggers::recover_interrupted`) every attempt still `started`
-   whose origin isn't `live` is recovered the same way, with its
-   `effect.result` saying what started it — Delivery lists it, and a
-   person may retry it — and counted toward the effect's health
-   as the pump counts one it finds;
+   that may pass. At startup, `effect_triggers::recover_interrupted`
+   finishes open attempts from a retry, backfill or automatic attempt
+   the same way. It logs the attempt's origin in `effect.result` and
+   counts the interruption toward the effect's health. A person can
+   retry the interrupted reaction.
 2. `effects::gate` isn't `Runs` (a live reaction only): nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
    event its own run caused (source `effect:<namespace>/<id>`) never
@@ -564,19 +559,24 @@ schema, shared (`Command::with_handler`) — over what the script composed
 `RunOrigin::Effect(key)`: its `command.executed@4` is caused by the
 triggering event, and the reaction's `effect_run` row and
 `effect.result@5 { effect, event, outcome, reason?, proposal?, attempt,
-origin }` (caused by that run) land **in the run's transaction**; with a step outside it, a
-`started` claim commits first (`claim`) and the record finishes it; a
-command that asks becomes a proposal whose transaction records
-`proposed`. A failure before any command ran (the script, the input,
-denied, invalid) is recorded `failed` by the consumer. An effect that
-fails never dead-letters the event. An approved proposal runs its calls
-as the person; the script's own events go only with a run that doesn't
-ask.
+origin }` (caused by that run) land **in the run's transaction**. For a
+step outside the transaction, the claim first commits the attempt and
+its shared run. The finish transaction records the outcome and error on
+the run. A command that asks creates a proposal and finishes the effect
+run as `skipped`. The proposal transaction records `effect_run.proposal_id`
+and emits the event outcome `proposed`. The consumer records a failure
+that occurs before any composed command runs. An effect that fails
+never dead-letters the event. An approved proposal runs its calls as
+the person. The script's own events go with a run that executes directly.
 
-**Attempts and a person's retry** (P9.D4). A reaction is `(effect,
-event)`; `effect_run` holds its **attempts** (`attempt` from 1, `origin`
-`live | retry | backfill | auto`, V156/V160), and the reaction's state is
-its latest attempt's (`v_effect_run.latest`). The live consumer makes one
+**Attempts and a person's retry** (P9.D4). A reaction is `(effect, event)`.
+`effect_run` holds its **attempts** (`attempt` from 1, `origin`
+`live | retry | backfill | auto`). Each attempt's `run_id` uniquely
+references its `contribution_run`. `v_effect_run` publishes the run's
+outcome, error, timestamps, extension, cost and permission decisions.
+The highest attempt number for the effect and event has `latest = 1`.
+Retention keeps both rows because the attempt records that the event was
+handled. The live consumer makes one
 attempt and never another; a failed one is sent again **by itself** only
 when that is safe (below). Otherwise a failed reaction is attempted
 again only by a person: `oxplow.effect.retry { effect, event }` (`commands/effect.rs` —
@@ -585,9 +585,9 @@ declared in `oxplow-foundation`, its services filled when the consumer
 registers at boot — `ServicesSlot`) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
 attempt:
-- the reaction's latest attempt must be `failed` (`Invalid` otherwise: one
-  that ran, was skipped or left a proposal isn't retried; one never made
-  has nothing to retry);
+- the reaction's latest attempt must have ended with a retryable outcome,
+  which includes `failed` and `interrupted`. An attempt with a proposal
+  awaits the person's decision;
 - the effect must be enabled and in the running catalog — a retry runs
   today's script, composing afresh from the event, not what the failed
   attempt composed;
@@ -600,8 +600,8 @@ attempt:
 It asks every time because of what a failure can hide: an attempt
 interrupted with a step outside oxplow under way may have landed that
 step, and a retry sends it again. The confirmation's text says so.
-Settings → Data → Delivery lists the reactions whose latest attempt
-failed (`useFailedReactions`), each with its reason and **Retry**
+Settings → Data → Delivery lists reactions whose latest run has outcome
+`failed` (`useFailedReactions`), each with its error and **Retry**
 (`InlineConfirm`).
 
 **Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An
@@ -642,11 +642,10 @@ retry isn't counted against the effect's health (`Reacted::Retrying`);
 the attempt that exhausts the retries counts once. A step inside oxplow, or
 a provider that doesn't declare the promise, waits for a person. An
 attempt cut off by oxplow stopping is sent again by itself on the same
-terms: its claim keeps what it composed when every step is safe to send
-again, and the store keeps it after only for a failed attempt
-(`finish_tx`). Delivery
-says "sent again by itself shortly" on a reaction awaiting its retry; a
-person may still retry it first.
+terms. Its claim keeps what it composed when every step is safe to send
+again. Once the run finishes, the store keeps the composition only
+while a retry is scheduled. Delivery shows when a failed reaction is
+awaiting its retry. A person may still retry it first.
 
 **Backfill** (P9.D5). The live consumer never reacts to what was logged
 before an effect started. A person has it react to that past with

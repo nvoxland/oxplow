@@ -52,7 +52,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
-use oxplow_db::effect_run_store::{EffectRunKey, Finished, ReactionOrigin, RunState};
+use oxplow_db::effect_run_store::{EffectRunKey, Finished, ReactionOrigin};
+use oxplow_domain::run::Outcome;
 use oxplow_domain::{CommandCall, CommandError, DomainError, StoredEvent};
 use serde_json::json;
 use std::time::Duration;
@@ -278,11 +279,18 @@ pub(crate) async fn count(
 /// before any command ran, interrupted); whether this recorded it. A
 /// reaction already recorded — by its run, its proposal or a concurrent
 /// delivery — stays as it is.
-async fn finish(svc: &Services, key: &EffectRunKey, done: Finished) -> Result<bool, DomainError> {
-    let (key, vocabulary) = (key.clone(), svc.vocabulary.clone());
+async fn finish(
+    svc: &Services,
+    key: &EffectRunKey,
+    run: Option<&RunContext>,
+    done: Finished,
+) -> Result<bool, DomainError> {
+    let (key, run, vocabulary) = (key.clone(), run.cloned(), svc.vocabulary.clone());
     let recorded = svc
         .db
-        .transaction(move |tx| effects::finished_tx(tx, &vocabulary.current(), &key, &done, None))
+        .transaction(move |tx| {
+            effects::finished_tx(tx, &vocabulary.current(), &key, &done, run.as_ref(), None)
+        })
         .await;
     svc.event_pump.wake();
     match recorded {
@@ -292,9 +300,9 @@ async fn finish(svc: &Services, key: &EffectRunKey, done: Finished) -> Result<bo
     }
 }
 
-fn ended(state: RunState, reason: impl Into<String>) -> Finished {
+fn ended(outcome: Outcome, reason: impl Into<String>) -> Finished {
     Finished {
-        state,
+        outcome,
         reason: Some(reason.into()),
         audit_id: None,
         proposal_id: None,
@@ -330,7 +338,7 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
     };
     let Some(resend) = claimed.resend else {
         return Ok(
-            if finish(svc, key, ended(RunState::Failed, INTERRUPTED)).await? {
+            if finish(svc, key, None, ended(Outcome::Interrupted, INTERRUPTED)).await? {
                 Reacted::Failed(INTERRUPTED.into())
             } else {
                 Reacted::Nothing
@@ -347,11 +355,21 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
             from,
             if_already_failed: false,
         });
-    Ok(match fail(svc, key, INTERRUPTED_RESENDABLE, retry).await? {
-        (false, _) => Reacted::Nothing,
-        (true, true) => Reacted::Retrying(INTERRUPTED_RESENDABLE.into()),
-        (true, false) => Reacted::Failed(INTERRUPTED_RESENDABLE.into()),
-    })
+    Ok(
+        match fail(
+            svc,
+            key,
+            None,
+            ended(Outcome::Interrupted, INTERRUPTED_RESENDABLE),
+            retry,
+        )
+        .await?
+        {
+            (false, _) => Reacted::Nothing,
+            (true, true) => Reacted::Retrying(INTERRUPTED_RESENDABLE.into()),
+            (true, false) => Reacted::Failed(INTERRUPTED_RESENDABLE.into()),
+        },
+    )
 }
 
 /// A failed attempt's automatic retry, as [`fail`] schedules it: what to
@@ -373,16 +391,22 @@ struct Retry {
 async fn fail(
     svc: &Services,
     key: &EffectRunKey,
-    reason: &str,
+    run: Option<&RunContext>,
+    done: Finished,
     retry: Option<Retry>,
 ) -> Result<(bool, bool), DomainError> {
-    let (key, vocabulary) = (key.clone(), svc.vocabulary.clone());
-    let done = ended(RunState::Failed, reason);
+    let (key, run, vocabulary) = (key.clone(), run.cloned(), svc.vocabulary.clone());
     let outcome = svc
         .db
         .transaction(move |tx| {
-            let recorded = match effects::finished_tx(tx, &vocabulary.current(), &key, &done, None)
-            {
+            let recorded = match effects::finished_tx(
+                tx,
+                &vocabulary.current(),
+                &key,
+                &done,
+                run.as_ref(),
+                None,
+            ) {
                 Ok(()) => true,
                 Err(DomainError::Invalid(_)) => false,
                 Err(e) => return Err(e),
@@ -471,28 +495,31 @@ pub(crate) async fn run_reaction(
         // A live attempt left `started`: the run that claimed it was cut
         // off. A person's (a retry, a backfill) under way is theirs to
         // record — or the next start's, when it was cut off.
-        (ReactionOrigin::Live, Some((attempt, RunState::Started, ReactionOrigin::Live))) => {
+        (ReactionOrigin::Live, Some((attempt, state, ReactionOrigin::Live)))
+            if state.outcome.is_none() =>
+        {
             let key = EffectRunKey {
                 effect,
                 event_id,
                 event_seq: event.seq,
                 attempt,
                 origin,
-                run_id: None,
             };
             return cut_off(svc, &key).await;
         }
         (ReactionOrigin::Live | ReactionOrigin::Backfill, Some(_)) => return Ok(Reacted::Nothing),
-        (ReactionOrigin::Retry, Some((attempt, RunState::Failed, _))) => attempt + 1,
+        (ReactionOrigin::Retry, Some((attempt, state, _))) if state.retryable() => attempt + 1,
         // Sent again by itself: only the failed attempt it was scheduled
         // for (a person's retry since is the latest, and isn't).
-        (ReactionOrigin::Auto, Some((attempt, RunState::Failed, _))) if scheduled => attempt + 1,
+        (ReactionOrigin::Auto, Some((attempt, state, _))) if scheduled && state.retryable() => {
+            attempt + 1
+        }
         (ReactionOrigin::Auto, _) => return Ok(Reacted::Nothing),
         (ReactionOrigin::Retry, Some((_, state, _))) => {
             return Err(DomainError::Invalid(format!(
                 "effect `{effect}`'s reaction to event {event_id} {NOT_FAILED} (it is `{}`): \
                  only a failed reaction is retried",
-                state.as_str()
+                state.display()
             )))
         }
         (ReactionOrigin::Retry, None) => {
@@ -527,7 +554,6 @@ pub(crate) async fn run_reaction(
         event_seq: event.seq,
         attempt,
         origin,
-        run_id: Some(run.run().to_string()),
     };
     // The live consumer never reacts to the past; a person's retry or
     // backfill names what to react to.
@@ -551,10 +577,15 @@ pub(crate) async fn run_reaction(
     if lineage.own {
         return Ok(Reacted::Nothing);
     }
+    if let Some(parent) = under {
+        parent.track_child(&run);
+    }
     let skipped = |why: String| async {
-        finish(svc, &key, ended(RunState::Skipped, why.clone())).await?;
-        record_run(svc, &run, oxplow_domain::run::Outcome::Skipped, Some(&why)).await;
-        Ok(Reacted::Skipped(why))
+        if finish(svc, &key, Some(&run), ended(Outcome::Skipped, why.clone())).await? {
+            Ok(Reacted::Skipped(why))
+        } else {
+            Ok(Reacted::Nothing)
+        }
     };
     if let Some(why) = lineage.refusal() {
         return skipped(why).await;
@@ -565,19 +596,13 @@ pub(crate) async fn run_reaction(
         // Stopped (a person's cancel, or its approval or extension revoked):
         // recorded `cancelled`, and no failure of the effect's own.
         let stopped = run.cancel().is_cancelled();
-        record_run(
-            svc,
-            &run,
-            if stopped {
-                oxplow_domain::run::Outcome::Cancelled
-            } else {
-                oxplow_domain::run::Outcome::Failed
-            },
-            Some(&reason),
-        )
-        .await;
+        let outcome = if stopped {
+            Outcome::Cancelled
+        } else {
+            Outcome::Failed
+        };
         Ok(
-            if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
+            if finish(svc, &key, Some(&run), ended(outcome, reason.clone())).await? {
                 if stopped {
                     Reacted::Stopped(reason)
                 } else {
@@ -645,15 +670,25 @@ pub(crate) async fn run_reaction(
         .run_effect(&run, key.clone(), kept, command, input)
         .await
     {
-        Ok(_) => {
-            record_run(svc, &run, oxplow_domain::run::Outcome::Ok, None).await;
+        Ok(done) => {
+            if done.audit_id.is_none() {
+                finish(
+                    svc,
+                    &key,
+                    Some(&run),
+                    Finished {
+                        outcome: Outcome::Ok,
+                        reason: None,
+                        audit_id: None,
+                        proposal_id: None,
+                    },
+                )
+                .await?;
+            }
             Ok(Reacted::Ran)
         }
         // Recorded with its proposal: a person decides.
-        Err(CommandError::Proposed { .. }) => {
-            record_run(svc, &run, oxplow_domain::run::Outcome::Skipped, None).await;
-            Ok(Reacted::Proposed)
-        }
+        Err(CommandError::Proposed { .. }) => Ok(Reacted::Proposed),
         Err(CommandError::Busy { message }) => Err(DomainError::Busy(message)),
         // Another delivery recorded it: not this effect's failure.
         Err(CommandError::Invalid { message, .. })
@@ -672,10 +707,10 @@ pub(crate) async fn run_reaction(
                 e.to_string()
             };
             let outcome = match &e {
-                CommandError::Denied { .. } => oxplow_domain::run::Outcome::Denied,
-                _ => oxplow_domain::run::Outcome::Failed,
+                _ if run.cancel().is_cancelled() => Outcome::Cancelled,
+                CommandError::Denied { .. } => Outcome::Denied,
+                _ => Outcome::Failed,
             };
-            record_run(svc, &run, outcome, Some(&reason)).await;
             let retry = match e {
                 CommandError::Unavailable { retry_after_ms, .. } if safe => Some(Retry {
                     resend,
@@ -685,10 +720,12 @@ pub(crate) async fn run_reaction(
                 }),
                 _ => None,
             };
-            Ok(match fail(svc, &key, &reason, retry).await? {
-                (_, true) => Reacted::Retrying(reason),
-                (_, false) => Reacted::Failed(reason),
-            })
+            Ok(
+                match fail(svc, &key, Some(&run), ended(outcome, reason.clone()), retry).await? {
+                    (_, true) => Reacted::Retrying(reason),
+                    (_, false) => Reacted::Failed(reason),
+                },
+            )
         }
     }
 }
@@ -891,36 +928,6 @@ pub fn spawn_auto_retry(state: &Arc<Services>) {
 /// its extension.
 pub(crate) fn find_effect(svc: &Services, name: &str) -> Option<(Extension, EffectDecl)> {
     effects(svc).into_iter().find(|(_, d)| d.name() == name)
-}
-
-/// Record `run`'s end when it never reached the bus (its script skipped
-/// or failed). Best effort: the reaction's own record is what decides.
-async fn record_run(
-    svc: &Services,
-    run: &RunContext,
-    outcome: oxplow_domain::run::Outcome,
-    error: Option<&str>,
-) {
-    let (run, error) = (run.clone(), error.map(str::to_string));
-    if let Err(e) = svc
-        .db
-        .transaction(move |tx| {
-            let recorded: bool = tx
-                .query_row(
-                    "SELECT EXISTS (SELECT 1 FROM contribution_run WHERE run_id = ?1)",
-                    [run.run().as_str()],
-                    |row| row.get(0),
-                )
-                .map_err(oxplow_db::map_sql_err)?;
-            if recorded {
-                return Ok(());
-            }
-            oxplow_db::contribution_run_store::record_tx(tx, &run, outcome, error.as_deref())
-        })
-        .await
-    {
-        tracing::warn!(error = %e, "recording an effect's run failed");
-    }
 }
 
 /// The run of an effect's reaction: the registered `oxplow.command.sequence` —
@@ -1156,7 +1163,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT effect, state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+                "SELECT effect, outcome FROM v_effect_run WHERE effect LIKE 'acme/%'"
             )
             .await,
             json!([["acme/mark-done", "ok"]])
@@ -1305,10 +1312,10 @@ mod tests {
         assert_eq!(title(&fx).await, before, "not sent again");
         let run = rows(
             svc,
-            "SELECT state, reason FROM v_effect_run WHERE effect LIKE 'acme/%'",
+            "SELECT outcome, error FROM v_effect_run WHERE effect LIKE 'acme/%'",
         )
         .await;
-        assert_eq!(run[0][0], json!("failed"));
+        assert_eq!(run[0][0], json!("interrupted"));
         assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
     }
 
@@ -1330,7 +1337,12 @@ mod tests {
             async move {
                 svc.db
                     .transaction(move |tx| {
-                        oxplow_db::effect_run_store::claim_tx(tx, &key, "t", None)
+                        oxplow_db::effect_run_store::claim_tx(
+                            tx,
+                            &key,
+                            &crate::effects::tests::context(&key),
+                            None,
+                        )
                     })
                     .await
                     .unwrap()
@@ -1345,13 +1357,28 @@ mod tests {
         claim(&auto, ReactionOrigin::Auto).await;
 
         assert_eq!(recover_interrupted(svc).await.unwrap(), 2);
+        let interrupted = svc
+            .db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM effect_run e
+                     JOIN contribution_run r ON r.run_id = e.run_id
+                     WHERE e.effect = 'acme/mark-done' AND r.outcome = 'interrupted'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(interrupted, 2);
         assert_eq!(
             rows(
                 svc,
-                "SELECT origin, state, reason LIKE 'interrupted%' FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
+                "SELECT origin, outcome, error LIKE 'interrupted%' FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
             )
             .await,
-            json!([["backfill", "failed", 1], ["live", "started", null], ["auto", "failed", 1]])
+            json!([["backfill", "interrupted", 1], ["live", null, null], ["auto", "interrupted", 1]])
         );
         assert_eq!(
             rows(
@@ -1377,7 +1404,14 @@ mod tests {
             ReactionOrigin::Live,
         );
         svc.db
-            .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, "t", None))
+            .transaction(move |tx| {
+                oxplow_db::effect_run_store::claim_tx(
+                    tx,
+                    &key,
+                    &crate::effects::tests::context(&key),
+                    None,
+                )
+            })
             .await
             .unwrap();
         EffectTriggers::new(Arc::downgrade(svc))
@@ -1457,7 +1491,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+                "SELECT outcome FROM v_effect_run WHERE effect LIKE 'acme/%'"
             )
             .await,
             json!([["failed"]])
@@ -1616,10 +1650,10 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT attempt, origin, state, latest FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY attempt"
+                "SELECT attempt, origin, outcome, latest FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY attempt"
             )
             .await,
-            json!([[1, "live", "failed", 0], [2, "retry", "ok", 1]])
+            json!([[1, "live", "interrupted", 0], [2, "retry", "ok", 1]])
         );
         assert_eq!(
             rows(
@@ -1838,7 +1872,7 @@ mod tests {
         let guarded = rows(
             svc,
             &format!(
-                "SELECT state, reason FROM v_effect_run WHERE effect LIKE 'acme/%' AND event_id = '{}'",
+                "SELECT outcome, error FROM v_effect_run WHERE effect LIKE 'acme/%' AND event_id = '{}'",
                 chained.envelope.id
             ),
         )
@@ -1871,10 +1905,10 @@ mod tests {
             .unwrap();
         let run = rows(
             svc,
-            "SELECT state, proposal_id FROM v_effect_run WHERE effect LIKE 'acme/%'",
+            "SELECT outcome, proposal_id FROM v_effect_run WHERE effect LIKE 'acme/%'",
         )
         .await;
-        assert_eq!(run[0][0], json!("proposed"));
+        assert_eq!(run[0][0], json!("skipped"));
         assert!(run[0][1].is_number(), "{run}");
         assert_eq!(
             rows(svc, "SELECT json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%'").await,
@@ -1971,10 +2005,10 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+                "SELECT outcome FROM v_effect_run WHERE effect LIKE 'acme/%'"
             )
             .await,
-            json!([["failed"]]),
+            json!([["cancelled"]]),
             "the attempt records why it stopped"
         );
         assert_eq!(
@@ -2053,10 +2087,10 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT state, count(*) FROM v_effect_run WHERE effect LIKE 'acme/%' GROUP BY state ORDER BY state"
+                "SELECT outcome, proposal_id IS NOT NULL, count(*) FROM v_effect_run WHERE effect LIKE 'acme/%' GROUP BY 1, 2 ORDER BY 1, 2"
             )
             .await,
-            json!([["proposed", 3], ["skipped", 3]])
+            json!([["skipped", 0, 3], ["skipped", 1, 3]])
         );
         assert_eq!(
             rows(
@@ -2186,7 +2220,7 @@ mod tests {
         let guarded = rows(
             svc,
             &format!(
-                "SELECT state FROM v_effect_run WHERE effect LIKE 'acme/%' AND event_id = '{}'",
+                "SELECT outcome FROM v_effect_run WHERE effect LIKE 'acme/%' AND event_id = '{}'",
                 chained.envelope.id
             ),
         )
@@ -2286,7 +2320,14 @@ mod tests {
             ReactionOrigin::Backfill,
         );
         svc.db
-            .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, "t", None))
+            .transaction(move |tx| {
+                oxplow_db::effect_run_store::claim_tx(
+                    tx,
+                    &key,
+                    &crate::effects::tests::context(&key),
+                    None,
+                )
+            })
             .await
             .unwrap();
         EffectTriggers::new(Arc::downgrade(svc))
@@ -2296,10 +2337,10 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT origin, state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+                "SELECT origin, outcome FROM v_effect_run WHERE effect LIKE 'acme/%'"
             )
             .await,
-            json!([["backfill", "started"]])
+            json!([["backfill", null]])
         );
         assert_eq!(
             rows(
@@ -2460,7 +2501,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT event_seq, attempt, origin, state FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
+                "SELECT event_seq, attempt, origin, outcome FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
             )
             .await,
             json!(past

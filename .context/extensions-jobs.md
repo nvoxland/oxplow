@@ -245,7 +245,11 @@ commands:
   enabled and declaration checks. `oxplow.collector.sync` is an `External`
   command, which the bus runs after releasing its pin (`.context/commands.md`),
   and an effect's `handle` no longer pins the whole event: its script runs
-  unpinned and the commands it composes pin per command. Pinned by
+  unpinned and the commands it composes pin per command. Its attempt is
+  recorded in `effect_run` with the outcome and timestamps on the linked
+  `contribution_run`. A proposal records a `skipped` run and sets the
+  attempt's `proposal_id`. Both rows stay in the database to prevent
+  replaying an event already handled. Pinned by
   `an_activation_does_not_wait_for_a_running_collector`,
   `a_collector_does_not_publish_across_a_change_to_its_extension`,
   `a_collector_does_not_publish_after_its_extension_is_disabled` and

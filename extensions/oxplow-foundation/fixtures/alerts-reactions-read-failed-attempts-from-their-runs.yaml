@@ -1,0 +1,30 @@
+# Closing a task absent from the store makes the assignment effect fail
+# when it tries to clear the task's assignment.
+requires: [oxplow-bundled, oxtask]
+given:
+  - observe:
+      event:
+        type: oxplow.task_record.changed
+        payload:
+          uri: "oxplow:oxplow/task?id=tsk999&provider=oxtask"
+          store: oxtask
+          id: tsk999
+          op: upserted
+          changed: [state]
+          cause: trigger
+          after: { state: done }
+when:
+  sql: |
+    SELECT effect, extension, outcome, length(trim(error)) > 0 AS has_error,
+           json_type(decisions) AS decisions_type
+    FROM v_effect_run WHERE effect = 'oxplow/assign-on-start' AND latest = 1
+expect:
+  rows:
+    - { effect: oxplow/assign-on-start, extension: oxplow-bundled, outcome: failed, has_error: 1, decisions_type: array }
+steps:
+  - when: { part: alerts-reactions }
+    expect:
+      loaders:
+        alerts_reactions:
+          rows:
+            - { effect: oxplow/assign-on-start, run_id: $any, error: $any, version: $any, cpu_ms: $any }

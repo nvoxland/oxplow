@@ -110,13 +110,14 @@ pub fn record_tx(
     finish_tx(conn, run, outcome, error)
 }
 
-/// Close the live runs left behind by the previous daemon. No kind owns
-/// recovery of a live contribution_run until it writes one at attempt start.
+/// Close live runs left behind by the previous daemon. The effect ledger
+/// recovers its own claims so it can publish a result and schedule a retry.
 pub fn interrupt_unfinished_tx(conn: &rusqlite::Connection) -> Result<usize, DomainError> {
     conn.execute(
         "UPDATE contribution_run
          SET finished_at = ?1, outcome = ?2, error = 'oxplow stopped before the run finished'
-         WHERE finished_at IS NULL",
+         WHERE finished_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM effect_run WHERE run_id = contribution_run.run_id)",
         params![Timestamp::now().to_string(), Outcome::Interrupted.as_str()],
     )
     .map_err(map_sql_err)
@@ -138,6 +139,9 @@ pub fn sweep_tx(
               )
               AND NOT EXISTS (
                   SELECT 1 FROM collector_checkpoint p WHERE p.last_run_id = r.run_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM effect_run e WHERE e.run_id = r.run_id
               )
             LIMIT ?2)",
         params![cutoff, limit as i64],
