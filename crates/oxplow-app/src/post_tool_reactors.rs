@@ -283,10 +283,10 @@ mod tests {
         );
     }
 
-    /// A report-less run's nudge reaches the agent through the hook
-    /// response once; one that misses its hook goes out on the next.
+    /// The report notice is for the person. A late agent nudge reaches
+    /// the agent through its next hook response, once.
     #[tokio::test]
-    async fn nudges_are_delivered_once_by_thread() {
+    async fn hook_only_delivers_agent_nudges_once_by_thread() {
         let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.config.write().unwrap().testing.command = Some("bun run test:collect".into());
@@ -299,23 +299,23 @@ mod tests {
             .ingest(hook(f.thread, HookKind::PostToolUse, bash("bun test")))
             .await
             .unwrap();
-        let first = svc
-            .agent_context
-            .post_tool_context(svc, &f.thread, None)
-            .await;
-        assert!(
-            first
-                .as_deref()
-                .is_some_and(|m| m.contains("bun run test:collect")),
-            "{first:?}"
-        );
         assert_eq!(
             svc.agent_context
                 .post_tool_context(svc, &f.thread, None)
                 .await,
             None,
-            "delivered once"
+            "the hook carries no person notice"
         );
+        let notices = svc
+            .nudge_store
+            .list_for_thread(&f.thread.to_string())
+            .await
+            .unwrap();
+        assert!(notices.iter().any(|notice| {
+            notice.kind == "report-less-run"
+                && notice.audience == oxplow_db::Audience::Person
+                && notice.message.contains("bun run test:collect")
+        }));
         // A nudge written after its hook answered goes out on the next hook.
         svc.collection
             .persist_nudge(
@@ -330,6 +330,12 @@ mod tests {
                 .await
                 .as_deref(),
             Some("a late nudge")
+        );
+        assert_eq!(
+            svc.agent_context
+                .post_tool_context(svc, &f.thread, None)
+                .await,
+            None
         );
     }
 }

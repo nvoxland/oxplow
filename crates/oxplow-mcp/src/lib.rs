@@ -363,6 +363,12 @@ impl ServerHandler for OxplowMcp {
                 .into(),
         );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        tracing::debug!(
+            target: "oxplow::agent_overhead",
+            stage = "mcp_instructions",
+            harness = "unknown",
+            bytes = info.instructions.as_ref().map_or(0, String::len),
+        );
         info
     }
 

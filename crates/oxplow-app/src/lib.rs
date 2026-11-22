@@ -9,6 +9,7 @@
 
 pub mod advisories;
 pub mod agent_context;
+mod agent_overhead;
 pub mod agent_path;
 pub mod agent_policy;
 pub mod agent_prompt;

@@ -2187,6 +2187,39 @@ nudge fires once per request, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
 nudges page ("Agent Nudges", `oxplow/changes.sections` slot).
 
+### Measuring context and hook overhead
+
+For a dev sample, quit the running app and use this command.
+
+```sh
+RUST_LOG='info,rmcp=warn,oxplow::agent_overhead=debug' bun run run:dev
+```
+
+Filter `.oxplow/logs/daemon.*.log` for `oxplow::agent_overhead`. This
+target is off at the default log level. Records carry byte counts, timings
+in microseconds, and routing labels such as harness and reactor name.
+They carry no prompt, tool, or context contents.
+
+- `launch_prompt` measures assembled launch text and its contributing
+  sections. `mcp_instructions` measures the instructions advertised
+  during MCP initialization, where the harness can be unknown.
+- `prompt_context` measures context prepared by the prompt hook, with
+  separate costs for session context, changed extension context, the
+  context basket, advisories, and reading pending nudges.
+  `prompt_commit` records the bytes marked for delivery and the time spent
+  updating delivery bookkeeping. The terminal hook does this before writing
+  its response. The chat host does it after accepting the context.
+- `post_tool_context` measures time waiting for reactors, time reading
+  pending nudges, and the size of the hook's context. `settled=false`
+  means settlement did not complete successfully within the hook.
+  `post_tool_reactor` measures each reactor's own run. A reactor may
+  finish after the hook returns, and runs in the same level overlap.
+
+Total `bytes` fields use the returned UTF-8 text. Section lengths can
+differ from the total because the total includes formatting and trimming.
+Harness-owned instructions, tool schemas, and model token counts are
+outside these measurements.
+
 ### Observe conformance
 
 What core records of a harness's session is checked the same way for

@@ -59,12 +59,11 @@ impl AgentContext {
     }
 
     /// What the agent hears after a tool call: the thread's undelivered
-    /// nudges (collection and post-tool advisories). The recording itself is the pump's
+    /// agent-directed nudges. The recording itself is the pump's
     /// (`tool_call_reactors`, `post_tool_reactors`, P3.5–P3.6): this waits
     /// up to [`POST_TOOL_SETTLE`] for the two reactors that write nudges,
     /// then takes whatever is undelivered — a nudge that lands after the
     /// window goes out on the thread's next tool call instead of being lost.
-    /// Collection nudges come before advisories.
     /// Nothing for a session whose harness can't carry context after a
     /// tool call (`tool_context`): its nudges wait for a prompt.
     pub async fn post_tool_context(
@@ -73,19 +72,35 @@ impl AgentContext {
         thread_id: &ThreadId,
         harness: Option<&str>,
     ) -> Option<String> {
+        let mut timer = crate::agent_overhead::Timer::start();
         if !carries(svc, harness, TOOL_CONTEXT) {
             return None;
         }
-        svc.event_pump
-            .settle(
+        let harness = harness.unwrap_or("unknown");
+        let settled = svc
+            .event_pump
+            .settle_agent_hook(
                 &[
                     crate::post_tool_reactors::COLLECTION,
                     crate::post_tool_reactors::POST_TOOL_ADVISORIES,
                 ],
                 POST_TOOL_SETTLE,
+                timer.enabled().then_some(harness),
             )
             .await;
-        undelivered(svc, thread_id).await
+        let reactor_wait_us = timer.lap_us();
+        let text = undelivered(svc, thread_id).await;
+        tracing::debug!(
+            target: "oxplow::agent_overhead",
+            stage = "post_tool_context",
+            harness,
+            bytes = text.as_ref().map_or(0, String::len),
+            reactor_wait_us,
+            settled,
+            nudge_read_us = timer.lap_us(),
+            elapsed_us = timer.elapsed_us(),
+        );
+        text
     }
 
     /// Context for a human's prompt in agent session `agent_session` (its
@@ -125,9 +140,11 @@ impl AgentContext {
         agent_session: Option<AgentSessionId>,
         harness: Option<&str>,
     ) -> Option<PendingContext> {
+        let mut timer = crate::agent_overhead::Timer::start();
         if !carries(svc, harness, PROMPT_CONTEXT) {
             return None;
         }
+        let harness = harness.unwrap_or("unknown");
         let mut pending = PendingContext {
             text: String::new(),
             baselines: Vec::new(),
@@ -136,6 +153,7 @@ impl AgentContext {
             basket: Vec::new(),
             agent_session,
             thread: Some(*thread_id),
+            overhead_harness: timer.enabled().then(|| harness.to_owned()),
         };
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id, agent_session)
@@ -143,11 +161,13 @@ impl AgentContext {
         if let (Some(key), Some(block)) = (session_id, &ctx_block) {
             pending.baselines.push((key.to_string(), block.clone()));
         }
+        let session_us = timer.lap_us();
         // What the extensions say the agent should know now, each block
         // once, then when it changes.
         let extension_blocks = self
             .changed_extension_contexts(svc, thread_id, session_id)
             .await;
+        let extension_count = extension_blocks.len();
         if let Some(key) = session_id {
             pending.contexts = extension_blocks
                 .iter()
@@ -161,10 +181,12 @@ impl AgentContext {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         });
+        let extension_us = timer.lap_us();
         let basket_block = context_basket(svc, *thread_id).await;
         if let Some((_, ids)) = &basket_block {
             pending.basket = ids.clone();
         }
+        let basket_us = timer.lap_us();
         // Prompt advisories land as nudges beside any a turn's end or a
         // late tool call left; the prompt carries them all.
         crate::advisories::for_thread(
@@ -174,20 +196,43 @@ impl AgentContext {
             None,
         )
         .await;
+        let advisory_us = timer.lap_us();
         let advisory_block = waiting_nudges(svc, thread_id).await;
         if let Some((_, ids)) = &advisory_block {
             pending.nudges = ids.clone();
         }
-        let combined: String = [
+        let nudge_read_us = timer.lap_us();
+        let sections = [
             ctx_block,
             extension_block,
             basket_block.map(|(text, _)| text),
             advisory_block.map(|(text, _)| text),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("\n\n");
+        ];
+        let [session_bytes, extension_bytes, basket_bytes, nudge_bytes] = sections
+            .each_ref()
+            .map(|section| section.as_ref().map_or(0, String::len));
+        let combined = sections
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        tracing::debug!(
+            target: "oxplow::agent_overhead",
+            stage = "prompt_context",
+            harness,
+            bytes = combined.len(),
+            session_bytes,
+            session_us,
+            extension_bytes,
+            extension_count,
+            extension_us,
+            basket_bytes,
+            basket_us,
+            advisory_us,
+            nudge_bytes,
+            nudge_read_us,
+            elapsed_us = timer.elapsed_us(),
+        );
         if combined.is_empty() {
             return None;
         }
@@ -199,6 +244,7 @@ impl AgentContext {
     /// blocks as sent, take the context items it carried, and mark its
     /// nudges delivered.
     pub async fn commit(&self, svc: &Services, built: PendingContext) {
+        let timer = crate::agent_overhead::Timer::start();
         {
             let mut state = self.state.lock();
             for (key, block) in built.baselines {
@@ -231,6 +277,15 @@ impl AgentContext {
             if let Err(err) = svc.nudge_store.mark_delivered(built.nudges).await {
                 warn!(?err, "marking the delivered nudges failed");
             }
+        }
+        if let Some(harness) = built.overhead_harness {
+            tracing::debug!(
+                target: "oxplow::agent_overhead",
+                stage = "prompt_commit",
+                harness = harness.as_str(),
+                bytes = built.text.len(),
+                elapsed_us = timer.elapsed_us(),
+            );
         }
     }
 
@@ -385,6 +440,7 @@ pub struct PendingContext {
     agent_session: Option<AgentSessionId>,
     /// The thread it was built for (none for a double in tests).
     thread: Option<ThreadId>,
+    overhead_harness: Option<String>,
 }
 
 impl PendingContext {
@@ -399,6 +455,7 @@ impl PendingContext {
             basket: Vec::new(),
             agent_session: None,
             thread: None,
+            overhead_harness: None,
         }
     }
 }

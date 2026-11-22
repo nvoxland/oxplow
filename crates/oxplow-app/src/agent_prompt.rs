@@ -97,41 +97,64 @@ pub fn assemble_system_prompt(
     harness: &crate::capabilities::Implementation,
     skills: &oxplow_domain::agent::text::AgentText,
 ) -> String {
+    let timer = crate::agent_overhead::Timer::start();
     let mut out = String::new();
-    out.push_str(oxplow_agent_text::WORKING_IN_OXPLOW.trim());
+    let preamble = oxplow_agent_text::WORKING_IN_OXPLOW.trim();
+    out.push_str(preamble);
     out.push_str("\n\n");
-    if !harness.has_feature(crate::agent_context::PROMPT_CONTEXT) {
-        out.push_str(&build_session_context_block(stream, thread, around));
+    let session_bytes = if !harness.has_feature(crate::agent_context::PROMPT_CONTEXT) {
+        let block = build_session_context_block(stream, thread, around);
+        out.push_str(&block);
+        out.push_str("\n\n");
+        block.len()
+    } else {
+        0
+    };
+    let thread_prompt = thread
+        .and_then(|t| t.custom_prompt.as_deref())
+        .unwrap_or("");
+    if !thread_prompt.is_empty() {
+        out.push_str(thread_prompt);
         out.push_str("\n\n");
     }
-    if let Some(t) = thread {
-        if let Some(prompt) = t.custom_prompt.as_deref().filter(|p| !p.is_empty()) {
-            out.push_str(prompt);
-            out.push_str("\n\n");
-        }
-    }
-    if let Some(prompt) = stream.custom_prompt.as_deref().filter(|p| !p.is_empty()) {
-        out.push_str(prompt);
+    let stream_prompt = stream.custom_prompt.as_deref().unwrap_or("");
+    if !stream_prompt.is_empty() {
+        out.push_str(stream_prompt);
         out.push_str("\n\n");
     }
     if !config.agent_prompt_append.is_empty() {
         out.push_str(&config.agent_prompt_append);
         out.push('\n');
     }
-    if let Some(hint) = config
-        .testing
-        .agent_hint
-        .as_deref()
-        .filter(|h| !h.is_empty())
-    {
+    let testing_hint = config.testing.agent_hint.as_deref().unwrap_or("");
+    if !testing_hint.is_empty() {
         out.push_str("\n# Testing\n");
-        out.push_str(hint);
+        out.push_str(testing_hint);
         out.push('\n');
     }
-    if !harness.has_feature(RUNTIME_TEXT) {
-        out.push_str(&skill_index_block(skills));
-    }
-    out.trim_end().to_string()
+    let skill_index_bytes = if !harness.has_feature(RUNTIME_TEXT) {
+        let index = skill_index_block(skills);
+        out.push_str(&index);
+        index.len()
+    } else {
+        0
+    };
+    out.truncate(out.trim_end().len());
+    tracing::debug!(
+        target: "oxplow::agent_overhead",
+        stage = "launch_prompt",
+        harness = harness.id.as_str(),
+        bytes = out.len(),
+        preamble_bytes = preamble.len(),
+        session_bytes,
+        thread_prompt_bytes = thread_prompt.len(),
+        stream_prompt_bytes = stream_prompt.len(),
+        project_prompt_bytes = config.agent_prompt_append.len(),
+        testing_hint_bytes = testing_hint.len(),
+        skill_index_bytes,
+        elapsed_us = timer.elapsed_us(),
+    );
+    out
 }
 
 /// The agent-harness feature: it ships skill files and slash commands its
@@ -285,6 +308,42 @@ mod tests {
         assert!(prompt.contains("<session-context>"));
         assert!(prompt.contains("Use TDD"));
         assert!(prompt.contains("be precise"));
+    }
+
+    #[test]
+    fn overhead_records_utf8_lengths_without_prompt_text() {
+        #[derive(Clone, Default)]
+        struct Output(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+        impl std::io::Write for Output {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().write(buf)
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let output = Output::default();
+        let writer = output.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || writer.clone())
+            .finish();
+        let mut cfg = config();
+        cfg.agent_prompt_append = "private résumé marker".into();
+        let prompt =
+            tracing::subscriber::with_default(subscriber, || prompt_for(&cfg, &stream(), &full()));
+        let record = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
+        let fields: Vec<_> = record.split_whitespace().collect();
+        assert!(fields.contains(&"stage=\"launch_prompt\""));
+        assert!(fields.contains(&format!("bytes={}", prompt.len()).as_str()));
+        assert!(fields
+            .contains(&format!("project_prompt_bytes={}", cfg.agent_prompt_append.len()).as_str()));
+        assert!(!record.contains(&cfg.agent_prompt_append));
     }
 
     #[test]

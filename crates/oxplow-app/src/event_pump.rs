@@ -240,6 +240,24 @@ impl EventPump {
     }
 
     pub async fn settle(self: &Arc<Self>, consumers: &[&str], timeout: Duration) -> bool {
+        self.settle_inner(consumers, timeout, None).await
+    }
+
+    pub(crate) async fn settle_agent_hook(
+        self: &Arc<Self>,
+        consumers: &[&str],
+        timeout: Duration,
+        harness: Option<&str>,
+    ) -> bool {
+        self.settle_inner(consumers, timeout, harness).await
+    }
+
+    async fn settle_inner(
+        self: &Arc<Self>,
+        consumers: &[&str],
+        timeout: Duration,
+        hook_harness: Option<&str>,
+    ) -> bool {
         let pump = self.clone();
         let slots: Vec<Arc<AsyncSlot>> = self
             .async_slots()
@@ -249,10 +267,28 @@ impl EventPump {
         // Side by side within a level, so the wait is the slowest
         // consumer's rather than the sum; a consumer runs in a level after
         // the ones it declares `after`.
+        let hook_harness = hook_harness.map(str::to_owned);
         let run = tokio::spawn(async move {
             let mut report = PumpReport::default();
             for level in settle_levels(slots) {
-                let runs = level.iter().map(|slot| pump.run_slot(slot));
+                let runs = level.iter().map(|slot| {
+                    let pump = &pump;
+                    let harness = hook_harness.as_deref();
+                    async move {
+                        let start = harness.map(|_| std::time::Instant::now());
+                        let ran = pump.run_slot(slot).await;
+                        if let (Some(start), Some(harness)) = (start, harness) {
+                            tracing::debug!(
+                                target: "oxplow::agent_overhead",
+                                stage = "post_tool_reactor",
+                                harness,
+                                source = slot.consumer.name(),
+                                elapsed_us = start.elapsed().as_micros() as u64,
+                            );
+                        }
+                        ran
+                    }
+                });
                 for ran in futures::future::join_all(runs).await {
                     report.add(ran?);
                 }
