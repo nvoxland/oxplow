@@ -1,0 +1,25 @@
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Created } }
+  - observe:
+      run:
+        extension: oxplow-foundation
+        kind: command
+        contribution: oxplow.thread.create
+        outcome: denied
+        error: Missing write grant
+        input: { stream: str1, title: Refused }
+when:
+  page: oxplow/command-data
+  params: { uri: "oxplow:oxplow/command?command=oxplow.thread.create", changed: changed }
+expect:
+  loaders:
+    runs:
+      rows:
+        - { outcome: ok, changed: 1 }
+steps:
+  - params: { changed: all, outcome: failed }
+    expect:
+      loaders:
+        runs:
+          rows:
+            - { outcome: denied, changed: 0 }

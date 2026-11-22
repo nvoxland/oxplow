@@ -140,7 +140,7 @@ pub struct Usage {
 struct RunAccounting {
     usage: Usage,
     children: Vec<RunContext>,
-    rolled_back: Option<Outcome>,
+    rolled_back: Option<(Outcome, Option<String>)>,
 }
 
 impl RunAccounting {
@@ -611,23 +611,26 @@ impl RunContext {
     }
 
     /// The status to record if this child's transaction rolls back.
-    pub fn observe_rollback_outcome(&self, outcome: Outcome) {
-        self.accounting().rolled_back = Some(outcome);
+    pub fn observe_rollback_outcome(&self, outcome: Outcome, error: Option<String>) {
+        self.accounting().rolled_back = Some((outcome, error));
     }
 
     /// Attempted descendants, with children before their parents so the
     /// store can link them as it records the enclosing runs.
-    pub fn rollback_observations(&self) -> Vec<(RunContext, Outcome)> {
+    pub fn rollback_observations(&self) -> Vec<(RunContext, Outcome, Option<String>)> {
         let mut observed = Vec::new();
         self.collect_rollback_observations(&mut observed);
         observed
     }
 
-    fn collect_rollback_observations(&self, observed: &mut Vec<(RunContext, Outcome)>) {
+    fn collect_rollback_observations(
+        &self,
+        observed: &mut Vec<(RunContext, Outcome, Option<String>)>,
+    ) {
         for child in &self.accounting().children {
             child.collect_rollback_observations(observed);
-            if let Some(outcome) = child.accounting().rolled_back {
-                observed.push((child.clone(), outcome));
+            if let Some((outcome, error)) = &child.accounting().rolled_back {
+                observed.push((child.clone(), *outcome, error.clone()));
             }
         }
     }

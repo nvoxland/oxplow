@@ -375,7 +375,7 @@ mod tests {
         let audit = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(out.command_run_id.unwrap())
             .await
             .unwrap()
@@ -685,7 +685,7 @@ mod tests {
         let audit = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(saved.command_run_id.unwrap())
             .await
             .unwrap()

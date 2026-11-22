@@ -731,6 +731,7 @@ fn no_tmux_in_the_app() {
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
+    ("crates/oxplow-app/src/commands/mod.rs", "\"oxplow-foundation\"", "the recorded owner of native commands in the oxplow namespace"),
     ("crates/oxplow-domain/src/capability.rs", "== \"oxplow\"", "the reserved provider id"),
     // The same reservation for filesystems: no extension's filesystem id
     // falls in `oxplow:`, the namespace of oxplow's own.

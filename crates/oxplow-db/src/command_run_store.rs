@@ -114,6 +114,14 @@ pub fn insert_with_outcome_tx(
     row: &NewCommandRun,
     outcome: Option<RunOutcome>,
 ) -> Result<i64, DomainError> {
+    if !run.contribution_ref().is_some_and(|reference| {
+        reference.id.kind == oxplow_domain::contribution::ContributionKind::Command
+    }) {
+        return Err(DomainError::Invariant(format!(
+            "command {} needs its own command run",
+            row.command
+        )));
+    }
     match outcome {
         Some(outcome) => {
             crate::contribution_run_store::record_tx(conn, run, outcome, row.error.as_deref())?
@@ -150,7 +158,7 @@ pub fn insert_rolled_back_children_tx(
     conn: &Connection,
     run: &RunContext,
 ) -> Result<(), DomainError> {
-    for (child, outcome) in run.rollback_observations() {
+    for (child, outcome, error) in run.rollback_observations() {
         let Some(contribution) = child.contribution_ref() else {
             continue;
         };
@@ -164,7 +172,9 @@ pub fn insert_rolled_back_children_tx(
         if exists {
             continue;
         }
-        let error = (outcome != RunOutcome::Ok).then_some("parent command transaction rolled back");
+        let error = error.as_deref().or_else(|| {
+            (outcome == RunOutcome::Cancelled).then_some("parent command transaction rolled back")
+        });
         crate::contribution_run_store::record_tx(conn, &child, outcome, error)?;
         conn.execute(
             "INSERT INTO command_run (command, run_id) VALUES (?1, ?2)",
@@ -195,7 +205,7 @@ pub fn mark_undone_tx(conn: &Connection, id: i64, undone_by: i64) -> Result<(), 
         .map_err(map_sql_err)?;
     if n == 0 {
         return Err(DomainError::Invariant(format!(
-            "audit row {id} is missing or already undone"
+            "command run {id} is missing or already undone"
         )));
     }
     Ok(())

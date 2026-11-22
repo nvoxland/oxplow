@@ -239,7 +239,9 @@ impl JobAuthorityHost {
             .validate()
             .map_err(|_| JobAuthorityError::Denied)?;
         job.job.validate().map_err(|_| JobAuthorityError::Denied)?;
-        if identity.job_id() != &job.job.id || provenance.originating_run_id() != &job.job.run_id {
+        if identity.job_id() != &job.job.id
+            || provenance.originating_run_id() != &job.job.queued_by_run_id
+        {
             return Err(JobAuthorityError::Denied);
         }
         let token = identity.attempt_fence();

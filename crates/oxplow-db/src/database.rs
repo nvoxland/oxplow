@@ -2084,10 +2084,12 @@ mod tests {
             "once_mark",
             "snapshot_op",
             "event_log",
-            "extension_run",
+            "contribution_run",
         ] {
+            let columns = columns(table);
+            assert!(!columns.is_empty(), "missing table {table}");
             assert!(
-                !columns(table).contains(&"effort_id".to_string()),
+                !columns.iter().any(|column| column == "effort_id"),
                 "{table}"
             );
         }
@@ -2622,7 +2624,7 @@ mod tests {
             )
             .unwrap_err();
         assert!(
-            refused.to_string().contains("extension job context origin"),
+            refused.to_string().contains("job run context origin"),
             "{refused}"
         );
         crate::sql_functions::register(&conn).unwrap();

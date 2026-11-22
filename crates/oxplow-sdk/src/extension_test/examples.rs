@@ -454,7 +454,7 @@ pub(super) async fn undo_run(
     let rows = host
         .svc
         .commands
-        .audit_store()
+        .command_run_store()
         .list_recent(1000)
         .await
         .unwrap_or_default();

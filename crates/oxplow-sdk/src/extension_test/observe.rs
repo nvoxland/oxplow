@@ -529,6 +529,7 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
     let effect = format!("{}/{}", host.namespace_of(extension), local);
     let live = observations.live;
     let error = text("error").map(str::to_string);
+    let input = body.get("input").cloned();
     let outcome = (!live).then_some(outcome);
     if kind == ContributionKind::Job {
         return Box::pin(observe_job_attempt(host, run, outcome)).await;
@@ -579,7 +580,7 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
                     &run,
                     &NewCommandRun {
                         command: local.clone(),
-                        input: None,
+                        input: input.clone(),
                         outcome: CommandOutcome::Ok,
                         error: error.clone(),
                         result: None,

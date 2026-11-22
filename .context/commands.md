@@ -567,29 +567,33 @@ An external read also receives the command's run ID, so model calls can
 link to it.
 
 **Retention.** The sweep removes refused runs (`invalid` or `denied`)
-after 30 days (`REFUSED_AUDIT_DAYS`). Other rows with NULL input age out
-after the 90-day `CONTRIBUTION_RUN_DAYS` window. Runs with recorded input
-stay for undo, approvals and event links. Deleting a shared run cascades
-to its command detail.
+after 30 days (`REFUSED_COMMAND_RUN_DAYS`). Failed runs and reads age out after
+the 90-day `CONTRIBUTION_RUN_DAYS` window. Successful runs with recorded
+input stay for undo, approvals and event links. Deleting a shared run
+cascades to its command detail.
 
 **Reading it.** `v_command_run` joins the command detail to the shared
 run and exposes every recorded command, including reads and unchanged
-calls. `changed = 1` means the detail has recorded input. The Command data
+calls. `changed = 1` means the run succeeded and recorded its input. The Command data
 page filters on that field and a row opens Run details. The bundled-todo
 Agent Interface page counts all completed runs over the last 30 days,
 including reads, when it shows the share that ended invalid, denied or
 failed.
+
+Native commands registered in the `oxplow.*` namespace record
+`oxplow-foundation` as their owner. An external handler receives the
+command's own run context so model calls and child operations can link to it.
 
 `CommandBus::undo(actor, command_run_id, confirmed)` loads the command detail and its shared run. It refuses a
 run that didn't complete, was already undone or has no inverse. It runs the
 inverse through the same pipeline and sets `undone_by` to the new detail
 row's ID. The original row is claimed **with** the inverse run
 — marked `undone_by` inside the run's transaction for a `Tx` inverse,
-or claimed (`undone_by = 0`, pending) before an `External` inverse and
-released if it fails — so two concurrent undos can't both apply it
-(review). The one that loses answers `Invalid` ("audit row N was
-already undone", `lost_race`) and leaves **no audit row**: it didn't
-fail, it was beaten to it. An approval's lost race is the same.
+or claimed before an `External` inverse and released if it fails. The
+`UNDO_PENDING = 0` sentinel reserves `undone_by` before the inverse has
+a command run ID. Those IDs start at 1. A concurrent undo that loses the
+claim returns `Invalid` ("command run N was already undone", `lost_race`)
+without recording a run. Approval claims use the same approach.
 
 **Agent rules follow the agent.** An `Actor::Page { on_behalf_of }` —
 or an `Actor::Component { component, on_behalf_of }`, a custom component

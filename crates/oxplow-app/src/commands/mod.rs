@@ -112,12 +112,11 @@ pub struct HandlerOutput {
     /// more than once (`Database::transaction` retries on SQLITE_BUSY).
     pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
     /// The run found nothing to change (a re-located comment anchor
-    /// already where it was). A `Tx` call that says so leaves no record —
-    /// no audit row, no `command.executed` — like a read, and its
-    /// transaction is rolled back, so nothing it wrote lands unaudited; one
-    /// that also returns events or an inverse (a change) is refused.
-    /// An undo, an approval or an effect's reaction is recorded
-    /// anyway, since its row must be marked. Honoured for `Tx` handlers
+    /// already where it was). Like a read, an unchanged `Tx` call records a
+    /// run without an execution event. Its transaction rolls back, and
+    /// the bus refuses results that include events or an inverse.
+    /// An undo, an approval or an effect's reaction records its execution
+    /// event because the original row must be marked. Honoured for `Tx` handlers
     /// only: an `External` one's work is outside the database, so it is
     /// always recorded.
     pub unchanged: bool,
@@ -452,7 +451,12 @@ impl Command {
                         oxplow_domain::contribution::ContributionKind::Command,
                         &self.spec.id,
                     ),
-                    extension: "core".into(),
+                    extension: if self.spec.id.starts_with("oxplow.") {
+                        "oxplow-foundation"
+                    } else {
+                        "core"
+                    }
+                    .into(),
                     version: None,
                     generation: None,
                     deployment: None,
@@ -818,7 +822,7 @@ impl RunOrigin {
     /// effect's step carries its key.
     fn invocation(&self, run: &RunContext, index: usize, call: &str, input: &Value) -> Invocation {
         Invocation {
-            run: run.child(None, Mode::External),
+            run: run.clone(),
             idempotency_key: match self {
                 RunOrigin::Effect(key, _, _) => Some(effect_step_key(key, index, call, input)),
                 _ => None,
@@ -831,7 +835,7 @@ impl RunOrigin {
 pub struct CommandBus {
     db: Database,
     log: SqliteEventLogStore,
-    audit: SqliteCommandRunStore,
+    command_runs: SqliteCommandRunStore,
     proposals: SqliteProposalStore,
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
@@ -867,7 +871,7 @@ impl CommandBus {
     ) -> Self {
         let sql_db = db.clone();
         Self {
-            audit: SqliteCommandRunStore::new(db.clone()),
+            command_runs: SqliteCommandRunStore::new(db.clone()),
             proposals: SqliteProposalStore::new(db.clone()),
             db,
             log,
@@ -1062,8 +1066,8 @@ impl CommandBus {
         self.log.vocabulary()
     }
 
-    pub fn audit_store(&self) -> &SqliteCommandRunStore {
-        &self.audit
+    pub fn command_run_store(&self) -> &SqliteCommandRunStore {
+        &self.command_runs
     }
 
     pub fn proposal_store(&self) -> &SqliteProposalStore {
@@ -1482,7 +1486,7 @@ impl CommandBus {
                 .unconfirmed(run, origin, prepared, input, preview, gates)
                 .await);
         }
-        // 5a. A read runs without a record: no audit row, no event.
+        // 5a. A read records its run without an execution event.
         if spec.access.reads_only() {
             let read = self.run_read(&resolved, run, input).await;
             self.ran_unaudited(run, &spec.id, read.as_ref().err()).await;
@@ -1606,7 +1610,7 @@ impl CommandBus {
                                 effect,
                                 &recorded,
                                 None,
-                                false,
+                                None,
                             ),
                         };
                         if let Err(e) = marked {
@@ -1770,9 +1774,7 @@ impl CommandBus {
         }
     }
 
-    /// A run that leaves no audit row — a read, or one that changed
-    /// nothing — is still an extension's run when it is one: recorded as
-    /// such ([`oxplow_db::contribution_run_store`]).
+    /// Record a read or unchanged command without a `command.executed` event.
     async fn ran_unaudited(&self, run: &RunContext, command: &str, failed: Option<&CommandError>) {
         let (ended, error) = match failed {
             None => (Outcome::Ok, None),

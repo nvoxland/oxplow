@@ -1,12 +1,13 @@
-//! `effect_run` (V149, P8.D10; attempts V156, P9.D4): each effect's
+//! `effect_run`: each effect's
 //! reaction to each event. The live consumer makes at most one attempt;
 //! a person's retry of a failed reaction makes the next, so a reaction
 //! is `(effect, event_id)` and its **state is its latest attempt's**.
-//! The command bus writes an attempt's row in its run's own transaction
-//! (or claims it `started` before a run with a step outside it); the
-//! app's `effect_triggers` reads it to never run, or re-send, twice.
+//! The command bus writes an attempt's row in its run's own transaction.
+//! A step outside that transaction first gets a claim with a NULL outcome.
+//! The app's `effect_triggers` checks the claim on redelivery.
 
 use rusqlite::{params, Connection, OptionalExtension};
+use std::{sync::Arc, time::Duration};
 
 use crate::database::map_sql_err;
 use oxplow_domain::{
@@ -120,6 +121,16 @@ pub struct Finished {
     pub proposal_id: Option<i64>,
 }
 
+/// A candidate for an automatic retry of this completion.
+pub struct AutomaticRetry {
+    pub resend: String,
+    pub asked: Option<Duration>,
+    pub from: Timestamp,
+}
+
+const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(10), Duration::from_secs(60)];
+const MAX_ASKED_WAIT: Duration = Duration::from_secs(15 * 60);
+
 /// A reaction's latest attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Latest {
@@ -218,7 +229,7 @@ pub fn schedule_retry_tx(
 }
 
 /// Drop `key`'s scheduled retry: it won't be sent again by itself.
-pub fn drop_retry_tx(
+pub(crate) fn drop_retry_tx(
     conn: &Connection,
     key: &EffectRunKey,
     health: Option<(&oxplow_domain::vocabulary::Vocabulary, &str)>,
@@ -247,6 +258,25 @@ pub fn drop_retry_tx(
         }
     }
     Ok(())
+}
+
+/// A retry that cannot run becomes a person's to retry. Clear its schedule
+/// and count the failure together when the effect still exists.
+pub async fn abandon_retry(
+    db: &crate::Database,
+    key: EffectRunKey,
+    health: Option<(Arc<oxplow_domain::vocabulary::Vocabulary>, String)>,
+) -> Result<(), DomainError> {
+    db.transaction(move |tx| {
+        drop_retry_tx(
+            tx,
+            &key,
+            health
+                .as_ref()
+                .map(|(vocabulary, reason)| (vocabulary.as_ref(), reason.as_str())),
+        )
+    })
+    .await
 }
 
 /// Drop every scheduled retry of `effect`: what they would send
@@ -306,15 +336,14 @@ pub fn due_retries_tx(
         .collect()
 }
 
-/// The attempts a person started — a retry, a backfill — that are still
-/// `started`. No pump delivery makes them, so none redelivers them: at
-/// start, each was cut off.
-pub fn person_started_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainError> {
+/// Attempts whose claim survived a stop. At boot the host decides which
+/// live attempts can be recovered by redelivery.
+pub fn unfinished_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainError> {
     let mut st = conn
         .prepare(
             "SELECT a.effect, a.event_id, a.event_seq, a.attempt, a.origin
                FROM effect_run a JOIN contribution_run r USING (run_id)
-              WHERE r.outcome IS NULL AND a.origin <> 'live' ORDER BY a.id",
+              WHERE r.outcome IS NULL ORDER BY a.id",
         )
         .map_err(map_sql_err)?;
     let rows: Vec<(String, String, i64, u32, String)> = st
@@ -527,8 +556,42 @@ pub fn finish_tx(
     Ok(())
 }
 
+/// Finish an attempt and either schedule its retry or account for its
+/// terminal outcome. The caller commits them with its own run and events.
+pub fn finish_with_retry_tx(
+    conn: &Connection,
+    key: &EffectRunKey,
+    done: &Finished,
+    run: Option<&RunContext>,
+    health: Option<&oxplow_domain::vocabulary::Vocabulary>,
+    retry: Option<&AutomaticRetry>,
+) -> Result<bool, DomainError> {
+    let retry = retry.filter(|retry| {
+        done.proposal_id.is_none()
+            && matches!(done.outcome, Outcome::Failed | Outcome::Interrupted)
+            && retry.asked.is_none_or(|asked| asked <= MAX_ASKED_WAIT)
+    });
+    let scheduled = if let Some(retry) = retry {
+        let made = automatic_in_a_row_tx(conn, &key.effect, &key.event_id)?
+            + u32::from(key.origin == ReactionOrigin::Auto && attempt_tx(conn, key)?.is_none());
+        RETRY_DELAYS.get(made as usize).map(|&delay| {
+            let delay = retry.asked.map_or(delay, |asked| delay.max(asked));
+            let at = Timestamp::from_unix_ms(retry.from.unix_ms() + delay.as_millis() as i64);
+            (at, retry.resend.as_str())
+        })
+    } else {
+        None
+    };
+    finish_tx(conn, key, done, run, health.filter(|_| scheduled.is_none()))?;
+    if let Some((at, resend)) = scheduled {
+        schedule_retry_tx(conn, key, &at.to_string(), resend)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// Account for a recorded outcome once retry policy decides it is final.
-pub fn account_completion_tx(
+pub(crate) fn account_completion_tx(
     conn: &Connection,
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
     key: &EffectRunKey,
@@ -667,6 +730,72 @@ mod tests {
     /// runs — what is sent again when it is cut off. finished, it
     /// drops it; only a scheduled retry keeps a composition, so none
     /// outlives the retry it was for.
+    #[tokio::test]
+    async fn a_resendable_failure_without_a_retry_finishes_with_its_health_count() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            let first = key();
+            let run = context(&first);
+            let failed = Finished {
+                outcome: Outcome::Failed,
+                reason: Some("step unavailable".into()),
+                command_run_id: None,
+                proposal_id: None,
+            };
+            let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+            let mut retry = AutomaticRetry {
+                resend: "{}".into(),
+                asked: None,
+                from: Timestamp::now(),
+            };
+            claim_tx(tx, &first, &run, Some(&retry.resend))?;
+            assert!(finish_with_retry_tx(
+                tx,
+                &first,
+                &failed,
+                Some(&run),
+                Some(&vocabulary),
+                Some(&retry)
+            )?);
+            let failures = |tx: &Connection| {
+                tx.query_row(
+                    "SELECT consecutive_failures FROM contribution_health
+                      WHERE namespace = 'acme' AND contribution = 'notify' AND kind = 'effect'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(map_sql_err)
+            };
+            assert_eq!(failures(tx)?, None);
+
+            retry.asked = Some(MAX_ASKED_WAIT + Duration::from_secs(1));
+            let automatic = EffectRunKey {
+                attempt: 2,
+                origin: ReactionOrigin::Auto,
+                ..first
+            };
+            let run = context(&automatic);
+            claim_tx(tx, &automatic, &run, Some(&retry.resend))?;
+            assert!(!finish_with_retry_tx(
+                tx,
+                &automatic,
+                &failed,
+                Some(&run),
+                Some(&vocabulary),
+                Some(&retry)
+            )?);
+            assert_eq!(
+                state_tx(tx, &automatic)?,
+                Some(state(Some(Outcome::Failed)))
+            );
+            assert_eq!(failures(tx)?, Some(1));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn a_claim_keeps_what_it_composed() {
         let db = Database::in_memory();

@@ -204,7 +204,8 @@ pub struct JobRun {
     pub id: JobId,
     pub owner: JobOwner,
     /// Host-generated identity of the originating run; immutable attribution.
-    pub run_id: RunId,
+    #[serde(rename = "run_id", alias = "queued_by_run_id")]
+    pub queued_by_run_id: RunId,
     pub intent_key: IntentKey,
     pub replay_policy: ReplayPolicy,
     pub state: JobState,
@@ -307,7 +308,7 @@ impl JobRun {
     pub fn queued(
         id: JobId,
         owner: JobOwner,
-        run_id: RunId,
+        queued_by_run_id: RunId,
         intent_key: IntentKey,
         replay_policy: ReplayPolicy,
         now_ms: i64,
@@ -318,7 +319,7 @@ impl JobRun {
         let job = Self {
             id,
             owner,
-            run_id,
+            queued_by_run_id,
             intent_key,
             replay_policy,
             state: JobState::Queued,
@@ -338,7 +339,7 @@ impl JobRun {
         self.id.validate()?;
         self.owner.validate()?;
         self.intent_key.validate()?;
-        if !is_uuid_v7(self.run_id.as_str())
+        if !is_uuid_v7(self.queued_by_run_id.as_str())
             || self.created_at_ms < 0
             || self.updated_at_ms < self.created_at_ms
             || self.fence > MAX_PERSISTED_COUNTER

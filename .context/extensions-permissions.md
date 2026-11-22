@@ -232,7 +232,7 @@ its scope trace.
   credentials the run received. Finished runs have a 90-day window
   (`CONTRIBUTION_RUN_DAYS`), with separate rules for command runs
   ([commands.md](./commands.md) "Retention"). Pinned by `contribution_run_tests.rs`
-  and `event_retention::tests::contribution_runs_past_their_window_are_swept`.
+  and the kind-specific retention tests in `event_retention.rs`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts and report

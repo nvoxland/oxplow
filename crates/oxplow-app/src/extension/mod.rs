@@ -3,6 +3,8 @@
 //! another crate imports it (`.context/working-in-this-repo.md`).
 
 #[cfg(test)]
+mod contribution_run_pin_tests;
+#[cfg(test)]
 mod contribution_run_tests;
 pub(crate) mod extension_activation;
 #[cfg(test)]
@@ -27,8 +29,6 @@ mod extension_lifecycle_tests;
 #[cfg(test)]
 pub(crate) mod extension_private_state_tests;
 pub mod extension_resources;
-#[cfg(test)]
-mod extension_run_pin_tests;
 pub(crate) mod extension_runtime_adapters;
 pub(crate) mod extension_secrets;
 pub(crate) mod extension_services;

@@ -93,7 +93,7 @@ impl Composed {
 }
 
 impl ComposedCall {
-    fn audit_detail(
+    fn command_detail(
         &self,
         out: &HandlerOutput,
         scopes: BTreeMap<String, u32>,
@@ -626,13 +626,21 @@ fn run_tree(
         }
         use oxplow_domain::run::Outcome as RunOutcome;
         let checked = out.and_then(|out| honest(out, &c.call.name));
-        c.run.observe_rollback_outcome(match &checked {
+        let outcome = match &checked {
             Ok(out) if out.unchanged => RunOutcome::Ok,
             Ok(_) => RunOutcome::Cancelled,
             Err(CommandError::Denied { .. }) => RunOutcome::Denied,
             Err(CommandError::Invalid { .. }) => RunOutcome::Invalid,
             Err(_) => RunOutcome::Failed,
+        };
+        let error = checked.as_ref().err().map(|error| {
+            if ctx.run.used_private_config() || c.run.used_private_config() {
+                "command using private configuration failed".to_owned()
+            } else {
+                error.to_string()
+            }
         });
+        c.run.observe_rollback_outcome(outcome, error);
         let mut out = checked?;
         if ctx.trace.summary().contains_key("config.secret")
             && !c.run.trace().summary().contains_key("config.secret")
@@ -642,7 +650,7 @@ fn run_tree(
         super::insert_tx(
             ctx.conn,
             &c.run,
-            &c.audit_detail(&out, c.run.trace().summary()),
+            &c.command_detail(&out, c.run.trace().summary()),
         )?;
         if let Some(after) = out.after_commit.take() {
             afters.push(after);
@@ -1009,7 +1017,7 @@ impl CommandBus {
             match ran {
                 Ok((mut out, used)) => {
                     if !recorded_in_transaction {
-                        let row = step.audit_detail(&out, used.clone());
+                        let row = step.command_detail(&out, used.clone());
                         let child = step.run.clone();
                         if let Err(error) = self
                             .db
@@ -1148,6 +1156,10 @@ impl CommandBus {
         let run_c = run.clone();
         let vocabulary = self.log.vocabulary().clone();
         let failed_c = failed.clone();
+        let retry_after = match &stop {
+            Some(CommandError::Unavailable { retry_after_ms, .. }) => Some(*retry_after_ms),
+            _ => None,
+        };
         let recorded = self
             .db
             .transaction(move |tx| {
@@ -1170,15 +1182,24 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.command_run_id)?;
                     }
-                    RunOrigin::Effect(key, resend, effect) => super::record_effect_tx(
-                        tx,
-                        &vocabulary.current(),
-                        key,
-                        effect,
-                        &recorded,
-                        failed_c.clone(),
-                        resend.is_some(),
-                    )?,
+                    RunOrigin::Effect(key, resend, effect) => {
+                        let retry = resend.as_ref().zip(retry_after).map(|(resend, asked)| {
+                            oxplow_db::effect_run_store::AutomaticRetry {
+                                resend: resend.to_string(),
+                                asked: asked.map(std::time::Duration::from_millis),
+                                from: oxplow_domain::Timestamp::now(),
+                            }
+                        });
+                        super::record_effect_tx(
+                            tx,
+                            &vocabulary.current(),
+                            key,
+                            effect,
+                            &recorded,
+                            failed_c.clone(),
+                            retry.as_ref(),
+                        )?;
+                    }
                     RunOrigin::Approval(id) => {
                         let id = *id;
                         proposal_store::finish_claim_tx(tx, id, recorded.command_run_id)?;
@@ -1254,7 +1275,7 @@ impl CommandBus {
                 match answer {
                     Ok(out) => {
                         let used = trace.summary();
-                        super::insert_tx(tx, run, &step.audit_detail(&out, used.clone()))
+                        super::insert_tx(tx, run, &step.command_detail(&out, used.clone()))
                             .map_err(TxError::Storage)?;
                         Ok((out, used))
                     }

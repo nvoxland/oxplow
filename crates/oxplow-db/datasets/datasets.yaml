@@ -1713,14 +1713,14 @@ datasets:
     - { not_null: capability }
     - { not_null: provider }
 - name: command_run
-  version: 1
+  version: 2
   key: [id]
   description: "Every command run on the bus, including reads and refusals. Each row names the command, who ran it, how it ended and the contribution run that holds its cost and authority."
   groups: [contribution_run]
   fields:
     - { name: "id", type: "INTEGER", doc: "The command run's integer detail id." }
     - { name: "command", type: "TEXT", doc: "The command id (`oxtask.task.create`)." }
-    - { name: "changed", type: "INT", doc: "1 when the command recorded its input. Reads and unchanged commands record no input." }
+    - { name: "changed", type: "INT", doc: "1 when the command completed with outcome ok and recorded its input." }
     - { name: "undone", type: "INT", doc: "1 when another command run has undone this run." }
     - { name: "uri", type: "TEXT", doc: "The contribution run's URI (`oxplow:oxplow/contribution_run?id=<run_id>`)." }
   tests:

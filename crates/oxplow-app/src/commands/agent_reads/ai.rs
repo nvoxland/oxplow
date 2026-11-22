@@ -144,7 +144,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     };
                     questions.insert(name, question);
                 }
-                invocation.run.used_ai();
                 let decision = svc
                     .ai_compute
                     .decide(
@@ -165,7 +164,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             |svc, invocation, p: AiSummarizeParams| async move {
                 let caller = ai_caller(invocation.actor())?;
                 check_ai_text("text", &p.text)?;
-                invocation.run.used_ai();
                 let summary = svc
                     .ai_compute
                     .summarize(

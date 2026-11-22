@@ -455,17 +455,47 @@ pub fn finished_tx(
     cause: Option<oxplow_domain::EventId>,
     account_health: bool,
 ) -> Result<(), oxplow_domain::DomainError> {
+    finish_attempt_tx(
+        tx,
+        vocabulary,
+        key,
+        done,
+        run,
+        Completion {
+            cause,
+            account_health,
+            retry: None,
+        },
+    )
+    .map(|_| ())
+}
+
+pub(crate) struct Completion<'a> {
+    pub cause: Option<oxplow_domain::EventId>,
+    pub account_health: bool,
+    pub retry: Option<&'a oxplow_db::effect_run_store::AutomaticRetry>,
+}
+
+pub(crate) fn finish_attempt_tx(
+    tx: &rusqlite::Connection,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    key: &oxplow_db::effect_run_store::EffectRunKey,
+    done: &oxplow_db::effect_run_store::Finished,
+    run: Option<&oxplow_domain::run::RunContext>,
+    completion: Completion<'_>,
+) -> Result<bool, oxplow_domain::DomainError> {
     use oxplow_db::effect_run_store::ReactionOrigin;
     use oxplow_domain::events::schema::{
         EffectOrigin, EffectOutcome, EffectResult, EffectResultV5,
     };
     use oxplow_domain::run::Outcome;
-    oxplow_db::effect_run_store::finish_tx(
+    let scheduled = oxplow_db::effect_run_store::finish_with_retry_tx(
         tx,
         key,
         done,
         run,
-        account_health.then_some(vocabulary),
+        completion.account_health.then_some(vocabulary),
+        completion.retry,
     )?;
     let outcome = match done.outcome {
         _ if done.proposal_id.is_some() => EffectOutcome::Proposed,
@@ -501,9 +531,9 @@ pub fn finished_tx(
         },
     )
     .with_subject([event_ref, effect_ref]);
-    result.cause = cause;
+    result.cause = completion.cause;
     oxplow_db::event_log_store::append_tx(tx, vocabulary, &result)?;
-    Ok(())
+    Ok(scheduled)
 }
 
 #[cfg(test)]

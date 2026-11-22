@@ -645,7 +645,9 @@ a person's, its failure counted; a due time that can't be read
 counts as late) — otherwise the
 retry is dropped and the failure is a person's. An attempt awaiting its
 retry isn't counted against the effect's health (`Reacted::Retrying`);
-the attempt that exhausts the retries counts once. A step inside oxplow, or
+the attempt that exhausts the retries counts once. The effect store finishes
+the attempt and records either its retry schedule or its health change in
+the same transaction. A step inside oxplow, or
 a provider that doesn't declare the promise, waits for a person. An
 attempt cut off by oxplow stopping is sent again by itself on the same
 terms. Its claim keeps what it composed when every step is safe to send

@@ -54,9 +54,9 @@ test("a failure is recorded once and shown at the control that ran it", async ()
   off();
 });
 
-// The record links what recorded the run: the audit row the daemon's error
+// The record links what recorded the run: the command run the daemon's error
 // names, and an approval's proposal.
-test("a failure's record names the run's audit row and the proposal it decided", async () => {
+test("a failure's record names the command run ID and the proposal it decided", async () => {
   const { reports, runner } = setup();
   await runner.run("Approve: Delete", () => Promise.reject(new IpcCallError("gone", "INVALID", null, [], 41)), {
     command: "acme.issue.delete",

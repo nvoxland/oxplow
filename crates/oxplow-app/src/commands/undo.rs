@@ -16,11 +16,11 @@ impl CommandBus {
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
         let row = self
-            .audit
+            .command_runs
             .get(command_run_id)
             .await?
             .ok_or_else(|| CommandError::Failed {
-                message: format!("audit row {command_run_id} not found"),
+                message: format!("command run {command_run_id} not found"),
             })?;
         let inverse = undoable(&row)?;
         self.run_inner(
@@ -33,9 +33,9 @@ impl CommandBus {
         .await
     }
 
-    /// Before an `External` run with an origin: mark the audit row as
+    /// Before an `External` run with an origin: mark the command run as
     /// being undone (`undone_by = UNDO_PENDING`), or the proposal as being
-    /// approved (approved, no audit row yet). Fails when it's already
+    /// approved (approved, no command run yet). Fails when it's already
     /// undone or decided, or being so.
     pub(super) async fn claim(&self, origin: &RunOrigin) -> Result<(), CommandError> {
         match origin {
@@ -117,7 +117,9 @@ pub(super) fn lost_race(
         return Err(e);
     }
     let message = match origin {
-        RunOrigin::Undo(command_run_id) => format!("audit row {command_run_id} was already undone"),
+        RunOrigin::Undo(command_run_id) => {
+            format!("command run {command_run_id} was already undone")
+        }
         RunOrigin::Approval(id) => format!(
             "{} was already decided",
             oxplow_domain::uri::build::proposal_uri(*id)
@@ -136,10 +138,10 @@ pub(super) fn lost_race(
     })
 }
 
-/// `undone_by` while an `External` undo is running (audit ids start at 1).
+/// `undone_by` while an `External` undo is running (command run IDs start at 1).
 pub(super) const UNDO_PENDING: i64 = 0;
 
-/// Replace a pending undo claim with the undo run's audit row.
+/// Replace a pending undo claim with the inverse command's run ID.
 pub(super) fn finish_undo_claim_tx(
     tx: &rusqlite::Connection,
     original: i64,
@@ -157,16 +159,16 @@ pub(super) fn finish_undo_claim_tx(
 pub(super) fn undoable(row: &CommandRun) -> Result<CommandCall, CommandError> {
     if row.outcome != Outcome::Ok {
         return Err(CommandError::Failed {
-            message: format!("audit row {} did not complete; nothing to undo", row.id),
+            message: format!("command run {} did not complete; nothing to undo", row.id),
         });
     }
     if let Some(by) = row.undone_by {
         return Err(CommandError::Invalid {
             field: None,
-            message: format!("audit row {} was already undone by {by}", row.id),
+            message: format!("command run {} was already undone by {by}", row.id),
         });
     }
     row.inverse.clone().ok_or_else(|| CommandError::Failed {
-        message: format!("`{}` (audit {}) is not undoable", row.command, row.id),
+        message: format!("`{}` (command run {}) is not undoable", row.command, row.id),
     })
 }

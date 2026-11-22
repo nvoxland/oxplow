@@ -1,5 +1,5 @@
-//! Recording a run (`.context/commands.md` "The pipeline" step 5): its audit
-//! row, `command.executed` and its events in one transaction, or — for a
+//! Recording a run (`.context/commands.md` "The pipeline" step 5): its
+//! shared run and command detail, `command.executed` and its events in one transaction, or — for a
 //! run that wrote nothing — its run record alone.
 
 use super::*;
@@ -12,18 +12,21 @@ pub(super) fn record_effect_tx(
     effect: &RunContext,
     command: &Recorded,
     failed: Option<String>,
-    may_retry: bool,
+    retry: Option<&oxplow_db::effect_run_store::AutomaticRetry>,
 ) -> Result<(), oxplow_domain::DomainError> {
-    let account_health = failed.is_none() || !may_retry;
-    crate::effects::finished_tx(
+    crate::effects::finish_attempt_tx(
         tx,
         vocabulary,
         key,
         &crate::effects::ran(command.command_run_id, failed),
         Some(effect),
-        Some(command.event_id.clone()),
-        account_health,
+        crate::effects::Completion {
+            cause: Some(command.event_id.clone()),
+            account_health: true,
+            retry,
+        },
     )
+    .map(|_| ())
 }
 
 tokio::task_local! {
@@ -99,7 +102,9 @@ impl CommandBus {
             .await
         {
             Ok(id) => note_failed_run(id),
-            Err(e) => tracing::warn!(error = %e, command = %spec.id, "command audit write failed"),
+            Err(e) => {
+                tracing::warn!(error = %e, command = %spec.id, "recording the command run failed")
+            }
         }
     }
 
@@ -154,7 +159,7 @@ impl CommandBus {
                         effect,
                         &recorded,
                         None,
-                        false,
+                        None,
                     )?,
                     RunOrigin::Approval(id) => {
                         let id = *id;

@@ -3332,6 +3332,18 @@ datasets:
     }
 
     #[test]
+    fn a_dataset_cannot_use_an_unknown_field_group() {
+        let unknown = SHARED_FIELDS.replacen("groups: [common]", "groups: [missing]", 1);
+        let error = grouped_sources(&unknown).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("`a` uses unknown field group `missing`"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn a_dataset_cannot_redeclare_a_field_from_a_group() {
         let duplicate = SHARED_FIELDS.replace(
             "fields: [{ name: title, type: TEXT, doc: Row title. }]",

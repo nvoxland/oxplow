@@ -184,21 +184,21 @@ async fn extension_namespaces(db: &Database) -> Result<Vec<String>, DomainError>
 pub struct SweepReport {
     pub content_deleted: usize,
     pub payloads_expired: usize,
-    /// Refused runs' audit rows past [`REFUSED_AUDIT_DAYS`], deleted.
-    pub refused_audit_deleted: usize,
-    /// Extension runs past [`CONTRIBUTION_RUN_DAYS`], deleted.
+    /// Refused command runs past [`REFUSED_COMMAND_RUN_DAYS`], deleted.
+    pub refused_command_runs_deleted: usize,
+    /// Contribution runs past [`CONTRIBUTION_RUN_DAYS`], deleted.
     pub contribution_runs_deleted: usize,
     /// A project's windows naming a namespace nothing logs: kept
     /// for an extension not installed yet, and said, since a typo does nothing.
     pub unused: Vec<String>,
 }
 
-/// How long a refused run's audit row — input that didn't fit, a caller
+/// How long a refused command run — input that didn't fit, a caller
 /// denied — is kept. It wrote nothing and nothing points at it (no
 /// `command.executed`, no inverse, no proposal or effect run), so it is
 /// only a record of an attempt; a confused or polling agent makes many.
 /// Runs that did something stay.
-pub const REFUSED_AUDIT_DAYS: i64 = 30;
+pub const REFUSED_COMMAND_RUN_DAYS: i64 = 30;
 
 /// How long an extension run's record is kept: a collector's events'
 /// window, so a run and the events it led to age out together.
@@ -225,7 +225,7 @@ pub(crate) fn sweep_run_batch_tx(
                AND CASE r.kind
                    WHEN 'command' THEN CASE
                        WHEN r.outcome IN ('invalid', 'denied') THEN 1
-                       ELSE r.started_at < ?2 AND a.input_json IS NULL
+                       ELSE r.started_at < ?2 AND (r.outcome <> 'ok' OR a.input_json IS NULL)
                    END
                    WHEN 'collector' THEN r.started_at < ?2 AND NOT EXISTS (
                        SELECT 1 FROM collector_checkpoint p WHERE p.last_run_id = r.run_id
@@ -334,14 +334,14 @@ async fn sweep_in_batches(
             }
         }
     }
-    let refused_cutoff = before(REFUSED_AUDIT_DAYS);
+    let refused_cutoff = before(REFUSED_COMMAND_RUN_DAYS);
     let run_cutoff = before(CONTRIBUTION_RUN_DAYS);
     loop {
         let (refused_cutoff, run_cutoff) = (refused_cutoff.clone(), run_cutoff.clone());
         let (refused, other) = db
             .transaction(move |tx| sweep_run_batch_tx(tx, &refused_cutoff, &run_cutoff, batch))
             .await?;
-        report.refused_audit_deleted += refused;
+        report.refused_command_runs_deleted += refused;
         report.contribution_runs_deleted += other;
         if ((refused + other) as i64) < batch {
             break;
@@ -404,22 +404,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_retention_uses_both_windows_and_keeps_recorded_input() {
+    async fn command_retention_uses_both_windows_and_keeps_successful_changes() {
         let db = Database::in_memory();
         db.transaction(|tx| {
             for (id, outcome, age, input) in [
-                ("denied", "denied", REFUSED_AUDIT_DAYS + 1, Some("{}")),
-                ("invalid", "invalid", REFUSED_AUDIT_DAYS + 1, Some("{}")),
+                ("denied", "denied", REFUSED_COMMAND_RUN_DAYS + 1, Some("{}")),
+                (
+                    "invalid",
+                    "invalid",
+                    REFUSED_COMMAND_RUN_DAYS + 1,
+                    Some("{}"),
+                ),
                 (
                     "at-refusal-cutoff",
                     "invalid",
-                    REFUSED_AUDIT_DAYS,
+                    REFUSED_COMMAND_RUN_DAYS,
                     Some("{}"),
                 ),
                 ("old-read", "ok", CONTRIBUTION_RUN_DAYS + 1, None),
                 ("at-run-cutoff", "ok", CONTRIBUTION_RUN_DAYS, None),
                 ("changed", "ok", 365, Some("{}")),
-                ("failed-with-input", "failed", 365, Some("{}")),
+                (
+                    "failed-with-input",
+                    "failed",
+                    CONTRIBUTION_RUN_DAYS + 1,
+                    Some("{}"),
+                ),
+                (
+                    "failed-at-cutoff",
+                    "failed",
+                    CONTRIBUTION_RUN_DAYS,
+                    Some("{}"),
+                ),
             ] {
                 insert_finished_run(tx, id, "command", outcome, age)?;
                 tx.execute(
@@ -438,13 +454,13 @@ mod tests {
         let report = sweep_in_batches(&db, now, &BTreeMap::new(), 2)
             .await
             .unwrap();
-        assert_eq!(report.refused_audit_deleted, 2);
-        assert_eq!(report.contribution_runs_deleted, 1);
+        assert_eq!(report.refused_command_runs_deleted, 2);
+        assert_eq!(report.contribution_runs_deleted, 2);
         let kept = [
             "at-refusal-cutoff",
             "at-run-cutoff",
             "changed",
-            "failed-with-input",
+            "failed-at-cutoff",
         ];
         assert_eq!(
             run_ids(&db, "SELECT run_id FROM contribution_run ORDER BY run_id").await,
@@ -630,7 +646,7 @@ mod tests {
             SweepReport {
                 content_deleted: 5,
                 payloads_expired: 5,
-                refused_audit_deleted: 0,
+                refused_command_runs_deleted: 0,
                 contribution_runs_deleted: 0,
                 unused: Vec::new(),
             }

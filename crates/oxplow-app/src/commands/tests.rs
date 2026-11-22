@@ -246,7 +246,7 @@ async fn a_read_command_has_details_without_its_payload() {
             "{access:?}"
         );
         assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
-        let rows = bus.audit_store().list_recent(10).await.unwrap();
+        let rows = bus.command_run_store().list_recent(10).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].command, "oxplow.kv.get");
         assert!(rows[0].input.is_null());
@@ -426,7 +426,7 @@ async fn a_tx_command_writes_its_state_audit_and_events_together() {
     assert_eq!(out.result, json!({"k": "a", "v": "1"}));
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let audit = bus
-        .audit_store()
+        .command_run_store()
         .get(out.command_run_id.unwrap())
         .await
         .unwrap()
@@ -480,7 +480,7 @@ async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
         "the handler's write rolled back"
     );
     assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
-    let recent = bus.audit_store().list_recent(5).await.unwrap();
+    let recent = bus.command_run_store().list_recent(5).await.unwrap();
     assert_eq!(recent.len(), 1);
     assert_eq!(recent[0].outcome, Outcome::Error);
     assert!(recent[0]
@@ -509,7 +509,7 @@ async fn schema_rejection_names_the_field_and_is_audited_invalid() {
         "{err:?}"
     );
     assert_eq!(
-        bus.audit_store().list_recent(1).await.unwrap()[0].outcome,
+        bus.command_run_store().list_recent(1).await.unwrap()[0].outcome,
         Outcome::Invalid
     );
     assert!(matches!(
@@ -586,7 +586,11 @@ async fn confirmation_is_a_persons_move_and_an_agents_run_doesnt_ask() {
     assert_eq!(preview.details, ["k: a", "v: 1"]);
     assert_eq!(kv_value(&db, "a").await, None);
     assert!(
-        bus.audit_store().list_recent(5).await.unwrap().is_empty(),
+        bus.command_run_store()
+            .list_recent(5)
+            .await
+            .unwrap()
+            .is_empty(),
         "nothing audited"
     );
     bus.run(
@@ -743,7 +747,7 @@ async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
         .unwrap();
     assert!(undo.command_run_id.is_some(), "the undo is recorded");
     let row = bus
-        .audit_store()
+        .command_run_store()
         .get(marked.command_run_id.unwrap())
         .await
         .unwrap()
@@ -799,7 +803,7 @@ async fn undo_applies_the_inverse_and_marks_the_row_once() {
         .unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let row = bus
-        .audit_store()
+        .command_run_store()
         .get(second.command_run_id.unwrap())
         .await
         .unwrap()
@@ -854,7 +858,7 @@ async fn concurrent_undos_apply_the_inverse_once() {
     );
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let ok_runs = bus
-        .audit_store()
+        .command_run_store()
         .list_recent(20)
         .await
         .unwrap()
@@ -945,7 +949,7 @@ async fn an_external_run_whose_record_fails_still_reports_success() {
         .unwrap();
     assert_eq!(out.command_run_id, None);
     assert_eq!(kv_value(&db, "e").await.as_deref(), Some("1"));
-    let rows = bus.audit_store().list_recent(10).await.unwrap();
+    let rows = bus.command_run_store().list_recent(10).await.unwrap();
     assert!(rows.iter().all(|r| r.outcome != Outcome::Error), "{rows:?}");
 }
 
@@ -1276,6 +1280,131 @@ fn composing_bus_on(db: Database, bus: CommandBus) -> (Database, Arc<CommandBus>
 
 fn calls(items: &[(&str, &str, &str)]) -> Value {
     json!({ "calls": items.iter().map(|(n, k, v)| json!({ "name": n, "input": { "k": k, "v": v } })).collect::<Vec<_>>() })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_composed_core_command_keeps_its_effect_senders_authority() {
+    use oxplow_domain::contribution::{ContributionId, ContributionKind};
+    use oxplow_domain::grant::{Decision, Enforcement, Grant, GrantRequest};
+    use oxplow_domain::permissions::Permissions;
+    use oxplow_domain::run::{Authority, ContributionRef};
+
+    let (db, bus) = composing_bus();
+    let sequence = "oxplow.command.sequence";
+    let leaf = "oxplow.kv.read_then_set";
+    let Handler::Tx(set) = kv_set() else {
+        unreachable!("kv_set is transactional");
+    };
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        if let Decision::Denied(reason) = ctx.run.decide_service("sql.read") {
+            return Err(CommandError::Denied { reason });
+        }
+        set(ctx, input)
+    }));
+    bus.register(Command::new(kv_spec(leaf, Confirm::Never), handler).unwrap())
+        .unwrap();
+
+    let sender = RunContext::contribution(
+        ContributionRef {
+            id: ContributionId::new("acme", ContributionKind::Effect, "note"),
+            extension: "acme".into(),
+            version: None,
+            generation: None,
+            deployment: None,
+        },
+        Actor::Effect {
+            effect: "acme/note".into(),
+            thread_id: Some(ThreadId::new(7)),
+            stream_id: Some(oxplow_domain::StreamId::new(1)),
+        },
+        Mode::Pure,
+    )
+    .authorized(Authority {
+        declared: GrantRequest {
+            scopes: ["sql.read".into()].into(),
+            ..GrantRequest::default()
+        },
+        grant: Grant::from_permissions(
+            "acme",
+            &Permissions {
+                commands: vec![sequence.into(), leaf.into()],
+                ..Permissions::default()
+            },
+        ),
+        enforcement: Enforcement { hosts: false },
+    });
+    let Decision::Denied(expected) = sender.decide_service("sql.read") else {
+        panic!("the sender has no SQL grant");
+    };
+    let input = calls(&[(leaf, "a", "1")]);
+    let err = bus
+        .run_in(&sender, sequence, input.clone(), false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CommandError::Denied { ref reason } if reason == &expected),
+        "{err:?}"
+    );
+    assert_eq!(kv_value(&db, "a").await, None);
+
+    bus.run(&Actor::Human, sequence, input, false)
+        .await
+        .unwrap();
+    assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn summing_root_command_runs_counts_each_childs_cpu_once() {
+    let (db, bus) = composing_bus();
+    let leaf = "oxplow.kv.measured";
+    let Handler::Tx(set) = kv_set() else {
+        unreachable!("kv_set is transactional");
+    };
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+        // Supply measured CPU directly, so the result needs no clock or worker.
+        ctx.run
+            .used_cpu(input["v"].as_str().unwrap().parse().unwrap(), 0);
+        set(ctx, input)
+    }));
+    bus.register(Command::new(kv_spec(leaf, Confirm::Never), handler).unwrap())
+        .unwrap();
+    let result = bus
+        .run(
+            &Actor::Human,
+            "oxplow.command.sequence",
+            calls(&[(leaf, "first", "9"), (leaf, "second", "17")]),
+            false,
+        )
+        .await
+        .unwrap();
+    let root = result.command_run_id.unwrap();
+    let (totals, children) = db
+        .read(move |conn| {
+            let totals: (i64, i64) = conn
+                .query_row(
+                    "SELECT count(*), sum(cpu_ms) FROM v_contribution_run WHERE parent_run_id IS NULL",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let mut statement = conn
+                .prepare(
+                    "SELECT cpu_ms FROM v_contribution_run
+                      WHERE parent_run_id = (SELECT run_id FROM command_run WHERE id = ?1)
+                      ORDER BY cpu_ms",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let children = statement
+                .query_map([root], |row| row.get::<_, i64>(0))
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok((totals, children))
+        })
+        .await
+        .unwrap();
+    assert_eq!(children, vec![9, 17]);
+    assert_eq!(totals, (1, 26));
 }
 
 /// Step 0 holds for a composed call as for a direct one: a child
@@ -1854,6 +1983,43 @@ async fn a_nested_run_asks_when_any_child_asks() {
         .await
         .unwrap();
     assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_denied_child_keeps_its_error_when_its_sibling_rolls_back() {
+    let (db, bus) = composing_bus();
+    let denied = "oxplow.kv.denied";
+    bus.register(
+        Command::new(
+            kv_spec(denied, Confirm::Never),
+            Handler::Tx(Arc::new(|_, _| {
+                Err(CommandError::Denied {
+                    reason: "this child cannot change the key".into(),
+                })
+            })),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let error = bus
+        .run(
+            &Actor::Human,
+            "oxplow.command.sequence",
+            calls(&[("oxplow.kv.set", "a", "1"), (denied, "b", "2")]),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, CommandError::Denied { .. }));
+    assert_eq!(kv_value(&db, "a").await, None);
+    let cancelled = audits_of(&db, "oxplow.kv.set").await;
+    assert_eq!(
+        cancelled[0].error.as_deref(),
+        Some("parent command transaction rolled back")
+    );
+    let denied = audits_of(&db, denied).await;
+    assert_eq!(denied[0].outcome, Outcome::Denied);
+    assert_eq!(denied[0].error.as_deref(), Some(error.to_string().as_str()));
 }
 
 #[tokio::test(flavor = "multi_thread")]

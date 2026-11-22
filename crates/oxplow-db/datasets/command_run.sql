@@ -4,7 +4,7 @@ SELECT r.run_id, r.parent_run_id, r.extension, r.contribution, r.kind, r.version
        r.started_at, r.finished_at, r.outcome, r.error, r.wall_ms, r.cpu_ms,
        r.peak_bytes, r.ai_calls, r.scopes_json AS scopes, r.decisions_json AS decisions,
        a.id, a.command,
-       CAST(a.input_json IS NOT NULL AS INTEGER) AS changed,
+       CAST(coalesce(r.outcome = 'ok' AND a.input_json IS NOT NULL, 0) AS INTEGER) AS changed,
        CAST(coalesce(a.undone_by, 0) > 0 AS INTEGER) AS undone,
        CAST(uri('oxplow/contribution_run', 'id', r.run_id) AS TEXT) AS uri
 FROM source('command_run') a JOIN source('contribution_run') r ON r.run_id = a.run_id

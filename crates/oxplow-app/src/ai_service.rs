@@ -110,6 +110,7 @@ pub struct CallSite<'a> {
     pub input_hash: Option<&'a str>,
     /// The contribution run that made it (`contribution_run.run_id`).
     pub run: Option<&'a oxplow_domain::run::RunId>,
+    pub(crate) context: Option<&'a oxplow_domain::run::RunContext>,
 }
 
 impl<'a> CallSite<'a> {
@@ -118,7 +119,15 @@ impl<'a> CallSite<'a> {
             caller,
             input_hash: None,
             run: None,
+            context: None,
         }
+    }
+
+    fn start(self) -> Instant {
+        if let Some(run) = self.context {
+            run.used_ai();
+        }
+        Instant::now()
     }
 }
 
@@ -815,7 +824,7 @@ impl AiService {
             ..
         } = bound;
         let key = self.key(provider)?;
-        let started = Instant::now();
+        let started = site.start();
         let result = model_provider
             .complete(
                 &instance(provider, key.as_deref()),
@@ -872,7 +881,7 @@ impl AiService {
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
         self.prepare_typed(bound, request, false).await?;
         let key = self.key(&bound.provider)?;
-        let started = Instant::now();
+        let started = site.start();
         let result = bound
             .model_provider
             .complete_typed(&instance(&bound.provider, key.as_deref()), request)
@@ -894,7 +903,7 @@ impl AiService {
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
         self.prepare_typed(bound, request, true).await?;
         let key = self.key(&bound.provider)?;
-        let started = Instant::now();
+        let started = site.start();
         let result = bound
             .model_provider
             .stream_typed(
@@ -1083,7 +1092,7 @@ impl AiService {
             ..
         } = bound;
         let key = self.key(provider)?;
-        let started = Instant::now();
+        let started = site.start();
         let result = model_provider
             .decide(
                 &instance(provider, key.as_deref()),

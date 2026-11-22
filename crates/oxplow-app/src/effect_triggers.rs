@@ -8,7 +8,7 @@
 //!
 //! 1. Already reacted (`effect_run`): nothing — a redelivery writes
 //!    nothing. A `started` row is a run interrupted after it claimed a
-//!    step outside the transaction: recorded `failed` ([`cut_off`]) and,
+//!    step outside the transaction: recorded `interrupted` ([`cut_off`]) and,
 //!    when its claim kept what it composed, sent again by itself like a
 //!    failure that may pass; otherwise a person's.
 //! 2. Not started yet, or the event is from before it started
@@ -18,7 +18,7 @@
 //! 4. Its script composes, over the event and its `input` rows:
 //!    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs as
 //!    `oxplow.command.sequence` by `Actor::Effect` (`CommandBus::run_effect`),
-//!    whose `effect_run` row and `effect.result@4` land with the run, its
+//!    whose `effect_run` row and `effect.result@5` land with the run, its
 //!    proposal, or — when it failed before anything ran — here.
 //!
 //! An effect that fails is recorded, never dead-letters the event: one
@@ -33,8 +33,7 @@
 //! failed while every step it composed was a write to a provider keeping
 //! `idempotent_writes` ([`safe_to_resend`]) — each step's key is the same
 //! on every attempt, so a write that landed lands once — is retried at
-//! most twice, 10 s then 60 s after the failure before
-//! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
+//! most twice, 10 s then 60 s after the failure before. While waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
 //! while the retry is scheduled ([`Resend`]); a `oxtask.task.create` in it
@@ -52,7 +51,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
-use oxplow_db::effect_run_store::{EffectRunKey, Finished, ReactionOrigin};
+use oxplow_db::effect_run_store::{AutomaticRetry, EffectRunKey, Finished, ReactionOrigin};
 use oxplow_domain::run::Outcome;
 use oxplow_domain::{CommandCall, CommandError, DomainError, StoredEvent};
 use serde_json::json;
@@ -292,17 +291,16 @@ fn ended(outcome: Outcome, reason: impl Into<String>) -> Finished {
     }
 }
 
-/// Why an attempt claimed `started` and never finished is failed.
+/// Why an unfinished claimed attempt now has outcome `interrupted`.
 pub(crate) const INTERRUPTED: &str =
     "interrupted: a step outside oxplow may have run, so it isn't sent again";
 
-/// Why one is failed whose claim kept what it composed: its every step was
-/// safe to send again.
+/// Why a cut-off attempt could be sent again from its saved composition.
 pub(crate) const INTERRUPTED_RESENDABLE: &str =
     "interrupted: a step outside oxplow may have run; every step is safe to send again";
 
 /// An attempt found still `started` — cut off between its claim and its
-/// record (oxplow stopped) — recorded `failed`. When its claim kept what
+/// record (oxplow stopped) — recorded `interrupted`. When its claim kept what
 /// it composed (every step a write to a provider keeping
 /// `idempotent_writes`), it is sent again by itself as a failure that may
 /// pass is, timed from when it started — so one found long after is a
@@ -332,11 +330,10 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
     // bound: not sent again, a person's.
     let retry = oxplow_domain::Timestamp::parse(&claimed.started_at)
         .ok()
-        .map(|from| Retry {
+        .map(|from| AutomaticRetry {
             resend,
             asked: None,
             from,
-            if_already_failed: false,
         });
     Ok(
         match fail(
@@ -345,7 +342,6 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
             None,
             ended(Outcome::Interrupted, INTERRUPTED_RESENDABLE),
             retry,
-            false,
         )
         .await?
         {
@@ -354,18 +350,6 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
             (true, false) => Reacted::Failed(INTERRUPTED_RESENDABLE.into()),
         },
     )
-}
-
-/// A failed attempt's automatic retry, as [`fail`] schedules it: what to
-/// send, how long its service asked to wait, and when the delay counts
-/// from (when it failed, or when a cut-off attempt started).
-struct Retry {
-    resend: String,
-    asked: Option<Duration>,
-    from: oxplow_domain::Timestamp,
-    /// Scheduled even when the attempt had already been recorded failed
-    /// (the bus records a step's failure partway).
-    if_already_failed: bool,
 }
 
 /// Record `key`'s attempt failed for `reason` and, with `retry`, schedule
@@ -377,61 +361,81 @@ async fn fail(
     key: &EffectRunKey,
     run: Option<&RunContext>,
     done: Finished,
-    retry: Option<Retry>,
-    previously_deferred: bool,
+    retry: Option<AutomaticRetry>,
 ) -> Result<(bool, bool), DomainError> {
     let active = run.is_some() || find_effect(svc, &key.effect).is_some();
     let (key, run, vocabulary) = (key.clone(), run.cloned(), svc.vocabulary.clone());
     let outcome = svc
         .db
         .transaction(move |tx| {
-            let recorded = match effects::finished_tx(
+            match effects::finish_attempt_tx(
                 tx,
                 &vocabulary.current(),
                 &key,
                 &done,
                 run.as_ref(),
-                None,
-                false,
+                effects::Completion {
+                    cause: None,
+                    account_health: active,
+                    retry: retry.as_ref(),
+                },
             ) {
-                Ok(()) => true,
-                Err(DomainError::Invalid(_)) => false,
-                Err(e) => return Err(e),
-            };
-            let scheduled = match &retry {
-                Some(r) if recorded || r.if_already_failed => schedule_retry_tx(tx, &key, r)?,
-                _ => false,
-            };
-            if active && !scheduled && (recorded || previously_deferred) {
-                oxplow_db::effect_run_store::account_completion_tx(
-                    tx,
-                    &vocabulary.current(),
-                    &key,
-                    &done,
-                    run.as_ref(),
-                )?;
+                Ok(scheduled) => Ok((true, scheduled)),
+                Err(DomainError::Invalid(message))
+                    if message.contains(effects::ALREADY_REACTED) =>
+                {
+                    let scheduled = run.is_some()
+                        && oxplow_db::effect_run_store::latest_tx(tx, &key.effect, &key.event_id)?
+                            .is_some_and(|latest| {
+                                latest.attempt == key.attempt && latest.retry_at.is_some()
+                            });
+                    Ok((false, scheduled))
+                }
+                Err(error) => Err(error),
             }
-            Ok((recorded, scheduled))
         })
         .await;
     svc.event_pump.wake();
     outcome
 }
 
-/// At start: every attempt a person or oxplow started (a retry, a
-/// backfill, an automatic attempt) that is still `started` was cut off —
-/// the app stopped between its claim and its record — and no pump
-/// delivery will find it, so each is recovered as [`cut_off`] does:
-/// Delivery lists it, or it is sent again by itself. A
-/// live one is the pump's: its redelivery finds it. How many were
-/// recovered.
+/// At boot, finish cut-off attempts that redelivery cannot recover.
 pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, DomainError> {
     let started = svc
         .db
-        .read(|tx| oxplow_db::effect_run_store::person_started_tx(tx))
+        .read(|tx| oxplow_db::effect_run_store::unfinished_tx(tx))
         .await?;
+    let declared: BTreeMap<_, _> = effects(svc)
+        .into_iter()
+        .map(|(_, decl)| (decl.name(), contribution_key(&decl)))
+        .collect();
+    let health =
+        crate::contribution_health::ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut recovered = 0;
     for key in started {
+        if key.origin == ReactionOrigin::Live {
+            if let Some(contribution) = declared.get(&key.effect) {
+                if health.disabled_reason(contribution).await?.is_none() {
+                    continue;
+                }
+            }
+            let vocabulary = svc.vocabulary.clone();
+            svc.db
+                .transaction(move |tx| {
+                    effects::finished_tx(
+                        tx,
+                        &vocabulary.current(),
+                        &key,
+                        &ended(Outcome::Interrupted, INTERRUPTED),
+                        None,
+                        None,
+                        false,
+                    )
+                })
+                .await?;
+            recovered += 1;
+            continue;
+        }
         let reacted = cut_off(svc, &key).await?;
         if matches!(reacted, Reacted::Nothing) {
             continue;
@@ -702,25 +706,15 @@ pub(crate) async fn run_reaction(
                 _ => Outcome::Failed,
             };
             let retry = match e {
-                CommandError::Unavailable { retry_after_ms, .. } if safe => Some(Retry {
+                CommandError::Unavailable { retry_after_ms, .. } if safe => Some(AutomaticRetry {
                     resend,
                     asked: retry_after_ms.map(Duration::from_millis),
                     from: oxplow_domain::Timestamp::now(),
-                    if_already_failed: true,
                 }),
                 _ => None,
             };
             Ok(
-                match fail(
-                    svc,
-                    &key,
-                    Some(&run),
-                    ended(outcome, reason.clone()),
-                    retry,
-                    safe,
-                )
-                .await?
-                {
+                match fail(svc, &key, Some(&run), ended(outcome, reason.clone()), retry).await? {
                     (_, true) => Reacted::Retrying(reason),
                     (_, false) => Reacted::Failed(reason),
                 },
@@ -742,10 +736,6 @@ struct Resend {
 pub(crate) const NO_LONGER_RESENT: &str =
     "not sent again by itself: a step's provider no longer keeps idempotent writes";
 
-/// How long after a failed attempt each automatic retry waits: at most
-/// two in a row (P10).
-pub(crate) const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(10), Duration::from_secs(60)];
-
 /// Whether sending a reaction's `calls` again by itself is safe (P10):
 /// every one is a write to a provider outside oxplow that keeps
 /// `idempotent_writes`, so — its key the same on every attempt — a write
@@ -756,33 +746,6 @@ fn safe_to_resend(_svc: &Services, _calls: &[CommandCall]) -> bool {
     // fills the model), so no step of a reaction is one that keeps
     // `idempotent_writes`: a failed attempt waits for a person.
     false
-}
-
-/// The longest a service's own "try again in" is waited for by itself: a
-/// longer wait is a person's to retry after.
-pub(crate) const MAX_ASKED_WAIT: Duration = Duration::from_secs(15 * 60);
-
-/// In `tx`: schedule `key`'s failed attempt to be sent again as `retry`
-/// says, its delay counted from `retry.from` — no sooner than its service
-/// asked — unless the reaction already had its automatic retries, or the
-/// service asked for longer than [`MAX_ASKED_WAIT`]: whether it was.
-fn schedule_retry_tx(
-    tx: &rusqlite::Connection,
-    key: &EffectRunKey,
-    retry: &Retry,
-) -> Result<bool, DomainError> {
-    if retry.asked.is_some_and(|a| a > MAX_ASKED_WAIT) {
-        return Ok(false);
-    }
-    let made = oxplow_db::effect_run_store::automatic_in_a_row_tx(tx, &key.effect, &key.event_id)?;
-    let Some(delay) = RETRY_DELAYS.get(made as usize) else {
-        return Ok(false);
-    };
-    let delay = retry.asked.map_or(*delay, |a| a.max(*delay));
-    let at =
-        oxplow_domain::Timestamp::from_unix_ms(retry.from.unix_ms() + delay.as_millis() as i64);
-    oxplow_db::effect_run_store::schedule_retry_tx(tx, key, &at.to_string(), &retry.resend)?;
-    Ok(true)
 }
 
 /// How late a retry may be sent by itself: one due longer ago (oxplow was
@@ -892,21 +855,8 @@ async fn drop_retry(
     key: &EffectRunKey,
     reason: Option<&str>,
 ) -> Result<(), DomainError> {
-    let (key, reason, vocabulary) = (
-        key.clone(),
-        reason.map(str::to_owned),
-        svc.vocabulary.clone(),
-    );
-    svc.db
-        .transaction(move |tx| {
-            let vocabulary = vocabulary.current();
-            oxplow_db::effect_run_store::drop_retry_tx(
-                tx,
-                &key,
-                reason.as_deref().map(|r| (vocabulary.as_ref(), r)),
-            )
-        })
-        .await
+    let health = reason.map(|reason| (svc.vocabulary.current(), reason.to_owned()));
+    oxplow_db::effect_run_store::abandon_retry(&svc.db, key.clone(), health).await
 }
 
 /// Check for due automatic retries every few seconds, for as long as the
@@ -1206,7 +1156,12 @@ mod tests {
         assert_eq!(title(&fx).await, format!("ui.op_failed #{}", ev.seq));
         // The script ran before its reaction; the reaction's run records
         // what the script called.
-        let audit = svc.commands.audit_store().list_recent(1).await.unwrap();
+        let audit = svc
+            .commands
+            .command_run_store()
+            .list_recent(1)
+            .await
+            .unwrap();
         assert_eq!(audit[0].command, crate::commands::compose::SEQUENCE);
         assert_eq!(audit[0].scopes, [("sql.read".to_string(), 1)].into());
         // The dry run (`extension test`, a change's review) reads alike.
@@ -1357,8 +1312,33 @@ mod tests {
         // an automatic attempt cut off the same way is recovered too.
         let auto = log(svc, settled(&fx, "taken")).await;
         claim(&auto, ReactionOrigin::Auto).await;
+        let orphan = EffectRunKey::first(
+            "acme/removed",
+            live.envelope.id.to_string(),
+            live.seq,
+            ReactionOrigin::Live,
+        );
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::effect_run_store::claim_tx(
+                    tx,
+                    &orphan,
+                    &crate::effects::tests::context(&orphan),
+                    None,
+                )
+            })
+            .await
+            .unwrap();
 
-        assert_eq!(recover_interrupted(svc).await.unwrap(), 2);
+        assert_eq!(recover_interrupted(svc).await.unwrap(), 3);
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT outcome FROM v_effect_run WHERE effect = 'acme/removed'"
+            )
+            .await,
+            json!([["interrupted"]])
+        );
         let interrupted = svc
             .db
             .read(|tx| {
@@ -1377,7 +1357,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT origin, outcome, error LIKE 'interrupted%' FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
+                "SELECT origin, outcome, error LIKE 'interrupted%' FROM v_effect_run WHERE effect = 'acme/mark-done' ORDER BY event_seq"
             )
             .await,
             json!([["backfill", "interrupted", 1], ["live", null, null], ["auto", "interrupted", 1]])
@@ -1388,7 +1368,7 @@ mod tests {
                 "SELECT json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%' ORDER BY seq"
             )
             .await,
-            json!([["backfill", "failed"], ["auto", "failed"]])
+            json!([["backfill", "failed"], ["auto", "failed"], ["live", "failed"]])
         );
         let human = oxplow_domain::Actor::Human;
         let retried = retry(svc, &human, &cut_off, true).await.unwrap();

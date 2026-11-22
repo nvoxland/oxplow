@@ -1075,7 +1075,7 @@ mod tests {
         let audit = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(1)
             .await
             .unwrap()

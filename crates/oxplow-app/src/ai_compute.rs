@@ -127,6 +127,7 @@ pub struct AiCompute {
 pub struct Caller<'a> {
     pub name: &'a str,
     pub run: Option<&'a oxplow_domain::run::RunId>,
+    context: Option<&'a oxplow_domain::run::RunContext>,
 }
 
 impl<'a> Caller<'a> {
@@ -134,13 +135,18 @@ impl<'a> Caller<'a> {
         Self {
             name,
             run: run.contribution_ref().map(|_| run.run()),
+            context: Some(run),
         }
     }
 }
 
 impl<'a> From<&'a str> for Caller<'a> {
     fn from(name: &'a str) -> Self {
-        Caller { name, run: None }
+        Caller {
+            name,
+            run: None,
+            context: None,
+        }
     }
 }
 
@@ -185,7 +191,6 @@ impl AiCompute {
         // Not under the job run's own pin: a job holds no generation, and
         // the model's binding is resolved under one of its own.
         run.check_authority().map_err(|_| refused())?;
-        run.used_ai();
         self.stream_typed(
             Caller::in_run(&name, run),
             role,
@@ -647,7 +652,6 @@ impl CollectorOracle {
         {
             return Err(reason);
         }
-        self.run.used_ai();
         let result = self.runtime.block_on(async {
             let f = self.compute.ai.read_run(&self.run, f);
             tokio::pin!(f);
@@ -741,6 +745,7 @@ fn site<'a>(caller: Caller<'a>, hash: &'a str) -> CallSite<'a> {
         caller: caller.name,
         input_hash: Some(hash),
         run: caller.run,
+        context: caller.context,
     }
 }
 
@@ -812,16 +817,18 @@ mod tests {
             session_id: Some(fx.session),
             stream_id: None,
         };
-        fx.svc
-            .commands
-            .run(
-                &actor,
-                "oxplow.ai.summarize",
-                json!({ "text": "some text" }),
-                false,
-            )
-            .await
-            .unwrap();
+        for _ in 0..2 {
+            fx.svc
+                .commands
+                .run(
+                    &actor,
+                    "oxplow.ai.summarize",
+                    json!({ "text": "some text" }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
         let linked: i64 = fx
             .svc
             .db
@@ -836,6 +843,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(linked, 1);
+        let costs =
+            fx.svc
+                .db
+                .read(|conn| {
+                    let mut statement = conn.prepare(
+                    "SELECT ai_calls FROM v_command_run WHERE command = 'oxplow.ai.summarize'
+                     ORDER BY id",
+                ).map_err(oxplow_db::map_sql_err)?;
+                    statement
+                        .query_map([], |row| row.get::<_, i64>(0))
+                        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+        assert_eq!(costs, [1, 0]);
     }
 
     /// P5.E1's red: the same computation twice is one call; the second

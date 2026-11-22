@@ -58,7 +58,12 @@ async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
     for r in results {
         leaks("a result", r);
     }
-    let audit = svc.commands.audit_store().list_recent(1_000).await.unwrap();
+    let audit = svc
+        .commands
+        .command_run_store()
+        .list_recent(1_000)
+        .await
+        .unwrap();
     leaks("the audit", &format!("{audit:?}"));
     let events = svc.event_log_store.read_after(0, 100_000).await.unwrap();
     leaks("the event log", &format!("{events:?}"));

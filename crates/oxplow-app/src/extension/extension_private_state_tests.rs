@@ -137,7 +137,13 @@ async fn a_command_writes_state_and_reads_it_back() {
     assert_eq!(peeked["result"], read, "{peeked}");
 
     // The write is audited without its values.
-    let audits = fx.svc.commands.audit_store().list_recent(20).await.unwrap();
+    let audits = fx
+        .svc
+        .commands
+        .command_run_store()
+        .list_recent(20)
+        .await
+        .unwrap();
     let audit = audits
         .iter()
         .find(|a| a.command == "alpha.state.write")

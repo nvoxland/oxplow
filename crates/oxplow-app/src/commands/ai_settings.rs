@@ -343,7 +343,7 @@ mod tests {
         let recorded = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(5)
             .await
             .unwrap()

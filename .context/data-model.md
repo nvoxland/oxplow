@@ -1514,7 +1514,8 @@ required `run_id` names a `contribution_run`. It keeps the integer
 inverse columns NULL. The bus writes the run and its details through
 `command_run_store::insert_tx`, then links an event or undo when there
 is one. A nested write's details land with its transaction. A rolled-back
-child keeps its outcome without payloads or an inverse.
+child keeps its outcome and its own error without payloads or an inverse.
+Successful writes cancelled by the parent transaction carry the rollback reason.
 `SqliteCommandRunStore` joins the run for the common fields, and
 `v_command_run` publishes them. V64 preserves existing audit IDs and the
 old AUTOINCREMENT high-water mark before backfilling detail rows.
@@ -1984,13 +1985,14 @@ attempt so retries have their own timing, costs and outcome.
   `command_run.run_id`, `collector_run.run_id` and `effect_run.run_id`
   name their shared runs. `job_run_attempt.run_id` names the
   attempt's run. `ai_call.run_id` names the run behind a call when one is
-  known.
+  known. The run's model-call count increments when the provider is invoked.
+  A cached result keeps its original call link and adds no new call.
 - **Retention.** `event_retention::sweep` applies all run retention rules
   in one sweep, in batches of 5,000. It sweeps finished runs only.
   Deleting a run also deletes its detail row through the foreign key.
   - Refused commands (`invalid` or `denied`) age out after 30 days
-    (`REFUSED_AUDIT_DAYS`). Other command runs with no recorded input
-    age out after 90 days. Other commands with recorded input stay.
+    (`REFUSED_COMMAND_RUN_DAYS`). Other runs age out after 90 days, with
+    successful commands that recorded input kept for undo.
   - Collector runs age out after 90 days. The run named by
     `collector_checkpoint.last_run_id` stays for as long as the checkpoint
     points to it.
@@ -1999,6 +2001,11 @@ attempt so retries have their own timing, costs and outcome.
   - Job attempts and their runs stay while the job exists.
   - Runs without a kind ledger follow the 90-day window
     (`CONTRIBUTION_RUN_DAYS`).
+
+  The indexed batch selection took 0.2 ms on 66,535 copied project runs
+  at the current cutoffs and 2.4 ms to select a full batch with cutoffs
+  advanced 120 days. These measurements cover selection; the current
+  indexes are sufficient for this history size.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 

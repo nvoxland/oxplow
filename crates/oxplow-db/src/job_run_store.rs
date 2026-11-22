@@ -130,7 +130,7 @@ pub enum JobRunStoreError {
     NotFound,
     #[error("job transition was rejected: {0}")]
     TransitionRejected(TransitionError),
-    #[error("extension job storage failed: {0}")]
+    #[error("job run storage failed: {0}")]
     Storage(DomainError),
 }
 
@@ -301,7 +301,7 @@ pub fn enqueue_with_context_tx(
     context
         .validate()
         .map_err(|_| JobRunStoreError::InvalidData)?;
-    if context.originating_run_id() != &new_job.job.run_id {
+    if context.originating_run_id() != &new_job.job.queued_by_run_id {
         return Err(JobRunStoreError::InvalidData);
     }
     let encoded = context
@@ -414,7 +414,7 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewJobRun) -> StoreResult<Enqueue
             contract_version,
             new_job.operation,
             new_job.invoker,
-            job.run_id.as_str(),
+            job.queued_by_run_id.as_str(),
             job.intent_key.as_str(),
             replay_policy_name(job.replay_policy),
             state_name(job.state),
@@ -1132,7 +1132,7 @@ fn decode_job(columns: JobColumns) -> StoreResult<JobRun> {
     let job = JobRun {
         id,
         owner,
-        run_id: RunId(run_id),
+        queued_by_run_id: RunId(run_id),
         intent_key: IntentKey::new(intent_key).map_err(|_| JobRunStoreError::InvalidData)?,
         replay_policy: parse_replay_policy(&replay_policy)?,
         state: parse_state(&state)?,
@@ -1178,7 +1178,7 @@ fn apply_attempt_change(
                     let attributed = run
                         .contribution_ref()
                         .is_some_and(|r| r.id == old.owner.contribution)
-                        && run.parent() == Some(&old.run_id)
+                        && run.parent() == Some(&old.queued_by_run_id)
                         && matches!(run.actor(), Actor::Job { job_id, attempt, fence, .. }
                             if job_id == old.id.as_str() && *attempt == new.attempt && *fence == new.fence);
                     if !attributed {
@@ -1202,7 +1202,7 @@ fn apply_attempt_change(
                 conn.execute(
                     "UPDATE contribution_run SET parent_run_id =
                         (SELECT run_id FROM contribution_run WHERE run_id = ?2) WHERE run_id = ?1",
-                    params![run.run().as_str(), old.run_id.as_str()],
+                    params![run.run().as_str(), old.queued_by_run_id.as_str()],
                 )
                 .map_err(map_sql_err)?;
             }
@@ -1348,10 +1348,20 @@ fn close_attempt(
             ],
         )
         .map_err(map_sql_err)?;
-    if changed == 1 {
+    if changed == 1
+        || conn
+            .query_row(
+                "SELECT outcome IS NOT NULL FROM contribution_run WHERE run_id = ?1",
+                [&run_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?
+            .unwrap_or(false)
+    {
         Ok(())
     } else {
-        Err(JobRunStoreError::Conflict)
+        Err(JobRunStoreError::InvalidData)
     }
 }
 
@@ -1579,7 +1589,7 @@ fn validate_new_job(new: &NewJobRun) -> StoreResult<()> {
     validate_metadata(&new.invoker)?;
     let _ = canonical_json(&new.request)?;
     validate_uuid_v7(new.job.id.as_str())?;
-    validate_uuid_v7(new.job.run_id.as_str())?;
+    validate_uuid_v7(new.job.queued_by_run_id.as_str())?;
     Ok(())
 }
 

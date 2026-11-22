@@ -1,10 +1,10 @@
 //! `contribution_run`: one row per run of extension code
-//! (`oxplow_domain::run`, `.context/data-model.md` "extension_run") — its
+//! (`oxplow_domain::run`, `.context/data-model.md` "contribution_run") — its
 //! identity, actor, anchors and cause, how it ended, what it cost and what
 //! it used. Written by the host that ran it, in the transaction its own
 //! record lands in where it has one. A run of core's own work (no
 //! contribution behind it) writes nothing. Read as `v_contribution_run`;
-//! swept on the collector window ([`crate::event_retention::sweep`]).
+//! swept according to each kind's retention rule ([`crate::event_retention::sweep`]).
 
 use oxplow_domain::run::{Outcome, RunContext};
 use oxplow_domain::{DomainError, Timestamp};
@@ -244,6 +244,65 @@ mod tests {
                 )
                 .map_err(map_sql_err)?;
             assert!(interrupted);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn contribution_run_reconcile_leaves_effect_and_job_claims_live() {
+        use crate::effect_run_store::{claim_tx, EffectRunKey, ReactionOrigin};
+
+        let db = Database::in_memory();
+        let effect = effect_run();
+        let job = RunContext::contribution(
+            ContributionRef {
+                id: ContributionId::new("acme", ContributionKind::Job, "review"),
+                extension: "acme".into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            },
+            Actor::System,
+            Mode::External,
+        );
+        db.transaction_now(|tx| {
+            claim_tx(
+                tx,
+                &EffectRunKey::first("acme/note", "e1", 1, ReactionOrigin::Live),
+                &effect,
+                None,
+            )?;
+            begin_tx(tx, &job)?;
+            tx.execute(
+                "INSERT INTO job_run
+                    (id, contribution_id, operation, invoker, queued_by_run_id, intent_key, replay_policy,
+                     state, attempt, fence, lease_until_ms, created_at_ms, updated_at_ms,
+                     revision, request_json)
+                 VALUES ('job', 'oxplow:oxplow/job?job=acme/review', 'model', 'system',
+                         ?1, 'key', 'never', 'running', 1, 1, 200, 0, 100, 2, '{}')",
+                [effect.run().as_str()],
+            )
+            .map_err(map_sql_err)?;
+            tx.execute(
+                "INSERT INTO job_run_attempt (job_id, attempt, fence, started_at_ms, lease_until_ms, run_id)
+                 VALUES ('job', 1, 1, 100, 200, ?1)",
+                [job.run().as_str()],
+            )
+            .map_err(map_sql_err)?;
+
+            assert_eq!(interrupt_unfinished_tx(tx)?, 0);
+            for run in [&effect, &job] {
+                let live: bool = tx
+                    .query_row(
+                        "SELECT finished_at IS NULL AND outcome IS NULL
+                         FROM contribution_run WHERE run_id = ?1",
+                        [run.run().as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                assert!(live, "{} claim was interrupted", run.run().as_str());
+            }
             Ok(())
         })
         .unwrap();

@@ -2902,7 +2902,7 @@ mod tests {
         let row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(audit)
             .await
             .unwrap()
@@ -2919,7 +2919,7 @@ mod tests {
         let row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(audit)
             .await
             .unwrap()
@@ -2951,7 +2951,7 @@ mod tests {
         let row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(out.command_run_id.unwrap())
             .await
             .unwrap()
@@ -2987,7 +2987,7 @@ mod tests {
         let before = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(50)
             .await
             .unwrap()
@@ -3010,7 +3010,13 @@ mod tests {
                 && said.contains("drop `inverse`"),
             "{said}"
         );
-        let after = fx.svc.commands.audit_store().list_recent(50).await.unwrap();
+        let after = fx
+            .svc
+            .commands
+            .command_run_store()
+            .list_recent(50)
+            .await
+            .unwrap();
         assert!(
             after
                 .iter()
@@ -3149,7 +3155,7 @@ def finish(x):
         let row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(out.command_run_id.unwrap())
             .await
             .unwrap()
@@ -3405,7 +3411,13 @@ def finish(x):
                 && said.contains("Nothing ran"),
             "{said}"
         );
-        let after = fx.svc.commands.audit_store().list_recent(50).await.unwrap();
+        let after = fx
+            .svc
+            .commands
+            .command_run_store()
+            .list_recent(50)
+            .await
+            .unwrap();
         assert!(
             after
                 .iter()
@@ -3687,7 +3699,13 @@ def finish(x):
         // The probe wrote "done" first; the rename after it read the title
         // before either ran.
         assert_eq!(title(&fx).await, format!("{before} (reviewed)"));
-        let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
+        let audits = fx
+            .svc
+            .commands
+            .command_run_store()
+            .list_recent(10)
+            .await
+            .unwrap();
         let ok: Vec<_> = audits
             .iter()
             .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
