@@ -127,7 +127,7 @@ async fn every_run_is_recorded_once_as_itself() {
     let collector = rows(
         svc,
         "SELECT r.version, r.generation, r.actor_kind, r.cause_event_id, r.thread_id, r.outcome,
-                r.kind, (SELECT run_id FROM collector_run WHERE owner = 'acme' AND id = 'star') = r.run_id
+                r.kind, (SELECT last_run_id FROM collector_checkpoint WHERE owner = 'acme' AND id = 'star') = r.run_id
            FROM contribution_run r WHERE r.contribution = 'oxplow:oxplow/collector?collector=acme/star'",
     )
     .await;
@@ -197,7 +197,7 @@ async fn every_run_is_recorded_once_as_itself() {
         ]]
     );
 
-    // A person runs the collector. Its core parent has no recorded run.
+    // The collector is a child of the command that started it.
     svc.commands
         .run(
             &Actor::Human,
@@ -209,11 +209,17 @@ async fn every_run_is_recorded_once_as_itself() {
         .unwrap();
     let nested = rows(
         svc,
-        "SELECT r.actor_kind, r.parent_run_id FROM contribution_run r
+        "SELECT r.actor_kind, p.contribution FROM contribution_run r JOIN contribution_run p ON p.run_id = r.parent_run_id
           WHERE r.contribution = 'oxplow:oxplow/collector?collector=acme/star' AND r.actor_kind = 'human'",
     )
     .await;
-    assert_eq!(nested, vec![vec![json!("human"), Value::Null]]);
+    assert_eq!(
+        nested,
+        vec![vec![
+            json!("human"),
+            json!("oxplow:oxplow/command?command=oxplow.collector.sync")
+        ]]
+    );
 
     // A person runs the extension's command: the command's run, audited
     // under it.

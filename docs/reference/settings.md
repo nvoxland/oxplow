@@ -291,9 +291,9 @@ collectors:
 `oxplow:junit`, `oxplow:lcov`, `oxplow:cobertura`, `oxplow:jacoco`,
 `oxplow:clippy` and `oxplow:eslint`. Coverage numbers come only from
 oxplow parsing the report, never from the agent, so they stay
-trustworthy. Each collector's last run shows in Settings → Data; one
-whose report fails to parse three times in a row is turned off until
-you turn it back on.
+trustworthy. Settings → Data shows each collector's last outcome. Open
+a collector's data page to see its recent runs and parse errors. Three
+consecutive parse failures disable the collector until you enable it again.
 
 #### A report format with no bundled parser
 

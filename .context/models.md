@@ -285,7 +285,7 @@ fills:
   - The run's result counts `{upserted, removed, renamed, unchanged,
     quarantined}` per model.
 - **Cursor.** A collector may return `"cursor": {...}`; it is kept in
-  `collector_run.cursor_json` and given back as `x["cursor"]` on the next
+  `collector_checkpoint.cursor_json` and given back as `x["cursor"]` on the next
   run. A failed run keeps the old cursor.
 - **Providers.** A provider process's collectors stream entity rows (`providers.md`); no capability turns them into model rows. A store of a model is an extension whose collector or commands write it.
   **There is no task provider.** A tracker

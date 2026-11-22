@@ -37,11 +37,16 @@ Rules:
   extension is deployed; you can't approve. Once it is deployed,
   `run_command` `oxplow.collector.sync { collector: "<namespace>/<id>" }`
   re-runs it.
-- `v_collector` lists every enabled collector with its trigger, `enabled`,
-  `state` (`disabled`, `failing`, `never_run`, `ok`) and last run.
-- `v_collector_run` shows each collector's last run and error, and
-  `v_collector_state` whether this OS enforces its `network` list
-  (`network_enforced`) and why failures disabled it, if they did.
+- `v_collector` lists enabled extensions' collectors with their trigger,
+  `enabled`, `state` (`disabled`, `failing`, `never_run`, `ok`),
+  `last_run_at` and `last_outcome`.
+- `v_collector_run` lists runs with their outcome, error and usage. Filter
+  by `owner` (the namespace) and `id` for a collector's history. Use
+  `latest = 1` for its newest finished run.
+- `v_collector_checkpoint` has the last successful cursor and row counts
+  plus the last trigger sequence and finished run ID. `v_collector_state`
+  shows whether this OS enforces the collector's `network` list
+  (`network_enforced`) and why failures disabled it.
 - **Test a collector before you deploy it** with `$OXPLOW_BIN extension test
   <name>` from your terminal: it runs your source (a worktree's draft
   included) in a throwaway oxplow,

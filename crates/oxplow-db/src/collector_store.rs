@@ -72,15 +72,14 @@ pub enum EntityWrite {
     },
 }
 
-/// Last run of one collector (`collector_run`).
+/// Last run and successful checkpoint of one collector.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectorRun {
-    /// The declaring extension, or `project`.
+    /// The collector's namespace.
     pub owner: String,
     pub id: String,
-    /// `ok`, `error` or `skipped` (the loop guard).
-    pub status: String,
+    pub outcome: String,
     pub last_run_at: String,
     pub error: Option<String>,
     /// Row counts per entity from the last successful run.
@@ -92,10 +91,20 @@ pub struct CollectorRun {
     /// The seq of the last trigger event it ran for.
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub last_event_id: Option<i64>,
-    /// The last run (`contribution_run.run_id`); `None` for one before runs
-    /// were recorded.
+    /// The last finished run (`contribution_run.run_id`).
     #[serde(default)]
     pub run_id: Option<String>,
+}
+
+/// What one collector run observed. A failed or skipped run advances the
+/// trigger checkpoint while retaining the last successful cursor and counts.
+#[derive(Debug, Default)]
+pub struct CollectorObservation {
+    pub row_counts: std::collections::BTreeMap<String, i64>,
+    pub cursor: Option<serde_json::Value>,
+    pub last_event_id: Option<i64>,
+    /// Report parsing supplies elapsed time but no usage measurements.
+    pub unmeasured_cost: bool,
 }
 
 #[derive(Clone)]
@@ -137,8 +146,16 @@ impl SqliteCollectorStore {
 
     /// Record a collector run's outcome. A failed run keeps the last good
     /// counts and checkpoint; `last_event_id` only moves forward.
-    pub async fn record_run(&self, run: CollectorRun) -> Result<(), DomainError> {
-        self.db.call(move |conn| record_run_in(conn, &run)).await
+    pub async fn record_run(
+        &self,
+        run: oxplow_domain::run::RunContext,
+        outcome: oxplow_domain::run::Outcome,
+        error: Option<String>,
+        observation: CollectorObservation,
+    ) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| record_run_in(tx, &run, outcome, error.as_deref(), &observation))
+            .await
     }
 
     /// One collector's last run, if it has run.
@@ -273,8 +290,12 @@ impl SqliteCollectorStore {
                 }
                 tx.execute("DELETE FROM dataset WHERE owner = ?1", [&ext])
                     .map_err(map_sql_err)?;
-                tx.execute("DELETE FROM collector_run WHERE owner = ?1", [&ext])
-                    .map_err(map_sql_err)?;
+                tx.execute(
+                    "DELETE FROM collector_checkpoint WHERE last_run_id IN (
+                        SELECT run_id FROM contribution_run WHERE extension = ?1 AND kind = 'collector'
+                    )",
+                    [&ext],
+                ).map_err(map_sql_err)?;
                 Ok(())
             })
             .await
@@ -329,10 +350,9 @@ pub fn ensure_entities_tx(
     Ok(())
 }
 
-const RUN_SELECT: &str =
-    "SELECT owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id,
-            run_id
-     FROM collector_run";
+const RUN_SELECT: &str = "SELECT owner, id, r.outcome, r.finished_at, r.error, p.row_counts_json,
+            p.cursor_json, p.last_event_id, p.last_run_id
+     FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id";
 
 fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
     let counts: String = r.get(5)?;
@@ -340,7 +360,7 @@ fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
     Ok(CollectorRun {
         owner: r.get(0)?,
         id: r.get(1)?,
-        status: r.get(2)?,
+        outcome: r.get(2)?,
         last_run_at: r.get(3)?,
         error: r.get(4)?,
         row_counts: serde_json::from_str(&counts).unwrap_or_default(),
@@ -350,36 +370,55 @@ fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
     })
 }
 
-/// Upsert one collector's run on `conn` — a caller's transaction when
-/// the run's event is logged with it.
-pub fn record_run_in(conn: &rusqlite::Connection, run: &CollectorRun) -> rusqlite::Result<()> {
-    let counts = serde_json::to_string(&run.row_counts).unwrap_or_else(|_| "{}".into());
-    let cursor = run.cursor.as_ref().map(|c| c.to_string());
-    conn.execute(
-        "INSERT INTO collector_run (owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id, run_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+/// Write the run, its per-run detail and the collector's checkpoint on the
+/// transaction that commits its data and event.
+pub fn record_run_in(
+    tx: &rusqlite::Transaction<'_>,
+    run: &oxplow_domain::run::RunContext,
+    outcome: oxplow_domain::run::Outcome,
+    error: Option<&str>,
+    observation: &CollectorObservation,
+) -> Result<(), DomainError> {
+    use oxplow_domain::{contribution::ContributionKind, run::Outcome};
+
+    let contribution = run
+        .contribution_ref()
+        .filter(|r| r.id.kind == ContributionKind::Collector)
+        .ok_or_else(|| DomainError::Invariant("collector run needs a collector identity".into()))?;
+    crate::contribution_run_store::record_tx(tx, run, outcome, error)?;
+    let run_id = run.run().as_str();
+    if observation.unmeasured_cost {
+        tx.execute(
+            "UPDATE contribution_run SET cpu_ms = NULL, peak_bytes = NULL, ai_calls = NULL WHERE run_id = ?1",
+            [run_id],
+        ).map_err(map_sql_err)?;
+    }
+    let owner = &contribution.id.namespace;
+    let id = &contribution.id.local;
+    let counts = serde_json::to_string(&observation.row_counts).expect("row counts serialize");
+    let good = outcome == Outcome::Ok;
+    tx.execute(
+        "INSERT INTO collector_run (run_id, owner, id, row_counts_json) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![run_id, owner, id, counts],
+    )
+    .map_err(map_sql_err)?;
+    let cursor = observation
+        .cursor
+        .as_ref()
+        .map(serde_json::Value::to_string);
+    tx.execute(
+        "INSERT INTO collector_checkpoint (owner, id, last_run_id, row_counts_json, cursor_json, last_event_id)
+         VALUES (?1, ?2, ?3, CASE WHEN ?7 THEN ?4 ELSE '{}' END, CASE WHEN ?7 THEN ?5 END, ?6)
          ON CONFLICT (owner, id) DO UPDATE SET
-           status = excluded.status, last_run_at = excluded.last_run_at,
-           error = excluded.error, run_id = excluded.run_id,
-           -- a failed run keeps the last good counts and checkpoint
-           row_counts_json = CASE WHEN excluded.status = 'ok'
-             THEN excluded.row_counts_json ELSE collector_run.row_counts_json END,
-           cursor_json = CASE WHEN excluded.status = 'ok'
-             THEN coalesce(excluded.cursor_json, collector_run.cursor_json) ELSE collector_run.cursor_json END,
-           last_event_id = max(coalesce(excluded.last_event_id, 0), coalesce(collector_run.last_event_id, 0))",
-        rusqlite::params![
-            run.owner,
-            run.id,
-            run.status,
-            run.last_run_at,
-            run.error,
-            counts,
-            cursor,
-            run.last_event_id,
-            run.run_id
-        ],
+           last_run_id = excluded.last_run_id,
+           row_counts_json = CASE WHEN ?7 THEN excluded.row_counts_json ELSE collector_checkpoint.row_counts_json END,
+           cursor_json = coalesce(excluded.cursor_json, collector_checkpoint.cursor_json),
+           last_event_id = coalesce(max(excluded.last_event_id, collector_checkpoint.last_event_id),
+                                    excluded.last_event_id, collector_checkpoint.last_event_id)",
+        rusqlite::params![owner, id, run_id, counts, cursor, observation.last_event_id, good],
     )
     .map(|_| ())
+    .map_err(map_sql_err)
 }
 
 /// A collector run deferred by its trigger's pacing (`v_pending_run`).
@@ -1013,19 +1052,19 @@ mod tests {
             .unwrap();
         let mut counts = std::collections::BTreeMap::new();
         counts.insert("pr".to_string(), 1);
-        let state = CollectorRun {
-            owner: "my-gh".into(),
-            id: "github".into(),
-            status: "ok".into(),
-            last_run_at: "2026-09-27T00:00:00Z".into(),
-            error: None,
+        use oxplow_domain::run::Outcome;
+        let run = test_run("my-gh", "my_gh", "github");
+        let state = CollectorObservation {
             row_counts: counts,
-            cursor: None,
-            last_event_id: None,
-            run_id: None,
+            ..CollectorObservation::default()
         };
-        store.record_run(state.clone()).await.unwrap();
-        assert_eq!(store.list_runs().await.unwrap(), vec![state]);
+        store
+            .record_run(run.clone(), Outcome::Ok, None, state)
+            .await
+            .unwrap();
+        let last = store.list_runs().await.unwrap();
+        assert_eq!(last.len(), 1);
+        assert_eq!(last[0].run_id.as_deref(), Some(run.run().as_str()));
 
         store.drop_extension("my-gh").await.unwrap();
         assert!(store.list_runs().await.unwrap().is_empty());
@@ -1040,32 +1079,95 @@ mod tests {
     /// the last event never moves back.
     #[tokio::test]
     async fn run_state_keeps_a_cursor_and_last_event() {
-        let store = SqliteCollectorStore::new(Database::in_memory());
-        let run = |status: &str, cursor: Option<serde_json::Value>, event: i64| CollectorRun {
-            owner: "project".into(),
-            id: "repo.scan".into(),
-            status: status.into(),
-            last_run_at: "2026-10-01T00:00:00Z".into(),
-            error: (status == "error").then(|| "boom".into()),
-            row_counts: [("pr".to_string(), 3)].into(),
-            cursor,
+        use oxplow_domain::run::Outcome;
+        let db = Database::in_memory();
+        let store = SqliteCollectorStore::new(db.clone());
+        let observed = |count, cursor, event| CollectorObservation {
+            row_counts: [("pr".to_string(), count)].into(),
+            cursor: Some(json!({"since": cursor})),
             last_event_id: Some(event),
-            run_id: None,
+            ..CollectorObservation::default()
         };
+        let run = || test_run("project", "project", "repo.scan");
         store
-            .record_run(run("ok", Some(json!({"since": "a"})), 7))
+            .record_run(run(), Outcome::Ok, None, observed(3, "a", 7))
             .await
             .unwrap();
         store
-            .record_run(run("error", Some(json!({"since": "b"})), 5))
+            .record_run(
+                run(),
+                Outcome::Failed,
+                Some("boom".into()),
+                observed(0, "b", 5),
+            )
             .await
             .unwrap();
         let got = store.run_of("project", "repo.scan").await.unwrap().unwrap();
-        assert_eq!(got.status, "error");
+        assert_eq!(got.outcome, "failed");
         assert_eq!(got.cursor, Some(json!({"since": "a"})));
         assert_eq!(got.last_event_id, Some(7));
         assert_eq!(got.error.as_deref(), Some("boom"));
+        assert_eq!(got.row_counts, [("pr".to_string(), 3)].into());
         assert!(store.run_of("project", "other").await.unwrap().is_none());
+        let rows = db
+            .call(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT r.outcome, c.run_id = p.last_run_id, c.row_counts_json
+                 FROM collector_run c JOIN contribution_run r USING (run_id)
+                 JOIN collector_checkpoint p USING (owner, id)
+                 ORDER BY r.finished_at, r.run_id",
+                )?;
+                let rows = stmt.query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, bool>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            [
+                ("ok".into(), false, json!({"pr": 3}).to_string()),
+                ("failed".into(), true, json!({"pr": 0}).to_string())
+            ]
+        );
+        let swept = db
+            .transaction(|tx| crate::contribution_run_store::sweep_tx(tx, "2099-01-01", 100))
+            .await
+            .unwrap();
+        assert_eq!(swept, 1);
+        let count = db
+            .call(|c| {
+                c.query_row("SELECT count(*) FROM collector_run", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+            })
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    fn test_run(extension: &str, namespace: &str, id: &str) -> oxplow_domain::run::RunContext {
+        use oxplow_domain::{
+            contribution::{ContributionId, ContributionKind},
+            run::{ContributionRef, Mode, RunContext},
+            Actor,
+        };
+        RunContext::contribution(
+            ContributionRef {
+                id: ContributionId::new(namespace, ContributionKind::Collector, id),
+                extension: extension.into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            },
+            Actor::System,
+            Mode::External,
+        )
     }
 
     /// `_` is a LIKE wildcard: dropping `gh` must leave `gh-extra`'s view

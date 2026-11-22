@@ -460,7 +460,7 @@ mod tests {
             json!([["on", "ok", ev.envelope.id.to_string()]])
         );
         assert_eq!(
-            rows(&fx.svc, "SELECT last_event_id FROM v_collector_run").await,
+            rows(&fx.svc, "SELECT last_event_id FROM v_collector_checkpoint").await,
             json!([[ev.seq]])
         );
     }
@@ -812,10 +812,10 @@ mod tests {
         assert_eq!(
             rows(
                 &fx.svc,
-                "SELECT id, status FROM v_collector_run ORDER BY id"
+                "SELECT id, outcome FROM v_collector_run ORDER BY id"
             )
             .await,
-            json!([["broken", "error"], ["seen", "ok"]])
+            json!([["broken", "failed"], ["seen", "ok"]])
         );
         assert_eq!(
             rows(&fx.svc, "SELECT json_extract(payload, '$.status') FROM v_event WHERE type = 'collector.synced' ORDER BY seq").await,
@@ -1090,8 +1090,12 @@ mod tests {
                 "{says}"
             );
             assert_eq!(
-                rows(svc, "SELECT status FROM v_collector_run WHERE id = 'prs'").await,
-                json!([["error"]]),
+                rows(
+                    svc,
+                    "SELECT outcome FROM v_collector_run WHERE id = 'prs' AND latest = 1"
+                )
+                .await,
+                json!([["failed"]]),
                 "{says}"
             );
             // Nothing was stored.
@@ -1162,7 +1166,7 @@ mod tests {
         );
         let guarded = rows(
             svc,
-            "SELECT status, error FROM v_collector_run WHERE id = 'pong'",
+            "SELECT outcome, error FROM v_collector_run WHERE id = 'pong' AND latest = 1",
         )
         .await;
         assert_eq!(guarded[0][0], json!("skipped"), "{guarded}");
@@ -1214,7 +1218,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT status, last_event_id FROM v_collector_run WHERE id = 'ping'"
+                "SELECT r.outcome, p.last_event_id FROM v_collector_checkpoint p JOIN v_collector_run r ON r.run_id = p.last_run_id WHERE p.id = 'ping'"
             )
             .await,
             json!([["skipped", chained.seq]])

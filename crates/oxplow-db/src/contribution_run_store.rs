@@ -136,6 +136,9 @@ pub fn sweep_tx(
               AND NOT EXISTS (
                   SELECT 1 FROM command_audit a WHERE a.run_id = r.run_id AND a.input_json IS NOT NULL
               )
+              AND NOT EXISTS (
+                  SELECT 1 FROM collector_checkpoint p WHERE p.last_run_id = r.run_id
+              )
             LIMIT ?2)",
         params![cutoff, limit as i64],
     )

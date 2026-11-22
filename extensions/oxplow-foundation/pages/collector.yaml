@@ -30,7 +30,7 @@ loaders:
                             WHEN 'run' THEN 'On a run'
                             ELSE k.trigger END AS runs,
              CASE WHEN k.enabled THEN 'Yes' ELSE 'No' || COALESCE(': ' || k.disabled_reason, '') END AS enabled,
-             k.state, k.last_run_at, k.last_status, k.error, k.next_due_at
+             k.state, k.last_run_at, k.last_outcome, k.error, k.next_due_at
       FROM v_collector k WHERE k.uri = :uri
   # The extension that declares it: one link.
   related:
@@ -63,7 +63,7 @@ view:
     - { key: enabled, label: Enabled }
     - { key: state, label: State }
     - { key: last_run_at, label: Last run, format: datetime }
-    - { key: last_status, label: Last result }
+    - { key: last_outcome, label: Last outcome }
     - { key: error, label: Error }
     - { key: next_due_at, label: Next due, format: datetime }
     empty: Collector not found.

@@ -80,8 +80,8 @@ section for the column.
   ```
   **Listed in Settings → Data → Collectors** beside the extensions' (owner
   `project`, the project's own extension, as `v_collector_state` lists every
-  extension's): each with its trigger ("after a test run"), last run
-  (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
+  extension's): each with its trigger ("after a test run"), last run in
+  `v_collector`, why failures turned it off with **Enable Again**, and **Sync
   Now** (`oxplow.collector.sync { collector: "project/<id>" }`). A report collector with a
   bundled parser needs no permission (the loader doesn't look for an
   `oxplow:` entry file). An own extension's `exec` program needs
@@ -96,8 +96,10 @@ section for the column.
   are skipped and logged (`winning_collectors`). A disabled collector claims
   no path: its read says it is disabled and the next one reads the report.
   Every collector is readable as `v_collector` (trigger, `enabled`, `state`
-  `disabled`/`failing`/`never_run`/`ok`, last run and its error; a plain view over
-  `contribution`, `collector_run` and `contribution_health`).
+  `disabled`/`failing`/`never_run`/`ok`, `last_outcome`, last run time and
+  error). It joins the collector's checkpoint to its last finished
+  `contribution_run` and reads its health from `contribution_health`.
+  The collector's data page lists its recent runs from `v_collector_run`.
   `CollectionService` reads report collectors from the extension
   catalog (`with_extensions`, `report_collectors(root)`,
   `is_report_collector(owner, id)`).
@@ -195,13 +197,14 @@ hook + MCP wiring):
   the turn the tool call ran in, so its request. It then runs **every** report collector whose `on_run`
   is that kind of run and whose report the run wrote (its mtime inside the
   run's freshness window) — `read_run_reports` in `collection.rs`, each
-  through `read_report`: a disabled collector or a
-  report that isn't there runs nothing; anything that ran is the
-  collector's run (`collector_run` + `collector.synced`, through the
-  collector runner's `RunLog`, deduped per detected run) and counts toward
-  its health — the third failed parse in a row disables it (P7.C2,
-  `contribution_health`); an `exec` parser whose extension lacks
-  `process.run` doesn't load, so it doesn't run. A test run only reads `on_run: test`
+  through `read_report`. A parse records a `contribution_run` under the
+  declaring extension, a `collector_run` detail row, the collector's
+  checkpoint and a `collector.synced@2` event through `RunLog`, deduped
+  per detected run. It records elapsed wall time. CPU time, peak
+  memory and AI call count are NULL. The third failed parse in a row
+  disables the collector (`contribution_health`). Disabled collectors
+  and missing reports produce no parse. An `exec` parser whose
+  extension lacks `process.run` fails to load. A test run only reads `on_run: test`
   collectors, an analyzer run only `on_run: analysis` ones. What they
   parsed merges by kind (`RunReports`): JUnit reports into one
   suite/case tree embedded in the `test-run` payload (`suites`) — the

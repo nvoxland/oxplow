@@ -8,5 +8,5 @@ when:
 expect:
   label: oxplow.request_outcome data
   loaders:
-    about: { rows: [{ name: oxplow.request_outcome }] }
+    about: { rows: [{ name: oxplow.request_outcome, last_outcome: ok }] }
     recorded: { rows: { contains: [{ measure_key: oxplow.request_test_outcome }] } }

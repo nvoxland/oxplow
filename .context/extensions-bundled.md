@@ -192,7 +192,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       analysed change and per check (a collector on `change.analyzed`):
       `change_id, collector, collector_uri, state, last_run_at, error`.
       `state` is `pending` until the check has run for the change's latest
-      `change.analyzed` (files) event (its `collector_run.last_event_id` is
+      `change.analyzed` (files) event (its `collector_checkpoint.last_event_id` is
       older than that event's seq), `failed` when that run failed, else `ok`.
       The Review page shows a pending check as still running.
   - **Any two points.** The page reads one change, of any kind: a commit, a

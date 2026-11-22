@@ -91,8 +91,9 @@ provenance and the git version. It is read live, so pin `metric` and `dimension`
   for `exec` only when you truly must shell out.
 - A `use:` entry may only re-target thresholds; the measure/aggregation/filter are
   inherent to the definition.
-- If a fact doesn't appear, check the run: every run logs a `collector.synced`
-  event and a `collector_run` row (a failed one with its error) — or re-run
+- If a fact doesn't appear, check `outcome` and `error` in
+  `v_collector_run` for the collector's namespace (`owner`) and `id`.
+  Filter by `latest = 1` for the newest finished run, or re-run
   `oxplow.collector.sync` and read the return.
 - `v_capture_exclusion` lists the snapshot files a capture's scan was not
   given (over the size limit, binary, unreadable): their facts stay stale

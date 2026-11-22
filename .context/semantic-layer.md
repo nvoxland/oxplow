@@ -121,7 +121,7 @@ What core publishes, by where it comes from. Each row names its datasets
 | Source | Datasets | Facts |
 |---|---|---|
 | work | `stream`, `thread`, `request`, `context_read` (tasks are the task model's datasets, `.context/tasks.md`) | cycle time, lifecycle |
-| collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
+| collectors | `collector` (declaration, standing and last run), `collector_run` (run history), `collector_checkpoint` (last successful output and latest finished run), `collector_state` / `collector_credential` (live network and credential standing) | — |
 | knowledge | the knowledge pages are bundled's `knowledge_page` (`v_oxplow_knowledge_page`) | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
@@ -1062,10 +1062,11 @@ The result keeps the two apart.
   entry per collector that declares an entity whose view the query read
   (`collection_coverage::Feeds`, restated on every catalog change):
   `{ dataset, source: "collector:<namespace>/<id>", status, at, error }`, the
-  status read at query time from `collector_run` and
-  `contribution_health` — `never` (no run), `failed` (the last run's
-  error), `disabled` (health says so, with its
-  reason), `stale` (its schedule's `next_due_at` passed) or `current`.
+  status read at query time from the latest run via `collector_checkpoint`
+  and from `contribution_health`. The status is `never` before the first run,
+  `failed` after a run that ended in error or was denied,
+  `disabled` according to its health, `stale` when its schedule's
+  `next_due_at` passed, or `current`.
   Core's own datasets carry no entry: core keeps them current. Nothing is
   inferred from timestamps alone. The page view lists each entry that
   isn't `current` with its last run and error.
@@ -1138,8 +1139,8 @@ extension's own declared event types, logged with the run (P9.D2;
   {at?, replaces?}}` and nothing else (`collected_of`; `capture` places the
   run's capture and names whose earlier captures it replaces — metrics.md
   "Placed, replacing captures"). A fact on a measure not in `facts:` or not defined is
-  dropped. Each run records one metric capture (or a failed one) plus a
-  `collector_run` row and `collector.synced@2` with its `facts` count.
+  dropped. Each run records one metric capture (or a failed one) with its
+  run, checkpoint update and `collector.synced@2` event with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,) is any enabled extension's when it reads with a bundled parser or a sandboxed script, and the
@@ -1151,15 +1152,14 @@ extension's own declared event types, logged with the run (P9.D2;
   analysis }` — when the `collection` reactor detects that kind of run and
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
-  the run (`.context/collection.md`); its run and health are any
-  collector's (`collector_run`, `collector.synced@2`, `contribution_health`), and
-  its extension's permissions apply (`process` for an exec script).
+  the run. Its run history records elapsed wall time and leaves CPU time,
+  peak memory and AI call count NULL. Its extension's permissions apply
+  (`process.run` for an exec script). [Collection](./collection.md)
 
-**Owners.** An extension (its name), always: the project's own collectors
-belong to its own extension, `project` by convention
-(`.oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
-ordinary extension name. There are no global collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
-that metrics name runs only while one of them is on.
+**Owners.** Each collector is named by `<namespace>/<id>`. In collector
+history and checkpoints, `owner` is that namespace. The shared run's
+`extension` names the declaring package. The project's own extension in
+`.oxplow/extensions/project/` uses `project` by convention.
 
 - **The project's own extension** declares its collectors in its
   `extension.yaml`, scripts under `collectors/` (relative to the extension
@@ -1196,17 +1196,28 @@ starlark/jaq; exactly one of `entities` / `facts`; `report` only with
 whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 
-**An entity collector's run** (`collector_runner::run_collector`) commits its rows, its
-`collector_run` row and its `collector.synced@2` event in **one
-transaction**; a failed run commits the failure the same way (no rows,
-the last good counts and checkpoint kept). The event's subject is
-`oxplow:oxplow/collector?collector=<namespace>/<id>` (resource `oxplow/collector`), its `trigger` is
-`manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler, as the
-system) or `on`. `collector_run` (V133, `v_collector_run`; it replaced
-V75 `ext_source_state`) keeps `owner, id, status (ok | error |
-skipped), last_run_at, error, row_counts_json, cursor_json,
-last_event_id`. The UI refreshes when `v_collector_run` changes
-(`collectorRan`); the in-memory `SourceSynced` is gone.
+**An entity collector's run** (`collector_runner::run_collector`) commits
+its rows, shared run, detail, checkpoint and `collector.synced@2` event in
+**one transaction**. It records a failure while keeping the last good
+counts and cursor. The event's subject is
+`oxplow:oxplow/collector?collector=<namespace>/<id>`. Its `trigger` is
+`manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler
+running as the system) or `on`.
+
+- `v_collector_run` exposes one row per run, with the shared run fields,
+  the collector's `owner`, `id`, `uri` and per-run `row_counts_json`.
+  `latest = 1` identifies the run named by the checkpoint. Older runs
+  whose individual counts were never recorded have NULL counts.
+- `v_collector_checkpoint` holds one row per collector that has run.
+  It exposes the latest finished `last_run_id`, the highest processed
+  `last_event_id`, the last successful `cursor_json` and the last
+  successful `row_counts_json`.
+- `v_collector` joins the declaration to the checkpoint and looks up the
+  shared run by its primary key for `last_run_at`, `last_outcome` and
+  `error`. Its row counts come from the checkpoint.
+
+Collector history ages out after `CONTRIBUTION_RUN_DAYS`. A checkpoint's
+latest finished run stays available for standing queries.
 
 **Health (P7.C2).** Collectors share the contribution failure policy
 ([extensions-activation.md](./extensions-activation.md) "Health, disable and repair"): three
@@ -1229,8 +1240,8 @@ type without a `trigger` field:
   integers, and the event itself — `:event_id` its id, `:event_seq` its
   seq; NULL when absent), and the script gets the event envelope as
   `input.event` ([extensions-events.md](./extensions-events.md) "The event envelope").
-- **Once per event.** The run's `collector_run.last_event_id` is the
-  event's seq, and its `collector.synced@2` is caused by the event with a
+- **Once per event.** `collector_checkpoint.last_event_id` tracks the
+  highest processed event seq. `collector.synced@2` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
   collector's rows, or a fact collector's capture and facts
   (`RunLog::record_with`) — so a redelivered event writes nothing,
@@ -1313,7 +1324,7 @@ entities from data already in the semantic layer:
 | Script services (`runtime::Hosts`, `TreeHost`), `facts_of`, `parse_report` | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
 | Exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
-| Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
+| Entity tables and views, run details and checkpoints | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read dataset (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | `v_collector` (standing) / `v_collector_credential`; setting a credential is `run_command oxplow.collector.set_credential`, running is `run_command oxplow.collector.sync` | `crates/oxplow-app/src/collector_runner.rs` |
 | MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |

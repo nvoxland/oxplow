@@ -410,7 +410,7 @@ collectors:
   service's ([extensions-permissions.md](./extensions-permissions.md) "Store
   services").
 - Every derived (Starlark, jaq) collector run, whatever its trigger, gets
-  `x["cursor"]`: the cursor the last successful run returned (`collector_run.cursor_json`),
+  `x["cursor"]`, the cursor the last successful run returned (`collector_checkpoint.cursor_json`),
   `null` before one did. An exec collector's stdin has the same keys
   (`trigger`, `changed`, `cursor`, `event`). A run may return `"cursor"` and
   `"models"` / `"fields"` ([models.md](./models.md) "The output").
@@ -442,8 +442,8 @@ starts over, which is what makes `start` run on boot, enable and deploy; one
 whose extension is off has no task and its triggers are dropped (`fire`
 checks again just before a run). Each task runs its collector through
 `run_collector` as the system, one run at a time; triggers that pile up behind
-a run fold into one (files merge). A run that fails is logged, keeps the
-cursor (the failed `collector_run` row leaves `cursor_json` as it was).
+a run fold into one (files merge). A failed run is logged and keeps
+the previous cursor in `collector_checkpoint`.
 
 **No change is lost.** The rule: when in doubt, run `start`, the full
 reconcile.

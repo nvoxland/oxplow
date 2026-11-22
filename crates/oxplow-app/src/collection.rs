@@ -26,6 +26,7 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
 use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_db::{SqliteSnapshotStore, SqliteThreadStore};
+use oxplow_domain::run::{Mode, RunContext};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, ThreadId};
 use oxplow_script::{Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRuntime};
@@ -663,6 +664,11 @@ impl CollectionService {
                     .map(|s| ReportCollector {
                         owner: e.name.clone(),
                         namespace: e.namespace.clone(),
+                        contribution: crate::run_context::unpinned_contribution(
+                            e,
+                            oxplow_domain::contribution::ContributionKind::Collector,
+                            &s.id,
+                        ),
                         own: e.is_own(),
                         configuration: e.configuration.clone(),
                         dir: e.path.clone(),
@@ -713,7 +719,7 @@ impl CollectionService {
         let root = self.worktrees.resolve(None).await.into_local_path();
         self.report_collectors(&root)
             .iter()
-            .any(|r| r.owner == owner && r.spec.id == id)
+            .any(|r| r.matches(owner, id))
     }
 
     /// `rel` under the checkout `root`, after every symlink: `None`
@@ -830,7 +836,7 @@ impl CollectionService {
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return ReportRead::Missing(path);
         };
-        let key = crate::collector_runner::contribution_key(&collector.owner, &spec.id);
+        let key = crate::collector_runner::contribution_key(&collector.namespace, &spec.id);
         if let Some(log) = &self.run_log {
             match log.health().disabled_reason(&key).await {
                 Ok(Some(reason)) => {
@@ -846,6 +852,10 @@ impl CollectionService {
                 }
             }
         }
+        let run = how
+            .parent
+            .child(Some(collector.contribution.clone()), Mode::External);
+        how.parent.track_child(&run);
         let started = std::time::Instant::now();
         let parsed = match self.report_parser(collector, root) {
             Err(ParserProblem::Broken(e)) => Err(e),
@@ -872,7 +882,7 @@ impl CollectionService {
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
         let error = parsed.as_ref().err().cloned();
-        self.record_report_run(&collector.owner, &spec.id, how, &key, elapsed, error)
+        self.record_report_run(&run, how, &key, elapsed, error)
             .await;
         match parsed {
             Ok((output, exec, label)) => ReportRead::Parsed {
@@ -890,8 +900,7 @@ impl CollectionService {
     /// counted.
     async fn record_report_run(
         &self,
-        owner: &str,
-        id: &str,
+        run: &RunContext,
         how: &ReportRun<'_>,
         key: &oxplow_db::ContributionKey,
         elapsed_ms: i64,
@@ -903,10 +912,10 @@ impl CollectionService {
         let recorded = log
             .record_with(
                 crate::collector_runner::RunRecord {
-                    owner,
-                    id,
+                    owner: &key.namespace,
+                    id: &key.contribution,
                     trigger: how.trigger,
-                    source: how.source,
+                    source: &run.actor().source(),
                     cause: how
                         .cause
                         .map(|c| (oxplow_domain::EventId(c.event_id.clone()), c.seq)),
@@ -915,7 +924,8 @@ impl CollectionService {
                     facts: 0,
                     elapsed_ms,
                     error: error.clone(),
-                    run: None,
+                    run,
+                    unmeasured_cost: true,
                 },
                 None,
             )
@@ -936,10 +946,12 @@ impl CollectionService {
                     Some(e) => health.failed(key, e).await.map(|_| ()),
                 };
                 if let Err(e) = counted {
-                    tracing::warn!(collector = %id, error = %e, "recording its health failed");
+                    tracing::warn!(collector = %key.contribution, error = %e, "recording its health failed");
                 }
             }
-            Err(e) => tracing::warn!(collector = %id, error = %e, "recording its run failed"),
+            Err(e) => {
+                tracing::warn!(collector = %key.contribution, error = %e, "recording its run failed")
+            }
         }
     }
 
@@ -1024,7 +1036,8 @@ impl CollectionService {
         let Some(log) = &self.run_log else {
             return false;
         };
-        let key = crate::collector_runner::contribution_key(&collector.owner, &collector.spec.id);
+        let key =
+            crate::collector_runner::contribution_key(&collector.namespace, &collector.spec.id);
         matches!(log.health().disabled_reason(&key).await, Ok(Some(_)))
     }
 
@@ -1039,10 +1052,15 @@ impl CollectionService {
         root: &std::path::Path,
     ) -> RunReports {
         let cause = origin.cause();
-        let source = oxplow_domain::Actor::System.source();
+        let mut parent = RunContext::core(oxplow_domain::Actor::System, Mode::External);
+        if let Some(cause) = cause {
+            parent = parent
+                .caused_by(oxplow_domain::EventId(cause.event_id.clone()))
+                .anchored(cause.anchors.clone());
+        }
         let how = ReportRun {
             trigger: "on",
-            source: &source,
+            parent: &parent,
             cause,
         };
         let mut out = RunReports::default();
@@ -1477,7 +1495,7 @@ impl CollectionService {
         thread: &ThreadId,
         owner: &str,
         id: &str,
-        source: &str,
+        parent: &RunContext,
         turn: Option<i64>,
     ) -> Result<ReportSync, crate::collector_runner::RunCollectorError> {
         use crate::collector_runner::RunCollectorError;
@@ -1485,11 +1503,12 @@ impl CollectionService {
         let collector = self
             .report_collectors(&root)
             .into_iter()
-            .find(|r| r.owner == owner && r.spec.id == id)
+            .filter(|r| r.matches(owner, id))
+            .min_by_key(|r| r.namespace != owner)
             .ok_or(RunCollectorError::NotFound)?;
         let how = ReportRun {
             trigger: "manual",
-            source,
+            parent,
             cause: None,
         };
         let mut reads = RunReports::default();
@@ -3682,6 +3701,7 @@ struct ReportCollector {
     owner: String,
     /// Its extension's namespace: its settings are stored under it.
     namespace: String,
+    contribution: oxplow_domain::run::ContributionRef,
     /// Whether its extension is one of the project's own (in the
     /// checkout, not installed): it wins a collision over one that isn't.
     own: bool,
@@ -3692,9 +3712,15 @@ struct ReportCollector {
     spec: CollectorSpec,
 }
 
+impl ReportCollector {
+    fn matches(&self, owner: &str, id: &str) -> bool {
+        self.spec.id == id && (self.namespace == owner || self.owner == owner)
+    }
+}
+
 struct ReportRun<'a> {
     trigger: &'static str,
-    source: &'a str,
+    parent: &'a RunContext,
     cause: Option<&'a RunCause>,
 }
 
@@ -4429,7 +4455,13 @@ mod tests {
         async fn sync_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
-                .sync_report_collector(&h.thread, "project", "tests.coverage", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "tests.coverage",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap()
             {
@@ -4788,7 +4820,13 @@ mod tests {
                 .unwrap();
             match h
                 .service
-                .sync_report_collector(&thread.id, "project", "tests.coverage", "human", Some(TURN))
+                .sync_report_collector(
+                    &thread.id,
+                    "project",
+                    "tests.coverage",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
             {
                 Ok(ReportSync::Coverage(CoverageIngest::Stored { summary_pct, .. })) => {
@@ -6945,7 +6983,7 @@ mod tests {
             h.db.read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT status, error FROM collector_run WHERE owner = 'project' AND id = ?1",
+                    "SELECT r.outcome, r.error FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id WHERE p.owner = 'project' AND p.id = ?1",
                     [&id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -7173,6 +7211,27 @@ mod tests {
                 collector_run(&h, "tests.junit").await,
                 Some(("ok".into(), None))
             );
+            let recorded = h.db.read(move |c| {
+                c.query_row(
+                    "SELECT r.extension, r.contribution, r.cause_event_id,
+                            r.wall_ms IS NOT NULL, r.cpu_ms IS NULL AND r.peak_bytes IS NULL AND r.ai_calls IS NULL
+                     FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id
+                     WHERE p.owner = 'project' AND p.id = 'tests.junit'",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?, r.get::<_, bool>(3)?, r.get::<_, bool>(4)?)),
+                ).map_err(oxplow_db::map_sql_err)
+            }).await.unwrap();
+            assert_eq!(
+                recorded,
+                (
+                    "project".into(),
+                    "oxplow:oxplow/collector?collector=project/tests.junit".into(),
+                    cause.event_id,
+                    true,
+                    true,
+                )
+            );
             let synced: Vec<serde_json::Value> =
                 h.db.read(|c| {
                     let mut stmt = c
@@ -7275,7 +7334,7 @@ mod tests {
                     "before failure {n}"
                 );
                 run_reads(&h, RunKind::Test).await;
-                assert_eq!(collector_run(&h, "tests.junit").await.unwrap().0, "error");
+                assert_eq!(collector_run(&h, "tests.junit").await.unwrap().0, "failed");
             }
             assert!(health.disabled_reason(&key).await.unwrap().is_some());
             // A good report now isn't read: the collector is off.
@@ -7283,7 +7342,13 @@ mod tests {
             assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "project", "tests.junit", "human", Some(TURN))
+                    .sync_report_collector(
+                        &h.thread,
+                        "project",
+                        "tests.junit",
+                        &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                        Some(TURN)
+                    )
                     .await,
                 Err(crate::collector_runner::RunCollectorError::Disabled(_))
             ));
@@ -7299,7 +7364,7 @@ mod tests {
                         &h.thread,
                         "project",
                         "tests.coverage",
-                        "human",
+                        &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
                         Some(TURN)
                     )
                     .await,
@@ -8051,7 +8116,13 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.eslint",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap()
             {
@@ -8126,7 +8197,13 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.eslint",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap()
             {
@@ -8239,7 +8316,13 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.report", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.report",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap_err();
             assert!(
@@ -8250,7 +8333,13 @@ mod tests {
             // loaded at all: there is no such collector to run.
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.entry", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.entry",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap_err();
             assert!(
@@ -8276,7 +8365,13 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.eslint",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap_err();
             assert!(

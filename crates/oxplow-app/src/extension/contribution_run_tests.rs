@@ -137,7 +137,7 @@ async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential(
     // failed run's attempt stays recorded under its own id.
     let last = rows(
         &fx,
-        "SELECT run_id, status FROM v_collector_run WHERE owner = 'acme' AND id = 'sync'",
+        "SELECT run_id, outcome FROM v_collector_run WHERE owner = 'acme' AND id = 'sync' AND latest = 1",
     )
     .await;
     assert_eq!(last, vec![vec![runs[1][6].clone(), json!("ok")]]);

@@ -376,6 +376,10 @@ collectors:
 - It has no `input`, `env`, `credentials` or `network`, and it writes no
   facts or entities.
 
+Each parse records a run under the declaring extension. Query
+`v_collector_run` for the outcome, error and elapsed time. CPU time, peak
+memory and AI call count are NULL for report parsers.
+
 ### Open datasets
 
 A dataset may say `open: true`. Other extensions' datasets then add rows to

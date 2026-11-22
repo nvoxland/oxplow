@@ -923,7 +923,7 @@ async fn a_collector_is_a_v_collector_row_with_its_standing() {
     }
     crate::test_fixtures::activate(&fx.svc).await;
 
-    let sql = "SELECT uri, extension, id, trigger, enabled, state, last_run_at, last_status \
+    let sql = "SELECT uri, extension, id, trigger, enabled, state, last_run_at, last_outcome \
                FROM v_collector WHERE extension = 'acme'";
     assert_eq!(
         rows(&fx, sql).await,
@@ -955,7 +955,7 @@ async fn a_collector_is_a_v_collector_row_with_its_standing() {
     .unwrap();
     let after = rows(
         &fx,
-        "SELECT state, last_status, last_run_at IS NOT NULL, error FROM v_collector WHERE id = 'pull'",
+        "SELECT state, last_outcome, last_run_at IS NOT NULL, error FROM v_collector WHERE id = 'pull'",
     )
     .await;
     assert_eq!(

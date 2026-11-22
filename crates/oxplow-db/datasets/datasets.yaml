@@ -1497,9 +1497,9 @@ datasets:
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector
-  version: 4
+  version: 5
   key: [uri]
-  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_contribution_run`."
+  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<namespace>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_collector_run`."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<namespace>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (`project` for the project's own)." }
@@ -1509,8 +1509,8 @@ datasets:
     - { name: "trigger", type: "TEXT", doc: "How it comes to run: `call` (manual), `schedule` (`every:`), `events` (`on:`) or `run` (after a test or analysis run)." }
     - { name: "enabled", type: "INT", doc: "1 unless failures disabled it on this machine (`disabled_reason` says why)." }
     - { name: "state", type: "TEXT", doc: "`disabled`, `failing` (its health is failing or its last run failed), `never_run` or `ok`." }
-    - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339); NULL when it never ran." }
-    - { name: "last_status", type: "TEXT", doc: "The last run's outcome: `ok`, `error` or `skipped`; NULL when it never ran." }
+    - { name: "last_run_at", type: "TEXT", doc: "When its last run finished (RFC 3339). NULL when it never ran." }
+    - { name: "last_outcome", type: "TEXT", doc: "The outcome of its last finished run, as in `v_collector_run.outcome`. NULL when it never ran." }
     - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
     - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
     - { name: "disabled_reason", type: "TEXT", doc: "Why it is disabled; NULL when it is not." }
@@ -1519,22 +1519,34 @@ datasets:
   tests:
     - { not_null: uri }
 - name: collector_run
-  version: 7
-  description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
+  version: 8
+  key: [run_id]
+  description: "One row per collector run, with its outcome, costs and row counts. The latest finished run is the one held by the collector's checkpoint."
+  groups: [contribution_run]
   fields:
-    - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
-    - { name: "id", type: "TEXT", doc: "The collector's id within its owner (may be dotted: `repo.scan_clone`)." }
-    - { name: "status", type: "TEXT", doc: "`ok`, `error` (what failed, or a permission its extension lacks; v4), or `skipped` (the loop guard refused its run for an event; `error` says why)." }
-    - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339)." }
-    - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
-    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
-    - { name: "cursor_json", type: "TEXT", doc: "Its checkpoint: the opaque state its script or provider read returned last." }
-    - { name: "last_event_id", type: "INTEGER", doc: "The seq of the last trigger event it ran for." }
-    - { name: "run_id", type: "TEXT", doc: "Its last run (`v_contribution_run.run_id`); NULL for a run before runs were recorded. (v2)" }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "owner", type: "TEXT", doc: "The collector's namespace. The declaring package is in `extension`." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its namespace (may be dotted: `repo.scan_clone`)." }
+    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after this run, as JSON. NULL for historical runs whose counts were never retained." }
+    - { name: "uri", type: "TEXT", doc: "The collector's URI (`oxplow:oxplow/collector?collector=<namespace>/<id>`)." }
+    - { name: "latest", type: "INT", doc: "1 when this run is the collector checkpoint's latest finished run, 0 otherwise." }
   tests:
+    - { not_null: run_id }
     - { not_null: owner }
     - { not_null: id }
+- name: collector_checkpoint
+  version: 1
+  key: [owner, id]
+  description: "One checkpoint per collector that has run. Holds the cursor and counts from its last successful run and the pointers to its latest handled event and latest finished run."
+  fields:
+    - { name: "owner", type: "TEXT", doc: "The collector's namespace." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its namespace." }
+    - { name: "uri", type: "TEXT", doc: "The collector's URI (`oxplow:oxplow/collector?collector=<namespace>/<id>`)." }
+    - { name: "cursor_json", type: "TEXT", doc: "The opaque cursor its script or provider returned. A failed run leaves it unchanged." }
+    - { name: "last_event_id", type: "INTEGER", doc: "The sequence of the latest trigger event the collector handled." }
+    - { name: "last_run_id", type: "TEXT", doc: "The latest finished run (`v_collector_run.run_id`)." }
+    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
+  tests:
+    - { not_null: last_run_id }
 - name: pending_run
   version: 2
   key: [owner, id]

@@ -3,13 +3,15 @@ SELECT c.uri, c.extension, c.namespace, c.local AS id, c.description,
        CAST(h.state IS NOT 'disabled' AS INTEGER) AS enabled,
        CAST(CASE
               WHEN h.state = 'disabled' THEN 'disabled'
-              WHEN h.state = 'failing' OR r.status = 'error' THEN 'failing'
-              WHEN r.owner IS NULL THEN 'never_run'
+              WHEN h.state = 'failing'
+                OR r.outcome IN ('failed', 'denied', 'cancelled', 'interrupted', 'invalid') THEN 'failing'
+              WHEN r.run_id IS NULL THEN 'never_run'
               ELSE 'ok'
             END AS TEXT) AS state,
-       r.last_run_at, r.status AS last_status, r.error, r.row_counts_json,
+       r.finished_at AS last_run_at, r.outcome AS last_outcome, r.error, p.row_counts_json,
        h.reason AS disabled_reason, h.next_due_at, h.fresh
 FROM ref('contribution') c
-LEFT JOIN ref('collector_run') r ON r.uri = c.uri
+LEFT JOIN source('collector_checkpoint') p ON p.owner = c.namespace AND p.id = c.local
+LEFT JOIN source('contribution_run') r ON r.run_id = p.last_run_id
 LEFT JOIN ref('contribution_health') h ON h.uri = c.uri
 WHERE c.kind = 'collector'

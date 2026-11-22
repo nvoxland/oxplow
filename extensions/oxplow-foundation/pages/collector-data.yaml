@@ -1,5 +1,5 @@
 title: Collector data
-description: What one collector recorded — the rows its last run counted and, for a collector that records facts, the facts of its recent runs.
+description: One collector's run history, the row counts from its last successful run, and the facts it recorded.
 label: '{{row.name}} data'
 icon: activity
 for: oxplow/collector
@@ -18,12 +18,20 @@ answers:
 loaders:
   about:
     sql: |
-      SELECT k.id AS name, k.description, k.uri, k.id,
-             k.last_run_at, k.last_status,
+      SELECT k.id AS name, k.description, k.uri, k.id, k.namespace,
+             k.last_run_at, k.last_outcome,
+             NULLIF((SELECT json_group_array(json_object('text', j.key || ': ' || j.value))
+                     FROM json_each(k.row_counts_json) j), '[]') AS row_counts
+      FROM v_collector k WHERE k.uri = :uri
+  runs:
+    sql: |
+      SELECT r.run_id, r.started_at, r.outcome, r.error, r.version, r.cpu_ms, r.ai_calls,
              NULLIF((SELECT json_group_array(json_object('text', j.key || ': ' || j.value))
                      FROM json_each(r.row_counts_json) j), '[]') AS row_counts
-      FROM v_collector k LEFT JOIN v_collector_run r ON r.uri = k.uri
-      WHERE k.uri = :uri
+      FROM about k JOIN v_collector_run r ON r.owner = k.namespace AND r.id = k.id
+      WHERE (:range_from IS NULL OR r.started_at >= :range_from)
+        AND (:range_to IS NULL OR r.started_at <= :range_to)
+      ORDER BY r.started_at DESC, r.run_id DESC LIMIT 200
   # A fact collector's captures carry its id as their producer; a report collector
   # records under the producer its report names, so it may have none here.
   recorded:
@@ -48,9 +56,22 @@ view:
     - { key: name, label: Collector }
     - { key: description, label: What it gathers }
     - { key: last_run_at, label: Last run, format: datetime }
-    - { key: last_status, label: Last result }
-    - { key: row_counts, label: Rows after the last run, format: items }
+    - { key: last_outcome, label: Last outcome }
+    - { key: row_counts, label: Rows after the last successful run, format: items }
     empty: This collector isn't known to the project.
+  - id: runs
+    title: Runs
+    viz: table
+    from: runs
+    columns:
+    - { key: started_at, label: When, format: datetime, expand: oxplow/run-details }
+    - { key: outcome, label: Outcome }
+    - { key: error, label: Error }
+    - { key: version, label: Version }
+    - { key: cpu_ms, label: CPU, format: duration }
+    - { key: ai_calls, label: Model calls }
+    - { key: row_counts, label: Rows, format: items }
+    empty: No runs in this range.
   - id: recorded
     title: Facts it recorded
     viz: table

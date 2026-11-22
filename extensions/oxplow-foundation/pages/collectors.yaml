@@ -8,14 +8,25 @@ answers:
 actions:
 - {"id":"sync","label":"Run again","command":"oxplow.collector.sync","input":{"collector":"tracker/issues"}}
 loaders:
-  runs:
-    sql: "SELECT owner, id, status, last_run_at, error FROM v_collector_run"
   collectors:
-    sql: "SELECT extension, id, trigger, enabled, state, last_run_at, error FROM v_collector ORDER BY extension, id"
+    sql: |
+      SELECT uri, extension, id, trigger, enabled, state, last_run_at, last_outcome, error
+      FROM v_collector ORDER BY extension, id
   credentials:
     sql: "SELECT collector, name FROM v_collector_credential WHERE is_set = 0 ORDER BY collector, name"
 view:
   stack:
-  - { id: runs, title: Runs, viz: table, from: runs }
-  - { id: collectors, title: Collectors, viz: table, from: collectors }
+  - id: collectors
+    title: Collectors
+    viz: table
+    from: collectors
+    columns:
+    - { key: id, label: Collector, link: { kind: page, from: uri } }
+    - { key: extension }
+    - { key: trigger }
+    - { key: enabled }
+    - { key: state }
+    - { key: last_run_at, label: Last run, format: datetime }
+    - { key: last_outcome, label: Last outcome }
+    - { key: error }
   - { id: credentials, title: Missing credentials, viz: table, from: credentials }

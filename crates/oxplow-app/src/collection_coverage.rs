@@ -8,7 +8,7 @@
 //!
 //! [`Feeds`] maps each extension entity's view to the collectors that
 //! declare that entity; it's restated on every catalog change. The status
-//! is read at query time from `collector_run` and `contribution_health`.
+//! is read at query time from the collector's checkpoint and contribution health.
 
 use std::collections::BTreeMap;
 use std::sync::RwLock;
@@ -100,7 +100,9 @@ fn status_of(
     let sql = |e: rusqlite::Error| DomainError::Storage(e.to_string());
     let run: Option<(String, String, Option<String>)> = c
         .query_row(
-            "SELECT status, last_run_at, error FROM collector_run WHERE owner = ?1 AND id = ?2",
+            "SELECT r.outcome, r.finished_at, r.error
+               FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id
+              WHERE p.owner = ?1 AND p.id = ?2",
             [&f.owner, &f.id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -122,7 +124,12 @@ fn status_of(
             reason.clone(),
         ),
         (None, _) => ("never", None, None),
-        (Some((status, at, error)), _) if status == "error" => {
+        (Some((status, at, error)), _)
+            if matches!(
+                status.as_str(),
+                "failed" | "denied" | "cancelled" | "interrupted" | "invalid"
+            ) =>
+        {
             ("failed", Some(at.clone()), error.clone())
         }
         (Some((_, at, _)), Some((_, _, Some(due)))) if due.as_str() < now => {
@@ -141,7 +148,12 @@ fn status_of(
 
 #[cfg(test)]
 mod tests {
-    use oxplow_db::CollectorRun;
+    use oxplow_db::CollectorObservation;
+    use oxplow_domain::{
+        contribution::{ContributionId, ContributionKind},
+        run::{ContributionRef, Mode, Outcome, RunContext},
+        Actor,
+    };
 
     async fn fixture() -> crate::test_fixtures::ThreadFixture {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -158,18 +170,18 @@ mod tests {
         fx
     }
 
-    fn run(status: &str, error: Option<&str>) -> CollectorRun {
-        CollectorRun {
-            owner: "my_gh".into(),
-            id: "gh".into(),
-            status: status.into(),
-            last_run_at: "2026-10-09T12:00:00.000000Z".into(),
-            error: error.map(str::to_string),
-            row_counts: Default::default(),
-            cursor: None,
-            last_event_id: None,
-            run_id: None,
-        }
+    fn run() -> RunContext {
+        RunContext::contribution(
+            ContributionRef {
+                id: ContributionId::new("my_gh", ContributionKind::Collector, "gh"),
+                extension: "my-gh".into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            },
+            Actor::System,
+            Mode::External,
+        )
     }
 
     /// A dataset a collector feeds says how the collector stands: never run,
@@ -190,13 +202,21 @@ mod tests {
         );
         let store = oxplow_db::SqliteCollectorStore::new(fx.svc.db.clone());
         store
-            .record_run(run("error", Some("rate limited")))
+            .record_run(
+                run(),
+                Outcome::Failed,
+                Some("rate limited".into()),
+                CollectorObservation::default(),
+            )
             .await
             .unwrap();
         let failed = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
         assert_eq!(failed[0].status, "failed");
         assert_eq!(failed[0].error.as_deref(), Some("rate limited"));
-        store.record_run(run("ok", None)).await.unwrap();
+        store
+            .record_run(run(), Outcome::Ok, None, CollectorObservation::default())
+            .await
+            .unwrap();
         let current = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
         assert_eq!(current[0].status, "current");
         assert!(current[0].at.is_some());

@@ -564,7 +564,11 @@ impl RunContext {
     /// Count the child's use separately and include its cost in this run.
     pub fn track_child(&self, child: &Self) {
         if child.parent() == Some(self.run()) && !Arc::ptr_eq(&self.usage, &child.usage) {
-            self.accounting().children.push(child.clone());
+            // The accounting record outlives command admission. Only the
+            // context that executes the child may retain a catalog reader.
+            self.accounting()
+                .children
+                .push(child.clone().without_host_generation());
         }
     }
 

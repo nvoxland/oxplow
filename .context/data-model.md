@@ -1451,7 +1451,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_datasets.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and the requests' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
-| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced the metrics bus `SnapshotTaken` arm) | boot.rs |
+| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector once per event (`collector_checkpoint.last_event_id`). Entity collectors write rows and fact collectors use the fact engine. On `snapshot.taken`, delta collectors run when the snapshot recorded files and whole-tree collectors run on every take. Other events use the stream's latest snapshot. The transaction also records the run and logs `collector.synced@2`. | boot.rs |
 
 **Async consumers (P2.6.2).** `trait AsyncEventConsumer { name,
 after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
@@ -1900,18 +1900,27 @@ one fails and deleted in the transaction of the next success; `v_asset`
 (v3) joins it, so an asset that never succeeded is listed too. See [semantic-layer.md](./semantic-layer.md)
 "Assets".
 
-### `collector_run` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)
+### `collector_run` and `collector_checkpoint` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)
 
-V133 (P7.B3; replaced V75 `ext_source_state`, its rows copied). Each
-collector's last run: `owner` + `id` (the primary key; the owner is the
-declaring extension, the project's own among them), `status` (`ok` / `error` /
-`skipped` — the loop guard refused its run for an
-event, V154 rebuilt the table for the CHECK), `last_run_at`, `error`, `row_counts_json` (rows per
-entity after the last good run), `cursor_json` (its opaque checkpoint)
-and `last_event_id` (the last trigger event it ran for; it never moves
-back). A failed run keeps the last good counts and cursor.
-`record_run_in` runs in the transaction that writes the run's rows and
-logs its `collector.synced@2`. Read as `v_collector_run`; see
+V65 moves each collector's saved state into `collector_checkpoint` and
+gives `collector_run` one row per run. A detail row has `run_id` (the
+primary key and a cascading reference to `contribution_run`), `owner`
+(the collector's namespace), `id`, and `row_counts_json` for that run.
+The migration leaves older per-run counts NULL where they were never
+recorded and creates a shared run for a checkpoint that lacks its last
+run.
+
+`collector_checkpoint` is keyed by `(owner, id)`. It stores the opaque
+`cursor_json`, the highest processed trigger sequence in `last_event_id`,
+the newest finished run in `last_run_id`, and the last successful run's
+`row_counts_json`. A failed run advances the last-run pointer and keeps
+the last good counts and cursor. `record_run_in` writes the shared run,
+detail and checkpoint together. The entity runner includes those writes
+in the transaction for the collector's output and `collector.synced@2`.
+
+Read history as `v_collector_run`, checkpoint state as
+`v_collector_checkpoint`, and standing as `v_collector`. The history
+view marks the run named by the checkpoint with `latest = 1`. See
 [semantic-layer.md](./semantic-layer.md) "Collectors".
 
 ### `effect_run` — `crates/oxplow-db/src/effect_run_store.rs`
@@ -1959,11 +1968,13 @@ own run fields until their detail records move to the shared table.
   credentials the run received.
 - **Readers.** `v_contribution_run` publishes the shared fields, with
   `scopes` and `decisions` for the two JSON columns, and the run's URI.
-  `command_audit.run_id` names its shared run. `effect_run`,
-  `collector_run` and `ai_call` can name a run in `run_id`.
+  `command_audit.run_id` and `collector_run.run_id` name their shared runs.
+  `effect_run` and `ai_call` can name a run in `run_id`.
 - **Retention.** `event_retention::sweep` uses a 90-day window
   (`CONTRIBUTION_RUN_DAYS`) in batches of 5,000. Commands with recorded
-  input stay, except refusals, which age out after 30 days.
+  input stay, except refusals, which age out after 30 days. A collector's
+  run ages out with its detail row. The finished run named by
+  `collector_checkpoint.last_run_id` is retained.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 
