@@ -234,7 +234,7 @@ component's `commands` at that version, as **`Actor::Component {
 component: id, on_behalf_of: Human }`** — the component acting for the
 person, so every policy applies as if they ran it. It is audited as kind
 `component` with the component's contribution ref as source
-(`command.executed@5`). The input is literal (no placeholders). A command
+(`command.executed@6`). The input is literal (no placeholders). A command
 that asks comes back `NEEDS_CONFIRMATION` and the **host** asks, never
 the frame. A component acts for a person, so it never proposes.
 `run_component_sql` and `component_form` are the same kind of call. All

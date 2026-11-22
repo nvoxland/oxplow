@@ -66,7 +66,7 @@ pub use ids::{
 };
 pub use json::{JsNumber, Json};
 pub use row_ids::{
-    AiCallId, AuditId, ByteSize, DeadLetterId, FileSnapshotId, ProposalId, SnapshotId,
+    AiCallId, ByteSize, CommandRunId, DeadLetterId, FileSnapshotId, ProposalId, SnapshotId,
 };
 pub use stream::{HostId, Stream, StreamKind};
 pub use thread::{Thread, ThreadMark};

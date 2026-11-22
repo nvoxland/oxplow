@@ -3,7 +3,7 @@
 //! event reaches an `on:` collector and an effect; a person runs the
 //! collector and the extension's command. Each run names its contribution,
 //! the actor the host chose, what caused it and where, and the records
-//! that already existed (`collector_run`, `effect_run`, `command_audit`)
+//! that already existed (`collector_run`, `effect_run`, `command_run`)
 //! point at it.
 
 use std::path::Path;
@@ -180,7 +180,7 @@ async fn every_run_is_recorded_once_as_itself() {
         svc,
         "SELECT r.actor_kind, r.actor_id, r.cause_event_id, r.outcome,
                 (SELECT count(*) FROM effect_run e WHERE e.run_id = r.run_id),
-                (SELECT count(*) FROM command_audit a JOIN contribution_run child USING (run_id)
+                (SELECT count(*) FROM command_run a JOIN contribution_run child USING (run_id)
                   WHERE child.parent_run_id = r.run_id AND child.kind = 'command')
            FROM contribution_run r WHERE r.contribution = 'oxplow:oxplow/effect?effect=acme/note'",
     )
@@ -230,7 +230,7 @@ async fn every_run_is_recorded_once_as_itself() {
     let command = rows(
         svc,
         "SELECT r.actor_kind, r.kind, r.outcome, a.command FROM contribution_run r
-           JOIN command_audit a ON a.run_id = r.run_id
+           JOIN command_run a ON a.run_id = r.run_id
           WHERE r.contribution = 'oxplow:oxplow/command?command=acme.note.write'",
     )
     .await;

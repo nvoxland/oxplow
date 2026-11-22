@@ -3,8 +3,8 @@
 //! Every command runs the same pipeline — validate the input against the
 //! spec's schema, check the invoker, apply the agent policy, require a
 //! person's confirmation when the spec says so, run the handler, and
-//! record `command.executed` in the event log plus a `command_audit` row
-//! **in one transaction**. `undo(audit_id)` runs the recorded inverse
+//! record `command.executed` in the event log plus a `command_run` row
+//! **in one transaction**. `undo(command_run_id)` runs the recorded inverse
 //! through the same pipeline.
 //!
 //! A handler is either `Tx` (runs inside the bus's transaction, so its
@@ -41,7 +41,7 @@ mod proposals;
 pub mod provider_instances;
 mod record;
 mod settings_commands;
-pub use record::tracking_failed_audit;
+pub use record::tracking_failed_run;
 pub mod action_point_offers;
 pub mod ref_commands;
 pub mod snapshot;
@@ -61,16 +61,16 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use oxplow_db::command_audit_store::{insert_tx, mark_undone_tx, set_event_id_tx, NewCommandAudit};
+use oxplow_db::command_run_store::{insert_tx, mark_undone_tx, set_event_id_tx, NewCommandRun};
 use oxplow_db::event_log_store::append_tx;
 use oxplow_db::proposal_store::{self, NewProposal};
 use oxplow_db::{
-    CommandAudit, Database, ProposalDecision, SqliteCommandAuditStore, SqliteEventLogStore,
+    CommandRun, Database, ProposalDecision, SqliteCommandRunStore, SqliteEventLogStore,
     SqliteProposalStore, TxError,
 };
 use oxplow_domain::events::schema::{
-    CommandApproved, CommandApprovedV2, CommandDeclined, CommandDeclinedV2, CommandExecuted,
-    CommandExecutedV5, CommandOutcome as Outcome, CommandProposed, CommandProposedV4,
+    CommandApproved, CommandApprovedV3, CommandDeclined, CommandDeclinedV2, CommandExecuted,
+    CommandExecutedV6, CommandOutcome as Outcome, CommandProposed, CommandProposedV4,
 };
 use oxplow_domain::uri::build::{command_uri, proposal_uri};
 use oxplow_domain::{
@@ -831,7 +831,7 @@ impl RunOrigin {
 pub struct CommandBus {
     db: Database,
     log: SqliteEventLogStore,
-    audit: SqliteCommandAuditStore,
+    audit: SqliteCommandRunStore,
     proposals: SqliteProposalStore,
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
@@ -867,7 +867,7 @@ impl CommandBus {
     ) -> Self {
         let sql_db = db.clone();
         Self {
-            audit: SqliteCommandAuditStore::new(db.clone()),
+            audit: SqliteCommandRunStore::new(db.clone()),
             proposals: SqliteProposalStore::new(db.clone()),
             db,
             log,
@@ -1062,7 +1062,7 @@ impl CommandBus {
         self.log.vocabulary()
     }
 
-    pub fn audit_store(&self) -> &SqliteCommandAuditStore {
+    pub fn audit_store(&self) -> &SqliteCommandRunStore {
         &self.audit
     }
 
@@ -1334,7 +1334,7 @@ impl CommandBus {
         let run = &match self.resolved(&command_run).await {
             Ok(run) => run,
             Err(err) => {
-                self.audit_only(
+                self.record_unapplied(
                     &command_run,
                     spec,
                     &input,
@@ -1354,7 +1354,7 @@ impl CommandBus {
                 field: None,
                 message,
             };
-            self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
+            self.record_unapplied(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                 .await;
             return Err(err);
         }
@@ -1363,7 +1363,7 @@ impl CommandBus {
         let routing = match command.validator.check(&input).map(|()| command.resolve()) {
             Ok(routing) => routing,
             Err(err) => {
-                self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                self.record_unapplied(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1371,7 +1371,7 @@ impl CommandBus {
         // 2. A job runs only what its extension declared for jobs; anyone
         // else may run every command…
         if let Some(err) = job_refusal(spec, actor) {
-            self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
+            self.record_unapplied(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                 .await;
             return Err(err);
         }
@@ -1386,7 +1386,7 @@ impl CommandBus {
                     reason: "a command that changes the workspace requires the actor's thread"
                         .into(),
                 };
-                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
+                self.record_unapplied(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1400,7 +1400,7 @@ impl CommandBus {
                 self.policy.check_command(thread_id.as_ref(), spec, gated)
             {
                 let err = CommandError::Denied { reason };
-                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
+                self.record_unapplied(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1429,7 +1429,7 @@ impl CommandBus {
                             CommandError::Denied { .. } => Outcome::Denied,
                             _ => Outcome::Error,
                         };
-                        self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
+                        self.record_unapplied(run, spec, &input, recorded, Some(err.to_string()))
                             .await;
                         return Err(err);
                     }
@@ -1451,7 +1451,7 @@ impl CommandBus {
         // the command's own, or each composed call's.
         for pending in prechecks {
             if let Err(err) = pending.run().await {
-                self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                self.record_unapplied(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1593,10 +1593,11 @@ impl CommandBus {
                         let marked = match &origin_tx {
                             RunOrigin::Call => Ok(()),
                             RunOrigin::Undo(original) => {
-                                mark_undone_tx(tx, *original, recorded.audit_id)
+                                mark_undone_tx(tx, *original, recorded.command_run_id)
                             }
                             RunOrigin::Approval(id) => {
-                                proposal_store::approve_tx(tx, *id, recorded.audit_id).map(|_| ())
+                                proposal_store::approve_tx(tx, *id, recorded.command_run_id)
+                                    .map(|_| ())
                             }
                             RunOrigin::Effect(key, _, effect) => record_effect_tx(
                                 tx,
@@ -1762,7 +1763,7 @@ impl CommandBus {
                     CommandError::Invalid { .. } => Outcome::Invalid,
                     _ => Outcome::Error,
                 };
-                self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
+                self.record_unapplied(run, spec, &input, recorded, Some(err.to_string()))
                     .await;
                 Err(err)
             }
@@ -1789,7 +1790,7 @@ impl CommandBus {
             ),
         };
         let run = run.clone();
-        let row = NewCommandAudit {
+        let row = NewCommandRun {
             command: command.to_owned(),
             input: None,
             outcome: ended,
@@ -1801,7 +1802,7 @@ impl CommandBus {
         if let Err(e) = self
             .db
             .transaction(move |tx| {
-                oxplow_db::command_audit_store::insert_rolled_back_children_tx(tx, &run)?;
+                oxplow_db::command_run_store::insert_rolled_back_children_tx(tx, &run)?;
                 insert_tx(tx, &run, &row).map(|_| ())
             })
             .await
@@ -1894,7 +1895,7 @@ impl CommandBus {
         };
         Ok(CommandOutcome {
             result: out.caller_result.unwrap_or(out.result),
-            audit_id: None,
+            command_run_id: None,
             event_id: None,
             inverse: None,
         })

@@ -20,7 +20,7 @@ mock.module("../api.js", () => ({
   ...realApi,
   runCommand: async (name: string, input: unknown) => {
     commands.push([name, input]);
-    return { result: { id: "trm9", uri: "oxplow:oxplow/terminal?id=trm9", title: "Terminal 9" }, audit_id: 1, event_id: null, inverse: null };
+    return { result: { id: "trm9", uri: "oxplow:oxplow/terminal?id=trm9", title: "Terminal 9" }, command_run_id: 1, event_id: null, inverse: null };
   },
 }));
 mock.module("../terminal/TerminalView.js", () => ({
@@ -37,7 +37,7 @@ const { VizActionRunnerContext } = await import("./vizActionRunner.js");
 // A viz presses through the page that draws it: a runner stands in for it.
 const press = async (_id: string, action: string, _p: unknown, row: unknown, _s: unknown, _c: boolean, input?: unknown) => {
   actions.push([action, row, input]);
-  return { result: null, audit_id: 2, event_id: null, inverse: null } as never;
+  return { result: null, command_run_id: 2, event_id: null, inverse: null } as never;
 };
 
 afterEach(() => {

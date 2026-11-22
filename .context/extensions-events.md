@@ -62,6 +62,12 @@ the Review page (`ImpactReportView`) never drops it.
 
 ## Event types
 
+`command.executed@6`, `command.approved@3` and `ui.op_failed@3` use
+`command_run_id` for the integer command detail ID. V68 upgrades the
+stored payloads in place, keeping each event's ID, sequence, anchors and
+proposal links. Expired payloads stay empty.
+
+
 `event_types:` (P8.D3; **stable since P9.D6**, so a shared or bundled
 extension may use it — below; `extension_event_types.rs`,
 `vocabulary_reactor.rs`) declares event types
@@ -556,7 +562,7 @@ A run is the registered `oxplow.command.sequence` — its spec and compiled inpu
 schema, shared (`Command::with_handler`) — over what the script composed
 (calls, and its own events through `own_events`), run by
 `CommandBus::run_effect` as `Actor::Effect` with
-`RunOrigin::Effect(key)`: its `command.executed@4` is caused by the
+`RunOrigin::Effect(key)`: its `command.executed@6` is caused by the
 triggering event, and the reaction's `effect_run` row and
 `effect.result@5 { effect, event, outcome, reason?, proposal?, attempt,
 origin }` (caused by that run) land **in the run's transaction**. For a

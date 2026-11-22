@@ -1156,8 +1156,8 @@ thread are told apart.
 - **In process.** The Codex observer and the UI's interrupt build envelopes
   directly, naming the session.
 - **The actor carries its session.** An MCP call's actor is
-  `Actor::Agent { session_id, thread_id, stream_id }`; its audit row
-  records the session (`command_audit.session_id`) and its events are
+  `Actor::Agent { session_id, thread_id, stream_id }`; its contribution run
+  records the session (`contribution_run.session_id`) and its events are
   anchored to it (`Actor::anchors()`). `source` stays `agent:thr<n>`.
 - A hook's harness is the bearer's, so even a timed-out hook is answered
   in its harness's shape.

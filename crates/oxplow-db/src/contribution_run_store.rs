@@ -10,7 +10,7 @@ use oxplow_domain::run::{Outcome, RunContext};
 use oxplow_domain::{DomainError, Timestamp};
 use rusqlite::params;
 
-use crate::command_audit_store::actor_kind_str;
+use crate::command_run_store::actor_kind_str;
 use crate::database::map_sql_err;
 
 /// Register a contribution run before its work starts.

@@ -2244,14 +2244,14 @@ mod tests {
         embedded::migrations::runner().run(&mut conn).unwrap();
         let has_via: bool = conn
             .query_row(
-                "SELECT count(*) > 0 FROM pragma_table_info('command_audit') WHERE name = 'via'",
+                "SELECT count(*) > 0 FROM pragma_table_info('command_run') WHERE name = 'via'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert!(!has_via);
         let rows: i64 = conn
-            .query_row("SELECT count(*) FROM command_audit", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM command_run", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 1);
     }
@@ -2357,7 +2357,7 @@ mod tests {
             0
         );
         assert_eq!(count("SELECT count(*) FROM event_log"), 1);
-        assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
+        assert_eq!(count("SELECT count(*) FROM command_run"), 1);
     }
 
     /// V60 lets a language be a contribution that is turned off, and keeps
@@ -2461,32 +2461,107 @@ mod tests {
         ).unwrap();
         embedded::migrations::runner().run(&mut conn).unwrap();
         let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
-        assert_eq!(count("SELECT count(*) FROM command_audit"), 4);
+        assert_eq!(count("SELECT count(*) FROM command_run"), 4);
         assert_eq!(
             count(
-                "SELECT count(*) FROM command_audit a JOIN contribution_run r USING (run_id)
+                "SELECT count(*) FROM command_run a JOIN contribution_run r USING (run_id)
                            WHERE a.id = 1 AND r.run_id = 'existing' AND r.outcome = 'invalid'
                              AND r.actor_id = 'thr1' AND r.cpu_ms = 10"
             ),
             1
         );
-        assert_eq!(count("SELECT count(*) FROM command_audit a JOIN contribution_run r USING (run_id)
+        assert_eq!(count("SELECT count(*) FROM command_run a JOIN contribution_run r USING (run_id)
                            WHERE a.id = 2 AND r.parent_run_id = 'effect' AND r.kind = 'command'
                              AND r.outcome = 'ok' AND r.cpu_ms IS NULL AND a.event_id = 'event' AND a.undone_by = 3"), 1);
         assert_eq!(
             count(
-                "SELECT count(*) FROM command_audit a JOIN contribution_run r USING (run_id)
+                "SELECT count(*) FROM command_run a JOIN contribution_run r USING (run_id)
                            WHERE a.id = 3 AND r.parent_run_id IS NULL AND r.cpu_ms IS NULL"
             ),
             1
         );
         assert_eq!(
             count(
-                "SELECT count(*) FROM command_audit
+                "SELECT count(*) FROM command_run
                            WHERE id > 50 AND run_id = 'read' AND input_json IS NULL"
             ),
             1
         );
+    }
+
+    #[test]
+    fn command_run_names_migration_keeps_event_links_and_expiry() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(67))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO event_log (seq, id, type, v, at, source, subject, payload, cause, payload_expired_at)
+             VALUES
+                 (8, 'ran', 'command.executed', 5, 'at', 'human', '[]', json_object('audit_id', 41), NULL, NULL),
+                 (9, 'approved', 'command.approved', 2, 'at', 'human', '[]',
+                     json_object('audit_id', 41, 'proposal', 3), 'ran', NULL),
+                 (10, 'failed', 'ui.op_failed', 2, 'at', 'human', '[]',
+                     json_object('audit_id', 42, 'proposal', 4), NULL, NULL),
+                 (11, 'expired', 'ui.op_failed', 1, 'at', 'human', '[]', '{}', NULL, 'expired');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let mut query = conn
+            .prepare(
+                "SELECT seq, id, v, payload, cause, payload_expired_at
+                 FROM event_log ORDER BY seq",
+            )
+            .unwrap();
+        let mut events = query.query([]).unwrap();
+        for (seq, id, version, payload, cause, expired) in [
+            (
+                8,
+                "ran",
+                6,
+                serde_json::json!({"command_run_id": 41}),
+                None,
+                None,
+            ),
+            (
+                9,
+                "approved",
+                3,
+                serde_json::json!({"command_run_id": 41, "proposal": 3}),
+                Some("ran"),
+                None,
+            ),
+            (
+                10,
+                "failed",
+                3,
+                serde_json::json!({"command_run_id": 42, "proposal": 4}),
+                None,
+                None,
+            ),
+            (
+                11,
+                "expired",
+                3,
+                serde_json::json!({}),
+                None,
+                Some("expired"),
+            ),
+        ] {
+            let row = events.next().unwrap().unwrap();
+            assert_eq!(row.get::<_, i64>(0).unwrap(), seq);
+            assert_eq!(row.get::<_, String>(1).unwrap(), id);
+            assert_eq!(row.get::<_, i64>(2).unwrap(), version);
+            let saved = row.get::<_, String>(3).unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
+                payload
+            );
+            assert_eq!(row.get::<_, Option<String>>(4).unwrap().as_deref(), cause);
+            assert_eq!(row.get::<_, Option<String>>(5).unwrap().as_deref(), expired);
+        }
+        assert!(events.next().unwrap().is_none());
     }
 
     #[test]
@@ -2694,7 +2769,7 @@ mod tests {
             0
         );
         assert_eq!(count("SELECT count(*) FROM event_log"), 1);
-        assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
+        assert_eq!(count("SELECT count(*) FROM command_run"), 1);
     }
 
     /// V47 moves the waiting context items into `context_item`, each with
@@ -3440,7 +3515,7 @@ mod tests {
             "event_log",
             "event_consumer_checkpoint",
             "event_dead_letter",
-            "command_audit",
+            "command_run",
             // V47 — the context baskets.
             "context_basket",
             "context_item",

@@ -68,7 +68,7 @@ pub(super) async fn without_sequences(
     host: &Host,
     audited: Vec<(String, Option<i64>)>,
 ) -> Vec<String> {
-    let audits = oxplow_db::SqliteCommandAuditStore::new(host.svc.db.clone());
+    let audits = oxplow_db::SqliteCommandRunStore::new(host.svc.db.clone());
     let mut commands = Vec::new();
     for (name, id) in audited {
         let steps = match (id, name == "oxplow.command.sequence") {
@@ -133,7 +133,7 @@ pub(super) async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Valu
     .map(|r| json!({ "id": text(&r[0]), "state": text(&r[1]), "reason": text(&r[2]) }))
     .collect();
     let ran = rows(
-        "SELECT json_extract(payload, '$.command'), json_extract(payload, '$.audit_id') FROM v_event \
+        "SELECT json_extract(payload, '$.command'), json_extract(payload, '$.command_run_id') FROM v_event \
          WHERE type = 'command.executed' AND seq > ?1 \
            AND json_extract(payload, '$.actor_kind') = 'effect' ORDER BY seq",
     )

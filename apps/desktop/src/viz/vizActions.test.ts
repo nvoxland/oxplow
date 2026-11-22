@@ -25,7 +25,7 @@ function deps(fail?: Error, openPage: string | null = null) {
     press: async (id, a, params, row, streamId, confirmed) => {
       log.push(`run ${id} ${a} ${JSON.stringify(params)} ${JSON.stringify(row)} ${streamId} ${confirmed}`);
       if (fail && !(confirmed && fail instanceof IpcCallError && fail.code === "NEEDS_CONFIRMATION")) throw fail;
-      return { result: {}, audit_id: 1, event_id: null, inverse: null };
+      return { result: {}, command_run_id: 1, event_id: null, inverse: null };
     },
     toast: (m) => log.push(`toast ${m}`),
     run: runnerTo(log),
@@ -54,7 +54,7 @@ test("an action whose command names a page to open opens it once it ran", async 
   expect(log.slice(-2)).toEqual([`open_after acme.issue.transition {}`, "open oxplow:oxplow/knowledge?id=lib&store=oxwiki"]);
 });
 
-const done = { result: {}, audit_id: 1, event_id: null, inverse: null };
+const done = { result: {}, command_run_id: 1, event_id: null, inverse: null };
 
 test("`then: replace` opens the page in place of the viz's page", async () => {
   const { d, log } = deps(undefined, "oxplow:oxplow/task?id=tsk9&provider=oxtask");
@@ -78,13 +78,13 @@ test("`then: close` closes the viz's page, without asking where", async () => {
 
 test("a command that names no page opens nothing, and a refusal to bind is recorded", async () => {
   const quiet = deps();
-  await openAfterAction(action, { result: {}, audit_id: 1, event_id: null, inverse: null }, quiet.d);
+  await openAfterAction(action, { result: {}, command_run_id: 1, event_id: null, inverse: null }, quiet.d);
   expect(quiet.log).toEqual([`open_after ${action.command} {}`]);
   const { d, log } = deps();
   d.openAfter = async () => {
     throw new Error("its result has no `page` to open");
   };
-  await openAfterAction(action, { result: {}, audit_id: 1, event_id: null, inverse: null }, d);
+  await openAfterAction(action, { result: {}, command_run_id: 1, event_id: null, inverse: null }, d);
   expect(log).toEqual([`error Finish: its result has no \`page\` to open`]);
 });
 
@@ -121,15 +121,15 @@ test("a row action with `when` is offered only on rows where that column is trut
 // it does for a command a person runs from the launcher.
 test("an undoable action's toast offers Undo, which undoes the run as the person", async () => {
   const log: string[] = [];
-  const undoable = { result: {}, audit_id: 7, event_id: null, inverse: { name: "oxplow.agent_session.close", input: {} } } as never;
+  const undoable = { result: {}, command_run_id: 7, event_id: null, inverse: { name: "oxplow.agent_session.close", input: {} } } as never;
   const d: VizActionDeps = {
     press: async () => undoable,
     toast: (m, undo) => {
       log.push(`toast ${m} ${undo ? "with undo" : "without"}`);
       undo?.();
     },
-    undo: async (auditId) => {
-      log.push(`undo ${auditId}`);
+    undo: async (commandRunId) => {
+      log.push(`undo ${commandRunId}`);
     },
     run: runnerTo([]),
     openAfter: async () => null,
@@ -205,7 +205,7 @@ test("a whole-page action is offered as a button; one over the viz's one row onl
 test("an `open` action opens the URI the press answered, with no toast, undo or open_after", async () => {
   const log: string[] = [];
   const d: VizActionDeps = {
-    press: async () => ({ result: { opened: "oxplow:oxplow/file?path=a.rs" }, audit_id: null, event_id: null, inverse: null }),
+    press: async () => ({ result: { opened: "oxplow:oxplow/file?path=a.rs" }, command_run_id: null, event_id: null, inverse: null }),
     toast: (m) => log.push(`toast ${m}`),
     undo: async () => {},
     run: runnerTo(log),
@@ -219,7 +219,7 @@ test("an `open` action opens the URI the press answered, with no toast, undo or 
   expect(await performVizAction(open, run, null, null, false, d)).toBe("done");
   expect(log).toEqual(["open oxplow:oxplow/file?path=a.rs"]);
   // An answer without a URI is the action's failure.
-  const none: VizActionDeps = { ...d, press: async () => ({ result: {}, audit_id: null, event_id: null, inverse: null }) };
+  const none: VizActionDeps = { ...d, press: async () => ({ result: {}, command_run_id: null, event_id: null, inverse: null }) };
   expect(await performVizAction(open, run, null, null, false, none)).toBe("failed");
 });
 
@@ -232,7 +232,7 @@ test("actionHelp is the page's help, else nothing", () => {
 test("an action whose result names a thing offers an Open link to it", async () => {
   const log: string[] = [];
   const d: VizActionDeps = {
-    press: async () => ({ result: { uri: "task:t1" }, audit_id: null, event_id: null, inverse: null }),
+    press: async () => ({ result: { uri: "task:t1" }, command_run_id: null, event_id: null, inverse: null }),
     toast: (m, _undo, open) => {
       log.push(`toast ${m} ${open ? "with open" : "without"}`);
       open?.();
@@ -257,7 +257,7 @@ test("a point action whose row nothing answers says it was skipped, and is not a
   const { d, log } = deps();
   const skipping: VizActionDeps = {
     ...d,
-    press: async () => ({ result: { skipped: "nothing answers `oxplow/task.move` for this item" }, audit_id: null, event_id: null, inverse: null }),
+    press: async () => ({ result: { skipped: "nothing answers `oxplow/task.move` for this item" }, command_run_id: null, event_id: null, inverse: null }),
   };
   const point: PageAction = { id: "mark", label: "Mark", command: null, point: "oxplow/task.move", input: {}, row: true } as PageAction;
   expect(await performVizAction(point, run, { id: 1 }, null, false, skipping)).toEqual({ skipped: "nothing answers `oxplow/task.move` for this item" });

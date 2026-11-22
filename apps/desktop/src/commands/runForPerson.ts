@@ -12,7 +12,7 @@
 ///   shown beside the control that ran it (`anchor`), and toasted only when
 ///   no such control is on screen.
 /// It never throws, and never toasts a success (callers keep their Undo).
-import { fieldErrors, ipcErrorAuditId, ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
+import { fieldErrors, ipcErrorCommandRunId, ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
 import { reportOpError, type OpErrorInput } from "../opErrors.js";
 import { failureStore, inlineClaims, type FailureStore, type InlineClaims } from "./actionFailures.js";
 
@@ -88,8 +88,8 @@ export function createRunner(deps: RunnerDeps) {
         message: failure.message,
         ...(opts.command ? { command: opts.command } : {}),
         ...(opts.threadId !== undefined ? { threadId: opts.threadId } : {}),
-        // What recorded the run: the daemon's audit row, an approval's proposal.
-        ...(ipcErrorAuditId(e) !== null ? { auditId: ipcErrorAuditId(e) } : {}),
+        // What recorded the run: the command run ID, an approval's proposal.
+        ...(ipcErrorCommandRunId(e) !== null ? { commandRunId: ipcErrorCommandRunId(e) } : {}),
         ...(opts.proposal !== undefined ? { proposalId: opts.proposal } : {}),
       });
       if (anchor) {

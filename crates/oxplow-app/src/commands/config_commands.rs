@@ -627,7 +627,7 @@ mod tests {
                 .contains(marker));
         }
         let audits = bus.db.read(|conn| {
-            let mut stmt = conn.prepare("SELECT coalesce(input_json,'') || coalesce(result_json,'') || coalesce(inverse_json,'') FROM command_audit").map_err(oxplow_db::map_sql_err)?;
+            let mut stmt = conn.prepare("SELECT coalesce(input_json,'') || coalesce(result_json,'') || coalesce(inverse_json,'') FROM command_run").map_err(oxplow_db::map_sql_err)?;
             let rows = stmt.query_map([], |row| row.get::<_,String>(0)).map_err(oxplow_db::map_sql_err)?;
             rows.collect::<Result<Vec<_>,_>>().map_err(oxplow_db::map_sql_err)
         }).await.unwrap();

@@ -1,6 +1,6 @@
 //! Recording a run (`.context/commands.md` "The pipeline" step 5): its audit
 //! row, `command.executed` and its events in one transaction, or — for a
-//! run that wrote nothing — its audit row alone.
+//! run that wrote nothing — its run record alone.
 
 use super::*;
 use oxplow_domain::run::RunContext;
@@ -19,7 +19,7 @@ pub(super) fn record_effect_tx(
         tx,
         vocabulary,
         key,
-        &crate::effects::ran(command.audit_id, failed),
+        &crate::effects::ran(command.command_run_id, failed),
         Some(effect),
         Some(command.event_id.clone()),
         account_health,
@@ -27,24 +27,24 @@ pub(super) fn record_effect_tx(
 }
 
 tokio::task_local! {
-    /// The audit row of the last run that failed in this task (a caller's
-    /// [`tracking_failed_audit`] scope).
-    static FAILED_AUDIT: std::cell::Cell<Option<i64>>;
+    /// The command detail ID of the last run that failed in this task (a caller's
+    /// [`tracking_failed_run`] scope).
+    static FAILED_RUN: std::cell::Cell<Option<i64>>;
 }
 
-fn note_failed_audit(id: i64) {
-    let _ = FAILED_AUDIT.try_with(|c| c.set(Some(id)));
+fn note_failed_run(id: i64) {
+    let _ = FAILED_RUN.try_with(|c| c.set(Some(id)));
 }
 
-/// Run `fut`, and say which audit row recorded a run in it that failed —
+/// Run `fut` and report the command detail ID if a run in it failed —
 /// the last one (a composite's own, after its children's). The window's
 /// front door (`oxplow_rpc::dispatch`) hands it to the window with the
 /// error, so the window's record of the failure links the run.
-pub async fn tracking_failed_audit<F: std::future::Future>(fut: F) -> (F::Output, Option<i64>) {
-    FAILED_AUDIT
+pub async fn tracking_failed_run<F: std::future::Future>(fut: F) -> (F::Output, Option<i64>) {
+    FAILED_RUN
         .scope(std::cell::Cell::new(None), async {
             let out = fut.await;
-            (out, FAILED_AUDIT.with(|c| c.get()))
+            (out, FAILED_RUN.with(|c| c.get()))
         })
         .await
 }
@@ -53,7 +53,7 @@ impl CommandBus {
     /// Audit a run that wrote nothing (invalid input, a denied invoker, a
     /// failed handler). Best effort: an audit failure must not mask the
     /// error being reported.
-    pub(super) async fn audit_only(
+    pub(super) async fn record_unapplied(
         &self,
         run: &RunContext,
         spec: &CommandSpec,
@@ -74,7 +74,7 @@ impl CommandBus {
         } else {
             error
         };
-        let row = NewCommandAudit {
+        let row = NewCommandRun {
             command: spec.id.clone(),
             input: Some(
                 if private_input || spec.atomicity == oxplow_domain::Atomicity::Dispatch {
@@ -93,12 +93,12 @@ impl CommandBus {
         match self
             .db
             .transaction(move |tx| {
-                oxplow_db::command_audit_store::insert_rolled_back_children_tx(tx, &run_c)?;
+                oxplow_db::command_run_store::insert_rolled_back_children_tx(tx, &run_c)?;
                 insert_tx(tx, &run_c, &row)
             })
             .await
         {
-            Ok(id) => note_failed_audit(id),
+            Ok(id) => note_failed_run(id),
             Err(e) => tracing::warn!(error = %e, command = %spec.id, "command audit write failed"),
         }
     }
@@ -145,7 +145,7 @@ impl CommandBus {
                 match &origin {
                     RunOrigin::Call => {}
                     RunOrigin::Undo(original) => {
-                        finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
+                        finish_undo_claim_tx(tx, *original, recorded.command_run_id)?;
                     }
                     RunOrigin::Effect(key, _, effect) => record_effect_tx(
                         tx,
@@ -158,7 +158,7 @@ impl CommandBus {
                     )?,
                     RunOrigin::Approval(id) => {
                         let id = *id;
-                        proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
+                        proposal_store::finish_claim_tx(tx, id, recorded.command_run_id)?;
                         log_approved_tx(
                             tx,
                             &vocabulary.current(),
@@ -185,7 +185,7 @@ impl CommandBus {
                 }
                 CommandOutcome {
                     result: out.caller_result.unwrap_or(out.result),
-                    audit_id: None,
+                    command_run_id: None,
                     event_id: None,
                     inverse: None,
                 }
@@ -208,7 +208,7 @@ pub(super) fn command_error(e: TxError<CommandError>) -> CommandError {
 pub(super) enum Abort {
     /// The handler failed: rolled back, then audited as the failure.
     Failed(CommandError),
-    /// An undo or approval lost its race: nothing ran; no audit row.
+    /// An undo or approval lost its race: nothing ran; no command detail row.
     Lost(CommandError),
     /// The call changed nothing (`HandlerOutput::unchanged`): rolled back,
     /// its answer returned, nothing recorded.
@@ -217,7 +217,7 @@ pub(super) enum Abort {
 
 /// What recording a successful run produced.
 pub(super) struct Recorded {
-    pub(super) audit_id: i64,
+    pub(super) command_run_id: i64,
     pub(super) event_id: oxplow_domain::EventId,
     /// Undo is withheld for runs that consumed secret configuration values.
     inverse_recorded: bool,
@@ -231,7 +231,7 @@ pub(super) fn unrecorded(mut out: HandlerOutput) -> CommandOutcome {
     }
     CommandOutcome {
         result: out.caller_result.unwrap_or(out.result),
-        audit_id: None,
+        command_run_id: None,
         event_id: None,
         inverse: None,
     }
@@ -243,7 +243,7 @@ pub(super) fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutco
     }
     CommandOutcome {
         result: out.caller_result.unwrap_or(out.result),
-        audit_id: Some(recorded.audit_id),
+        command_run_id: Some(recorded.command_run_id),
         event_id: Some(recorded.event_id),
         inverse: out.inverse.filter(|_| recorded.inverse_recorded),
     }
@@ -276,7 +276,7 @@ impl Executed {
     }
 }
 
-/// Inside the run's transaction: the audit row, `command.executed`
+/// Inside the run's transaction: the run and its details, `command.executed`
 /// pointing at it, the handler's domain events, and the row's event id.
 pub(super) fn record_tx(
     tx: &rusqlite::Connection,
@@ -318,10 +318,10 @@ pub(super) fn record_tx(
     } else {
         None
     };
-    let audit_id = insert_tx(
+    let command_run_id = insert_tx(
         tx,
         &run,
-        &NewCommandAudit {
+        &NewCommandRun {
             command: spec.id.clone(),
             input: Some(if sensitive {
                 super::steps::private_composite_spec(spec).recorded_input(input)
@@ -344,12 +344,12 @@ pub(super) fn record_tx(
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),
-        &CommandExecutedV5 {
+        &CommandExecutedV6 {
             command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             outcome,
-            audit_id,
+            command_run_id,
             undoable: inverse.is_some(),
         },
     )
@@ -379,9 +379,9 @@ pub(super) fn record_tx(
         // re-sent step's answer): logged once.
         oxplow_db::event_log_store::append_unique_tx(tx, vocabulary, &event)?;
     }
-    set_event_id_tx(tx, audit_id, &executed.id)?;
+    set_event_id_tx(tx, command_run_id, &executed.id)?;
     Ok(Recorded {
-        audit_id,
+        command_run_id,
         event_id: executed.id,
         inverse_recorded: inverse.is_some(),
     })

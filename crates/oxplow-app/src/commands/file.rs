@@ -376,7 +376,7 @@ mod tests {
             .svc
             .commands
             .audit_store()
-            .get(out.audit_id.unwrap())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -686,7 +686,7 @@ mod tests {
             .svc
             .commands
             .audit_store()
-            .get(saved.audit_id.unwrap())
+            .get(saved.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();

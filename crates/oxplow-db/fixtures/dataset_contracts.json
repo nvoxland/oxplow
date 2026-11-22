@@ -9171,6 +9171,93 @@
       "key": [
         "event_id"
       ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `ui.op_failed` event (v_event.id); read its output with `read_event_content`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it failed (RFC 3339)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream of the thread it was started from, if any."
+        },
+        {
+          "name": "thread",
+          "type": "TEXT",
+          "doc": "The thread it was started from (`thr3`), if any."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What the person was doing (\"Merge bugfixes into current\")."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command it ran, shell-style (\"git merge bugfixes\"), if known."
+        },
+        {
+          "name": "message",
+          "type": "TEXT",
+          "doc": "The error message, when there was no captured output to show."
+        },
+        {
+          "name": "exit_code",
+          "type": "INT",
+          "doc": "The process's exit code, if known."
+        },
+        {
+          "name": "signal",
+          "type": "TEXT",
+          "doc": "The signal that killed the process (`SIGKILL`), if any."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INT",
+          "doc": "How long it ran, in milliseconds, if measured."
+        },
+        {
+          "name": "output_size",
+          "type": "INT",
+          "doc": "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured."
+        },
+        {
+          "name": "command_run_id",
+          "type": "INT",
+          "doc": "The failed command's run (`v_command_run.id`), if any. (v4)"
+        },
+        {
+          "name": "proposal_id",
+          "type": "INT",
+          "doc": "An approval that failed: its proposal (v_command_proposal.id); NULL otherwise. (v3)"
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention expired its details (they read NULL); NULL while kept."
+        },
+        {
+          "name": "seen",
+          "type": "INT",
+          "doc": "1 once the person opened its output on the Alerts page (`oxplow.op_error.mark_seen`), or dismissed it. (v2)"
+        },
+        {
+          "name": "dismissed",
+          "type": "INT",
+          "doc": "1 once the person dismissed it (`oxplow.op_error.dismiss`, `dismiss_all`): the app no longer lists it. (v2)"
+        }
+      ],
+      "key": [
+        "event_id"
+      ]
     }
   },
   "fact": {
@@ -10851,6 +10938,195 @@
           "name": "audit_id",
           "type": "INTEGER",
           "doc": "The `command_audit` detail row for its composed command, when recorded."
+        },
+        {
+          "name": "proposal_id",
+          "type": "INTEGER",
+          "doc": "The proposal it left, when a command asked a person."
+        },
+        {
+          "name": "retry_at",
+          "type": "TEXT",
+          "doc": "When an automatic retry was scheduled (RFC 3339). NULL if no automatic retry was scheduled."
+        }
+      ],
+      "key": [
+        "effect",
+        "event_id",
+        "attempt"
+      ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run's UUIDv7, ordered by start time."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The recorded run that started it, if any."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares the contribution."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's URI (v_contribution.uri)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "The contribution kind, such as collector, command, effect, job or implementation."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared version when it ran, if any."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog generation it ran against, if any."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `page`, `component`, `system`, `effect` or `job`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The actor's id for its kind, such as `thr3` for an agent. NULL when the actor has no id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for (v_stream.id), if any."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for (v_thread.id), if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for (v_agent_turn.id), if any."
+        },
+        {
+          "name": "session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for (v_agent_session.id), if any."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over, if any."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (v_event.id), if any."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure`, `transactional` or `external`."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339). NULL while live."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied`, `cancelled`, `invalid` (input refused) or `interrupted` (oxplow stopped before it ended). NULL while live."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it did not end `ok`, if known."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "Elapsed time in milliseconds. NULL while live or when unmeasured."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Script CPU time in milliseconds, summed. NULL while live or when unmeasured."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "Peak script memory in bytes. NULL while live or when unmeasured."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "Model calls it made. NULL while live or when unmeasured."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it used and their counts, as a JSON object."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "Permission decisions as a JSON array of `{ need, decision, reason? }`."
+        },
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Attempt id."
+        },
+        {
+          "name": "effect",
+          "type": "TEXT",
+          "doc": "The effect's `<namespace>/<id>`."
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The event it reacted to (`v_event.id`)."
+        },
+        {
+          "name": "event_seq",
+          "type": "INTEGER",
+          "doc": "That event's log position."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Which attempt at the reaction, from 1."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)."
+        },
+        {
+          "name": "latest",
+          "type": "INT",
+          "doc": "1 for the highest attempt number for this effect and event."
+        },
+        {
+          "name": "command_run_id",
+          "type": "INTEGER",
+          "doc": "The `command_run` detail row for its composed command, when recorded."
         },
         {
           "name": "proposal_id",
@@ -16292,6 +16568,91 @@
         },
         {
           "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
+        },
+        {
+          "name": "superseded_by",
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
+        }
+      ],
+      "key": []
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Proposal id."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/proposal?id=<id>`."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command (`oxplow.config.set`, `oxtask.task.delete`)."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent`, `page` or `effect`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`), page or effect, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What it supersedes on: `oxplow:oxplow/config?key=<key>` for a config change, else the command and its input."
+        },
+        {
+          "name": "preview",
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
+        },
+        {
+          "name": "dry_run",
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
+        },
+        {
+          "name": "command_run_id",
           "type": "INTEGER",
           "doc": "The approving run's command audit row."
         },

@@ -528,20 +528,18 @@ pub enum CommandOutcome {
     Error,
 }
 
-/// Version 5 names a page among the actors where v4 named a lens (V114
-/// rewrote v4 events; v4 added a custom component, v3 durable job
-/// attribution).
+/// Version 6 names the command detail row by its command run ID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandExecutedV5 {
+pub struct CommandExecutedV6 {
     /// The command's name (`oxplow.thread.mark`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor_id: Option<String>,
     pub outcome: CommandOutcome,
-    /// The `command_audit` row, which holds the input and the inverse.
-    pub audit_id: i64,
+    /// The `command_run` row, which holds the input and the inverse.
+    pub command_run_id: i64,
     /// Whether an inverse was recorded, i.e. `commands.undo` can apply.
     pub undoable: bool,
 }
@@ -549,8 +547,8 @@ pub struct CommandExecutedV5 {
 pub struct CommandExecuted;
 impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
-    const V: u32 = 5;
-    type Payload = CommandExecutedV5;
+    const V: u32 = 6;
+    type Payload = CommandExecutedV6;
 }
 
 /// `command.proposed@4`: an agent or an effect ran a command that needs a
@@ -582,23 +580,23 @@ impl EventType for CommandProposed {
     type Payload = CommandProposedV4;
 }
 
-/// `command.approved@2`: a person approved a proposal and the command ran
-/// as them, audited as `audit_id`.
+/// `command.approved@3`: a person approved a proposal and the command ran
+/// as them. Its detail row is `command_run_id`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandApprovedV2 {
+pub struct CommandApprovedV3 {
     /// The proposal's id.
     pub proposal: i64,
     pub command: String,
-    /// The approving run's `command_audit` row.
-    pub audit_id: i64,
+    /// The approving run's `command_run` row.
+    pub command_run_id: i64,
 }
 
 pub struct CommandApproved;
 impl EventType for CommandApproved {
     const TYPE: &'static str = "command.approved";
-    const V: u32 = 2;
-    type Payload = CommandApprovedV2;
+    const V: u32 = 3;
+    type Payload = CommandApprovedV3;
 }
 
 /// `command.declined@2`: a person declined a proposal; nothing ran.
@@ -1696,13 +1694,13 @@ impl EventType for RefDrifted {
     type Payload = RefDriftedV1;
 }
 
-/// `ui.op_failed@2`: an operation the person started in the app failed, as
+/// `ui.op_failed@3`: an operation the person started in the app failed, as
 /// the app showed it (`oxplow.ui.report_error`). Its captured stderr and
-/// stdout are the `output` body. v2 adds the run's audit row and an
-/// approval's proposal (v1 had neither: it upcasts unchanged).
+/// stdout are the `output` body. The event can link to a command run and
+/// its approval proposal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct UiOpFailedV2 {
+pub struct UiOpFailedV3 {
     /// What the person was doing ("Merge bugfixes into current").
     pub label: String,
     /// The command it ran, shell-style ("git merge bugfixes").
@@ -1726,9 +1724,9 @@ pub struct UiOpFailedV2 {
     /// Its captured output, `{ stderr?, stdout? }`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<ContentRef>,
-    /// A command whose run failed: its audit row (`command_audit.id`).
+    /// A command whose run failed: its detail row (`command_run.id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audit_id: Option<i64>,
+    pub command_run_id: Option<i64>,
     /// An approval that failed: its proposal (`command_proposal.id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal: Option<i64>,
@@ -1737,11 +1735,11 @@ pub struct UiOpFailedV2 {
 pub struct UiOpFailed;
 impl EventType for UiOpFailed {
     const TYPE: &'static str = "ui.op_failed";
-    const V: u32 = 2;
-    type Payload = UiOpFailedV2;
+    const V: u32 = 3;
+    type Payload = UiOpFailedV3;
     fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
         match from_v {
-            // v1 is v2 with neither link.
+            // v1 has neither link.
             1 => Ok(payload),
             _ => Err(DomainError::Invalid(format!(
                 "ui.op_failed@{from_v} has no upcast"
@@ -1904,9 +1902,9 @@ mod tests {
                 ("change.analyzed", 1),
                 ("code.diagnostics.changed", 2),
                 ("collector.synced", 2),
-                ("command.approved", 2),
+                ("command.approved", 3),
                 ("command.declined", 2),
-                ("command.executed", 5),
+                ("command.executed", 6),
                 ("command.proposed", 4),
                 ("config.changed", 3),
                 ("contribution.disabled", 1),
@@ -1931,7 +1929,7 @@ mod tests {
                 ("thread.closed", 1),
                 ("ui.op_error.dismissed", 1),
                 ("ui.op_error.seen", 1),
-                ("ui.op_failed", 2),
+                ("ui.op_failed", 3),
                 ("vcs.commit.indexed", 2),
                 ("vcs.head.moved", 3),
             ]

@@ -116,7 +116,7 @@ impl RunState {
 pub struct Finished {
     pub outcome: Outcome,
     pub reason: Option<String>,
-    pub audit_id: Option<i64>,
+    pub command_run_id: Option<i64>,
     pub proposal_id: Option<i64>,
 }
 
@@ -239,7 +239,7 @@ pub fn drop_retry_tx(
                 &Finished {
                     outcome: Outcome::Failed,
                     reason: Some(reason.into()),
-                    audit_id: None,
+                    command_run_id: None,
                     proposal_id: None,
                 },
                 None,
@@ -518,8 +518,8 @@ pub fn finish_tx(
         _ => return Err(already(key)),
     };
     conn.execute(
-        "UPDATE effect_run SET audit_id = ?2, proposal_id = ?3, resend_json = NULL WHERE run_id = ?1",
-        params![run_id, done.audit_id, done.proposal_id],
+        "UPDATE effect_run SET command_run_id = ?2, proposal_id = ?3, resend_json = NULL WHERE run_id = ?1",
+        params![run_id, done.command_run_id, done.proposal_id],
     ).map_err(map_sql_err)?;
     if let Some(vocabulary) = health {
         account_completion_tx(conn, vocabulary, key, done, run)?;
@@ -594,7 +594,7 @@ mod tests {
         Finished {
             outcome: Outcome::Ok,
             reason: None,
-            audit_id: Some(9),
+            command_run_id: Some(9),
             proposal_id: None,
         }
     }
@@ -692,7 +692,7 @@ mod tests {
             let failed = Finished {
                 outcome: Outcome::Failed,
                 reason: Some("boom".into()),
-                audit_id: None,
+                command_run_id: None,
                 proposal_id: None,
             };
             finish_tx(tx, &failing, &failed, Some(&run), None)?;
@@ -746,7 +746,7 @@ mod tests {
             let failed = Finished {
                 outcome: Outcome::Failed,
                 reason: Some("interrupted".into()),
-                audit_id: None,
+                command_run_id: None,
                 proposal_id: None,
             };
             finish_tx(tx, &key(), &failed, Some(&context(&key())), None)?;

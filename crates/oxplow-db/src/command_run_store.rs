@@ -1,4 +1,4 @@
-//! `command_audit` (migration V93): every command the bus ran, with who
+//! `command_run` (migration V93): every command the bus ran, with who
 //! ran it, how it went, the input, and the inverse that undoes it.
 //! See `.context/commands.md`.
 
@@ -53,7 +53,7 @@ fn parse_outcome(s: &str) -> Result<Outcome, DomainError> {
 
 /// One audited run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct CommandAudit {
+pub struct CommandRun {
     pub id: i64,
     pub at: Timestamp,
     pub command: String,
@@ -72,7 +72,7 @@ pub struct CommandAudit {
     pub event_id: Option<EventId>,
     /// The call that undoes this run, when the command is undoable.
     pub inverse: Option<CommandCall>,
-    /// The audit row of the run that undid this one.
+    /// The command detail ID of the run that undid this one.
     pub undone_by: Option<i64>,
     /// The scopes the run called, and how often.
     pub scopes: BTreeMap<String, u32>,
@@ -80,7 +80,7 @@ pub struct CommandAudit {
 
 /// What a run writes before its event id is known.
 #[derive(Debug, Clone)]
-pub struct NewCommandAudit {
+pub struct NewCommandRun {
     pub command: String,
     /// A read or unchanged command keeps no input, result or inverse.
     pub input: Option<Value>,
@@ -96,7 +96,7 @@ pub struct NewCommandAudit {
 pub fn insert_tx(
     conn: &Connection,
     run: &RunContext,
-    row: &NewCommandAudit,
+    row: &NewCommandRun,
 ) -> Result<i64, DomainError> {
     let outcome = match row.outcome {
         Outcome::Ok => RunOutcome::Ok,
@@ -111,7 +111,7 @@ pub fn insert_tx(
 pub fn insert_with_outcome_tx(
     conn: &Connection,
     run: &RunContext,
-    row: &NewCommandAudit,
+    row: &NewCommandRun,
     outcome: Option<RunOutcome>,
 ) -> Result<i64, DomainError> {
     match outcome {
@@ -128,7 +128,7 @@ pub fn insert_with_outcome_tx(
         .map_err(map_sql_err)?;
     }
     conn.execute(
-        "INSERT INTO command_audit (command, run_id, input_json, result_json, inverse_json)
+        "INSERT INTO command_run (command, run_id, input_json, result_json, inverse_json)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             row.command,
@@ -167,7 +167,7 @@ pub fn insert_rolled_back_children_tx(
         let error = (outcome != RunOutcome::Ok).then_some("parent command transaction rolled back");
         crate::contribution_run_store::record_tx(conn, &child, outcome, error)?;
         conn.execute(
-            "INSERT INTO command_audit (command, run_id) VALUES (?1, ?2)",
+            "INSERT INTO command_run (command, run_id) VALUES (?1, ?2)",
             params![contribution.id.local, child.run().as_str()],
         )
         .map_err(map_sql_err)?;
@@ -178,18 +178,18 @@ pub fn insert_rolled_back_children_tx(
 /// Attach the `command.executed` event to the row, once appended.
 pub fn set_event_id_tx(conn: &Connection, id: i64, event_id: &EventId) -> Result<(), DomainError> {
     conn.execute(
-        "UPDATE command_audit SET event_id = ?2 WHERE id = ?1",
+        "UPDATE command_run SET event_id = ?2 WHERE id = ?1",
         params![id, event_id.as_str()],
     )
     .map_err(map_sql_err)?;
     Ok(())
 }
 
-/// Record that `undone_by` (another audit row) applied this run's inverse.
+/// Record that `undone_by` (another command detail row) applied this run's inverse.
 pub fn mark_undone_tx(conn: &Connection, id: i64, undone_by: i64) -> Result<(), DomainError> {
     let n = conn
         .execute(
-            "UPDATE command_audit SET undone_by = ?2 WHERE id = ?1 AND undone_by IS NULL",
+            "UPDATE command_run SET undone_by = ?2 WHERE id = ?1 AND undone_by IS NULL",
             params![id, undone_by],
         )
         .map_err(map_sql_err)?;
@@ -201,7 +201,7 @@ pub fn mark_undone_tx(conn: &Connection, id: i64, undone_by: i64) -> Result<(), 
     Ok(())
 }
 
-fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
+fn row_to_command_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandRun> {
     let conv = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -213,7 +213,7 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
     let result: Option<String> = row.get("result_json")?;
     let event_id: Option<String> = row.get("event_id")?;
     let scopes: Option<String> = row.get("scopes_json")?;
-    Ok(CommandAudit {
+    Ok(CommandRun {
         id: row.get("id")?,
         at: string_to_ts(&at).map_err(conv)?,
         command: row.get("command")?,
@@ -251,25 +251,25 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
 const AUDIT_WITH_RUN: &str =
     "SELECT a.*, r.started_at AS at, r.actor_kind, r.actor_id, r.thread_id, r.session_id,
             r.outcome, r.error, r.scopes_json
-     FROM command_audit a JOIN contribution_run r ON r.run_id = a.run_id";
+     FROM command_run a JOIN contribution_run r ON r.run_id = a.run_id";
 
-pub fn get_tx(conn: &Connection, id: i64) -> Result<Option<CommandAudit>, DomainError> {
+pub fn get_tx(conn: &Connection, id: i64) -> Result<Option<CommandRun>, DomainError> {
     conn.query_row(
         &format!("{AUDIT_WITH_RUN} WHERE a.id = ?1"),
         params![id],
-        row_to_audit,
+        row_to_command_run,
     )
     .optional()
     .map_err(map_sql_err)
 }
 
 /// Newest first.
-pub fn list_recent_tx(conn: &Connection, limit: usize) -> Result<Vec<CommandAudit>, DomainError> {
+pub fn list_recent_tx(conn: &Connection, limit: usize) -> Result<Vec<CommandRun>, DomainError> {
     let mut stmt = conn
         .prepare(&format!("{AUDIT_WITH_RUN} ORDER BY a.id DESC LIMIT ?1"))
         .map_err(map_sql_err)?;
     let rows = stmt
-        .query_map(params![limit as i64], row_to_audit)
+        .query_map(params![limit as i64], row_to_command_run)
         .map_err(map_sql_err)?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_sql_err)
@@ -278,20 +278,20 @@ pub fn list_recent_tx(conn: &Connection, limit: usize) -> Result<Vec<CommandAudi
 /// Async wrappers over the `_tx` cores. The bus writes through the cores
 /// inside its own transaction; these are for reads and tests.
 #[derive(Clone)]
-pub struct SqliteCommandAuditStore {
+pub struct SqliteCommandRunStore {
     db: Database,
 }
 
-impl SqliteCommandAuditStore {
+impl SqliteCommandRunStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
 
-    pub async fn get(&self, id: i64) -> Result<Option<CommandAudit>, DomainError> {
+    pub async fn get(&self, id: i64) -> Result<Option<CommandRun>, DomainError> {
         self.db.call_mut(move |c| get_tx(c, id)).await
     }
 
-    pub async fn list_recent(&self, limit: usize) -> Result<Vec<CommandAudit>, DomainError> {
+    pub async fn list_recent(&self, limit: usize) -> Result<Vec<CommandRun>, DomainError> {
         self.db.call_mut(move |c| list_recent_tx(c, limit)).await
     }
 }
@@ -322,7 +322,7 @@ mod tests {
     #[tokio::test]
     async fn audit_rows_round_trip_and_mark_undone_once() {
         let db = Database::in_memory();
-        let store = SqliteCommandAuditStore::new(db.clone());
+        let store = SqliteCommandRunStore::new(db.clone());
         let event = EventId::generate();
         let (id, undo_id) = db
             .transaction({
@@ -338,7 +338,7 @@ mod tests {
                                 stream_id: None,
                             },
                         ),
-                        &NewCommandAudit {
+                        &NewCommandRun {
                             command: "oxplow.task.transition".into(),
                             input: Some(json!({"id": "tsk1", "to": "done"})),
                             outcome: Outcome::Ok,
@@ -355,7 +355,7 @@ mod tests {
                     let undo_id = insert_tx(
                         tx,
                         &test_command_run("oxplow.task.transition", oxplow_domain::Actor::Human),
-                        &NewCommandAudit {
+                        &NewCommandRun {
                             command: "oxplow.task.transition".into(),
                             input: Some(json!({"id": "tsk1", "to": "ready"})),
                             outcome: Outcome::Ok,
@@ -406,7 +406,7 @@ mod tests {
                         on_behalf_of: Box::new(oxplow_domain::Actor::Human),
                     },
                 ),
-                &NewCommandAudit {
+                &NewCommandRun {
                     command: "oxplow.config.set".into(),
                     input: Some(json!({})),
                     outcome: Outcome::Denied,

@@ -9,5 +9,5 @@ SELECT r.run_id, r.parent_run_id, r.extension, r.contribution, r.kind, r.version
            WHERE later.effect = e.effect AND later.event_id = e.event_id
              AND later.attempt > e.attempt
        ) AS INTEGER) AS latest,
-       e.audit_id, e.proposal_id, e.retry_at
+       e.command_run_id, e.proposal_id, e.retry_at
 FROM source('effect_run') e JOIN source('contribution_run') r ON r.run_id = e.run_id

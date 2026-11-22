@@ -24,8 +24,8 @@ export interface VizActionDeps {
   ): Promise<CommandOutcome>;
   /** A toast; with `undo`, it offers Undo. */
   toast(message: string, undo?: () => void, open?: () => void): void;
-  /** Undo the run recorded as `auditId`, as the person. */
-  undo(auditId: number): Promise<unknown>;
+  /** Undo the run recorded as `commandRunId`, as the person. */
+  undo(commandRunId: number): Promise<unknown>;
   /** The person's runner (`commands/runForPerson.ts`): a failure is
    *  recorded once and shows beside `anchor`'s control. */
   run: Runner["run"];
@@ -167,11 +167,11 @@ export async function performVizAction(
     return { skipped };
   }
   // A run that came back undoable offers its Undo.
-  const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
+  const commandRunId = outcome.inverse && outcome.command_run_id != null ? outcome.command_run_id : null;
   const uri = resultUri(outcome.result);
   deps.toast(
     ranMessage(action.label, outcome.result),
-    auditId === null ? undefined : () => void deps.run(`Undo ${action.label}`, () => deps.undo(auditId)),
+    commandRunId === null ? undefined : () => void deps.run(`Undo ${action.label}`, () => deps.undo(commandRunId)),
     uri === null ? undefined : () => deps.openPage(uri, false),
   );
   await openAfterAction(action, outcome, deps);

@@ -236,7 +236,7 @@ mod tests {
         );
         fx.svc
             .commands
-            .undo(&Actor::Human, second.audit_id.unwrap(), false)
+            .undo(&Actor::Human, second.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(
@@ -247,7 +247,7 @@ mod tests {
         );
         fx.svc
             .commands
-            .undo(&Actor::Human, first.audit_id.unwrap(), false)
+            .undo(&Actor::Human, first.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(
@@ -303,7 +303,7 @@ mod tests {
         );
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(

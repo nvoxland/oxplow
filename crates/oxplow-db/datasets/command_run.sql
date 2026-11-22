@@ -7,4 +7,4 @@ SELECT r.run_id, r.parent_run_id, r.extension, r.contribution, r.kind, r.version
        CAST(a.input_json IS NOT NULL AS INTEGER) AS changed,
        CAST(coalesce(a.undone_by, 0) > 0 AS INTEGER) AS undone,
        CAST(uri('oxplow/contribution_run', 'id', r.run_id) AS TEXT) AS uri
-FROM source('command_audit') a JOIN source('contribution_run') r ON r.run_id = a.run_id
+FROM source('command_run') a JOIN source('contribution_run') r ON r.run_id = a.run_id

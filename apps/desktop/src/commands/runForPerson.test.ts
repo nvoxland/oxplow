@@ -62,7 +62,7 @@ test("a failure's record names the run's audit row and the proposal it decided",
     command: "acme.issue.delete",
     proposal: 3,
   });
-  expect(reports).toEqual([{ label: "Approve: Delete", message: "gone", command: "acme.issue.delete", auditId: 41, proposalId: 3 }]);
+  expect(reports).toEqual([{ label: "Approve: Delete", message: "gone", command: "acme.issue.delete", commandRunId: 41, proposalId: 3 }]);
 });
 
 test("a failure with no control on screen is left to the toast", async () => {

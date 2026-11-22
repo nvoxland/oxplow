@@ -717,7 +717,7 @@ datasets:
     - { name: "stdout", type: "TEXT", doc: "Captured stdout, if any." }
     - { name: "truncated", type: "INT", doc: "1 when only the first part was kept (bodies are capped)." }
 - name: op_error
-  version: 4
+  version: 5
   key: [event_id]
   description: "Operations that failed in front of the person in the app (a merge, a save, a query), as the app showed them: one row per `ui.op_failed` event. The captured stderr and stdout are the event's `output` body — `read_event_content(event_id, output)`. Kept 30 days, the output 14; past that the row stays with its details NULL."
   fields:
@@ -732,7 +732,7 @@ datasets:
     - { name: "signal", type: "TEXT", doc: "The signal that killed the process (`SIGKILL`), if any." }
     - { name: "duration_ms", type: "INT", doc: "How long it ran, in milliseconds, if measured." }
     - { name: "output_size", type: "INT", doc: "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured." }
-    - { name: "audit_id", type: "INT", doc: "The failed command's run (`v_command_run.id`), if any. (v4)" }
+    - { name: "command_run_id", type: "INT", doc: "The failed command's run (`v_command_run.id`), if any. (v4)" }
     - { name: "proposal_id", type: "INT", doc: "An approval that failed: its proposal (v_command_proposal.id); NULL otherwise. (v3)" }
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention expired its details (they read NULL); NULL while kept." }
     - { name: "seen", type: "INT", doc: "1 once the person opened its output on the Alerts page (`oxplow.op_error.mark_seen`), or dismissed it. (v2)" }
@@ -1089,7 +1089,7 @@ datasets:
     - { not_null: id }
     - { unique: id }
 - name: effect_run
-  version: 4
+  version: 5
   key: [effect, event_id, attempt]
   description: "Each attempt at an effect's reaction to an event, with its shared run fields. The run names the extension that declares the effect. The live consumer makes one attempt, and a person's `effect.retry` of a failed attempt makes the next. A reaction's latest attempt has `latest = 1`. A run in progress has a NULL outcome. When a command asks a person, the run has outcome `skipped` and `proposal_id` identifies the proposal."
   groups: [contribution_run]
@@ -1101,7 +1101,7 @@ datasets:
     - { name: "attempt", type: "INTEGER", doc: "Which attempt at the reaction, from 1." }
     - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)." }
     - { name: "latest", type: "INT", doc: "1 for the highest attempt number for this effect and event." }
-    - { name: "audit_id", type: "INTEGER", doc: "The `command_audit` detail row for its composed command, when recorded." }
+    - { name: "command_run_id", type: "INTEGER", doc: "The `command_run` detail row for its composed command, when recorded." }
     - { name: "proposal_id", type: "INTEGER", doc: "The proposal it left, when a command asked a person." }
     - { name: "retry_at", type: "TEXT", doc: "When an automatic retry was scheduled (RFC 3339). NULL if no automatic retry was scheduled." }
   tests:
@@ -1843,7 +1843,7 @@ datasets:
     - { name: "spends", type: "INT", doc: "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)" }
     - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
-  version: 6
+  version: 7
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   fields:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
@@ -1860,7 +1860,7 @@ datasets:
     - { name: "dry_run", type: "TEXT", doc: "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run." }
     - { name: "decision", type: "TEXT", doc: "`pending`, `approved`, `declined` or `superseded`." }
     - { name: "decided_at", type: "TEXT", doc: "When it was decided or superseded." }
-    - { name: "audit_id", type: "INTEGER", doc: "The approving run's command audit row." }
+    - { name: "command_run_id", type: "INTEGER", doc: "The approving run's command audit row." }
     - { name: "superseded_by", type: "INTEGER", doc: "The proposal that replaced it." }
   tests:
     - { not_null: id }

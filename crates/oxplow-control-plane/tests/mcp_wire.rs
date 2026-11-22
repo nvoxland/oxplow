@@ -246,8 +246,8 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
         .unwrap()
         .id;
     assert_eq!(executed.envelope.anchors.agent_session_id, Some(session));
-    let audit = oxplow_db::command_audit_store::SqliteCommandAuditStore::new(services.db.clone())
-        .get(executed_audit_id(&executed.envelope))
+    let audit = oxplow_db::command_run_store::SqliteCommandRunStore::new(services.db.clone())
+        .get(executed_command_run_id(&executed.envelope))
         .await
         .unwrap()
         .unwrap();
@@ -255,8 +255,8 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
 }
 
 /// The audit row a `command.executed` names.
-fn executed_audit_id(envelope: &oxplow_domain::events::Envelope) -> i64 {
-    envelope.payload["audit_id"].as_i64().unwrap()
+fn executed_command_run_id(envelope: &oxplow_domain::events::Envelope) -> i64 {
+    envelope.payload["command_run_id"].as_i64().unwrap()
 }
 
 /// A bearer no session holds is refused before MCP sees the request.

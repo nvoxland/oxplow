@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(input, json!({ "uri": "oxplow:oxplow/file?path=src/a.rs" }));
         assert!(answered);
         assert_eq!(out.result, json!({ "open": true }));
-        assert_eq!(out.audit_id, None);
+        assert_eq!(out.command_run_id, None);
     }
 
     /// An agent runs `oxplow.window.navigate`: the window gets the ref (and
@@ -520,7 +520,7 @@ mod tests {
             out.result,
             json!({ "opened": "oxplow:oxplow/file?path=src/auth.rs", "stream": "str2" })
         );
-        assert_eq!(out.audit_id, None);
+        assert_eq!(out.command_run_id, None);
     }
 
     /// No window, one that doesn't host it, one that doesn't answer, an

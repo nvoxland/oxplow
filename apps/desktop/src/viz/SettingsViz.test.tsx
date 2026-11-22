@@ -16,7 +16,7 @@ let refuse: Error | null = null;
 mock.module("../api.js", () => ({ ...realApi, runCommand: async (name: string, input: unknown) => {
   calls.push({ name, input });
   if (refuse) throw refuse;
-  return { result: null, audit_id: null, event_id: null, inverse: null };
+  return { result: null, command_run_id: null, event_id: null, inverse: null };
 } }));
 const { SettingsViz } = await import("./SettingsViz.js");
 afterEach(() => { cleanup(); calls.length = 0; refuse = null; });

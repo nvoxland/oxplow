@@ -6,21 +6,21 @@ use super::*;
 use oxplow_domain::run::{Mode, RunContext};
 
 impl CommandBus {
-    /// Apply the inverse recorded for `audit_id`, as `actor`, through the
+    /// Apply the inverse recorded for `command_run_id`, as `actor`, through the
     /// normal pipeline (policy, confirmation and audit included). The
     /// original row is marked `undone_by` the new run.
     pub async fn undo(
         &self,
         actor: &Actor,
-        audit_id: i64,
+        command_run_id: i64,
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
         let row = self
             .audit
-            .get(audit_id)
+            .get(command_run_id)
             .await?
             .ok_or_else(|| CommandError::Failed {
-                message: format!("audit row {audit_id} not found"),
+                message: format!("audit row {command_run_id} not found"),
             })?;
         let inverse = undoable(&row)?;
         self.run_inner(
@@ -28,7 +28,7 @@ impl CommandBus {
             &inverse.name,
             inverse.input.clone(),
             confirmed,
-            RunOrigin::Undo(audit_id),
+            RunOrigin::Undo(command_run_id),
         )
         .await
     }
@@ -40,10 +40,10 @@ impl CommandBus {
     pub(super) async fn claim(&self, origin: &RunOrigin) -> Result<(), CommandError> {
         match origin {
             RunOrigin::Call => Ok(()),
-            RunOrigin::Undo(audit_id) => {
-                let audit_id = *audit_id;
+            RunOrigin::Undo(command_run_id) => {
+                let command_run_id = *command_run_id;
                 self.db
-                    .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
+                    .transaction(move |tx| mark_undone_tx(tx, command_run_id, UNDO_PENDING))
                     .await
                     .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))
             }
@@ -79,13 +79,13 @@ impl CommandBus {
             // the next start (a person's retry or backfill) or by the
             // pump's redelivery (a live one).
             RunOrigin::Call | RunOrigin::Effect(..) => return,
-            RunOrigin::Undo(audit_id) => {
+            RunOrigin::Undo(command_run_id) => {
                 self.db
                     .transaction(move |tx| {
                         tx.execute(
-                            "UPDATE command_audit SET undone_by = NULL
+                            "UPDATE command_run SET undone_by = NULL
                               WHERE id = ?1 AND undone_by = ?2",
-                            rusqlite::params![audit_id, UNDO_PENDING],
+                            rusqlite::params![command_run_id, UNDO_PENDING],
                         )
                         .map(|_| ())
                         .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
@@ -117,7 +117,7 @@ pub(super) fn lost_race(
         return Err(e);
     }
     let message = match origin {
-        RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
+        RunOrigin::Undo(command_run_id) => format!("audit row {command_run_id} was already undone"),
         RunOrigin::Approval(id) => format!(
             "{} was already decided",
             oxplow_domain::uri::build::proposal_uri(*id)
@@ -146,7 +146,7 @@ pub(super) fn finish_undo_claim_tx(
     done_by: i64,
 ) -> Result<(), oxplow_domain::DomainError> {
     tx.execute(
-        "UPDATE command_audit SET undone_by = ?2 WHERE id = ?1 AND undone_by = ?3",
+        "UPDATE command_run SET undone_by = ?2 WHERE id = ?1 AND undone_by = ?3",
         rusqlite::params![original, done_by, UNDO_PENDING],
     )
     .map(|_| ())
@@ -154,7 +154,7 @@ pub(super) fn finish_undo_claim_tx(
 }
 
 /// The inverse of an audited run, if it can still be applied.
-pub(super) fn undoable(row: &CommandAudit) -> Result<CommandCall, CommandError> {
+pub(super) fn undoable(row: &CommandRun) -> Result<CommandCall, CommandError> {
     if row.outcome != Outcome::Ok {
         return Err(CommandError::Failed {
             message: format!("audit row {} did not complete; nothing to undo", row.id),

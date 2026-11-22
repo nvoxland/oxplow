@@ -30,7 +30,7 @@ function fakes() {
     },
     submit: async (runId, nodeId, input, confirmed) => {
       calls.push(["submit", runId, nodeId, input, confirmed]);
-      return { result: null, auditId: 1, eventId: null, inverse: null } as never;
+      return { result: null, commandRunId: 1, eventId: null, inverse: null } as never;
     },
     actionStart: async (runId, nodeId, action, row) => {
       calls.push(["actionStart", runId, nodeId, action, row]);
@@ -39,7 +39,7 @@ function fakes() {
   };
   const press: RunPageAction = async (...args) => {
     calls.push(["press", ...args]);
-    return { result: null, auditId: 1, eventId: null, inverse: null } as never;
+    return { result: null, commandRunId: 1, eventId: null, inverse: null } as never;
   };
   return { calls, forms, press };
 }

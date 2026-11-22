@@ -2898,7 +2898,7 @@ mod tests {
         let kept = out.inverse.clone().expect("the run is undoable");
         assert_eq!(kept.name, "oxplow.probe.rename");
         assert_eq!(kept.input, json!({ "thread": r, "title": "todo" }));
-        let audit = out.audit_id.unwrap();
+        let audit = out.command_run_id.unwrap();
         let row = fx
             .svc
             .commands
@@ -2925,7 +2925,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            row.undone_by, undo.audit_id,
+            row.undone_by, undo.command_run_id,
             "the undo is its own audited run"
         );
     }
@@ -2952,7 +2952,7 @@ mod tests {
             .svc
             .commands
             .audit_store()
-            .get(out.audit_id.unwrap())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -2960,7 +2960,7 @@ mod tests {
         let err = fx
             .svc
             .commands
-            .undo(&agent(&fx), out.audit_id.unwrap(), false)
+            .undo(&agent(&fx), out.command_run_id.unwrap(), false)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not undoable"), "{err}");
@@ -3150,7 +3150,7 @@ def finish(x):
             .svc
             .commands
             .audit_store()
-            .get(out.audit_id.unwrap())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -3908,7 +3908,7 @@ def finish(x):
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let out = run().await.unwrap();
         assert_eq!(out.result["result"]["n"], json!(1));
-        assert_eq!(out.audit_id, None, "a read isn't recorded");
+        assert_eq!(out.command_run_id, None, "a read isn't recorded");
 
         with_count(&format!(
             "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.thread.rename\", \"input\": {{\"thread\": \"{}\", \"title\": \"done\"}}}}]}}\n",

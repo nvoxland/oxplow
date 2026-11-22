@@ -1248,7 +1248,7 @@ own initial-scan paths and don't need separate backfill. Efforts were
 removed (2026-11-10), and their slice of the graph (touched files, summary
 refs, declared impacts) went with them.
 
-### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_audit` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
+### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_run` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
 
 The event log, built in P1.4. **State tables hold current truth; the log
 records activity and state changes**, and it is written in the *same
@@ -1507,15 +1507,15 @@ the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 
-`command_audit` is the command detail table from V64. Its unique,
+`command_run` is the command detail table named by V68. Its unique,
 required `run_id` names a `contribution_run`. It keeps the integer
 `id`, the command's name, `input_json`, `result_json`, `event_id`,
 `inverse_json` and `undone_by`. Reads and no-ops leave the payload and
 inverse columns NULL. The bus writes the run and its details through
-`command_audit_store::insert_tx`, then links an event or undo when there
+`command_run_store::insert_tx`, then links an event or undo when there
 is one. A nested write's details land with its transaction. A rolled-back
 child keeps its outcome without payloads or an inverse.
-`SqliteCommandAuditStore` joins the run for the common fields, and
+`SqliteCommandRunStore` joins the run for the common fields, and
 `v_command_run` publishes them. V64 preserves existing audit IDs and the
 old AUTOINCREMENT high-water mark before backfilling detail rows.
 See [commands.md](./commands.md).
@@ -1935,7 +1935,7 @@ view marks the run named by the checkpoint with `latest = 1`. See
 V66 gives each **attempt** at an effect's reaction a shared run.
 `effect_run` keeps its integer `id`, `effect` (`<namespace>/<id>`),
 `event_id`, `event_seq`, `attempt` (from 1), `origin` (`live`, `retry`,
-`backfill` or `auto`), `audit_id`, `proposal_id`, `retry_at` and
+`backfill` or `auto`), `command_run_id`, `proposal_id`, `retry_at` and
 `resend_json`. The unique key `(effect, event_id, attempt)` prevents an
 attempt from landing twice. The highest attempt number describes the
 reaction's current state (`latest_tx` and `v_effect_run.latest`).
@@ -1979,7 +1979,7 @@ own run fields until their detail records move to the shared table.
   credentials the run received.
 - **Readers.** `v_contribution_run` publishes the shared fields, with
   `scopes` and `decisions` for the two JSON columns, and the run's URI.
-  `command_audit.run_id`, `collector_run.run_id` and `effect_run.run_id`
+  `command_run.run_id`, `collector_run.run_id` and `effect_run.run_id`
   name their shared runs. `extension_job_attempt.run_id` names the
   attempt's run. `ai_call.run_id` names the run behind a call when one is
   known.
@@ -2045,23 +2045,23 @@ kept until a person decides: the command and input, who proposed it
 (`actor_kind`, `actor_id`, `thread_id`, `stream_id`), the confirmation
 `preview_json`, `dry_run_json` (what it would have done when proposed;
 NULL when it can't be dry-run), and `decision` — `pending`, `approved`
-(with the approving run's `audit_id`), `declined` or `superseded`.
+(with the approving run's `command_run_id`), `declined` or `superseded`.
 `proposal_key(command, input)` is `config:<key>` for `oxplow.config.set` /
 `oxplow.config.unset`, else the command and its input with keys sorted;
 `insert_tx` marks pending rows with the same key `superseded` (with
 `superseded_by`) and returns which (`Inserted { id, superseded }`, for
-`command.proposed@3.supersedes`). `approve_tx` / `decline_tx` decide a
+`command.proposed@4.supersedes`). `approve_tx` / `decline_tx` decide a
 pending row once — a decided one is `Invalid`, a missing one `NotFound`.
 An `External` command's approval is the claim trio instead: `claim_tx`
-marks it approved with no `audit_id` before the run, `finish_claim_tx`
-names the run's audit row, and `release_claim_tx` makes it pending again
+marks it approved with no `command_run_id` before the run, `finish_claim_tx`
+names the command run, and `release_claim_tx` makes it pending again
 when the run failed. `dry_run_json` is the `Tx` handler's `result` run
 confirmed and rolled back: `oxplow.config.set` / `oxplow.config.unset` give `{ key,
 before, after, changed }`, a composite `{ result, children: [{ name,
 input, result, inverse? }] }`, any other command its own result. No
 expiry. Written
 inside the bus's transactions; read as `v_command_proposal` (ref
-`proposal:<id>`). Events `command.proposed@3`, `command.approved@2`,
+`proposal:<id>`). Events `command.proposed@4`, `command.approved@3`,
 `command.declined@2`.
 
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
@@ -2247,17 +2247,6 @@ no override schema stamp, and no configuration compare-and-swap. Extension neste
 snapshots are projections over registered keys; private workflow state continues
 to use its separate CAS store above. See [settings.md](./settings.md) and
 [extensions-manifest.md](./extensions-manifest.md) for the runtime contracts.
-
-## Dedicated job actor audit compatibility
-
-Draft V54 widens command_audit actor_kind to include `job`, retaining every
-column/row, proposal audit links, the refused-audit index and AUTOINCREMENT
-high-water. The rebuild uses the migration transaction and legacy rename mode;
-the runner turns foreign_keys off around migrations. It has not been executed.
-ActorKindV2 preserves command.proposed@3's actor kinds; command.executed@4
-adds a custom component (`component`) to v3's (V93 rewrote v3 events, each
-a v4 one as is). command.proposed remains v2 because neither a job nor a
-component (which acts for a person) creates a confirmation proposal.
 
 Metric declaration upserts expose caller-transaction helpers for coherent
 extension generation publication. Their async wrappers use the same helpers;

@@ -824,7 +824,7 @@ export function App() {
         const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
         if (local) {
           return local
-            .then(({ result }): CommandOutcome => ({ result, audit_id: null, event_id: null, inverse: null }))
+            .then(({ result }): CommandOutcome => ({ result, command_run_id: null, event_id: null, inverse: null }))
             .catch((e: unknown) => {
               recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
               return null;

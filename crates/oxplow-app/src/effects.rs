@@ -425,7 +425,7 @@ pub const ALREADY_REACTED: &str = "already reacted to event";
 
 /// How a reaction whose commands ran ended: `ok`, or `failed` with the
 /// step error when a step outside the transaction failed partway.
-pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store::Finished {
+pub fn ran(command_run_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store::Finished {
     use oxplow_db::effect_run_store::Finished;
     use oxplow_domain::run::Outcome;
     Finished {
@@ -435,7 +435,7 @@ pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store
             Outcome::Ok
         },
         reason: failed,
-        audit_id: Some(audit_id),
+        command_run_id: Some(command_run_id),
         proposal_id: None,
     }
 }
@@ -550,7 +550,7 @@ pub(crate) mod tests {
                         &runs::Finished {
                             outcome: oxplow_domain::run::Outcome::Failed,
                             reason: Some("unavailable".into()),
-                            audit_id: None,
+                            command_run_id: None,
                             proposal_id: None,
                         },
                         Some(&run),

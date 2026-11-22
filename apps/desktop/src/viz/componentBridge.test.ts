@@ -173,12 +173,12 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
     invoke: async (command, input, confirmed) => {
       calls.push(["invoke", command, input, confirmed]);
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, ["process — runs programs"]);
-      return { result: null, audit_id: 1, event_id: null, inverse: null };
+      return { result: null, command_run_id: 1, event_id: null, inverse: null };
     },
     invokePoint: async (point, context, command, confirmed) => {
       calls.push(["invokePoint", point, context, command, confirmed]);
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, []);
-      return { result: { moved: true }, audit_id: 1, event_id: null, inverse: null };
+      return { result: { moved: true }, command_run_id: 1, event_id: null, inverse: null };
     },
     navigate: (ref, opts) => {
       calls.push(["navigate", ref, opts]);
@@ -259,7 +259,7 @@ test("ready is heard once; an update posts only what the frame hasn't seen, nami
     props: null,
   };
   const host = createBridgeHost(h.channel.port1, {
-    invoke: async () => ({ result: null, audit_id: 1, event_id: null, inverse: null }),
+    invoke: async () => ({ result: null, command_run_id: 1, event_id: null, inverse: null }),
     navigate: () => {},
     confirm: async () => true,
     onReady: () => h.calls.push(["ready"]),

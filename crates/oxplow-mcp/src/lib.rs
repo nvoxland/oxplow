@@ -309,7 +309,7 @@ impl OxplowMcp {
     #[tool(
         description = "Run a command by its id with its input (`list_commands { id }` shows its \
                        schema and an example input). Returns \
-                       `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
+                       `{ result, command_run_id, event_id, inverse? }`. Invalid input names the \
                        failing field; a denied command says why. A command that needs a \
                        person's confirmation is not run: it is recorded as a proposal and \
                        this returns `{ proposal, message }` — tell the person it waits for \
@@ -1551,7 +1551,7 @@ mod tests {
         let text = out.content[0].as_text().unwrap().text.clone();
         let outcome: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(outcome["result"]["changed"], true);
-        assert!(outcome["audit_id"].is_number());
+        assert!(outcome["command_run_id"].is_number());
         let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
         assert!(
             yaml.contains("oxplow.snapshots.retentionDays: 21"),

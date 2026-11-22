@@ -93,7 +93,7 @@ describe("vcsMerge — UI-initiated background VCS op", () => {
           }
           return {
             status: "ok",
-            data: { result: mergeOutcome, audit_id: 1, event_id: null, inverse: null },
+            data: { result: mergeOutcome, command_run_id: 1, event_id: null, inverse: null },
           };
         },
         completeBackgroundTask: async (id: string, resultJson: string | null) => {

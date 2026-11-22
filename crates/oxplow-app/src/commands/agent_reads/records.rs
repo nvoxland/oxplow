@@ -115,7 +115,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.result["content"], "mine");
-        assert!(out.audit_id.is_none(), "a read leaves no record");
+        assert!(out.command_run_id.is_none(), "a read leaves no record");
 
         let err = fx
             .svc

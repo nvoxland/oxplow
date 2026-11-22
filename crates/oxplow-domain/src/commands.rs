@@ -1053,12 +1053,12 @@ pub struct Preview {
 pub struct CommandOutcome {
     #[specta(type = crate::Json)]
     pub result: Value,
-    /// The `command_audit` row; `None` for a `Read` command.
+    /// The `command_run` row; `None` for a `Read` command.
     #[specta(type = Option<crate::JsNumber>)]
-    pub audit_id: Option<i64>,
+    pub command_run_id: Option<i64>,
     /// The `command.executed` event; `None` for a `Read` command.
     pub event_id: Option<EventId>,
-    /// Present when the command is undoable: `commands.undo(audit_id)`
+    /// Present when the command is undoable: `commands.undo(command_run_id)`
     /// runs it.
     pub inverse: Option<CommandCall>,
 }

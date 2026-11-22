@@ -16,7 +16,7 @@ const choices = [{ value: "claude", label: "Claude", group: null }, { value: "co
 function source(submitted: unknown[], enabled = choices): FormSource {
   return {
     start: async () => ({ command: { id: "oxplow.agent_session.open", input_schema: { type: "object", required: ["harness"], properties: { harness: { type: "string" } } } }, values: { harness: enabled[0]?.value ?? "" }, fields: ["harness"], fixed: [], choices: { harness: enabled }, reads: { datasets: [], tables: [], measures: [] } }) as never,
-    submit: async (_target, input) => { submitted.push(input); return { result: null, audit_id: null, event_id: null, inverse: null }; },
+    submit: async (_target, input) => { submitted.push(input); return { result: null, command_run_id: null, event_id: null, inverse: null }; },
     actionStart: async () => { throw new Error("not an action form"); },
   };
 }

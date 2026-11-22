@@ -417,7 +417,7 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
     toast: (message: string, undo?: () => void, open?: () => void) =>
       showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
     // The person's click on Undo is their confirmation of it.
-    undo: (auditId: number) => undoCommand(auditId, true),
+    undo: (commandRunId: number) => undoCommand(commandRunId, true),
     ...openAfter,
   };
   // The runs in order; a run that asks stops them, the rest waiting on

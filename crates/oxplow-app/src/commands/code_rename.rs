@@ -319,7 +319,7 @@ mod tests {
         let after = std::fs::read_to_string(dir.path().join("w.py")).unwrap();
         assert_eq!(after, "\n\nclass Gadget:\n    def spin(self): pass\n");
         svc.commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(

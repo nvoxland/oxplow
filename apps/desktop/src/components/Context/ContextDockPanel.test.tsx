@@ -22,7 +22,7 @@ mock.module("../../api.js", () => ({
   setUiPreference: async () => {},
   runCommand: async (name: string, input: unknown) => {
     ran.push([name, input]);
-    return { audit_id: 1, inverse: null, result: {} };
+    return { command_run_id: 1, inverse: null, result: {} };
   },
 }));
 const { addToContext, cancelAddToContext, setSelectedThread } = await import("../../contextBasket.js");

@@ -11,7 +11,7 @@ use specta::Type;
 use oxplow_domain::events::schema::ActorKind;
 use oxplow_domain::{DomainError, StreamId, ThreadId, Timestamp};
 
-use crate::command_audit_store::{actor_kind_str, parse_actor_kind};
+use crate::command_run_store::{actor_kind_str, parse_actor_kind};
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use crate::event_content_store::canonical;
 
@@ -69,8 +69,8 @@ pub struct Proposal {
     pub dry_run: Option<Value>,
     pub decision: ProposalDecision,
     pub decided_at: Option<Timestamp>,
-    /// The approving run's `command_audit` row.
-    pub audit_id: Option<i64>,
+    /// The approving run's `command_run` row.
+    pub command_run_id: Option<i64>,
     /// The proposal that replaced this one.
     pub superseded_by: Option<i64>,
 }
@@ -156,7 +156,7 @@ fn decide_tx(
     conn: &Connection,
     id: i64,
     decision: ProposalDecision,
-    audit_id: Option<i64>,
+    command_run_id: Option<i64>,
 ) -> Result<Proposal, DomainError> {
     let current = get_tx(conn, id)?.ok_or(DomainError::NotFound)?;
     if current.decision != ProposalDecision::Pending {
@@ -167,21 +167,25 @@ fn decide_tx(
         )));
     }
     conn.execute(
-        "UPDATE command_proposal SET decision = ?2, decided_at = ?3, audit_id = ?4 WHERE id = ?1",
+        "UPDATE command_proposal SET decision = ?2, decided_at = ?3, command_run_id = ?4 WHERE id = ?1",
         params![
             id,
             decision.as_str(),
             ts_to_string(Timestamp::now()),
-            audit_id
+            command_run_id
         ],
     )
     .map_err(map_sql_err)?;
     get_tx(conn, id)?.ok_or(DomainError::NotFound)
 }
 
-/// A person approved it and the run is audited as `audit_id`.
-pub fn approve_tx(conn: &Connection, id: i64, audit_id: i64) -> Result<Proposal, DomainError> {
-    decide_tx(conn, id, ProposalDecision::Approved, Some(audit_id))
+/// A person approved it and the run is audited as `command_run_id`.
+pub fn approve_tx(
+    conn: &Connection,
+    id: i64,
+    command_run_id: i64,
+) -> Result<Proposal, DomainError> {
+    decide_tx(conn, id, ProposalDecision::Approved, Some(command_run_id))
 }
 
 /// Before an `External` approval runs: mark it approved with no audit row
@@ -191,13 +195,13 @@ pub fn claim_tx(conn: &Connection, id: i64) -> Result<(), DomainError> {
     decide_tx(conn, id, ProposalDecision::Approved, None).map(|_| ())
 }
 
-/// The claimed approval ran, audited as `audit_id`.
-pub fn finish_claim_tx(conn: &Connection, id: i64, audit_id: i64) -> Result<(), DomainError> {
+/// The claimed approval ran, audited as `command_run_id`.
+pub fn finish_claim_tx(conn: &Connection, id: i64, command_run_id: i64) -> Result<(), DomainError> {
     let n = conn
         .execute(
-            "UPDATE command_proposal SET audit_id = ?2
-              WHERE id = ?1 AND decision = 'approved' AND audit_id IS NULL",
-            params![id, audit_id],
+            "UPDATE command_proposal SET command_run_id = ?2
+              WHERE id = ?1 AND decision = 'approved' AND command_run_id IS NULL",
+            params![id, command_run_id],
         )
         .map_err(map_sql_err)?;
     if n == 0 {
@@ -213,7 +217,7 @@ pub fn finish_claim_tx(conn: &Connection, id: i64, audit_id: i64) -> Result<(), 
 pub fn release_claim_tx(conn: &Connection, id: i64) -> Result<(), DomainError> {
     conn.execute(
         "UPDATE command_proposal SET decision = 'pending', decided_at = NULL
-          WHERE id = ?1 AND decision = 'approved' AND audit_id IS NULL",
+          WHERE id = ?1 AND decision = 'approved' AND command_run_id IS NULL",
         params![id],
     )
     .map_err(map_sql_err)?;
@@ -255,7 +259,7 @@ fn row_to_proposal(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proposal> {
             .map(|s| string_to_ts(&s))
             .transpose()
             .map_err(conv)?,
-        audit_id: row.get("audit_id")?,
+        command_run_id: row.get("command_run_id")?,
         superseded_by: row.get("superseded_by")?,
     })
 }
@@ -378,7 +382,7 @@ mod tests {
         assert_eq!(p.dry_run, Some(json!({ "before": null, "after": "hi" })));
         assert_eq!(p.decision, ProposalDecision::Pending);
         assert_eq!(
-            (p.decided_at, p.audit_id, p.superseded_by),
+            (p.decided_at, p.command_run_id, p.superseded_by),
             (None, None, None)
         );
         assert_eq!(store.list_pending().await.unwrap(), vec![p]);
@@ -440,7 +444,7 @@ mod tests {
         db.transaction(move |tx| claim_tx(tx, id)).await.unwrap();
         let claimed = store.get(id).await.unwrap().unwrap();
         assert_eq!(claimed.decision, ProposalDecision::Approved);
-        assert_eq!(claimed.audit_id, None);
+        assert_eq!(claimed.command_run_id, None);
         assert!(db.transaction(move |tx| claim_tx(tx, id)).await.is_err());
         assert!(db.transaction(move |tx| decline_tx(tx, id)).await.is_err());
 
@@ -454,13 +458,13 @@ mod tests {
         db.transaction(move |tx| claim_tx(tx, id)).await.unwrap();
         let audit = db
             .transaction(|tx| {
-                crate::command_audit_store::insert_tx(
+                crate::command_run_store::insert_tx(
                     tx,
-                    &crate::command_audit_store::test_command_run(
+                    &crate::command_run_store::test_command_run(
                         "oxplow.config.set",
                         oxplow_domain::Actor::Human,
                     ),
-                    &crate::NewCommandAudit {
+                    &crate::NewCommandRun {
                         command: "oxplow.config.set".into(),
                         input: Some(json!({})),
                         outcome: oxplow_domain::events::schema::CommandOutcome::Ok,
@@ -476,7 +480,10 @@ mod tests {
         db.transaction(move |tx| finish_claim_tx(tx, id, audit))
             .await
             .unwrap();
-        assert_eq!(store.get(id).await.unwrap().unwrap().audit_id, Some(audit));
+        assert_eq!(
+            store.get(id).await.unwrap().unwrap().command_run_id,
+            Some(audit)
+        );
         // Finished: neither finished again nor released.
         assert!(db
             .transaction(move |tx| finish_claim_tx(tx, id, audit))
@@ -506,13 +513,13 @@ mod tests {
         // The audit row an approval names exists (the approving run's).
         let audit = db
             .transaction(|tx| {
-                crate::command_audit_store::insert_tx(
+                crate::command_run_store::insert_tx(
                     tx,
-                    &crate::command_audit_store::test_command_run(
+                    &crate::command_run_store::test_command_run(
                         "oxplow.config.set",
                         oxplow_domain::Actor::Human,
                     ),
-                    &crate::NewCommandAudit {
+                    &crate::NewCommandRun {
                         command: "oxplow.config.set".into(),
                         input: Some(json!({})),
                         outcome: oxplow_domain::events::schema::CommandOutcome::Ok,
@@ -530,13 +537,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(a.decision, ProposalDecision::Approved);
-        assert_eq!(a.audit_id, Some(audit));
+        assert_eq!(a.command_run_id, Some(audit));
         assert!(a.decided_at.is_some());
         let d = db
             .transaction(move |tx| decline_tx(tx, declined))
             .await
             .unwrap();
-        assert_eq!((d.decision, d.audit_id), (ProposalDecision::Declined, None));
+        assert_eq!(
+            (d.decision, d.command_run_id),
+            (ProposalDecision::Declined, None)
+        );
         assert!(store.list_pending().await.unwrap().is_empty());
         for (id, done) in [(approved, "approved"), (declined, "declined")] {
             let err = db

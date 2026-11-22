@@ -281,7 +281,7 @@ mod tests {
             "a sequence in one transaction undoes"
         );
 
-        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+        let audits = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(20)
             .await
             .unwrap();
@@ -301,7 +301,7 @@ mod tests {
 
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         let undone = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
@@ -350,7 +350,7 @@ mod secret_recording_tests {
     }
 
     async fn assert_no_secret_history(svc: &crate::Services) {
-        let audits = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+        let audits = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
             .list_recent(100)
             .await
             .unwrap();

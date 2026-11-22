@@ -663,7 +663,7 @@ mod tests {
             .is_some());
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), true)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), true)
             .await
             .unwrap();
         assert!(!get(&fx, s.id).await.is_open());
@@ -869,7 +869,7 @@ mod tests {
         // Undo closes the new session only.
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), true)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), true)
             .await
             .unwrap();
         assert!(!get(&fx, new.id).await.is_open());
@@ -1080,12 +1080,12 @@ mod tests {
             .await
             .unwrap()
             .remove(0);
-        assert_eq!(Some(audit.id), out.audit_id);
+        assert_eq!(Some(audit.id), out.command_run_id);
         let events = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
         assert!(events
             .iter()
             .any(|e| e.envelope.event_type == "command.executed"
-                && e.envelope.payload["audit_id"] == audit.id));
+                && e.envelope.payload["command_run_id"] == audit.id));
         assert!(events
             .iter()
             .any(|e| e.envelope.event_type == "agent.status.changed"
@@ -1094,7 +1094,7 @@ mod tests {
 
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         let reopened = get(&fx, s).await;
@@ -1136,7 +1136,7 @@ mod tests {
         assert_eq!(get(&fx, fx.session).await.title, "tests");
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), true)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), true)
             .await
             .unwrap();
         assert_eq!(get(&fx, fx.session).await.title, "");

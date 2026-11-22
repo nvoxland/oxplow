@@ -978,7 +978,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(again.audit_id, None);
+        assert_eq!(again.command_run_id, None);
         let err = f
             .svc
             .commands

@@ -17,7 +17,7 @@ mock.module("./api.js", () => ({
   },
   runCommand: async (name: string, input: unknown) => {
     if (name === "oxplow.ui.report_error") reported.push(input);
-    return { result: null, audit_id: 1, event_id: "e", inverse: null };
+    return { result: null, command_run_id: 1, event_id: "e", inverse: null };
   },
 }));
 const { useProposals } = await import("./proposals.js");

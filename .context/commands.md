@@ -468,7 +468,7 @@ sampled or on by setting, and approvals by scope.
 
 The bus is split by concern: `mod.rs` the types, the registry and the
 pipeline (`run_prepared`, the read path); `record.rs` a
-run's audit row and events (`record_tx`, `audit_only`,
+run's audit row and events (`record_tx`, `record_unapplied`,
 `record_external`, the transaction's `Abort`); `undo.rs` undo and the
 claims that keep two undos or approvals from both applying;
 `proposals.rs` proposals (`unconfirmed`, the dry run, approve,
@@ -542,12 +542,12 @@ skipping.
    would lose the row it undoes); an agent's undo asks nothing, as its
    runs don't.
 5. **Run and record.** The bus writes a `contribution_run` row and a
-   `command_audit` detail row linked by `run_id`
-   (`command_audit_store::insert_tx`). The shared row holds the actor,
+   `command_run` detail row linked by `run_id`
+   (`command_run_store::insert_tx`). The shared row holds the actor,
    anchors, timing, outcome, error, cost and authority. The detail row
    holds the command's input, result, inverse, event link and undo marker.
-   For a `Tx` write, the handler, both rows, `command.executed@5` and the
-   handler's effects commit together. The event's `audit_id` names the
+   For a `Tx` write, the handler, both rows, `command.executed@6` and the
+   handler's effects commit together. The event's `command_run_id` names the
    detail row's integer ID. The handler's events take the executed event
    as their cause and inherit any missing thread and stream anchors.
    A handler failure rolls back its writes and gets its own record with
@@ -557,7 +557,7 @@ skipping.
 
 Plain reads and unchanged calls still get a run and a detail row
 (`ran_unaudited`). Their `input_json`, `result_json` and `inverse_json`
-are NULL. They emit no `command.executed` and return no `audit_id` or
+are NULL. They emit no `command.executed` and return no `command_run_id` or
 `event_id`. A `Tx` read runs in a snapshot that rolls back. A call that
 returns `HandlerOutput::unchanged` also rolls back its transaction, then
 the bus records its run separately. The bus rejects an unchanged result
@@ -580,7 +580,7 @@ Agent Interface page counts all completed runs over the last 30 days,
 including reads, when it shows the share that ended invalid, denied or
 failed.
 
-`CommandBus::undo(actor, audit_id, confirmed)` loads the command detail and its shared run. It refuses a
+`CommandBus::undo(actor, command_run_id, confirmed)` loads the command detail and its shared run. It refuses a
 run that didn't complete, was already undone or has no inverse. It runs the
 inverse through the same pipeline and sets `undone_by` to the new detail
 row's ID. The original row is claimed **with** the inverse run
@@ -620,10 +620,10 @@ commands on that stream only (`Actor::confined_to_own_stream`; an event
 with no stream reaches no worktree). Its source is
 `effect:<namespace>/<id>`, and only a
 `Human` approves or declines a proposal. The audit and events say so:
-`actor_kind = 'effect'`, carried by `command.executed@4` (whose
-`ActorKind` also has `job`) and `command.proposed@3` (whose `ActorKindV2`
-has no `job`: a job can't leave a proposal). The log holds only these
-versions (V70 rewrote older rows). An effect's reaction runs
+`actor_kind = 'effect'`, carried by `command.executed@6` (whose
+`ActorKind` also has `job`) and `command.proposed@4` (whose `ActorKindV2`
+has no `job`: a job can't leave a proposal). V68 updates the stored command-executed payloads. An effect's reaction
+runs
 through `CommandBus::run_effect` (P8.D10) with `RunOrigin::Effect`, the
 fourth origin beside a call, an undo and an approval: like those, its
 effect attempt and shared run finish in the same transaction as its
@@ -634,7 +634,7 @@ decision ends as `skipped` and records the proposal ID. Its
 
 **An `External` run whose recording fails** (its effects already
 committed in the service's own transaction) is reported as done and
-unrecorded — `audit_id: None`, logged at error level — never as an
+unrecorded — `command_run_id: None`, logged at error level — never as an
 error, which would claim the change didn't happen.
 
 A command whose confirmation depends on the input sets
@@ -813,8 +813,8 @@ proposal is decided once (`Invalid` after):
 
 - **`CommandBus::approve(actor, id)`** runs the proposal's command as the
   person, confirmed, through the whole pipeline (`RunOrigin::Approval`).
-  A `Tx` run marks the row approved with its `audit_id` and logs
-  `command.approved@2 { proposal, command, audit_id }` (caused by its
+  A `Tx` run marks the row approved with its `command_run_id` and logs
+  `command.approved@3 { proposal, command, command_run_id }` (caused by its
   `command.executed`) in the run's own transaction; an `External` run
   claims the row first (approved, no audit row: `claim_tx`), names its
   audit row when recorded (`finish_claim_tx`) and releases the claim if
@@ -1001,7 +1001,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.contribution.enable { extension, kind, contribution }` | `External` over `contribution_health.rs` and the provider registry (P7.C1; replaced `provider.enable`) | Not undoable. Enables a disabled contribution on this machine again — clearing an automatic disable (`contribution_health` back to `ok`, its count starting over). `kind` (`provider` \| `collector` \| `effect`) is part of its name — a provider and a collector may share an id; there must be a failed one of that kind, or a provider instance the registry knows. A provider instance resets its backoff and reconciles, so it starts when `extensionInstances` enables it; a collector runs at its next trigger. Logs `contribution.enabled@1 { extension, contribution, kind }`; the result is its `contribution_health` row. See [providers.md](./providers.md) |
 | `oxplow.contribution.enable_all { extension? }` | `External` over `contribution_health.rs` and the provider registry, like `enable` | Not undoable. Enables every contribution a failure policy disabled (`contribution_health.state = 'disabled'`) — `extension`'s, or every extension's — each exactly as `oxplow.contribution.enable` does (a provider instance resets and reconciles; a collector runs at its next trigger), logging one `contribution.enabled@1` apiece. Returns `{ enabled: [<contribution_health row>…] }`, empty when nothing was disabled. Extension problems and Data → Collectors offer it as **Enable All Disabled (N)**. |
 | `oxplow.page.show { page?, spec?, params? }` | `External` | Shows a page beside the conversation (an agent's `oxplow_show_page`): a page by id opens at its URI; an inline `spec` is checked (`parse_temp_page`: read-only, no `for:`), written as the page file `v<hash of the YAML>.yaml` on `oxplow:temp` through `Services.temp.put` and shown as `oxplow:oxplow/page?page=temp/<id>` (the same YAML is the same page; a daemon restart keeps it; the GC removes it after 7 idle days). It opens as a tab of the caller's thread when a window is open (`opened`, else `why`) and returns the page's text. Saving it is `oxplow.extension.write_page` (Save as Page) or a knowledge page with an `oxplow-page` block. See [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
-| `oxplow.ui.report_error { label, command?, message?, exit_code?, thread?, stream?, signal?, duration_ms?, stderr?, stdout?, audit_id?, proposal? }` | `Tx` (`commands/ui.rs`) | `Record`, not undoable. The app's runner (`commands/runForPerson.ts`, usability.md "A person's command that fails") runs it once for each person's command that fails, and `recordOpError` for any other failure; its result's `event` is the row's id, which the window uses to tell a failure it showed beside its control from one the toast announces; the Alerts page lists `v_op_error`, not a client copy. `audit_id` is the audit row of the person's run that failed: the daemon's dispatch puts it on the IPC error (`IpcError.audit_id`, from `oxplow_app::commands::tracking_failed_audit`, which `audit_only` feeds) and the runner passes it on; `proposal` is an approval's, also the event's subject. Logs `ui.op_failed@2` (v2 added both; v1 upcasts unchanged) anchored to `thread` (and its stream), or, from no thread, to the `stream` on screen so its agent can read the output (not both: `Invalid` at `/stream`); stderr / stdout stored as its `output` body (`put_json_tx`, namespace `ui`); the agent reads them as `v_op_error` and `read_event_content(event_id, output)` |
+| `oxplow.ui.report_error { label, command?, message?, exit_code?, thread?, stream?, signal?, duration_ms?, stderr?, stdout?, command_run_id?, proposal? }` | `Tx` (`commands/ui.rs`) | `Record`, not undoable. The app's runner (`commands/runForPerson.ts`, usability.md "A person's command that fails") runs it once for each person's command that fails, and `recordOpError` for any other failure; its result's `event` is the row's id, which the window uses to tell a failure it showed beside its control from one the toast announces; the Alerts page lists `v_op_error`, not a client copy. `command_run_id` identifies the person's failed command run: the daemon's dispatch puts it on the IPC error (`IpcError.command_run_id`, from `oxplow_app::commands::tracking_failed_run`, which `record_unapplied` feeds) and the runner passes it on; `proposal` is an approval's, also the event's subject. Logs `ui.op_failed@3` (V68 renames the command link in stored payloads) anchored to `thread` (and its stream), or, from no thread, to the `stream` on screen so its agent can read the output (not both: `Invalid` at `/stream`); stderr / stdout stored as its `output` body (`put_json_tx`, namespace `ui`); the agent reads them as `v_op_error` and `read_event_content(event_id, output)` |
 | `oxplow.op_error.mark_seen { event }`, `oxplow.op_error.dismiss { event }`, `oxplow.op_error.dismiss_all {}` (`Tx`) | `commands/op_error.rs` over `oxplow_db::op_error_store` | `Record`, not undoable: the person opened a failed operation's output, or cleared it from the app's list. Each logs `ui.op_error.seen@1` / `ui.op_error.dismissed@1 { event }`, anchored as the failure and kept as long (the `ui` window), read back as `v_op_error.seen` / `dismissed` (dismissing is seeing). `event` that isn't a `ui.op_failed` event is `Invalid` at `/event`; one already in that state is `unchanged` (a run without an execution event); `dismiss_all` logs one per failure not dismissed, `{ dismissed: n }` |
 | `oxplow.metric.scaffold { name, language?, glob?, origin? }` | `Tx`, `Read` | the files of a code metric extension (`{ name, dir, files: [{ path, content }] }`: manifest, collector script, page, fixture — the template `oxplow extension new metric` writes); writes nothing (the agent writes them, then `extension check` / `extension test`) |
 
@@ -1019,7 +1019,7 @@ and specialized domain commands resolve registered keys and choose a level
 explicitly. Runtime state remains in its own stores. The `config.changed` pump
 consumers apply changes to running services; `ConfigChanged` refreshes the UI.
 **The person's way onto the bus** (P5.A1): RPC `run_command { id,
-input, confirmed }` and `undo_command { audit_id, confirmed }`
+input, confirmed }` and `undo_command { command_run_id, confirmed }`
 (`oxplow_rpc::commands::bus`, `Actor::Human`; desktop `runCommand` /
 `undoCommand` in `api.ts`). A call that needs confirmation comes back
 `NEEDS_CONFIRMATION` and the UI asks, then calls again with `confirmed`.
@@ -1028,7 +1028,7 @@ UI writes goes through `run_command`. Parity: `both("run_command")`,
 `ui("undo_command")`. A person's undo is offered where they ran it: a
 command run through `personCommands` (a board move, a search offer)
 that comes back undoable (its outcome's `inverse`) shows **Undo** on its
-"done" toast, which runs `undoCommand(audit_id)` — the click is the
+"done" toast, which runs `undoCommand(command_run_id)` — the click is the
 person's confirmation — and says "undone" or records the failure
 (P11). The thrown error keeps its IPC code
 (`IpcCallError.code`, `needsConfirmation(e)` in `ipc-error.ts`), and
@@ -1062,7 +1062,7 @@ is refused naming the offered ids that end alike (`config.get` →
 rather than read a listing of every full spec (164 KB): the index keeps
 discovery cheap, the example makes the first call right, and a refusal
 quotes the example. `run_command` answers with the outcome:
-`result`, `audit_id`, `event_id`, `inverse?` — or, for an effect's run that asks,
+`result`, `command_run_id`, `event_id`, `inverse?` — or, for an effect's run that asks,
 `{ kind: "proposed", proposal, message }`). Every other tool is a
 command or page an extension declares with `tool:` ([extensions-commands.md](./extensions-commands.md)
 "Agents: the MCP surface"): a named entry to a command, run through the

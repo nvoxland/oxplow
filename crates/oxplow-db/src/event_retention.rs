@@ -220,7 +220,7 @@ pub(crate) fn sweep_run_batch_tx(
         .prepare(
             "DELETE FROM contribution_run WHERE run_id IN (
             SELECT r.run_id
-              FROM contribution_run r LEFT JOIN command_audit a ON a.run_id = r.run_id
+              FROM contribution_run r LEFT JOIN command_run a ON a.run_id = r.run_id
              WHERE r.finished_at IS NOT NULL AND r.started_at < ?1
                AND CASE r.kind
                    WHEN 'command' THEN CASE
@@ -423,7 +423,7 @@ mod tests {
             ] {
                 insert_finished_run(tx, id, "command", outcome, age)?;
                 tx.execute(
-                    "INSERT INTO command_audit (command, run_id, input_json)
+                    "INSERT INTO command_run (command, run_id, input_json)
                      VALUES ('acme.example', ?1, ?2)",
                     params![id, input],
                 )
@@ -451,7 +451,7 @@ mod tests {
             kept
         );
         assert_eq!(
-            run_ids(&db, "SELECT run_id FROM command_audit ORDER BY run_id").await,
+            run_ids(&db, "SELECT run_id FROM command_run ORDER BY run_id").await,
             kept
         );
         assert_eq!(

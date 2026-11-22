@@ -637,7 +637,7 @@ mod tests {
     async fn undo(fx: &crate::test_fixtures::ThreadFixture, run: &oxplow_domain::CommandOutcome) {
         fx.svc
             .commands
-            .undo(&Actor::Human, run.audit_id.unwrap(), false)
+            .undo(&Actor::Human, run.command_run_id.unwrap(), false)
             .await
             .unwrap();
     }

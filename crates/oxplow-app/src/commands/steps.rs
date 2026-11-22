@@ -97,9 +97,9 @@ impl ComposedCall {
         &self,
         out: &HandlerOutput,
         scopes: BTreeMap<String, u32>,
-    ) -> super::NewCommandAudit {
+    ) -> super::NewCommandRun {
         let private = self.has_private_input();
-        super::NewCommandAudit {
+        super::NewCommandRun {
             command: self.call.name.clone(),
             input: (!out.unchanged).then(|| self.recorded_input()),
             outcome: Outcome::Ok,
@@ -939,7 +939,7 @@ impl CommandBus {
             match check_tree(&self.policy, actor, gates.may_write, &plan.calls) {
                 Ok(answer) => answer,
                 Err(err) => {
-                    self.audit_only(run, spec, input, Outcome::Denied, Some(err.to_string()))
+                    self.record_unapplied(run, spec, input, Outcome::Denied, Some(err.to_string()))
                         .await;
                     return Err(err);
                 }
@@ -1033,7 +1033,7 @@ impl CommandBus {
                 }
                 Err(err) => {
                     if !matches!(&err, CommandError::NeedsConfirmation { .. }) {
-                        self.audit_only(
+                        self.record_unapplied(
                             &step.run,
                             &step.command.spec,
                             &step.call.input,
@@ -1063,7 +1063,7 @@ impl CommandBus {
                         CommandError::Denied { .. } => Outcome::Denied,
                         _ => Outcome::Error,
                     };
-                    self.audit_only(run, spec, input, recorded, Some(err.to_string()))
+                    self.record_unapplied(run, spec, input, recorded, Some(err.to_string()))
                         .await;
                 }
                 return Err(err);
@@ -1168,7 +1168,7 @@ impl CommandBus {
                 match &origin {
                     RunOrigin::Call => {}
                     RunOrigin::Undo(original) => {
-                        finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
+                        finish_undo_claim_tx(tx, *original, recorded.command_run_id)?;
                     }
                     RunOrigin::Effect(key, resend, effect) => super::record_effect_tx(
                         tx,
@@ -1181,7 +1181,7 @@ impl CommandBus {
                     )?,
                     RunOrigin::Approval(id) => {
                         let id = *id;
-                        proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
+                        proposal_store::finish_claim_tx(tx, id, recorded.command_run_id)?;
                         log_approved_tx(
                             tx,
                             &vocabulary.current(),
@@ -1211,7 +1211,7 @@ impl CommandBus {
             Some(err) => Err(err),
             None => Ok(CommandOutcome {
                 result: caller_result.unwrap_or(result),
-                audit_id: recorded.as_ref().map(|r| r.audit_id),
+                command_run_id: recorded.as_ref().map(|r| r.command_run_id),
                 event_id: recorded.map(|r| r.event_id),
                 inverse,
             }),

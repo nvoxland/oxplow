@@ -17,7 +17,7 @@ mock.module("../api.js", () => ({
 }));
 const { VizView } = await import("./VizView.js");
 
-const press: VizActionRunner = async () => ({ result: null, audit_id: 1, event_id: null, inverse: null });
+const press: VizActionRunner = async () => ({ result: null, command_run_id: 1, event_id: null, inverse: null });
 const wrapper = ({ children }: { children: ReactNode }) => <VizActionRunnerContext.Provider value={press}>{children}</VizActionRunnerContext.Provider>;
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 afterEach(cleanup);

@@ -30,7 +30,7 @@ mock.module("../../api.js", () => ({
     id === "e-push" && body === "output" ? { text: JSON.stringify({ stderr: "rejected" }), size: 20, truncated: false } : null,
   runCommand: async (name: string, input: unknown) => {
     ran.push([name, input]);
-    return { result: null, audit_id: 1, event_id: "e", inverse: null };
+    return { result: null, command_run_id: 1, event_id: "e", inverse: null };
   },
   querySql: async (sql: string) => {
     if (sql.includes("FROM v_extension")) {

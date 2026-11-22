@@ -101,8 +101,8 @@ macro_rules! rpc_dispatch {
                 args
             };
             // A person's run that fails says which audit row recorded it
-            // (`IpcError::audit_id`), so the window's record links the run.
-            let (out, audited) = ::oxplow_app::commands::tracking_failed_audit(Box::pin(async move { match name {
+            // (`IpcError::command_run_id`), so the window's record links the run.
+            let (out, audited) = ::oxplow_app::commands::tracking_failed_run(Box::pin(async move { match name {
                 $(
                     $cname => {
                         #[derive(serde::Deserialize)]
@@ -160,7 +160,7 @@ macro_rules! rpc_dispatch {
                 _ => Err($crate::IpcError::not_found()),
             } })).await;
             out.map_err(|mut e| {
-                e.audit_id = e.audit_id.or(audited.and_then(std::num::NonZeroI64::new));
+                e.command_run_id = e.command_run_id.or(audited.and_then(std::num::NonZeroI64::new));
                 e
             })
         }
@@ -221,7 +221,7 @@ macro_rules! oxplow_command_table {
                 run_command_for_call => $crate::commands::bus::run_command_for_call { client: String, call: String, id: String, input: ::oxplow_domain::Json } -> ::oxplow_domain::CommandOutcome,
                 run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 command_open_after => $crate::commands::bus::command_open_after { id: String, result: ::oxplow_domain::Json } -> Option<String>,
-                undo_command => $crate::commands::bus::undo_command { audit_id: ::oxplow_domain::AuditId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                undo_command => $crate::commands::bus::undo_command { command_run_id: ::oxplow_domain::CommandRunId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 decide_proposal => $crate::commands::bus::decide_proposal { proposal: ::oxplow_domain::ProposalId, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
                 // hooks
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),

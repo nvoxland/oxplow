@@ -46,7 +46,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Version 5 names a page among the actors where v4 named a lens (V114\nrewrote v4 events; v4 added a custom component, v3 durable job\nattribution).",
+  "description": "Version 6 names the command detail row by its command run ID.",
   "properties": {
     "actor_id": {
       "type": [
@@ -57,14 +57,14 @@
     "actor_kind": {
       "$ref": "#/$defs/ActorKind"
     },
-    "audit_id": {
-      "description": "The `command_audit` row, which holds the input and the inverse.",
-      "format": "int64",
-      "type": "integer"
-    },
     "command": {
       "description": "The command's name (`oxplow.thread.mark`, `oxplow.config.set`).",
       "type": "string"
+    },
+    "command_run_id": {
+      "description": "The `command_run` row, which holds the input and the inverse.",
+      "format": "int64",
+      "type": "integer"
     },
     "outcome": {
       "$ref": "#/$defs/CommandOutcome"
@@ -78,9 +78,9 @@
     "command",
     "actor_kind",
     "outcome",
-    "audit_id",
+    "command_run_id",
     "undoable"
   ],
-  "title": "CommandExecutedV5",
+  "title": "CommandExecutedV6",
   "type": "object"
 }

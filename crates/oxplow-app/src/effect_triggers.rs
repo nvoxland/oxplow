@@ -287,7 +287,7 @@ fn ended(outcome: Outcome, reason: impl Into<String>) -> Finished {
     Finished {
         outcome,
         reason: Some(reason.into()),
-        audit_id: None,
+        command_run_id: None,
         proposal_id: None,
     }
 }
@@ -661,7 +661,7 @@ pub(crate) async fn run_reaction(
         .await
     {
         Ok(done) => {
-            if done.audit_id.is_none() {
+            if done.command_run_id.is_none() {
                 finish(
                     svc,
                     &key,
@@ -669,7 +669,7 @@ pub(crate) async fn run_reaction(
                     Finished {
                         outcome: Outcome::Ok,
                         reason: None,
-                        audit_id: None,
+                        command_run_id: None,
                         proposal_id: None,
                     },
                 )
@@ -1005,7 +1005,7 @@ pub(crate) async fn run_script(
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, UiOpFailed, UiOpFailedV2,
+        ActorKind, CommandExecuted, CommandExecutedV6, CommandOutcome, UiOpFailed, UiOpFailedV3,
     };
     use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Envelope;
@@ -1054,7 +1054,7 @@ mod tests {
     fn settled_by(fx: &crate::test_fixtures::ThreadFixture, state: &str, source: &str) -> Envelope {
         let mut env = Envelope::typed::<UiOpFailed>(
             source,
-            &UiOpFailedV2 {
+            &UiOpFailedV3 {
                 label: state.into(),
                 command: None,
                 message: None,
@@ -1063,7 +1063,7 @@ mod tests {
                 signal: None,
                 duration_ms: None,
                 output: None,
-                audit_id: None,
+                command_run_id: None,
                 proposal: None,
             },
         );
@@ -1854,12 +1854,12 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:other/e{i}"),
-                &CommandExecutedV5 {
+                &CommandExecutedV6 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("other/e{i}")),
                     outcome: CommandOutcome::Ok,
-                    audit_id: 1,
+                    command_run_id: 1,
                     undoable: false,
                 },
             );
@@ -2195,12 +2195,12 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:acme-pr/e{i}"),
-                &CommandExecutedV5 {
+                &CommandExecutedV6 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("acme-pr/e{i}")),
                     outcome: CommandOutcome::Ok,
-                    audit_id: 1,
+                    command_run_id: 1,
                     undoable: false,
                 },
             );

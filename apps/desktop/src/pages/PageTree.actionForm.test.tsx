@@ -36,10 +36,10 @@ const start = (): FormStart =>
 
 const forms: PageForms = {
   start: async () => start(),
-  submit: async () => ({ result: null, auditId: 1, eventId: null, inverse: null }) as never,
+  submit: async () => ({ result: null, commandRunId: 1, eventId: null, inverse: null }) as never,
   actionStart: async () => start(),
 };
-const press: RunPageAction = async () => ({ result: null, auditId: 1, eventId: null, inverse: null }) as never;
+const press: RunPageAction = async () => ({ result: null, commandRunId: 1, eventId: null, inverse: null }) as never;
 
 /** The page of a task: its links (with the Link… form action) over
  *  its comments, which change as the page is read again. */

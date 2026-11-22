@@ -106,7 +106,7 @@ mod tests {
             .unwrap();
         assert_eq!(out.result["columns"], json!(["view"]));
         assert_eq!(out.result["rows"], json!([["v_thread"]]));
-        assert!(out.audit_id.is_none(), "a read leaves no record");
+        assert!(out.command_run_id.is_none(), "a read leaves no record");
 
         let err = svc
             .commands

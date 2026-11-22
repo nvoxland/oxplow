@@ -652,7 +652,7 @@ mod tests {
             matches!(&err, oxplow_domain::CommandError::Failed { message } if message.contains("nowhere")),
             "{err:?}"
         );
-        let audits = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+        let audits = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
             .list_recent(5)
             .await
             .unwrap();
@@ -844,8 +844,8 @@ mod tests {
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "one\n"
         );
-        let audit = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
-            .get(out.audit_id.unwrap())
+        let audit = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -862,8 +862,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let audit = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
-            .get(merged.audit_id.unwrap())
+        let audit = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
+            .get(merged.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -926,7 +926,7 @@ mod tests {
             json!({ "stream": stream, "rev": rev, "parent": base })
         );
         svc.commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .expect("the commit is undone");
         assert_eq!(git(&root, &["rev-parse", "HEAD"]), base);
@@ -968,7 +968,7 @@ mod tests {
             .unwrap();
         assert!(out.inverse.is_some(), "a page's commit is undoable");
         svc.commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), true)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), true)
             .await
             .expect("the person undoes it");
         assert_eq!(git(&root, &["rev-parse", "HEAD"]), base);
@@ -1028,7 +1028,7 @@ mod tests {
                 let head = git(&root, &["rev-parse", "HEAD"]);
                 let err = svc
                     .commands
-                    .undo(&Actor::Human, out.audit_id.unwrap(), false)
+                    .undo(&Actor::Human, out.command_run_id.unwrap(), false)
                     .await
                     .unwrap_err();
                 assert!(format!("{err:?}").contains(why), "{err:?}");

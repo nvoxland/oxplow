@@ -557,19 +557,19 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	undoCommand: (auditId: AuditId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
+	undoCommand: (commandRunId: CommandRunId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { commandRunId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	decideProposal: (proposal: ProposalId, approve: boolean) => typedError<{
 	result: unknown,
-	/**  The `command_audit` row; `None` for a `Read` command. */
-	audit_id: number | null,
+	/**  The `command_run` row; `None` for a `Read` command. */
+	command_run_id: number | null,
 	/**  The `command.executed` event; `None` for a `Read` command. */
 	event_id: EventId | null,
 	/**
-	 *  Present when the command is undoable: `commands.undo(audit_id)`
+	 *  Present when the command is undoable: `commands.undo(command_run_id)`
 	 *  runs it.
 	 */
 	inverse: CommandCall | null,
@@ -1061,9 +1061,6 @@ export type AttachResult = {
 	sessionId: string,
 	replayB64: string,
 };
-
-/**  A `command_audit` row. */
-export type AuditId = number;
 
 export type BackgroundTask = {
 	id: string,
@@ -1611,16 +1608,19 @@ undoable: boolean };
 /**  A completed run. */
 export type CommandOutcome = {
 	result: unknown,
-	/**  The `command_audit` row; `None` for a `Read` command. */
-	audit_id: number | null,
+	/**  The `command_run` row; `None` for a `Read` command. */
+	command_run_id: number | null,
 	/**  The `command.executed` event; `None` for a `Read` command. */
 	event_id: EventId | null,
 	/**
-	 *  Present when the command is undoable: `commands.undo(audit_id)`
+	 *  Present when the command is undoable: `commands.undo(command_run_id)`
 	 *  runs it.
 	 */
 	inverse: CommandCall | null,
 };
+
+/**  A `command_run` row. */
+export type CommandRunId = number;
 
 /**  What a command declares about itself. */
 export type CommandSpec = {
@@ -3562,12 +3562,12 @@ export type IpcError_Deserialize = {
 	 */
 	details?: string[],
 	/**
-	 *  A person's command whose run failed: the audit row that recorded it
-	 *  (`command_audit.id`), so the window's record of the failure
+	 *  The detail row of a person's failed command run
+	 *  (`command_run.id`), so the window's record of the failure
 	 *  (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
 	 *  (row ids start at 1), which keeps the error small.
 	 */
-	auditId?: number | null,
+	commandRunId?: number | null,
 };
 
 /**
@@ -3595,12 +3595,12 @@ export type IpcError_Serialize = {
 	 */
 	details?: string[],
 	/**
-	 *  A person's command whose run failed: the audit row that recorded it
-	 *  (`command_audit.id`), so the window's record of the failure
+	 *  The detail row of a person's failed command run
+	 *  (`command_run.id`), so the window's record of the failure
 	 *  (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
 	 *  (row ids start at 1), which keeps the error small.
 	 */
-	auditId?: number | null,
+	commandRunId?: number | null,
 };
 
 /**  A `ui.about` command's filter on the item it is offered on. */

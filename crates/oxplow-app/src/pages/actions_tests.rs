@@ -143,7 +143,7 @@ async fn an_open_action_returns_the_uri_and_runs_no_command() {
         out.result,
         serde_json::json!({ "opened": "oxplow:oxplow/file?path=a.rs" })
     );
-    assert!(out.audit_id.is_none() && out.event_id.is_none() && out.inverse.is_none());
+    assert!(out.command_run_id.is_none() && out.event_id.is_none() && out.inverse.is_none());
     let err = run_page_action(&svc, &runs, call(&id, None, "nothing", None))
         .await
         .unwrap_err();

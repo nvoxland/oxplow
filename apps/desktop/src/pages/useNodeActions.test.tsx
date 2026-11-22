@@ -10,7 +10,7 @@ const recorder = () => {
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: null, event_id: null, inverse: null } as never;
   };
   return { calls, press };
 };
@@ -68,7 +68,7 @@ test("a submitted form runs its run again", async () => {
   const after: string[] = [];
   const forms = {
     start: async () => ({}) as never,
-    submit: async () => ({ result: null, audit_id: null, event_id: null, inverse: null }) as never,
+    submit: async () => ({ result: null, command_run_id: null, event_id: null, inverse: null }) as never,
     actionStart: async () => ({}) as never,
   };
   await nodeFormSource(forms, "run-2", "form", (id) => after.push(id)).submit({ config: { id: "x" }, params: {} }, {}, null, false);

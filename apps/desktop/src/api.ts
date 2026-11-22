@@ -26,7 +26,7 @@ import {
   metricSpecs as metricSpecRows,
   type MetricSpec,
 } from "./metricsSql.js";
-import { IpcCallError, ipcErrorCode, ipcErrorAuditId, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorCommandRunId, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   HarnessListing,
@@ -75,7 +75,7 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
     ipcErrorCode(result.error),
     ipcErrorField(result.error),
     ipcErrorDetails(result.error),
-    ipcErrorAuditId(result.error),
+    ipcErrorCommandRunId(result.error),
   );
 }
 
@@ -985,9 +985,9 @@ async function runVcs(name: string, input: unknown, confirmed = false): Promise<
   return (await runCommand(name, input, confirmed)).result as OpOutcome;
 }
 
-/** Undo the run recorded as `auditId`, as the person. */
-export async function undoCommand(auditId: number, confirmed = false): Promise<CommandOutcome> {
-  return unwrap(await commands.undoCommand(auditId, confirmed));
+/** Undo the run recorded as `commandRunId`, as the person. */
+export async function undoCommand(commandRunId: number, confirmed = false): Promise<CommandOutcome> {
+  return unwrap(await commands.undoCommand(commandRunId, confirmed));
 }
 
 /** Approve (it runs as the person; its outcome) or decline (`null`) an

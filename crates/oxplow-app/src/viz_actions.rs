@@ -111,7 +111,7 @@ impl Prepared {
             } => run_page_point(svc, actor, &point, &context, command.as_deref(), confirmed).await,
             Prepared::Open(uri) => Ok(CommandOutcome {
                 result: serde_json::json!({ "opened": uri }),
-                audit_id: None,
+                command_run_id: None,
                 event_id: None,
                 inverse: None,
             }),
@@ -824,7 +824,7 @@ async fn run_page_point(
         }
         None => Ok(CommandOutcome {
             result: serde_json::json!({ "skipped": format!("nothing answers `{point}` for this item") }),
-            audit_id: None,
+            command_run_id: None,
             event_id: None,
             inverse: None,
         }),
@@ -1425,7 +1425,7 @@ view:
             .as_str()
             .unwrap()
             .contains("nothing answers `acme/item.finish`"));
-        assert_eq!(skipped.audit_id, None);
+        assert_eq!(skipped.command_run_id, None);
         assert_ne!(mark(&fx.svc, fx.thread).await, "green");
 
         let (fx, _root) = point_page_fixture(&["item.finish", "item.also"]).await;
@@ -1744,7 +1744,7 @@ view:
             .svc
             .commands
             .audit_store()
-            .get(out.audit_id.unwrap())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -2397,7 +2397,7 @@ view:
             .svc
             .commands
             .audit_store()
-            .get(out.audit_id.unwrap())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();

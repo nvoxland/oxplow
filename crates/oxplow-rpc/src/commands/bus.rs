@@ -6,7 +6,7 @@
 
 use oxplow_app::Services;
 use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
-use oxplow_domain::{AuditId, ProposalId};
+use oxplow_domain::{CommandRunId, ProposalId};
 
 use crate::error::IpcError;
 
@@ -169,16 +169,16 @@ pub async fn get_command(svc: &Services, name: String) -> Result<CommandSpec, Ip
         .ok_or_else(|| IpcError::from(oxplow_domain::CommandError::Unknown { name }))
 }
 
-/// Apply the inverse recorded for audit row `audit_id`, as the person,
+/// Apply the inverse recorded for command run `command_run_id`, as the person,
 /// through the same pipeline.
 pub async fn undo_command(
     svc: &Services,
-    audit_id: AuditId,
+    command_run_id: CommandRunId,
     confirmed: bool,
 ) -> Result<CommandOutcome, IpcError> {
     let outcome = svc
         .commands
-        .undo(&Actor::Human, audit_id.value(), confirmed)
+        .undo(&Actor::Human, command_run_id.value(), confirmed)
         .await?;
     Ok(outcome)
 }
@@ -236,7 +236,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        let audit = err.audit_id.expect("the failed run's audit row").get();
+        let audit = err
+            .command_run_id
+            .expect("the failed run's audit row")
+            .get();
         let row = svc
             .db
             .read(move |c| {
@@ -259,7 +262,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(unknown.audit_id, None);
+        assert_eq!(unknown.command_run_id, None);
     }
 
     #[tokio::test]
@@ -441,11 +444,11 @@ mod tests {
         assert!(!dir.path().join("old.txt").exists());
         // One that doesn't ask runs at once.
         let out = set(false).await.unwrap();
-        assert!(out["audit_id"].is_number(), "{out}");
+        assert!(out["command_run_id"].is_number(), "{out}");
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
         assert!(file.contains("Be brief."), "{file}");
-        let audit = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
-            .get(out["audit_id"].as_i64().unwrap())
+        let audit = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
+            .get(out["command_run_id"].as_i64().unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -457,12 +460,12 @@ mod tests {
         // Undo runs the recorded inverse through the same pipeline.
         let undone = crate::dispatch(
             "undo_command",
-            json!({ "auditId": out["audit_id"], "confirmed": true }),
+            json!({ "commandRunId": out["command_run_id"], "confirmed": true }),
             &svc,
         )
         .await
         .unwrap();
-        assert!(undone["audit_id"].is_number(), "{undone}");
+        assert!(undone["command_run_id"].is_number(), "{undone}");
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
         assert!(!file.contains("Be brief."), "{file}");
     }
@@ -526,7 +529,7 @@ mod tests {
 
         let approved = propose().await;
         let out = decide(approved, true).await.unwrap();
-        assert!(out["audit_id"].is_number(), "{out}");
+        assert!(out["command_run_id"].is_number(), "{out}");
         assert!(!exists(), "approved: deleted as the person");
         // Decided once.
         let err = decide(approved, false).await.unwrap_err();

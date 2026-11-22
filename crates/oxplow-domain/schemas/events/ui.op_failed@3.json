@@ -27,20 +27,20 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`ui.op_failed@2`: an operation the person started in the app failed, as\nthe app showed it (`oxplow.ui.report_error`). Its captured stderr and\nstdout are the `output` body. v2 adds the run's audit row and an\napproval's proposal (v1 had neither: it upcasts unchanged).",
+  "description": "`ui.op_failed@3`: an operation the person started in the app failed, as\nthe app showed it (`oxplow.ui.report_error`). Its captured stderr and\nstdout are the `output` body. The event can link to a command run and\nits approval proposal.",
   "properties": {
-    "audit_id": {
-      "description": "A command whose run failed: its audit row (`command_audit.id`).",
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
     "command": {
       "description": "The command it ran, shell-style (\"git merge bugfixes\").",
       "type": [
         "string",
+        "null"
+      ]
+    },
+    "command_run_id": {
+      "description": "A command whose run failed: its detail row (`command_run.id`).",
+      "format": "int64",
+      "type": [
+        "integer",
         "null"
       ]
     },
@@ -108,6 +108,6 @@
   "required": [
     "label"
   ],
-  "title": "UiOpFailedV2",
+  "title": "UiOpFailedV3",
   "type": "object"
 }

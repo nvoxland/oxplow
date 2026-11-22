@@ -3436,7 +3436,7 @@ pub(crate) mod tests {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let ran = run_due_collectors(&fx.svc).await;
         assert_eq!(ran, vec![("work".to_string(), "star".to_string())]);
-        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+        let audits = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(10)
             .await
             .unwrap();

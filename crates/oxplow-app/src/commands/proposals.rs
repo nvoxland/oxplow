@@ -59,7 +59,7 @@ impl CommandBus {
             let error = CommandError::Denied {
                 reason: "private command input requires a direct confirmed invocation".into(),
             };
-            self.audit_only(
+            self.record_unapplied(
                 run_ctx,
                 spec,
                 &input,
@@ -78,8 +78,14 @@ impl CommandBus {
                             CommandError::Denied { .. } => Outcome::Denied,
                             _ => Outcome::Error,
                         };
-                        self.audit_only(run_ctx, spec, &input, recorded, Some(err.to_string()))
-                            .await;
+                        self.record_unapplied(
+                            run_ctx,
+                            spec,
+                            &input,
+                            recorded,
+                            Some(err.to_string()),
+                        )
+                        .await;
                         return err;
                     }
                 }
@@ -94,7 +100,7 @@ impl CommandBus {
             let error = CommandError::Denied {
                 reason: "private configuration requires a direct confirmed invocation".into(),
             };
-            self.audit_only(
+            self.record_unapplied(
                 run_ctx,
                 spec,
                 &input,
@@ -151,7 +157,7 @@ impl CommandBus {
                         &oxplow_db::effect_run_store::Finished {
                             outcome: oxplow_domain::run::Outcome::Skipped,
                             reason: None,
-                            audit_id: None,
+                            command_run_id: None,
                             proposal_id: Some(inserted.id),
                         },
                         Some(run),
@@ -306,10 +312,10 @@ pub(super) fn log_approved_tx(
 ) -> Result<(), oxplow_domain::DomainError> {
     let approved = Envelope::typed::<CommandApproved>(
         actor.source(),
-        &CommandApprovedV2 {
+        &CommandApprovedV3 {
             proposal: id,
             command: spec.id.clone(),
-            audit_id: recorded.audit_id,
+            command_run_id: recorded.command_run_id,
         },
     )
     .with_subject([proposal_uri(id), command_uri(&spec.id)])
@@ -401,7 +407,7 @@ mod secret_tests {
             .await
             .unwrap();
         assert!(proposals.is_empty());
-        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+        let audits = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(100)
             .await
             .unwrap();

@@ -162,13 +162,13 @@ async fn undoing_a_scripts_field_write_restores_the_field() {
     assert_eq!(fields().await, json!({ "scorer": { "score": 4 } }));
     fx.svc
         .commands
-        .undo(&Actor::Human, second.audit_id.unwrap(), true)
+        .undo(&Actor::Human, second.command_run_id.unwrap(), true)
         .await
         .unwrap();
     assert_eq!(fields().await, json!({ "scorer": { "score": 9 } }));
     fx.svc
         .commands
-        .undo(&Actor::Human, first.audit_id.unwrap(), true)
+        .undo(&Actor::Human, first.command_run_id.unwrap(), true)
         .await
         .unwrap();
     assert_eq!(fields().await, json!({}));

@@ -25,7 +25,7 @@ command):
 | Write | Why it isn't a command |
 |---|---|
 | select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
-| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
+| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_run`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
@@ -605,7 +605,7 @@ reaches the frontend as `number`:
 - **A command's argument or result** (the command table in `oxplow-rpc`):
   no attribute reaches it, so it has a type. The entity ids in `ids.rs`
   travel as `"thr1"` strings; the plain-number rows have their own
-  newtypes in `row_ids.rs` (`SnapshotId`, `FileSnapshotId`, `AuditId`,
+  newtypes in `row_ids.rs` (`SnapshotId`, `FileSnapshotId`, `CommandRunId`,
   `ProposalId`, `DeadLetterId`, `AiCallId`, `ByteSize`), serialized as the
   number. A limit or small count is `u32`.
 

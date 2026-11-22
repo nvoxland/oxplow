@@ -2,7 +2,7 @@
 //!
 //! The entity ids in [`crate::ids`] travel as `"<prefix><int>"` strings.
 //! These rows have always been plain integers on the wire (a snapshot's
-//! id, an audit row, a dead letter), and the exporter forbids a bare
+//! id, a command run, a dead letter), and the exporter forbids a bare
 //! `i64`/`u64` in a command's arguments and results — a field can opt out
 //! with `#[specta(type = oxplow_domain::JsNumber)]`, an argument cannot. So each kind is its
 //! own transparent newtype: it serializes as the number, exports as
@@ -56,8 +56,8 @@ row_id!(
     FileSnapshotId
 );
 row_id!(
-    /// A `command_audit` row.
-    AuditId
+    /// A `command_run` row.
+    CommandRunId
 );
 row_id!(
     /// A `command_proposal` row: an agent's run waiting on a person.
@@ -109,8 +109,8 @@ mod tests {
     fn they_serialize_as_plain_numbers() {
         assert_eq!(serde_json::to_string(&SnapshotId::new(7)).unwrap(), "7");
         assert_eq!(
-            serde_json::from_str::<AuditId>("12").unwrap(),
-            AuditId::new(12)
+            serde_json::from_str::<CommandRunId>("12").unwrap(),
+            CommandRunId::new(12)
         );
         assert_eq!(serde_json::to_string(&ByteSize::new(4096)).unwrap(), "4096");
         assert_eq!(

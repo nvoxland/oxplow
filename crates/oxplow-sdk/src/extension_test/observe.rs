@@ -562,7 +562,7 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
                         &Finished {
                             outcome,
                             reason: error.clone(),
-                            audit_id: None,
+                            command_run_id: None,
                             proposal_id: None,
                         },
                         Some(&run),
@@ -572,12 +572,12 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
                 }
             }
             ContributionKind::Command => {
-                use oxplow_db::command_audit_store::{insert_with_outcome_tx, NewCommandAudit};
+                use oxplow_db::command_run_store::{insert_with_outcome_tx, NewCommandRun};
                 use oxplow_domain::events::schema::CommandOutcome;
                 insert_with_outcome_tx(
                     tx,
                     &run,
-                    &NewCommandAudit {
+                    &NewCommandRun {
                         command: local.clone(),
                         input: None,
                         outcome: CommandOutcome::Ok,

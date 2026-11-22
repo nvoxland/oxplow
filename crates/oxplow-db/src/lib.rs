@@ -18,7 +18,7 @@ pub mod catalog_listing_store;
 pub mod change_store;
 pub mod changes;
 pub mod collector_store;
-pub mod command_audit_store;
+pub mod command_run_store;
 pub mod commit_request_store;
 pub mod context_store;
 pub mod contribution_health_store;
@@ -87,7 +87,7 @@ pub use collector_store::{
     CollectorObservation, CollectorRun, EntityColumn, EntityTable, EntityWrite, PendingRun,
     SqliteCollectorStore, StoredType,
 };
-pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
+pub use command_run_store::{CommandRun, NewCommandRun, SqliteCommandRunStore};
 pub use contribution_health_store::{
     ContributionHealthRow, ContributionKey, SqliteContributionHealthStore,
 };

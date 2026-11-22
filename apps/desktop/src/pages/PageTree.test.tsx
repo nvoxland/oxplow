@@ -75,7 +75,7 @@ function recorder() {
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: null, event_id: null, inverse: null } as never;
   };
   return { calls, press };
 }

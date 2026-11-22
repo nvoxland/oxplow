@@ -20,8 +20,8 @@ export interface PendingCommand {
 
 export interface PersonCommandDeps {
   runCommand(name: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
-  /** Undo the run recorded as `auditId`, as the person (`undo_command`). */
-  undo(auditId: number): Promise<unknown>;
+  /** Undo the run recorded as `commandRunId`, as the person (`undo_command`). */
+  undo(commandRunId: number): Promise<unknown>;
   /** A toast; with `undo`, it offers Undo; with `open`, an Open link. */
   toast(message: string, undo?: () => void, open?: () => void): void;
   /** Open the page a result's `uri` names. */
@@ -41,8 +41,8 @@ export function createPersonCommands(deps: PersonCommandDeps) {
   /** The run's outcome — `null` when it failed, or waits for the
    *  person's confirmation (truthy exactly when it ran). */
   // Taking a toast's Undo: the run undone, as the person.
-  const undo = async (label: string, auditId: number, result?: unknown) => {
-    const ran = await deps.run(`Undo ${label}`, () => deps.undo(auditId));
+  const undo = async (label: string, commandRunId: number, result?: unknown) => {
+    const ran = await deps.run(`Undo ${label}`, () => deps.undo(commandRunId));
     if (ran.ok) deps.toast(undoneMessage(label, result));
   };
   const attempt = async (p: PendingCommand, confirmed: boolean): Promise<CommandOutcome | null> => {
@@ -56,11 +56,11 @@ export function createPersonCommands(deps: PersonCommandDeps) {
       const out = ran.value;
       set(null);
       // A run that came back undoable offers its Undo.
-      const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
+      const commandRunId = out.inverse && out.command_run_id != null ? out.command_run_id : null;
       const uri = resultUri(out.result);
       deps.toast(
         ranMessage(p.label, out.result),
-        auditId === null ? undefined : () => void undo(p.label, auditId, out.result),
+        commandRunId === null ? undefined : () => void undo(p.label, commandRunId, out.result),
         uri && deps.openPage ? () => deps.openPage?.(uri) : undefined,
       );
       return out;
@@ -98,7 +98,7 @@ export function openPersonUri(uri: string): void {
 export const personCommands: PersonCommands = createPersonCommands({
   runCommand: (name, input, confirmed) => runCommand(name, input, confirmed),
   // The person's click on Undo is their confirmation of it.
-  undo: (auditId) => undoCommand(auditId, true),
+  undo: (commandRunId) => undoCommand(commandRunId, true),
   toast: (message, undo, open) =>
     showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
   openPage: openPersonUri,
