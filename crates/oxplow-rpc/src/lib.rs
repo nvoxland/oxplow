@@ -191,6 +191,7 @@ macro_rules! oxplow_command_table {
             ctx {
                 // terminal — the agent-spawn path needs plugin_runtime
                 "open_terminal_session" => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 },
+                "restart_agent_terminal" => $crate::commands::terminal::restart_agent_terminal { uri: String },
             }
             svc {
             }

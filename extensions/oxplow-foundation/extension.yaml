@@ -1863,6 +1863,12 @@ commands:
     scope: vcs.write
     op: stage
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
+  - name: agent_terminal.restart
+    summary: "Stop the current agent terminal and launch it again with the installed harness executable. Keeps the session and its saved conversation. A person's only."
+    scope: agent_terminal.write
+    op: restart
+    ui: { label: "Restart Terminal", group: Tasks, keywords: [agent, session, relaunch], when: 'pageKind == "oxplow/agent_session"' }
+    example: {uri: "oxplow:oxplow/agent_session?id=ses3"}
   # window.show — the window's.
   - name: window.find
     summary: "Show the find bar in the file the window shows."

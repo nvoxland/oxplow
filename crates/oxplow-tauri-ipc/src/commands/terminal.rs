@@ -20,3 +20,17 @@ pub async fn open_terminal_session(
     };
     oxplow_rpc::commands::terminal::open_terminal_session(&ctx, uri, cols, rows).await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn restart_agent_terminal(
+    state: tauri::State<'_, AppState>,
+    plugin_runtime: tauri::State<'_, PluginRuntimeState>,
+    uri: String,
+) -> Result<(), IpcError> {
+    let ctx = oxplow_rpc::RpcContext {
+        services: state.inner().clone(),
+        plugin_runtime: Some(plugin_runtime.inner().as_ref().clone()),
+    };
+    oxplow_rpc::commands::terminal::restart_agent_terminal(&ctx, uri).await
+}

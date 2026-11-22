@@ -216,8 +216,9 @@ touches roughly seven files. They sit in this order:
    the command over `POST /ipc/:name`, and — via `tauri_adapters!` in
    `oxplow-tauri-ipc`'s `commands::generated` — the `#[tauri::command]`
    whose only job is to give `tauri-specta` something to derive the TS
-   binding from. **Do not hand-write adapters**; they were all deleted
-   in.
+   binding from. The standard generator takes `&Services`. Terminal
+   launch and restart also need the plugin endpoints, so their dispatch
+   rows use `ctx` and their adapters supply `RpcContext`.
 
    `cargo test -p oxplow-tauri-ipc` (`export_ts_bindings`) regenerates
    `apps/desktop/src/tauri-bridge/generated/bindings.ts`; CI fails on a

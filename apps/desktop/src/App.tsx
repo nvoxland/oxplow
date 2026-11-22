@@ -1547,6 +1547,16 @@ export function App() {
           return { opened: plan.page?.id ?? null, stream: plan.streamId };
         },
       },
+      "agent_terminal.write": {
+        restart: async (input, ctx) => {
+          if (ctx.actor !== "human") throw new Error("Only a person can restart an agent terminal.");
+          const requested = (input as { uri?: string } | null)?.uri;
+          const uri = requested ?? effectiveCenterActive;
+          if (typeOf(uri) !== "oxplow/agent_session") throw new Error("No agent terminal is selected.");
+          await desktopBridge().restartAgentTerminal(uri);
+          return null;
+        },
+      },
       // It fills the shown thread's agent input, unsent.
       "agent_input.write": {
         draft: (input) => {
@@ -1590,7 +1600,7 @@ export function App() {
     // getFileSession / mutateFileSession are plain functions over the
     // session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
+  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, effectiveCenterActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);
   windowHandlersRef.current = windowHandlers;
 
@@ -1921,6 +1931,15 @@ export function App() {
         tab.agentStatus = status?.status ?? "waiting";
         tab.question = status?.question;
         tab.icon = session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined;
+        tab.contextMenu = [
+          ...(tab.contextMenu ?? []),
+          {
+            id: "agent_terminal.restart",
+            label: "Restart Terminal",
+            enabled: true,
+            run: () => void offerDeps.run("Restart Terminal", "oxplow.agent_terminal.restart", { uri: ref.id }),
+          },
+        ];
         if (session && !registeredTitle) tab.label = session.displayName || sessionLabel(harnesses, session);
       }
       tab.render = () => (
@@ -1962,6 +1981,7 @@ export function App() {
     dirtyTabs,
     editingSetterFor,
     tabActions,
+    offerDeps,
     actionsSetterFor,
     openTab,
     bookmarks,

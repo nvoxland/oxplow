@@ -108,6 +108,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Open, rename and close a thread's agent sessions. Opening one only adds the slot (the UI starts its process, and nothing types into it); closing one stops its process.",
     },
     Scope {
+        id: "agent_terminal.write",
+        access: Access::Write,
+        host: Host::Window,
+        spends: false,
+        summary: "Restart an agent session's terminal process and resume its saved conversation.",
+    },
+    Scope {
         id: "agent_text.read",
         access: Access::Read,
         host: Host::Daemon,

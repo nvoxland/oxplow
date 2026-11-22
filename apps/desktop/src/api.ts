@@ -163,6 +163,9 @@ function buildBridge() {
     /// starting one: `null` when none runs.
     lookupTerminalSession: async (uri: string): Promise<string | null> =>
       unwrap(await commands.lookupTerminalSession(uri)),
+    restartAgentTerminal: async (uri: string): Promise<void> => {
+      unwrap(await commands.restartAgentTerminal(uri));
+    },
     closeTerminalSession: async (sessionId: string): Promise<void> => {
       try {
         unwrap(await commands.closeTerminalSession(sessionId));

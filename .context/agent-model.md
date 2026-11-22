@@ -402,6 +402,11 @@ the assembled system prompt, the session's resume id, the agent text, the
 harness's config, `HOME` (local streams only) and the program search
 path. A harness never touches the database.
 
+Restart Terminal replaces the agent session's PTY through this same
+launch path. It reads the saved binding after the old process exits,
+so stopping the TUI leaves the session's conversation intact. See
+[Terminal](./terminal.md#when-a-session-ends-or-goes-away).
+
 **What a harness implements.** `AgentHarness` requires what every harness
 answers: `id`, `title`, `launch`, `tool_use` (its calls in
 oxplow's vocabulary, "Tool vocabulary") and `render` (a `HookAnswer` in

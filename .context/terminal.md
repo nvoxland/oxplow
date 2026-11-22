@@ -402,6 +402,15 @@ are two PTY writes, as they were typed. Nothing merges keys any more.
 
 ## When a session ends or goes away
 
+**Restart Terminal** is available in Quick Open while an agent terminal
+is shown and in the agent session tab's right-click menu. It stops the
+old PTY process and launches the selected harness again with the same
+session URI, conversation binding, worktree and terminal size. The
+normal launch resolves the currently installed executable. Codex's TUI
+rejoins the observed thread on the shared app-server, which keeps running.
+Attached views follow a `restart` event on the old PTY and replay the
+replacement; a launch failure leaves them with the Retry banner.
+
 A session's process exiting sends `{type:"exit", exitCode}`; the registry
 then unregisters it (`TerminalSessionRegistry`'s forwarder removes it from
 both maps), so attaching to its key spawns a fresh one instead of replaying

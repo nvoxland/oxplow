@@ -163,6 +163,51 @@ pub async fn open_terminal_session(
         // its stream — what the person has selected doesn't matter.
         Target::AgentSession(id) => id,
     };
+    let _launch = ctx.terminal_sessions.lock_agent_launch(session_id).await;
+    open_agent_terminal(ctx, session_id, cols, rows).await
+}
+
+/// Replace a terminal process without closing the agent session or
+/// changing its conversation binding. The ordinary launch resolves the
+/// harness executable again and, for Codex, attaches to the same thread.
+pub async fn restart_agent_terminal(ctx: &RpcContext, uri: String) -> Result<(), IpcError> {
+    let Target::AgentSession(id) = target_of(&uri)? else {
+        return Err(IpcError::invalid(
+            "restart requires an agent session terminal",
+        ));
+    };
+    let terminals = &ctx.terminal_sessions;
+    let key = agent_pane_key(id);
+    let requested = terminals.session_id_for_key(&key).await;
+    let _launch = terminals.lock_agent_launch(id).await;
+    let current = terminals.session_id_for_key(&key).await;
+    if current.is_some() && current != requested {
+        // A concurrent open or restart has already started a replacement.
+        return Ok(());
+    }
+    let (cols, rows) = if let Some(pty) = &current {
+        let size = terminals.size(pty).await.unwrap_or((80, 24));
+        match terminals.close(pty).await {
+            Ok(()) | Err(oxplow_app::terminal_sessions::TerminalSessionError::NotFound(_)) => {}
+            Err(err) => return Err(err.into()),
+        }
+        size
+    } else {
+        (80, 24)
+    };
+    let result = open_agent_terminal(ctx, id, cols, rows).await;
+    if let Some(old) = requested {
+        terminals.report_restart(old, result.as_ref().err().map(|err| err.message.as_str()));
+    }
+    result.map(|_| ())
+}
+
+async fn open_agent_terminal(
+    ctx: &RpcContext,
+    session_id: AgentSessionId,
+    cols: u16,
+    rows: u16,
+) -> Result<AttachResult, IpcError> {
     // Already running: nothing about how to start it matters, and a switch
     // back to its stream shouldn't wait on the database to work that out.
     if let Some(attached) = ctx
@@ -740,7 +785,7 @@ mod tests {
     )]
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_codex_session_resumes_its_thread_after_a_backend_restart() {
+    async fn a_codex_session_resumes_its_thread_after_terminal_and_backend_restarts() {
         // A failure shows as a failure, not a hang.
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
             use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
@@ -856,10 +901,42 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             assert_eq!(bound().await, "thr-restart");
-            let _ = ctx
-                .terminal_sessions
-                .close(first["sessionId"].as_str().unwrap())
-                .await;
+            let upgraded = bin.join("codex-next");
+            std::fs::copy(&program, &upgraded).unwrap();
+            std::fs::write(
+                &upgraded,
+                "#!/bin/sh\ntouch .restarted-with-upgrade\nexec sleep 600\n",
+            )
+            .unwrap();
+            std::fs::rename(upgraded, &program).unwrap();
+            let uri = agent_session_uri(session.id);
+            let mut events = ctx.terminal_sessions.subscribe();
+            crate::dispatch("restart_agent_terminal", json!({ "uri": uri }), &ctx)
+                .await
+                .unwrap();
+            let replacement = open(&ctx, &session.id.to_string()).await.unwrap();
+            assert_ne!(replacement["sessionId"], first["sessionId"]);
+            assert_eq!(bound().await, "thr-restart");
+            loop {
+                let event = events.recv().await.unwrap();
+                if event.session_id == first["sessionId"].as_str().unwrap()
+                    && event.message == r#"{"type":"restart"}"#
+                {
+                    break;
+                }
+            }
+            let marker = project.path().join(".restarted-with-upgrade");
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !marker.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("the replacement TUI ran the newly installed executable");
+            ctx.terminal_sessions
+                .close(replacement["sessionId"].as_str().unwrap())
+                .await
+                .unwrap();
 
             // The backend restarts: everything in memory is gone; the database,
             // the daemon and the program are not.

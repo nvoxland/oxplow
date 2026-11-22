@@ -371,9 +371,10 @@ person's) or the **app shell** (`projects.write`: create, open — New /
 Open Project; the window reaches the shell, so the window hosts its
 handlers too). A shell command isn't recorded: there's no app-scope bus
 or log yet — one comes when something there is worth recording or an
-agent needs it. A command
-backed by a window scope is `View` (not recorded, no
-transaction) and its spec carries the operation (`CommandSpec::op`):
+agent needs it. Window commands normally have `View` access. Restart
+Terminal uses the person's `agent_terminal.write` scope because its
+handler calls the PTY restart RPC. Window commands carry their operation
+in `CommandSpec::op`.
 
 - **The window's own runs stay in it** — `clientHost.ts` `runLocally`:
   the window does it with its own handler, nothing sent to the daemon.

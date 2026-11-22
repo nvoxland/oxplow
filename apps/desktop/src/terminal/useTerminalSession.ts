@@ -99,12 +99,22 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
       // Output may arrive before the open answers (a replay sent from
       // inside it): held until the session id is known.
       const pendingEvents: TerminalEvent[] = [];
+      let opening = false;
+      let followRestart = false;
       const applyEvent = (event: TerminalEvent) => {
         const msg = readSessionMessage(event.message);
         if (msg?.kind === "data") term.write(msg.bytes);
+        if (msg?.kind === "restart") {
+          endedRef.current = true;
+          sessionIdRef.current = null;
+          restartPendingRef.current = false;
+          if (opening) followRestart = true;
+          else openSession(true);
+        }
         if (msg?.kind === "exit") {
           endedRef.current = true;
-          if (restartPendingRef.current) {
+          launchFailedRef.current = msg.outcome.kind === "launch_failed";
+          if (restartPendingRef.current && !launchFailedRef.current) {
             restartPendingRef.current = false;
             reopenRef.current?.();
             return;
@@ -121,7 +131,6 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
         applyEvent(event);
       });
 
-      let opening = false;
       const openSession = (again: boolean) => {
         if (opening || disposed) return;
         opening = true;
@@ -178,6 +187,10 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
           })
           .finally(() => {
             opening = false;
+            if (followRestart) {
+              followRestart = false;
+              openSession(true);
+            }
           });
       };
       activatedRef.current = false;

@@ -126,6 +126,19 @@ test("an exit is said with its outcome, and Start Again opens it again under a n
   expect(written).toContain("<reset>");
 });
 
+test("an attached agent follows a restarted PTY", async () => {
+  const { result } = renderHook(() => useTerminalSession(AGENT, { shown: true, startOnActivate: true }));
+  const { term, written } = fakeTerm();
+  act(() => void result.current.attach(term));
+  await waitFor(() => expect(written).toContain("hello"));
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "restart" }) }));
+  await waitFor(() => expect(written.filter((chunk) => chunk === "hello")).toHaveLength(2));
+  expect(written).toContain("<reset>");
+  expect(result.current.ended).toBeNull();
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "exit", exitCode: 1 }) }));
+  expect(result.current.ended).toBeNull();
+});
+
 test("an agent moved to another conversation opens again once its process exits", async () => {
   const { result, rerender } = renderHook(({ conversation }) => useTerminalSession(AGENT, { shown: true, startOnActivate: true, conversation }), {
     initialProps: { conversation: "a" },

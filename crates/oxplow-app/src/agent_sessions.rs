@@ -38,11 +38,22 @@ impl SessionProcesses {
     /// retire its bearer. Nothing running is fine — there is nothing to
     /// stop.
     pub fn kill(&self, session: AgentSessionId) {
+        self.invalidate(session);
+        let processes = self.clone();
+        tokio::spawn(async move {
+            let _launch = processes.terminals.lock_agent_launch(session).await;
+            // A launch already in flight can have issued a new bearer or
+            // opened an observer since the slot closed.
+            processes.invalidate(session);
+            processes
+                .terminals
+                .close_key(&agent_pane_key(session))
+                .await;
+        });
+    }
+
+    fn invalidate(&self, session: AgentSessionId) {
         self.auth.revoke(session);
         let _ = self.chat.close(&session);
-        let terminals = self.terminals.clone();
-        tokio::spawn(async move {
-            terminals.close_key(&agent_pane_key(session)).await;
-        });
     }
 }

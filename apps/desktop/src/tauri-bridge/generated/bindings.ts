@@ -680,6 +680,7 @@ export const commands = {
 	 *  run directly in a PTY, named by its URI (`oxplow_rpc::commands::terminal`).
 	 */
 	openTerminalSession: (uri: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { uri, cols, rows })),
+	restartAgentTerminal: (uri: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("restart_agent_terminal", { uri })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
