@@ -22,21 +22,6 @@ mod extension_grants_tests;
 pub mod extension_impact;
 #[cfg(test)]
 mod extension_imports_tests;
-pub(crate) mod extension_job_ai;
-pub(crate) mod extension_job_authority;
-#[cfg(test)]
-mod extension_job_crash_tests;
-pub mod extension_job_dispatch;
-#[cfg(test)]
-mod extension_job_hardening_tests;
-pub mod extension_job_operations;
-pub(crate) mod extension_job_runner;
-pub(crate) mod extension_job_scheduler;
-#[cfg(test)]
-mod extension_job_stream_tests;
-pub(crate) mod extension_jobs;
-#[cfg(test)]
-mod extension_jobs_tests;
 #[cfg(test)]
 mod extension_lifecycle_tests;
 #[cfg(test)]
@@ -48,6 +33,21 @@ pub(crate) mod extension_runtime_adapters;
 pub(crate) mod extension_secrets;
 pub(crate) mod extension_services;
 pub(crate) mod extension_settings;
+pub(crate) mod job_run_ai;
+pub(crate) mod job_run_authority;
+#[cfg(test)]
+mod job_run_crash_tests;
+pub mod job_run_dispatch;
+#[cfg(test)]
+mod job_run_hardening_tests;
+pub mod job_run_operations;
+pub(crate) mod job_run_runner;
+pub(crate) mod job_run_scheduler;
+#[cfg(test)]
+mod job_run_stream_tests;
+pub(crate) mod job_runs;
+#[cfg(test)]
+mod job_runs_tests;
 /// Where an extension's own SQLite file is (a fixture writes it from outside).
 pub use extension_services::store_path;
 #[cfg(test)]

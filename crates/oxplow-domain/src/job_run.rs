@@ -200,7 +200,7 @@ pub struct AttemptFence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExtensionJob {
+pub struct JobRun {
     pub id: JobId,
     pub owner: JobOwner,
     /// Host-generated identity of the originating run; immutable attribution.
@@ -266,7 +266,7 @@ pub enum JobEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobTransition {
-    pub job: ExtensionJob,
+    pub job: JobRun,
     /// Returned only by Claim; required for every attempt-bound event.
     pub token: Option<AttemptFence>,
 }
@@ -301,7 +301,7 @@ pub enum TransitionError {
     CounterOverflow,
 }
 
-impl ExtensionJob {
+impl JobRun {
     /// Build a queued job. IDs, attribution, intent key and replay policy are
     /// all supplied by the host; arguments are deliberately not represented.
     pub fn queued(
@@ -626,8 +626,8 @@ mod tests {
         IntentKey::new("review:1".into()).unwrap()
     }
 
-    fn queued(replay: ReplayPolicy) -> ExtensionJob {
-        ExtensionJob::queued(
+    fn queued(replay: ReplayPolicy) -> JobRun {
+        JobRun::queued(
             JobId::generate(),
             JobOwner {
                 contribution: ContributionId::new("acme", ContributionKind::Job, "review"),
@@ -645,7 +645,7 @@ mod tests {
 
     /// Claim `job` at `now`, then let its lease run out: the job recovery
     /// finds, `Interrupted`.
-    fn claimed_then_expired(job: ExtensionJob, now: i64) -> ExtensionJob {
+    fn claimed_then_expired(job: JobRun, now: i64) -> JobRun {
         let running = job
             .transition(JobEvent::Claim {
                 now_ms: now,
@@ -662,7 +662,7 @@ mod tests {
             .job
     }
 
-    fn retry(job: &ExtensionJob, now: i64) -> Result<JobTransition, TransitionError> {
+    fn retry(job: &JobRun, now: i64) -> Result<JobTransition, TransitionError> {
         job.transition(JobEvent::RetryInterrupted {
             now_ms: now,
             intent_key: key(),

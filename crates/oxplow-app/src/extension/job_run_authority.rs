@@ -8,15 +8,15 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use oxplow_domain::{
     contribution::Descriptor,
-    extension_job::JobOwner,
-    extension_job_context::{JobExecutionIdentity, JobInvocationContext},
+    job_run::JobOwner,
+    job_run_context::{JobExecutionIdentity, JobInvocationContext},
     run::{Authority, Budget, ContributionRef, RunContext},
     stores::ThreadStore,
 };
 
 use crate::{
     extension::extension_catalog::ExtensionCatalog,
-    extension::extension_job_operations::{JobOperationKey, JobOperationRegistry, JobOperations},
+    extension::job_run_operations::{JobOperationKey, JobOperationRegistry, JobOperations},
     run_context::LiveCheck,
 };
 
@@ -221,7 +221,7 @@ impl JobAuthorityHost {
 
     pub async fn authorize(
         &self,
-        job: &oxplow_db::extension_job_store::StoredExtensionJob,
+        job: &oxplow_db::job_run_store::StoredJobRun,
         identity: &JobExecutionIdentity,
         provenance: &JobInvocationContext,
     ) -> Result<JobExecution, JobAuthorityError> {
@@ -231,7 +231,7 @@ impl JobAuthorityHost {
 
     async fn authorize_unpinned(
         &self,
-        job: &oxplow_db::extension_job_store::StoredExtensionJob,
+        job: &oxplow_db::job_run_store::StoredJobRun,
         identity: &JobExecutionIdentity,
         provenance: &JobInvocationContext,
     ) -> Result<JobExecution, JobAuthorityError> {
@@ -244,11 +244,11 @@ impl JobAuthorityHost {
         }
         let token = identity.attempt_fence();
         let token_matches = match job.job.state {
-            oxplow_domain::extension_job::JobState::Queued => {
+            oxplow_domain::job_run::JobState::Queued => {
                 job.job.attempt.checked_add(1) == Some(token.attempt)
                     && job.job.fence.checked_add(1) == Some(token.fence)
             }
-            oxplow_domain::extension_job::JobState::Running => {
+            oxplow_domain::job_run::JobState::Running => {
                 job.job.attempt == token.attempt
                     && job.job.fence == token.fence
                     && job

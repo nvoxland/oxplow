@@ -3,23 +3,21 @@
 
 use crate::{
     extension::extension_catalog::{CatalogSnapshot, ExtensionCatalog},
-    extension::extension_job_ai::TypedAiJobRequest,
-    extension::extension_job_authority::{DeclaredJobGrants, JobAuthorityHost},
-    extension::extension_job_dispatch::ExtensionJobDispatcher,
-    extension::extension_job_operations::{
+    extension::job_run_ai::TypedAiJobRequest,
+    extension::job_run_authority::{DeclaredJobGrants, JobAuthorityHost},
+    extension::job_run_dispatch::JobRunDispatcher,
+    extension::job_run_operations::{
         JobOperationKey, JobOperationRegistry, JobOperations, RegisteredJobOperation,
     },
 };
 use oxplow_db::{
-    extension_job_store::{
-        self, EnqueueResult, ExtensionJobStoreError, NewExtensionJob, SqliteExtensionJobStore,
-    },
+    job_run_store::{self, EnqueueResult, JobRunStoreError, NewJobRun, SqliteJobRunStore},
     Database,
 };
 use oxplow_domain::{
     contribution::{ContributionId, ContributionKind},
-    extension_job::{ExtensionJob, IntentKey, JobEvent, JobId, JobOwner, JobState, ReplayPolicy},
-    extension_job_context::JobInvocationContext,
+    job_run::{IntentKey, JobEvent, JobId, JobOwner, JobRun, JobState, ReplayPolicy},
+    job_run_context::JobInvocationContext,
     run::{Cancel, RunContext},
     CommandError,
 };
@@ -56,7 +54,7 @@ pub struct JobsDependencies {
     pub sql: crate::sql_gateway::SqlGateway,
 }
 
-pub struct ExtensionJobs {
+pub struct JobRuns {
     db: Database,
     catalog: Arc<ExtensionCatalog>,
     root: PathBuf,
@@ -66,12 +64,12 @@ pub struct ExtensionJobs {
     threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     sql: crate::sql_gateway::SqlGateway,
-    tools: Arc<crate::extension::extension_job_runner::ToolHost>,
+    tools: Arc<crate::extension::job_run_runner::ToolHost>,
     spawned: std::sync::atomic::AtomicBool,
     shutdown: Cancel,
 }
 
-impl ExtensionJobs {
+impl JobRuns {
     pub fn new(deps: JobsDependencies) -> Self {
         let JobsDependencies {
             db,
@@ -93,9 +91,7 @@ impl ExtensionJobs {
             ai,
             threads,
             vocabulary,
-            tools: Arc::new(crate::extension::extension_job_runner::ToolHost::new(
-                sql.clone(),
-            )),
+            tools: Arc::new(crate::extension::job_run_runner::ToolHost::new(sql.clone())),
             sql,
             operations: JobOperations::default(),
             spawned: Default::default(),
@@ -126,11 +122,11 @@ impl ExtensionJobs {
                 };
                 let key = JobOperationKey::new(owner, job.operation.as_str().into())
                     .map_err(|_| job_problem())?;
-                let runner = crate::extension::extension_job_runner::AiJob {
+                let runner = crate::extension::job_run_runner::AiJob {
                     ai: self.ai.clone(),
-                    store: SqliteExtensionJobStore::new(self.db.clone()),
+                    store: SqliteJobRunStore::new(self.db.clone()),
                     tools: self.tools.clone(),
-                    definitions: crate::extension::extension_job_runner::AiJob::definitions(
+                    definitions: crate::extension::job_run_runner::AiJob::definitions(
                         job,
                         &extension.commands,
                     ),
@@ -209,7 +205,7 @@ impl ExtensionJobs {
             .map_err(|_| denied("job operation is unavailable"))?;
         let context = JobInvocationContext::capture(ctx.run)
             .map_err(|_| invalid("invalid job scheduling provenance"))?;
-        let job = ExtensionJob::queued(
+        let job = JobRun::queued(
             JobId::generate(),
             owner,
             ctx.run.run().clone(),
@@ -218,7 +214,7 @@ impl ExtensionJobs {
             oxplow_domain::Timestamp::now().unix_ms(),
         )
         .map_err(|_| invalid("invalid job intent"))?;
-        let new = NewExtensionJob {
+        let new = NewJobRun {
             job,
             operation,
             invoker: ctx.run.actor().source(),
@@ -226,15 +222,23 @@ impl ExtensionJobs {
         };
         // A duplicate is allowed even at capacity; the immutable input and
         // provenance checks in enqueue prevent reusing an intent for new work.
-        let existing: bool = ctx.conn.query_row("SELECT EXISTS(SELECT 1 FROM extension_job WHERE contribution_id=?1 AND intent_key=?2)",
-            rusqlite::params![new.job.owner.contribution.to_string(), new.job.intent_key.as_str()], |row| row.get(0))
+        let existing: bool = ctx
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM job_run WHERE contribution_id=?1 AND intent_key=?2)",
+                rusqlite::params![
+                    new.job.owner.contribution.to_string(),
+                    new.job.intent_key.as_str()
+                ],
+                |row| row.get(0),
+            )
             .map_err(oxplow_db::map_sql_err)?;
         if !existing {
             let (project, package): (i64, i64) = ctx
                 .conn
                 .query_row(
                     "SELECT count(*), COALESCE(sum(c.extension = ?1), 0)
-                FROM extension_job j LEFT JOIN contribution c ON c.id = j.contribution_id
+                FROM job_run j LEFT JOIN contribution c ON c.id = j.contribution_id
                 WHERE j.state IN ('queued', 'running')",
                     [&extension],
                     |row| Ok((row.get(0)?, row.get(1)?)),
@@ -244,7 +248,7 @@ impl ExtensionJobs {
                 return Err(invalid("job queue capacity reached"));
             }
         }
-        let kept = extension_job_store::enqueue_with_context_tx(ctx.conn, &new, &context)
+        let kept = job_run_store::enqueue_with_context_tx(ctx.conn, &new, &context)
             .map_err(store_error)?;
         let (created, stored) = match kept {
             EnqueueResult::Created(job) => (true, job),
@@ -266,16 +270,16 @@ impl ExtensionJobs {
             .ownership
             .with_owner(run, "jobs.read", |extension| extension.namespace.clone())
             .map_err(|_| denied("job result authority is unavailable"))?;
-        let metadata = extension_job_store::metadata_tx(conn, &id)
+        let metadata = job_run_store::metadata_tx(conn, &id)
             .map_err(store_error)?
             .filter(|row| row.job.owner.contribution.namespace == extension)
             .ok_or_else(|| invalid("job was not found"))?;
         check_stream(
             run,
-            &extension_job_store::get_context_tx(conn, &id).map_err(store_error)?,
+            &job_run_store::get_context_tx(conn, &id).map_err(store_error)?,
         )?;
         let result = if metadata.job.attempt > 0 {
-            extension_job_store::attempts_tx(conn, &id, Some(metadata.job.attempt - 1), 1)
+            job_run_store::attempts_tx(conn, &id, Some(metadata.job.attempt - 1), 1)
                 .map_err(store_error)?
                 .items
                 .into_iter()
@@ -287,19 +291,19 @@ impl ExtensionJobs {
         // What the current attempt has streamed so far: its text, and how
         // many tools it called (`v_job_run_output` has every row).
         let output = if metadata.job.attempt > 0 {
-            extension_job_store::output_tx(conn, &id, metadata.job.attempt, 0, usize::MAX)
+            job_run_store::output_tx(conn, &id, metadata.job.attempt, 0, usize::MAX)
                 .map_err(store_error)?
         } else {
             Vec::new()
         };
         let text: String = output
             .iter()
-            .filter(|row| row.kind == oxplow_domain::extension_job::JobOutputKind::Text)
+            .filter(|row| row.kind == oxplow_domain::job_run::JobOutputKind::Text)
             .filter_map(|row| row.content["text"].as_str())
             .collect();
         let tool_calls = output
             .iter()
-            .filter(|row| row.kind == oxplow_domain::extension_job::JobOutputKind::ToolCall)
+            .filter(|row| row.kind == oxplow_domain::job_run::JobOutputKind::ToolCall)
             .count();
         Ok(json!({
             "jobRun": job_run_ref(&id),
@@ -357,13 +361,13 @@ impl ExtensionJobs {
                 extension.namespace.clone()
             })
             .map_err(|_| denied("job cancellation authority is unavailable"))?;
-        let metadata = extension_job_store::metadata_tx(ctx.conn, &id)
+        let metadata = job_run_store::metadata_tx(ctx.conn, &id)
             .map_err(store_error)?
             .filter(|row| row.job.owner.contribution.namespace == extension)
             .ok_or_else(|| invalid("job was not found"))?;
         check_stream(
             ctx.run,
-            &extension_job_store::get_context_tx(ctx.conn, &id).map_err(store_error)?,
+            &job_run_store::get_context_tx(ctx.conn, &id).map_err(store_error)?,
         )?;
         self.request_cancellation_tx(ctx.conn, &metadata)
     }
@@ -379,7 +383,7 @@ impl ExtensionJobs {
             return Err(denied("job cancellation requires an audited transaction"));
         }
         let id = job_id(&input.job_run)?;
-        let metadata = extension_job_store::metadata_tx(ctx.conn, &id)
+        let metadata = job_run_store::metadata_tx(ctx.conn, &id)
             .map_err(store_error)?
             .ok_or_else(|| invalid("job was not found"))?;
         self.request_cancellation_tx(ctx.conn, &metadata)
@@ -391,14 +395,14 @@ impl ExtensionJobs {
     fn request_cancellation_tx(
         &self,
         conn: &rusqlite::Connection,
-        job: &extension_job_store::RecoveryCandidate,
+        job: &job_run_store::RecoveryCandidate,
     ) -> Result<Value, CommandError> {
         let ended = matches!(
             job.job.state,
             JobState::Succeeded | JobState::Failed | JobState::Cancelled | JobState::Interrupted
         );
         if !ended && job.job.cancellation_requested_at_ms.is_none() {
-            let changed = extension_job_store::transition_tx(
+            let changed = job_run_store::transition_tx(
                 conn,
                 &job.job.id,
                 job.revision,
@@ -418,7 +422,7 @@ impl ExtensionJobs {
         &self,
         activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
         commands: Arc<crate::commands::CommandBus>,
-    ) -> ExtensionJobDispatcher {
+    ) -> JobRunDispatcher {
         self.tools.bind(commands);
         let grants = Arc::new(DeclaredJobGrants::new(
             self.catalog.clone(),
@@ -435,7 +439,7 @@ impl ExtensionJobs {
             .with_registry_handle(self.operations.clone())
             .with_activation(activation),
         );
-        ExtensionJobDispatcher::new(self.db.clone(), host).with_vocabulary(self.vocabulary.clone())
+        JobRunDispatcher::new(self.db.clone(), host).with_vocabulary(self.vocabulary.clone())
     }
 
     /// Start the scheduler (once), as boot does after activation; tool
@@ -449,8 +453,8 @@ impl ExtensionJobs {
             return;
         }
         let dispatcher = Arc::new(self.dispatcher(activation, commands));
-        let scheduler = crate::extension::extension_job_scheduler::ExtensionJobScheduler::new(
-            SqliteExtensionJobStore::new(self.db.clone()),
+        let scheduler = crate::extension::job_run_scheduler::JobRunScheduler::new(
+            SqliteJobRunStore::new(self.db.clone()),
             dispatcher,
             self.shutdown.clone(),
         );
@@ -465,8 +469,8 @@ impl ExtensionJobs {
         &self,
         activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
         commands: Arc<crate::commands::CommandBus>,
-        crash: Option<crate::extension::extension_job_dispatch::CrashHook>,
-    ) -> Arc<ExtensionJobDispatcher> {
+        crash: Option<crate::extension::job_run_dispatch::CrashHook>,
+    ) -> Arc<JobRunDispatcher> {
         let dispatcher = self.dispatcher(activation, commands);
         Arc::new(match crash {
             Some(hook) => dispatcher.with_crash_hook(hook),
@@ -479,7 +483,7 @@ impl ExtensionJobs {
     }
 }
 
-impl Drop for ExtensionJobs {
+impl Drop for JobRuns {
     fn drop(&mut self) {
         self.shutdown.cancel();
     }
@@ -491,7 +495,7 @@ impl Drop for ExtensionJobs {
 pub(crate) fn announce_tx(
     conn: &rusqlite::Connection,
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
-    job: &ExtensionJob,
+    job: &JobRun,
 ) -> Result<(), oxplow_domain::DomainError> {
     use oxplow_domain::events::schema::{
         ContributionJobCompleted, ContributionJobCompletedV2, JobOutcome,
@@ -503,7 +507,7 @@ pub(crate) fn announce_tx(
         JobState::Interrupted => JobOutcome::Interrupted,
         JobState::Queued | JobState::Running => return Ok(()),
     };
-    let context = extension_job_store::get_context_tx(conn, &job.id)
+    let context = job_run_store::get_context_tx(conn, &job.id)
         .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
     let payload = ContributionJobCompletedV2 {
         job_run: job.id.as_str().to_string(),
@@ -609,10 +613,10 @@ fn invalid(message: &str) -> CommandError {
         message: message.into(),
     }
 }
-fn store_error(error: ExtensionJobStoreError) -> CommandError {
+fn store_error(error: JobRunStoreError) -> CommandError {
     match error {
-        ExtensionJobStoreError::Storage(error) => error.into(),
-        ExtensionJobStoreError::Conflict | ExtensionJobStoreError::IntentConflict => {
+        JobRunStoreError::Storage(error) => error.into(),
+        JobRunStoreError::Conflict | JobRunStoreError::IntentConflict => {
             invalid("job intent or revision conflicts with stored work")
         }
         _ => invalid("invalid or unavailable job state"),

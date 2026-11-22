@@ -232,8 +232,8 @@ pub(crate) fn sweep_run_batch_tx(
                    )
                    WHEN 'effect' THEN 0
                    WHEN 'job' THEN r.started_at < ?2 AND NOT EXISTS (
-                       SELECT 1 FROM extension_job_attempt a
-                         JOIN extension_job j ON j.id = a.job_id WHERE a.run_id = r.run_id
+                       SELECT 1 FROM job_run_attempt a
+                         JOIN job_run j ON j.id = a.job_id WHERE a.run_id = r.run_id
                    )
                    ELSE r.started_at < ?2
                END
@@ -541,13 +541,13 @@ mod tests {
         db.transaction(|tx| {
             insert_finished_run(tx, "attempt", "job", "ok", 365)?;
             tx.execute_batch(
-                "INSERT INTO extension_job (
+                "INSERT INTO job_run (
                      id, contribution_id, operation, invoker, queued_by_run_id,
                      intent_key, replay_policy, state, attempt, fence, created_at_ms,
                      updated_at_ms, revision, request_json
                  ) VALUES ('job', 'acme/job', 'model', 'human', 'enqueue',
                            'key', 'never', 'succeeded', 1, 1, 0, 2, 2, '{}');
-                 INSERT INTO extension_job_attempt (
+                 INSERT INTO job_run_attempt (
                      job_id, attempt, fence, started_at_ms, lease_until_ms, closed_at_ms, outcome, run_id
                  ) VALUES ('job', 1, 1, 0, 2, 1, 'succeeded', 'attempt');",
             )
@@ -566,12 +566,12 @@ mod tests {
             ["attempt"]
         );
         assert_eq!(
-            run_ids(&db, "SELECT run_id FROM extension_job_attempt").await,
+            run_ids(&db, "SELECT run_id FROM job_run_attempt").await,
             ["attempt"]
         );
 
         db.transaction(|tx| {
-            tx.execute_batch("DELETE FROM extension_job_attempt; DELETE FROM extension_job;")
+            tx.execute_batch("DELETE FROM job_run_attempt; DELETE FROM job_run;")
                 .map_err(map_sql_err)
         })
         .await

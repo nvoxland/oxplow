@@ -87,14 +87,14 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
 A **job** is what an extension declares (`job:<namespace>/<id>`). Each
 enqueued job has a `job_run:<id>` URI and a row in `v_job_run`. It keeps
 its own state machine across retries. Each claimed attempt has a separate
-`contribution_run` row. A job is model work an extension asks for that runs outside any
-transaction and outlives a restart (`operation: ai.complete_typed`). It
+`contribution_run` row. A job is model work an extension asks for that runs
+outside any transaction and outlives a restart (`operation: ai.complete_typed`). It
 streams its reply as it comes, may call tools the extension declares,
 can be cancelled mid-reply, and says how it ended with an event. The
-declaration is `extensions/jobs.rs`; intent, snapshot, cancel and the
-end event `extension_jobs.rs`; what runs `extension_job_runner.rs`;
-claiming, supervising and publishing `extension_job_dispatch.rs`,
-`extension_job_scheduler.rs` and `extension_job_authority.rs`.
+declaration is in `extensions/jobs.rs`. The run service is in `job_runs.rs`
+and the worker is in `job_run_runner.rs`. Claiming, supervision and authority
+are handled by `job_run_dispatch.rs`, `job_run_scheduler.rs` and
+`job_run_authority.rs`.
 
 ```yaml
 jobs:
@@ -154,7 +154,7 @@ commands:
   Each model round streams on the role
   (`AiCompute::stream_typed`, a recorded computation: the same request
   reads its recorded answer, replayed at once). What comes is the
-  attempt's **output** (`extension_job_output`, `v_job_run_output`): text
+  attempt's **output** (`job_run_output`, `v_job_run_output`): text
   coalesced into a row every 100 ms (or 4 KiB), each tool call and what
   it answered, each round's usage. Each write is its own short
   transaction — none is held while the dataset writes — and the table
@@ -194,7 +194,7 @@ commands:
   later. The lease is 30 s, renewed every 10 s: an attempt whose lease
   ran out (oxplow stopped) is fenced when recovery finds it. A `never`
   job then ends `interrupted`. An `idempotent` one is queued again in
-  the same transaction (`extension_job_dispatch::requeue_tx`,
+  the same transaction (`job_run_dispatch::requeue_tx`,
   `JobEvent::RetryInterrupted`), so it is never seen `interrupted`, and
   runs as its next attempt, up to `MAX_ATTEMPTS` (3) in all; the third
   cut-off is final. On the new attempt a round that had finished reads
@@ -213,7 +213,7 @@ commands:
 - **A job belongs to its extension's deployment, not to a catalog
   generation.** Its owner is the extension, its package version, the
   job's contract `version` and the deployment's hash
-  (`JobOwner.deployment`, `extension_job.deployment_hash`); nothing records
+  (`JobOwner.deployment`, `job_run.deployment_hash`); nothing records
   the generation it was queued under, so another extension's change
   neither strands a queued job nor stops a running one. A redeploy of its
   own extension is another deployment whatever its version says (a
@@ -271,8 +271,8 @@ commands:
   repeat of an intent it already has is not a new one). No database
   transaction is held while a model streams (`Database::write_transactions_open`
   is zero where a model is streaming, asserted in the tests). These are
-  pinned in `extension_job_hardening_tests.rs` and
-  `extension_job_crash_tests.rs`.
+  pinned in `job_run_hardening_tests.rs` and
+  `job_run_crash_tests.rs`.
 - **The replay decision.** An `idempotent` job cut off by a crash or a lost
   lease runs again, up to three attempts in all; a `never` job (the default)
   ends `interrupted` and is never run again on its own. Either way the
@@ -325,7 +325,7 @@ the built-in roles `default | summarize | decide` (optional:
 only: the person binds `<namespace>/<id>` to a dataset, else the fallback
 role's dataset serves it; `features` are what a bound dataset must support.
 The extension names it by its bare id — a job request's `role`
-(`extension_jobs::enqueue` qualifies it and stores `<namespace>/<id>`, refusing
+(`job_runs::enqueue` qualifies it and stores `<namespace>/<id>`, refusing
 a name the extension doesn't declare), a collector's `role=` (qualified
 with the run's extension by `CollectorOracle`). `ai_profiles::profiles_of`
 feeds `AiService::set_profiles` from the catalog; resolution, features

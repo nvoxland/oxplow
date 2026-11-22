@@ -4,13 +4,11 @@
 
 use std::{sync::Arc, time::Duration};
 
-use oxplow_db::extension_job_store::{RecoveryCursor, SqliteExtensionJobStore};
-use oxplow_domain::{extension_job::JobId, run::Cancel};
+use oxplow_db::job_run_store::{RecoveryCursor, SqliteJobRunStore};
+use oxplow_domain::{job_run::JobId, run::Cancel};
 use tokio::{task::JoinSet, time::Instant};
 
-use crate::extension::extension_job_dispatch::{
-    DispatchError, DispatchOutcome, ExtensionJobDispatcher,
-};
+use crate::extension::job_run_dispatch::{DispatchError, DispatchOutcome, JobRunDispatcher};
 
 const MAX_DISPATCHES: usize = 4;
 const PAGE_SIZE: usize = 64;
@@ -19,9 +17,9 @@ const FAILURE_BACKOFF: Duration = Duration::from_secs(5);
 
 /// One project-level scheduler. Construct only after the host has published a
 /// coherent active catalog and exact operation registry.
-pub struct ExtensionJobScheduler {
-    store: SqliteExtensionJobStore,
-    dispatcher: Arc<ExtensionJobDispatcher>,
+pub struct JobRunScheduler {
+    store: SqliteJobRunStore,
+    dispatcher: Arc<JobRunDispatcher>,
     shutdown: Cancel,
     queued_cursor: Option<RecoveryCursor>,
     recovery_cursor: Option<RecoveryCursor>,
@@ -30,10 +28,10 @@ pub struct ExtensionJobScheduler {
     backoff_until: Option<Instant>,
 }
 
-impl ExtensionJobScheduler {
+impl JobRunScheduler {
     pub fn new(
-        store: SqliteExtensionJobStore,
-        dispatcher: Arc<ExtensionJobDispatcher>,
+        store: SqliteJobRunStore,
+        dispatcher: Arc<JobRunDispatcher>,
         shutdown: Cancel,
     ) -> Self {
         Self {

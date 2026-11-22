@@ -12,16 +12,16 @@ use std::time::Duration;
 use oxplow_ai::parts::{
     DeltaFold, MessageRoleV1, MessageV1, PartV1, StreamDeltaV1, ToolDefinitionV1,
 };
-use oxplow_db::extension_job_store::SqliteExtensionJobStore;
-use oxplow_domain::extension_job::{Completion, JobOutputKind, NewJobOutput};
+use oxplow_db::job_run_store::SqliteJobRunStore;
+use oxplow_domain::job_run::{Completion, JobOutputKind, NewJobOutput};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::extension::extension_job_ai::TypedAiJobRequest;
-use crate::extension::extension_job_operations::{
+use crate::extension::extensions::jobs::{JobDecl, QUERY_SQL_TOOL};
+use crate::extension::job_run_ai::TypedAiJobRequest;
+use crate::extension::job_run_operations::{
     JobOperation, JobOperationError, JobWork, JobWorkOutcome,
 };
-use crate::extension::extensions::jobs::{JobDecl, QUERY_SQL_TOOL};
 
 /// Tool calls one round may make; more are answered with an error.
 const MAX_CALLS_PER_ROUND: usize = 16;
@@ -59,7 +59,7 @@ impl ToolHost {
 /// One declared job's runner.
 pub(crate) struct AiJob {
     pub(crate) ai: Arc<crate::ai_compute::AiCompute>,
-    pub(crate) store: SqliteExtensionJobStore,
+    pub(crate) store: SqliteJobRunStore,
     pub(crate) tools: Arc<ToolHost>,
     pub(crate) decl: JobDecl,
     /// What the model is told it may call: the declared tools (their
@@ -366,9 +366,9 @@ enum Out {
 
 impl Writer {
     fn spawn(
-        store: SqliteExtensionJobStore,
-        job: oxplow_domain::extension_job::JobId,
-        token: oxplow_domain::extension_job::AttemptFence,
+        store: SqliteJobRunStore,
+        job: oxplow_domain::job_run::JobId,
+        token: oxplow_domain::job_run::AttemptFence,
     ) -> (Writer, tokio::task::JoinHandle<()>) {
         let (tx, mut rx) = mpsc::unbounded_channel::<Out>();
         let handle = tokio::spawn(async move {

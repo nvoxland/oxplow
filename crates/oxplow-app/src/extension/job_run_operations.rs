@@ -8,8 +8,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use oxplow_domain::{
     commands::Actor,
-    extension_job::{AttemptFence, Completion, JobId, JobOwner, ReplayPolicy},
-    extension_job_context::{JobExecutionIdentity, JobInvocationContext},
+    job_run::{AttemptFence, Completion, JobId, JobOwner, ReplayPolicy},
+    job_run_context::{JobExecutionIdentity, JobInvocationContext},
     run::{Mode, RunContext},
 };
 use serde_json::Value;

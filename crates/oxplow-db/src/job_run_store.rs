@@ -7,12 +7,11 @@ use std::{io, io::Write};
 
 use oxplow_domain::{
     contribution::ContributionRef,
-    extension_job::{
-        AttemptFence, Completion, ExtensionJob, IntentKey, JobEvent, JobId, JobOutput,
-        JobOutputKind, JobOwner, JobState, JobTransition, NewJobOutput, ReplayPolicy,
-        TransitionError,
+    job_run::{
+        AttemptFence, Completion, IntentKey, JobEvent, JobId, JobOutput, JobOutputKind, JobOwner,
+        JobRun, JobState, JobTransition, NewJobOutput, ReplayPolicy, TransitionError,
     },
-    extension_job_context::{JobExecutionIdentity, JobInvocationContext},
+    job_run_context::{JobExecutionIdentity, JobInvocationContext},
     run::{ContributionRef as RunContribution, Mode, Outcome, RunContext, RunId},
     Actor, DomainError, Timestamp,
 };
@@ -27,21 +26,21 @@ const MAX_PAGE_ITEMS: usize = 256;
 const MAX_PAGE_BYTES: usize = 4 * 1_048_576;
 
 #[derive(Clone)]
-pub struct SqliteExtensionJobStore {
+pub struct SqliteJobRunStore {
     db: Database,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct NewExtensionJob {
-    pub job: ExtensionJob,
+pub struct NewJobRun {
+    pub job: JobRun,
     pub operation: String,
     pub invoker: String,
     pub request: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StoredExtensionJob {
-    pub job: ExtensionJob,
+pub struct StoredJobRun {
+    pub job: JobRun,
     pub operation: String,
     pub invoker: String,
     pub request: Value,
@@ -51,7 +50,7 @@ pub struct StoredExtensionJob {
 /// A recovery listing deliberately omits the private request payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryCandidate {
-    pub job: ExtensionJob,
+    pub job: JobRun,
     pub operation: String,
     pub invoker: String,
     pub revision: u64,
@@ -59,8 +58,8 @@ pub struct RecoveryCandidate {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnqueueResult {
-    Created(StoredExtensionJob),
-    Existing(StoredExtensionJob),
+    Created(StoredJobRun),
+    Existing(StoredJobRun),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,7 +115,7 @@ pub struct HistoryPage<T, C> {
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum ExtensionJobStoreError {
+pub enum JobRunStoreError {
     #[error("job data is invalid or exceeds storage limits")]
     InvalidData,
     #[error("job invocation context is missing")]
@@ -135,14 +134,14 @@ pub enum ExtensionJobStoreError {
     Storage(DomainError),
 }
 
-type StoreResult<T> = Result<T, ExtensionJobStoreError>;
+type StoreResult<T> = Result<T, JobRunStoreError>;
 
-impl SqliteExtensionJobStore {
+impl SqliteJobRunStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
 
-    pub async fn enqueue(&self, new_job: NewExtensionJob) -> StoreResult<EnqueueResult> {
+    pub async fn enqueue(&self, new_job: NewJobRun) -> StoreResult<EnqueueResult> {
         self.db
             .transaction_or(move |tx| enqueue_tx(tx, &new_job).map_err(store_tx_error))
             .await
@@ -153,7 +152,7 @@ impl SqliteExtensionJobStore {
     /// backend API grants no execution authority and makes no worker wake.
     pub async fn enqueue_with_context(
         &self,
-        new_job: NewExtensionJob,
+        new_job: NewJobRun,
         context: JobInvocationContext,
     ) -> StoreResult<EnqueueResult> {
         self.db
@@ -188,12 +187,12 @@ impl SqliteExtensionJobStore {
             .map_err(map_store_tx_error)
     }
 
-    pub async fn get(&self, id: JobId) -> StoreResult<StoredExtensionJob> {
+    pub async fn get(&self, id: JobId) -> StoreResult<StoredJobRun> {
         self.db
             .read_or(move |tx| get_tx(tx, &id).map_err(store_tx_error))
             .await
             .map_err(map_store_tx_error)?
-            .ok_or(ExtensionJobStoreError::NotFound)
+            .ok_or(JobRunStoreError::NotFound)
     }
 
     /// Read dispatch metadata without loading the private request payload.
@@ -202,7 +201,7 @@ impl SqliteExtensionJobStore {
             .read_or(move |tx| metadata_tx(tx, &id).map_err(store_tx_error))
             .await
             .map_err(map_store_tx_error)?
-            .ok_or(ExtensionJobStoreError::NotFound)
+            .ok_or(JobRunStoreError::NotFound)
     }
 
     pub async fn transition(
@@ -211,7 +210,7 @@ impl SqliteExtensionJobStore {
         expected_revision: u64,
         event: JobEvent,
         result: Option<Value>,
-    ) -> StoreResult<StoredExtensionJob> {
+    ) -> StoreResult<StoredJobRun> {
         self.db
             .transaction_or(move |tx| {
                 transition_tx(tx, &id, expected_revision, &event, result.as_ref())
@@ -295,25 +294,25 @@ impl SqliteExtensionJobStore {
 /// Duplicate delivery preserves the original context, including its RunId.
 pub fn enqueue_with_context_tx(
     conn: &Connection,
-    new_job: &NewExtensionJob,
+    new_job: &NewJobRun,
     context: &JobInvocationContext,
 ) -> StoreResult<EnqueueResult> {
     ensure_transaction(conn)?;
     context
         .validate()
-        .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+        .map_err(|_| JobRunStoreError::InvalidData)?;
     if context.originating_run_id() != &new_job.job.run_id {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     let encoded = context
         .encode_json()
-        .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+        .map_err(|_| JobRunStoreError::InvalidData)?;
     with_savepoint(conn, || {
         let outcome = enqueue_tx(conn, new_job)?;
         match &outcome {
             EnqueueResult::Created(stored) => {
                 conn.execute(
-                    "INSERT INTO extension_job_context
+                    "INSERT INTO job_run_context
                         (job_id, originating_run_id, context_json) VALUES (?1, ?2, ?3)",
                     params![
                         stored.job.id.as_str(),
@@ -328,7 +327,7 @@ pub fn enqueue_with_context_tx(
                 // original provenance is unknown. Run telemetry is no fallback.
                 let original = get_context_tx(conn, &stored.job.id)?;
                 if !original.same_scheduling_provenance(context) {
-                    return Err(ExtensionJobStoreError::IntentConflict);
+                    return Err(JobRunStoreError::IntentConflict);
                 }
             }
         }
@@ -343,7 +342,7 @@ pub fn get_context_tx(conn: &Connection, id: &JobId) -> StoreResult<JobInvocatio
     let row = conn
         .query_row(
             "SELECT j.queued_by_run_id, c.originating_run_id, c.context_json
-             FROM extension_job j LEFT JOIN extension_job_context c ON c.job_id = j.id
+             FROM job_run j LEFT JOIN job_run_context c ON c.job_id = j.id
              WHERE j.id = ?1",
             [id.as_str()],
             |row| {
@@ -358,21 +357,21 @@ pub fn get_context_tx(conn: &Connection, id: &JobId) -> StoreResult<JobInvocatio
         )
         .optional()
         .map_err(map_sql_err)?
-        .ok_or(ExtensionJobStoreError::NotFound)?;
+        .ok_or(JobRunStoreError::NotFound)?;
     validate_uuid_v7(&row.0)?;
-    let (origin, encoded) = row.1.ok_or(ExtensionJobStoreError::MissingContext)?;
+    let (origin, encoded) = row.1.ok_or(JobRunStoreError::MissingContext)?;
     if origin != row.0 {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
-    let context = JobInvocationContext::decode_json(&encoded)
-        .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    let context =
+        JobInvocationContext::decode_json(&encoded).map_err(|_| JobRunStoreError::InvalidData)?;
     if context.originating_run_id().as_str() != origin
         || context
             .encode_json()
-            .map_err(|_| ExtensionJobStoreError::InvalidData)?
+            .map_err(|_| JobRunStoreError::InvalidData)?
             != encoded
     {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     Ok(context)
 }
@@ -380,7 +379,7 @@ pub fn get_context_tx(conn: &Connection, id: &JobId) -> StoreResult<JobInvocatio
 /// Enqueue in the caller's transaction. A duplicate key returns the original
 /// job only if every immutable field except redelivery RunId and candidate id
 /// matches. The original run attribution is retained.
-pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<EnqueueResult> {
+pub fn enqueue_tx(conn: &Connection, new_job: &NewJobRun) -> StoreResult<EnqueueResult> {
     ensure_transaction(conn)?;
     validate_new_job(new_job)?;
     if let Some(existing) = get_by_intent_tx(
@@ -391,7 +390,7 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
         return if duplicate_matches(&existing, new_job)? {
             Ok(EnqueueResult::Existing(existing))
         } else {
-            Err(ExtensionJobStoreError::IntentConflict)
+            Err(JobRunStoreError::IntentConflict)
         };
     }
 
@@ -401,7 +400,7 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
         owner_columns(&job.owner);
     let savepoint = Savepoint::new(conn)?;
     let insert = conn.execute(
-        "INSERT INTO extension_job (
+        "INSERT INTO job_run (
             id, contribution_id, package_version, contract_version,
             operation, invoker, queued_by_run_id, intent_key, replay_policy, state, attempt,
             fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
@@ -420,7 +419,7 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
             replay_policy_name(job.replay_policy),
             state_name(job.state),
             i64::from(job.attempt),
-            i64::try_from(job.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+            i64::try_from(job.fence).map_err(|_| JobRunStoreError::InvalidData)?,
             job.lease_until_ms,
             job.cancellation_requested_at_ms,
             job.created_at_ms,
@@ -432,7 +431,7 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
     match insert {
         Ok(_) => {
             savepoint.release()?;
-            Ok(EnqueueResult::Created(StoredExtensionJob {
+            Ok(EnqueueResult::Created(StoredJobRun {
                 job: job.clone(),
                 operation: new_job.operation.clone(),
                 invoker: new_job.invoker.clone(),
@@ -453,18 +452,18 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
                     return if duplicate_matches(&existing, new_job)? {
                         Ok(EnqueueResult::Existing(existing))
                     } else {
-                        Err(ExtensionJobStoreError::IntentConflict)
+                        Err(JobRunStoreError::IntentConflict)
                     };
                 }
                 // A candidate job id cannot alias another intent.
-                return Err(ExtensionJobStoreError::Conflict);
+                return Err(JobRunStoreError::Conflict);
             }
-            Err(ExtensionJobStoreError::Storage(map_sql_err(error)))
+            Err(JobRunStoreError::Storage(map_sql_err(error)))
         }
     }
 }
 
-pub fn get_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<StoredExtensionJob>> {
+pub fn get_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<StoredJobRun>> {
     validate_uuid_v7(id.as_str())?;
     let raw = conn
         .query_row(
@@ -472,7 +471,7 @@ pub fn get_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<StoredExtensi
                     operation, invoker, queued_by_run_id, intent_key, replay_policy, state, attempt,
                     fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
                     updated_at_ms, revision, request_json, deployment_hash
-             FROM extension_job WHERE id = ?1",
+             FROM job_run WHERE id = ?1",
             [id.as_str()],
             decode_stored_job,
         )
@@ -490,7 +489,7 @@ pub fn metadata_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<Recovery
                     j.queued_by_run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                     j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
                     j.updated_at_ms, j.operation, j.invoker, j.revision, j.deployment_hash
-             FROM extension_job j WHERE j.id = ?1",
+             FROM job_run j WHERE j.id = ?1",
             [id.as_str()],
             read_recovery_candidate,
         )
@@ -505,7 +504,7 @@ pub fn transition_tx(
     expected_revision: u64,
     event: &JobEvent,
     result: Option<&Value>,
-) -> StoreResult<StoredExtensionJob> {
+) -> StoreResult<StoredJobRun> {
     transition_with_run_tx(conn, id, expected_revision, event, result, None)
 }
 
@@ -518,30 +517,30 @@ pub fn transition_with_run_tx(
     event: &JobEvent,
     result: Option<&Value>,
     run: Option<&RunContext>,
-) -> StoreResult<StoredExtensionJob> {
+) -> StoreResult<StoredJobRun> {
     ensure_transaction(conn)?;
     if expected_revision == 0 || expected_revision > i64::MAX as u64 {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
-    let mut current = get_tx(conn, id)?.ok_or(ExtensionJobStoreError::NotFound)?;
+    let mut current = get_tx(conn, id)?.ok_or(JobRunStoreError::NotFound)?;
     if current.revision != expected_revision {
-        return Err(ExtensionJobStoreError::Conflict);
+        return Err(JobRunStoreError::Conflict);
     }
     let result_json = match event {
         JobEvent::Complete { .. } | JobEvent::ConfirmStopped { .. } => {
             result.map(canonical_json).transpose()?
         }
-        _ if result.is_some() => return Err(ExtensionJobStoreError::InvalidData),
+        _ if result.is_some() => return Err(JobRunStoreError::InvalidData),
         _ => None,
     };
     let transition = current
         .job
         .transition(event.clone())
-        .map_err(ExtensionJobStoreError::TransitionRejected)?;
+        .map_err(JobRunStoreError::TransitionRejected)?;
     let next_revision = expected_revision
         .checked_add(1)
         .filter(|revision| *revision <= i64::MAX as u64)
-        .ok_or(ExtensionJobStoreError::InvalidData)?;
+        .ok_or(JobRunStoreError::InvalidData)?;
     with_savepoint(conn, || {
         apply_attempt_change(
             conn,
@@ -554,7 +553,7 @@ pub fn transition_with_run_tx(
         let next = &transition.job;
         let changed = conn
             .execute(
-                "UPDATE extension_job SET state=?1, attempt=?2, fence=?3, lease_until_ms=?4,
+                "UPDATE job_run SET state=?1, attempt=?2, fence=?3, lease_until_ms=?4,
                 cancellation_requested_at_ms=?5, updated_at_ms=?6, revision=?7,
                 package_version=?16, deployment_hash=?17
          WHERE id=?8 AND revision=?9 AND state=?10 AND attempt=?11 AND fence=?12
@@ -563,7 +562,7 @@ pub fn transition_with_run_tx(
                 params![
                     state_name(next.state),
                     i64::from(next.attempt),
-                    i64::try_from(next.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                    i64::try_from(next.fence).map_err(|_| JobRunStoreError::InvalidData)?,
                     next.lease_until_ms,
                     next.cancellation_requested_at_ms,
                     next.updated_at_ms,
@@ -572,8 +571,7 @@ pub fn transition_with_run_tx(
                     expected_revision as i64,
                     state_name(current.job.state),
                     i64::from(current.job.attempt),
-                    i64::try_from(current.job.fence)
-                        .map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                    i64::try_from(current.job.fence).map_err(|_| JobRunStoreError::InvalidData)?,
                     current.job.lease_until_ms,
                     current.job.cancellation_requested_at_ms,
                     current.job.updated_at_ms,
@@ -583,7 +581,7 @@ pub fn transition_with_run_tx(
             )
             .map_err(map_sql_err)?;
         if changed != 1 {
-            return Err(ExtensionJobStoreError::Conflict);
+            return Err(JobRunStoreError::Conflict);
         }
         current.job = next.clone();
         current.revision = next_revision;
@@ -604,10 +602,10 @@ pub fn append_output_tx(
     rows: &[NewJobOutput],
 ) -> StoreResult<u64> {
     ensure_transaction(conn)?;
-    let fence = i64::try_from(token.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    let fence = i64::try_from(token.fence).map_err(|_| JobRunStoreError::InvalidData)?;
     let mut seq: i64 = conn
         .query_row(
-            "SELECT COALESCE(max(seq), 0) FROM extension_job_output
+            "SELECT COALESCE(max(seq), 0) FROM job_run_output
               WHERE job_id = ?1 AND attempt = ?2",
             params![job_id.as_str(), i64::from(token.attempt)],
             |row| row.get(0),
@@ -615,16 +613,16 @@ pub fn append_output_tx(
         .map_err(map_sql_err)?;
     let mut insert = conn
         .prepare_cached(
-            "INSERT INTO extension_job_output
+            "INSERT INTO job_run_output
                 (job_id, attempt, fence, seq, kind, at_ms, content_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .map_err(map_sql_err)?;
     for row in rows {
         let content =
-            serde_json::to_string(&row.content).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+            serde_json::to_string(&row.content).map_err(|_| JobRunStoreError::InvalidData)?;
         if content.len() > MAX_OUTPUT_BYTES || row.at_ms < 0 {
-            return Err(ExtensionJobStoreError::InvalidData);
+            return Err(JobRunStoreError::InvalidData);
         }
         seq += 1;
         insert
@@ -652,7 +650,7 @@ pub fn output_tx(
 ) -> StoreResult<Vec<JobOutput>> {
     let mut stmt = conn
         .prepare_cached(
-            "SELECT seq, kind, at_ms, content_json FROM extension_job_output
+            "SELECT seq, kind, at_ms, content_json FROM job_run_output
               WHERE job_id = ?1 AND attempt = ?2 AND seq > ?3
               ORDER BY seq LIMIT ?4",
         )
@@ -662,7 +660,7 @@ pub fn output_tx(
             params![
                 job_id.as_str(),
                 i64::from(attempt),
-                i64::try_from(after_seq).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                i64::try_from(after_seq).map_err(|_| JobRunStoreError::InvalidData)?,
                 i64::try_from(limit.min(MAX_PAGE_ITEMS * 16)).unwrap_or(i64::MAX)
             ],
             |row| {
@@ -678,11 +676,10 @@ pub fn output_tx(
     rows.map(|row| {
         let (seq, kind, at_ms, content) = row.map_err(map_sql_err)?;
         Ok(JobOutput {
-            seq: u64::try_from(seq).map_err(|_| ExtensionJobStoreError::InvalidData)?,
-            kind: JobOutputKind::parse(&kind).ok_or(ExtensionJobStoreError::InvalidData)?,
+            seq: u64::try_from(seq).map_err(|_| JobRunStoreError::InvalidData)?,
+            kind: JobOutputKind::parse(&kind).ok_or(JobRunStoreError::InvalidData)?,
             at_ms,
-            content: serde_json::from_str(&content)
-                .map_err(|_| ExtensionJobStoreError::InvalidData)?,
+            content: serde_json::from_str(&content).map_err(|_| JobRunStoreError::InvalidData)?,
         })
     })
     .collect()
@@ -701,7 +698,7 @@ pub fn record_observation_tx(
         || observation.token.fence == 0
         || observation.token.fence != 2 * u64::from(observation.token.attempt) - 1
     {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     let evidence_json = observation
         .evidence
@@ -710,26 +707,26 @@ pub fn record_observation_tx(
         .transpose()?;
     let attempt_start: Option<i64> = conn
         .query_row(
-            "SELECT started_at_ms FROM extension_job_attempt
+            "SELECT started_at_ms FROM job_run_attempt
          WHERE job_id=?1 AND attempt=?2 AND fence=?3",
             params![
                 job_id.as_str(),
                 i64::from(observation.token.attempt),
                 i64::try_from(observation.token.fence)
-                    .map_err(|_| ExtensionJobStoreError::InvalidData)?
+                    .map_err(|_| JobRunStoreError::InvalidData)?
             ],
             |row| row.get(0),
         )
         .optional()
         .map_err(map_sql_err)?;
     if attempt_start.is_none_or(|started| observation.observed_at_ms < started) {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     let outcome = completion_name(observation.outcome);
     let existing: Option<(String, i64, i64, i64, String, Option<String>)> = conn
         .query_row(
             "SELECT job_id, attempt, fence, observed_at_ms, outcome, evidence_json
-         FROM extension_job_observation WHERE id=?1",
+         FROM job_run_observation WHERE id=?1",
             [&observation.id],
             |row| {
                 Ok((
@@ -759,13 +756,13 @@ pub fn record_observation_tx(
                 observation: observation.clone(),
             });
         }
-        return Err(ExtensionJobStoreError::Conflict);
+        return Err(JobRunStoreError::Conflict);
     }
     conn.execute(
-        "INSERT INTO extension_job_observation (id, job_id, attempt, fence, observed_at_ms, outcome, evidence_json)
+        "INSERT INTO job_run_observation (id, job_id, attempt, fence, observed_at_ms, outcome, evidence_json)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![observation.id, job_id.as_str(), i64::from(observation.token.attempt),
-            i64::try_from(observation.token.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+            i64::try_from(observation.token.fence).map_err(|_| JobRunStoreError::InvalidData)?,
             observation.observed_at_ms, outcome, evidence_json],
     ).map_err(map_sql_err)?;
     Ok(OutcomeObservation {
@@ -785,7 +782,7 @@ pub fn attempts_tx(
     let after = after_attempt.unwrap_or(0);
     let mut statement = conn.prepare(
         "SELECT job_id, attempt, fence, started_at_ms, lease_until_ms, closed_at_ms, outcome, result_json
-         FROM extension_job_attempt WHERE job_id=?1 AND attempt>?2 ORDER BY attempt LIMIT ?3",
+         FROM job_run_attempt WHERE job_id=?1 AND attempt>?2 ORDER BY attempt LIMIT ?3",
     ).map_err(map_sql_err)?;
     let rows = statement
         .query_map(
@@ -804,7 +801,7 @@ pub fn attempts_tx(
         let raw = row.map_err(map_sql_err)?;
         let size = raw.7.as_ref().map_or(0, String::len);
         if size > MAX_JSON_BYTES {
-            return Err(ExtensionJobStoreError::InvalidData);
+            return Err(JobRunStoreError::InvalidData);
         }
         if bytes + size > MAX_PAGE_BYTES {
             more = true;
@@ -834,12 +831,12 @@ pub fn observations_tx(
     if after
         .is_some_and(|cursor| cursor.observed_at_ms < 0 || validate_uuid_v7(&cursor.id).is_err())
     {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     let mut statement = conn
         .prepare(
             "SELECT id, attempt, fence, observed_at_ms, outcome, evidence_json
-         FROM extension_job_observation WHERE job_id=?1
+         FROM job_run_observation WHERE job_id=?1
            AND (observed_at_ms>?2 OR (observed_at_ms=?2 AND id>?3))
          ORDER BY observed_at_ms, id LIMIT ?4",
         )
@@ -861,7 +858,7 @@ pub fn observations_tx(
         let raw = row.map_err(map_sql_err)?;
         let size = raw.5.as_ref().map_or(0, String::len);
         if size > MAX_JSON_BYTES {
-            return Err(ExtensionJobStoreError::InvalidData);
+            return Err(JobRunStoreError::InvalidData);
         }
         if bytes + size > MAX_PAGE_BYTES {
             more = true;
@@ -908,11 +905,11 @@ fn candidates_tx(
 ) -> StoreResult<HistoryPage<RecoveryCandidate, RecoveryCursor>> {
     validate_page(limit)?;
     if now_ms < 0 {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     if let Some(cursor) = after {
         if cursor.updated_at_ms < 0 {
-            return Err(ExtensionJobStoreError::InvalidData);
+            return Err(JobRunStoreError::InvalidData);
         }
         validate_uuid_v7(cursor.id.as_str())?;
     }
@@ -927,7 +924,7 @@ fn candidates_tx(
                 j.queued_by_run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                 j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
                 j.updated_at_ms, j.operation, j.invoker, j.revision, j.deployment_hash
-         FROM extension_job j
+         FROM job_run j
          WHERE {predicate}
            AND (j.updated_at_ms>?2 OR (j.updated_at_ms=?2 AND j.id>?3))
          ORDER BY j.updated_at_ms, j.id LIMIT ?4"
@@ -1048,7 +1045,7 @@ fn decode_stored_job(row: &Row<'_>) -> rusqlite::Result<RawStoredJob> {
     })
 }
 
-fn decode_stored_job_data(raw: RawStoredJob) -> StoreResult<StoredExtensionJob> {
+fn decode_stored_job_data(raw: RawStoredJob) -> StoreResult<StoredJobRun> {
     let job = decode_job(JobColumns {
         id: raw.id,
         contribution_id: raw.contribution_id,
@@ -1071,9 +1068,9 @@ fn decode_stored_job_data(raw: RawStoredJob) -> StoreResult<StoredExtensionJob> 
     let revision = u64::try_from(raw.revision)
         .ok()
         .filter(|value| *value > 0)
-        .ok_or(ExtensionJobStoreError::InvalidData)?;
+        .ok_or(JobRunStoreError::InvalidData)?;
     let request = parse_bounded_json(&raw.request_json)?;
-    Ok(StoredExtensionJob {
+    Ok(StoredJobRun {
         job,
         operation: raw.operation,
         invoker: raw.invoker,
@@ -1100,7 +1097,7 @@ struct JobColumns {
     deployment_hash: Option<String>,
 }
 
-fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
+fn decode_job(columns: JobColumns) -> StoreResult<JobRun> {
     let JobColumns {
         id,
         contribution_id,
@@ -1123,43 +1120,42 @@ fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
         .parse::<ContributionRef>()
         .ok()
         .and_then(|r| r.id())
-        .ok_or(ExtensionJobStoreError::InvalidData)?;
+        .ok_or(JobRunStoreError::InvalidData)?;
     let owner = JobOwner {
         contribution,
         package_version,
         contract_version: contract_version
-            .map(|v| u32::try_from(v).map_err(|_| ExtensionJobStoreError::InvalidData))
+            .map(|v| u32::try_from(v).map_err(|_| JobRunStoreError::InvalidData))
             .transpose()?,
         deployment: deployment_hash,
     };
-    let job = ExtensionJob {
+    let job = JobRun {
         id,
         owner,
         run_id: RunId(run_id),
-        intent_key: IntentKey::new(intent_key).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+        intent_key: IntentKey::new(intent_key).map_err(|_| JobRunStoreError::InvalidData)?,
         replay_policy: parse_replay_policy(&replay_policy)?,
         state: parse_state(&state)?,
-        attempt: u32::try_from(attempt).map_err(|_| ExtensionJobStoreError::InvalidData)?,
-        fence: u64::try_from(fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+        attempt: u32::try_from(attempt).map_err(|_| JobRunStoreError::InvalidData)?,
+        fence: u64::try_from(fence).map_err(|_| JobRunStoreError::InvalidData)?,
         lease_until_ms,
         cancellation_requested_at_ms,
         created_at_ms,
         updated_at_ms,
     };
-    job.validate()
-        .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    job.validate().map_err(|_| JobRunStoreError::InvalidData)?;
     Ok(job)
 }
 
 fn parse_job_id(value: &str) -> StoreResult<JobId> {
     validate_uuid_v7(value)?;
     serde_json::from_value::<JobId>(Value::String(value.to_owned()))
-        .map_err(|_| ExtensionJobStoreError::InvalidData)
+        .map_err(|_| JobRunStoreError::InvalidData)
 }
 
 fn apply_attempt_change(
     conn: &Connection,
-    old: &ExtensionJob,
+    old: &JobRun,
     transition: &JobTransition,
     event: &JobEvent,
     result_json: Option<&str>,
@@ -1175,7 +1171,7 @@ fn apply_attempt_change(
                     fence: new.fence,
                 },
             )
-            .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+            .map_err(|_| JobRunStoreError::InvalidData)?;
             let fallback;
             let run = match run {
                 Some(run) => {
@@ -1186,7 +1182,7 @@ fn apply_attempt_change(
                         && matches!(run.actor(), Actor::Job { job_id, attempt, fence, .. }
                             if job_id == old.id.as_str() && *attempt == new.attempt && *fence == new.fence);
                     if !attributed {
-                        return Err(ExtensionJobStoreError::InvalidData);
+                        return Err(JobRunStoreError::InvalidData);
                     }
                     run
                 }
@@ -1199,7 +1195,7 @@ fn apply_attempt_change(
                 conn,
                 &run.clone().began_at(Timestamp::from_unix_ms(*now_ms)),
             )
-            .map_err(ExtensionJobStoreError::Storage)?;
+            .map_err(JobRunStoreError::Storage)?;
             // Low-level jobs may have a durable queuing ID and no saved
             // invocation context. Keep the parent link when that run exists.
             if run.parent().is_none() {
@@ -1211,20 +1207,20 @@ fn apply_attempt_change(
                 .map_err(map_sql_err)?;
             }
             conn.execute(
-                "INSERT INTO extension_job_attempt (job_id, attempt, fence, started_at_ms, lease_until_ms, run_id)
+                "INSERT INTO job_run_attempt (job_id, attempt, fence, started_at_ms, lease_until_ms, run_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![old.id.as_str(), i64::from(new.attempt), i64::try_from(new.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                params![old.id.as_str(), i64::from(new.attempt), i64::try_from(new.fence).map_err(|_| JobRunStoreError::InvalidData)?,
                         now_ms, new.lease_until_ms, run.run().as_str()],
             ).map_err(map_sql_err)?;
         }
         JobEvent::Renew { .. } => {
             let changed = conn.execute(
-                "UPDATE extension_job_attempt SET lease_until_ms=?1
+                "UPDATE job_run_attempt SET lease_until_ms=?1
                  WHERE job_id=?2 AND attempt=?3 AND fence=?4 AND closed_at_ms IS NULL AND lease_until_ms IS ?5",
-                params![new.lease_until_ms, old.id.as_str(), i64::from(old.attempt), i64::try_from(old.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?, old.lease_until_ms],
+                params![new.lease_until_ms, old.id.as_str(), i64::from(old.attempt), i64::try_from(old.fence).map_err(|_| JobRunStoreError::InvalidData)?, old.lease_until_ms],
             ).map_err(map_sql_err)?;
             if changed != 1 {
-                return Err(ExtensionJobStoreError::Conflict);
+                return Err(JobRunStoreError::Conflict);
             }
         }
         JobEvent::Complete {
@@ -1260,7 +1256,7 @@ fn apply_attempt_change(
 
 fn fallback_attempt_run(
     conn: &Connection,
-    job: &ExtensionJob,
+    job: &JobRun,
     identity: &JobExecutionIdentity,
 ) -> StoreResult<RunContext> {
     let extension: Option<String> = conn
@@ -1279,9 +1275,10 @@ fn fallback_attempt_run(
         deployment: job.owner.deployment.clone(),
     };
     match get_context_tx(conn, &job.id) {
-        Ok(provenance) => RunContext::job(owner, identity, &provenance)
-            .map_err(|_| ExtensionJobStoreError::InvalidData),
-        Err(ExtensionJobStoreError::MissingContext) => Ok(RunContext::contribution(
+        Ok(provenance) => {
+            RunContext::job(owner, identity, &provenance).map_err(|_| JobRunStoreError::InvalidData)
+        }
+        Err(JobRunStoreError::MissingContext) => Ok(RunContext::contribution(
             owner,
             Actor::job(identity, None, None),
             Mode::External,
@@ -1292,7 +1289,7 @@ fn fallback_attempt_run(
 
 fn close_attempt(
     conn: &Connection,
-    job: &ExtensionJob,
+    job: &JobRun,
     now_ms: i64,
     outcome: AttemptOutcome,
     result: Option<&str>,
@@ -1310,7 +1307,7 @@ fn close_attempt(
     };
     let (run_id, started_ms): (String, i64) = conn
         .query_row(
-            "UPDATE extension_job_attempt SET closed_at_ms=?1, outcome=?2, result_json=?3
+            "UPDATE job_run_attempt SET closed_at_ms=?1, outcome=?2, result_json=?3
              WHERE job_id=?4 AND attempt=?5 AND fence=?6 AND closed_at_ms IS NULL
                AND lease_until_ms IS ?7
              RETURNING run_id, started_at_ms",
@@ -1320,21 +1317,21 @@ fn close_attempt(
                 result,
                 job.id.as_str(),
                 i64::from(job.attempt),
-                i64::try_from(job.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                i64::try_from(job.fence).map_err(|_| JobRunStoreError::InvalidData)?,
                 job.lease_until_ms,
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(map_sql_err)?
-        .ok_or(ExtensionJobStoreError::Conflict)?;
+        .ok_or(JobRunStoreError::Conflict)?;
     let finished_at = Timestamp::from_unix_ms(now_ms);
     if let Some(run) = run {
         if run.run().as_str() != run_id {
-            return Err(ExtensionJobStoreError::Conflict);
+            return Err(JobRunStoreError::Conflict);
         }
         return crate::contribution_run_store::finish_at_tx(conn, run, outcome, error, finished_at)
-            .map_err(ExtensionJobStoreError::Storage);
+            .map_err(JobRunStoreError::Storage);
     }
     // Recovery and callbacks without a live worker have durable lease
     // timing and no measured CPU, memory or model costs.
@@ -1354,7 +1351,7 @@ fn close_attempt(
     if changed == 1 {
         Ok(())
     } else {
-        Err(ExtensionJobStoreError::Conflict)
+        Err(JobRunStoreError::Conflict)
     }
 }
 
@@ -1388,16 +1385,14 @@ fn decode_attempt(raw: RawAttempt) -> StoreResult<AttemptRecord> {
     let attempt = u32::try_from(attempt)
         .ok()
         .filter(|value| *value > 0)
-        .ok_or(ExtensionJobStoreError::InvalidData)?;
+        .ok_or(JobRunStoreError::InvalidData)?;
     let fence = u64::try_from(fence)
         .ok()
         .filter(|value| *value > 0)
-        .ok_or(ExtensionJobStoreError::InvalidData)?;
+        .ok_or(JobRunStoreError::InvalidData)?;
     let outcome = match outcome.as_deref() {
         None => None,
-        Some(value) => {
-            Some(parse_attempt_outcome(value).ok_or(ExtensionJobStoreError::InvalidData)?)
-        }
+        Some(value) => Some(parse_attempt_outcome(value).ok_or(JobRunStoreError::InvalidData)?),
     };
     let result = result.as_deref().map(parse_bounded_json).transpose()?;
     if fence != 2 * u64::from(attempt) - 1
@@ -1407,7 +1402,7 @@ fn decode_attempt(raw: RawAttempt) -> StoreResult<AttemptRecord> {
         || closed.is_some() != outcome.is_some()
         || (result.is_some() && (outcome.is_none() || outcome == Some(AttemptOutcome::Interrupted)))
     {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     Ok(AttemptRecord {
         job_id,
@@ -1439,23 +1434,23 @@ fn decode_observation(raw: RawObservation, job_id: &JobId) -> StoreResult<Outcom
         attempt: u32::try_from(attempt)
             .ok()
             .filter(|value| *value > 0)
-            .ok_or(ExtensionJobStoreError::InvalidData)?,
+            .ok_or(JobRunStoreError::InvalidData)?,
         fence: u64::try_from(fence)
             .ok()
             .filter(|value| *value > 0)
-            .ok_or(ExtensionJobStoreError::InvalidData)?,
+            .ok_or(JobRunStoreError::InvalidData)?,
     };
     validate_uuid_v7(&id)?;
     if token.fence != 2 * u64::from(token.attempt) - 1 {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     let outcome = match outcome.as_str() {
         "succeeded" => Completion::Succeeded,
         "failed" => Completion::Failed,
-        _ => return Err(ExtensionJobStoreError::InvalidData),
+        _ => return Err(JobRunStoreError::InvalidData),
     };
     if time < 0 {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     let evidence = evidence.as_deref().map(parse_bounded_json).transpose()?;
     Ok(OutcomeObservation {
@@ -1561,16 +1556,16 @@ fn decode_recovery_candidate(raw: RawRecovery) -> StoreResult<RecoveryCandidate>
         revision: u64::try_from(revision)
             .ok()
             .filter(|revision| *revision > 0)
-            .ok_or(ExtensionJobStoreError::InvalidData)?,
+            .ok_or(JobRunStoreError::InvalidData)?,
     })
 }
 
 // -- validation, canonical JSON and names ----------------------------------------
 
-fn validate_new_job(new: &NewExtensionJob) -> StoreResult<()> {
+fn validate_new_job(new: &NewJobRun) -> StoreResult<()> {
     new.job
         .validate()
-        .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+        .map_err(|_| JobRunStoreError::InvalidData)?;
     if new.job.state != JobState::Queued
         || new.job.attempt != 0
         || new.job.fence != 0
@@ -1578,7 +1573,7 @@ fn validate_new_job(new: &NewExtensionJob) -> StoreResult<()> {
         || new.job.cancellation_requested_at_ms.is_some()
         || new.job.updated_at_ms != new.job.created_at_ms
     {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     validate_metadata(&new.operation)?;
     validate_metadata(&new.invoker)?;
@@ -1594,21 +1589,21 @@ fn validate_metadata(value: &str) -> StoreResult<()> {
         || !value.is_ascii()
         || !value.bytes().all(|b| b.is_ascii_graphic())
     {
-        Err(ExtensionJobStoreError::InvalidData)
+        Err(JobRunStoreError::InvalidData)
     } else {
         Ok(())
     }
 }
 
 fn validate_uuid_v7(value: &str) -> StoreResult<()> {
-    let uuid = uuid::Uuid::parse_str(value).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    let uuid = uuid::Uuid::parse_str(value).map_err(|_| JobRunStoreError::InvalidData)?;
     if uuid.get_version_num() == 7
         && uuid.get_variant() == uuid::Variant::RFC4122
         && uuid.to_string() == value
     {
         Ok(())
     } else {
-        Err(ExtensionJobStoreError::InvalidData)
+        Err(JobRunStoreError::InvalidData)
     }
 }
 
@@ -1618,13 +1613,13 @@ fn canonical_json(value: &Value) -> StoreResult<String> {
     // entries for sorting, so a rejected request cannot allocate an unbounded
     // additional key vector. Depth validation bounds serializer recursion.
     let mut count = CountWriter(0);
-    serde_json::to_writer(&mut count, value).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    serde_json::to_writer(&mut count, value).map_err(|_| JobRunStoreError::InvalidData)?;
     let mut writer = BoundedWriter {
         bytes: Vec::new(),
         limit: MAX_JSON_BYTES,
     };
-    write_canonical(value, &mut writer).map_err(|_| ExtensionJobStoreError::InvalidData)?;
-    String::from_utf8(writer.bytes).map_err(|_| ExtensionJobStoreError::InvalidData)
+    write_canonical(value, &mut writer).map_err(|_| JobRunStoreError::InvalidData)?;
+    String::from_utf8(writer.bytes).map_err(|_| JobRunStoreError::InvalidData)
 }
 
 fn write_canonical(value: &Value, out: &mut impl Write) -> io::Result<()> {
@@ -1662,7 +1657,7 @@ fn write_canonical(value: &Value, out: &mut impl Write) -> io::Result<()> {
 
 fn validate_json_depth(value: &Value, depth: usize, lower_bytes: &mut usize) -> StoreResult<()> {
     if depth > MAX_JSON_DEPTH {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     // Every value consumes at least one byte; strings and keys consume at
     // least their UTF-8 length. This bounds traversal of huge flat inputs
@@ -1673,7 +1668,7 @@ fn validate_json_depth(value: &Value, depth: usize, lower_bytes: &mut usize) -> 
             _ => 1,
         })
         .filter(|bytes| *bytes <= MAX_JSON_BYTES)
-        .ok_or(ExtensionJobStoreError::InvalidData)?;
+        .ok_or(JobRunStoreError::InvalidData)?;
     match value {
         Value::Array(items) => items
             .iter()
@@ -1682,7 +1677,7 @@ fn validate_json_depth(value: &Value, depth: usize, lower_bytes: &mut usize) -> 
             *lower_bytes = lower_bytes
                 .checked_add(key.len().saturating_add(2))
                 .filter(|bytes| *bytes <= MAX_JSON_BYTES)
-                .ok_or(ExtensionJobStoreError::InvalidData)?;
+                .ok_or(JobRunStoreError::InvalidData)?;
             validate_json_depth(item, depth + 1, lower_bytes)
         }),
         _ => Ok(()),
@@ -1691,13 +1686,12 @@ fn validate_json_depth(value: &Value, depth: usize, lower_bytes: &mut usize) -> 
 
 fn parse_bounded_json(text: &str) -> StoreResult<Value> {
     if text.len() > MAX_JSON_BYTES {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
-    let value: Value =
-        serde_json::from_str(text).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    let value: Value = serde_json::from_str(text).map_err(|_| JobRunStoreError::InvalidData)?;
     let canonical = canonical_json(&value)?;
     if canonical != text {
-        return Err(ExtensionJobStoreError::InvalidData);
+        return Err(JobRunStoreError::InvalidData);
     }
     Ok(value)
 }
@@ -1734,7 +1728,7 @@ impl Write for BoundedWriter {
     }
 }
 
-impl From<DomainError> for ExtensionJobStoreError {
+impl From<DomainError> for JobRunStoreError {
     fn from(error: DomainError) -> Self {
         Self::Storage(error)
     }
@@ -1762,20 +1756,20 @@ fn with_savepoint<T>(conn: &Connection, write: impl FnOnce() -> StoreResult<T>) 
 }
 impl<'a> Savepoint<'a> {
     fn new(conn: &'a Connection) -> StoreResult<Self> {
-        conn.execute_batch("SAVEPOINT extension_job_store")
+        conn.execute_batch("SAVEPOINT job_run_store")
             .map_err(map_sql_err)?;
         Ok(Self { conn, active: true })
     }
     fn release(mut self) -> StoreResult<()> {
         self.conn
-            .execute_batch("RELEASE extension_job_store")
+            .execute_batch("RELEASE job_run_store")
             .map_err(map_sql_err)?;
         self.active = false;
         Ok(())
     }
     fn rollback(mut self) -> StoreResult<()> {
         self.conn
-            .execute_batch("ROLLBACK TO extension_job_store; RELEASE extension_job_store")
+            .execute_batch("ROLLBACK TO job_run_store; RELEASE job_run_store")
             .map_err(map_sql_err)?;
         self.active = false;
         Ok(())
@@ -1786,15 +1780,12 @@ impl Drop for Savepoint<'_> {
         if self.active {
             let _ = self
                 .conn
-                .execute_batch("ROLLBACK TO extension_job_store; RELEASE extension_job_store");
+                .execute_batch("ROLLBACK TO job_run_store; RELEASE job_run_store");
         }
     }
 }
 
-fn duplicate_matches(
-    existing: &StoredExtensionJob,
-    incoming: &NewExtensionJob,
-) -> StoreResult<bool> {
+fn duplicate_matches(existing: &StoredJobRun, incoming: &NewJobRun) -> StoreResult<bool> {
     Ok(existing.job.owner == incoming.job.owner
         && existing.job.intent_key == incoming.job.intent_key
         && existing.job.replay_policy == incoming.job.replay_policy
@@ -1807,10 +1798,10 @@ fn get_by_intent_tx(
     conn: &Connection,
     contribution_id: &str,
     intent_key: &str,
-) -> StoreResult<Option<StoredExtensionJob>> {
+) -> StoreResult<Option<StoredJobRun>> {
     let id: Option<String> = conn
         .query_row(
-            "SELECT id FROM extension_job WHERE contribution_id=?1 AND intent_key=?2",
+            "SELECT id FROM job_run WHERE contribution_id=?1 AND intent_key=?2",
             params![contribution_id, intent_key],
             |row| read_text(row, 0, 36),
         )
@@ -1818,7 +1809,7 @@ fn get_by_intent_tx(
         .map_err(map_sql_err)?;
     id.map(|value| {
         let id = parse_job_id(&value)?;
-        get_tx(conn, &id)?.ok_or(ExtensionJobStoreError::NotFound)
+        get_tx(conn, &id)?.ok_or(JobRunStoreError::NotFound)
     })
     .transpose()
 }
@@ -1842,7 +1833,7 @@ fn parse_replay_policy(value: &str) -> StoreResult<ReplayPolicy> {
     match value {
         "never" => Ok(ReplayPolicy::Never),
         "idempotent" => Ok(ReplayPolicy::Idempotent),
-        _ => Err(ExtensionJobStoreError::InvalidData),
+        _ => Err(JobRunStoreError::InvalidData),
     }
 }
 fn state_name(value: JobState) -> &'static str {
@@ -1863,7 +1854,7 @@ fn parse_state(value: &str) -> StoreResult<JobState> {
         "succeeded" => Ok(JobState::Succeeded),
         "failed" => Ok(JobState::Failed),
         "cancelled" => Ok(JobState::Cancelled),
-        _ => Err(ExtensionJobStoreError::InvalidData),
+        _ => Err(JobRunStoreError::InvalidData),
     }
 }
 fn completion_name(value: Completion) -> &'static str {
@@ -1885,13 +1876,13 @@ fn validate_page(limit: usize) -> StoreResult<()> {
     if (1..=MAX_PAGE_ITEMS).contains(&limit) {
         Ok(())
     } else {
-        Err(ExtensionJobStoreError::InvalidData)
+        Err(JobRunStoreError::InvalidData)
     }
 }
 
 fn ensure_transaction(conn: &Connection) -> StoreResult<()> {
     if conn.is_autocommit() {
-        Err(ExtensionJobStoreError::TransactionRequired)
+        Err(JobRunStoreError::TransactionRequired)
     } else {
         Ok(())
     }
@@ -1900,15 +1891,15 @@ fn is_unique_violation(error: &rusqlite::Error) -> bool {
     matches!(error, rusqlite::Error::SqliteFailure(code, _) if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE || code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY)
 }
 
-fn store_tx_error(error: ExtensionJobStoreError) -> TxError<ExtensionJobStoreError> {
+fn store_tx_error(error: JobRunStoreError) -> TxError<JobRunStoreError> {
     match error {
-        ExtensionJobStoreError::Storage(storage) => TxError::Storage(storage),
+        JobRunStoreError::Storage(storage) => TxError::Storage(storage),
         other => TxError::Aborted(other),
     }
 }
-fn map_store_tx_error(error: TxError<ExtensionJobStoreError>) -> ExtensionJobStoreError {
+fn map_store_tx_error(error: TxError<JobRunStoreError>) -> JobRunStoreError {
     match error {
-        TxError::Storage(storage) => ExtensionJobStoreError::Storage(storage),
+        TxError::Storage(storage) => JobRunStoreError::Storage(storage),
         TxError::Aborted(reason) => reason,
     }
 }

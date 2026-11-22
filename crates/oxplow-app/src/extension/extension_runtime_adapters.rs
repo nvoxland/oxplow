@@ -11,7 +11,7 @@ pub struct PreparedRuntimeAdapters {
     snapshots: crate::snapshots::PreparedSnapshots,
     models: crate::ai_service::PreparedModelProviders,
     scripts: crate::providers::script::PreparedScripts,
-    jobs: std::sync::Arc<crate::extension::extension_job_operations::JobOperationRegistry>,
+    jobs: std::sync::Arc<crate::extension::job_run_operations::JobOperationRegistry>,
 }
 
 impl PreparedRuntimeAdapters {

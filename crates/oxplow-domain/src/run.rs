@@ -338,9 +338,9 @@ impl RunContext {
     /// No service is authorized until the dispatcher attaches live authority.
     pub fn job(
         contribution: ContributionRef,
-        identity: &crate::extension_job_context::JobExecutionIdentity,
-        provenance: &crate::extension_job_context::JobInvocationContext,
-    ) -> Result<Self, crate::extension_job_context::JobContextError> {
+        identity: &crate::job_run_context::JobExecutionIdentity,
+        provenance: &crate::job_run_context::JobInvocationContext,
+    ) -> Result<Self, crate::job_run_context::JobContextError> {
         provenance.validate()?;
         let actor = Actor::job(
             identity,
@@ -366,13 +366,13 @@ impl RunContext {
     pub fn continue_job_attempt(
         mut self,
         claimed: &Self,
-    ) -> Result<Self, crate::extension_job_context::JobContextError> {
+    ) -> Result<Self, crate::job_run_context::JobContextError> {
         if !matches!(&self.actor, Actor::Job { .. })
             || self.actor != claimed.actor
             || self.contribution != claimed.contribution
             || self.parent != claimed.parent
         {
-            return Err(crate::extension_job_context::JobContextError::Invalid);
+            return Err(crate::job_run_context::JobContextError::Invalid);
         }
         self.run = claimed.run.clone();
         self.started = claimed.started;

@@ -368,7 +368,7 @@ left out; `summarize` or `decide` otherwise) and optional
   - Tests: each kind against a local stand-in for its API
     (`oxplow_ai_fake::mock`, `mock_sse`), pinning the request shape and the
     stream, in `crates/oxplow-ai-rig/src/tests.rs`; a streaming tool-call
-    job end to end in `extension_jobs_tests`.
+    job end to end in `job_runs_tests`.
 - Two operations: `complete` (text, optionally JSON) and `decide` (typed
   questions: `noul` → probability, `choice` → choice + probabilities,
   `score` → level index + probabilities). Non-Jev models answer `decide`

@@ -115,7 +115,7 @@ pub type SettingsReader<'a> = dyn FnMut(
         crate::extension::extension_configuration::ConfigurationError,
     > + 'a;
 
-pub type JobReader<'a> = dyn FnMut(crate::extension::extension_jobs::JobInput) -> Result<Value, oxplow_domain::CommandError>
+pub type JobReader<'a> = dyn FnMut(crate::extension::job_runs::JobInput) -> Result<Value, oxplow_domain::CommandError>
     + 'a;
 
 /// Whether a model serves a role: given the role as the script names it,
@@ -288,7 +288,7 @@ impl<'a> Calls<'a> {
 
     fn with_jobs_source(
         self,
-        source: Option<std::sync::Arc<crate::extension::extension_jobs::ExtensionJobs>>,
+        source: Option<std::sync::Arc<crate::extension::job_runs::JobRuns>>,
         runtime: &tokio::runtime::Handle,
     ) -> Self {
         match source {
@@ -416,7 +416,7 @@ impl<'a> Calls<'a> {
         };
         let job_input = if id == "jobs.read" {
             Some(
-                serde_json::from_value::<crate::extension::extension_jobs::JobInput>(args.clone())
+                serde_json::from_value::<crate::extension::job_runs::JobInput>(args.clone())
                     .map_err(|_| "jobs.read takes { job_run }".to_string())?,
             )
         } else {

@@ -2,11 +2,11 @@
 //! declarations bind these to their own package; inputs contain no owner or grant.
 
 use super::{ops::Op, util::schema, Handler, HandlerOutput};
-use crate::extension::extension_jobs::{EnqueueInput, ExtensionJobs, JobInput};
+use crate::extension::job_runs::{EnqueueInput, JobInput, JobRuns};
 use oxplow_domain::CommandError;
 use std::sync::Arc;
 
-pub fn ops(jobs: Arc<ExtensionJobs>) -> Vec<Op> {
+pub fn ops(jobs: Arc<JobRuns>) -> Vec<Op> {
     let enqueue = jobs.clone();
     let snapshot = jobs.clone();
     let manage = jobs.clone();

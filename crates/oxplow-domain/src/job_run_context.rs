@@ -9,8 +9,8 @@ use uuid::Uuid;
 use crate::{
     commands::Actor,
     events::{Anchors, EventId},
-    extension_job::{AttemptFence, JobId},
     ids::{AgentSessionId, StreamId, ThreadId},
+    job_run::{AttemptFence, JobId},
     run::{RunContext, RunId},
     uri::OxplowUri,
 };

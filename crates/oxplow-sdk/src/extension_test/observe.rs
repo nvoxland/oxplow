@@ -606,13 +606,13 @@ async fn observe_job_attempt(
     observed: oxplow_domain::run::RunContext,
     outcome: Option<oxplow_domain::run::Outcome>,
 ) -> Result<(), String> {
-    use oxplow_db::extension_job_store::{
-        enqueue_with_context_tx, transition_with_run_tx, EnqueueResult, NewExtensionJob,
+    use oxplow_db::job_run_store::{
+        enqueue_with_context_tx, transition_with_run_tx, EnqueueResult, NewJobRun,
     };
-    use oxplow_domain::extension_job::{
-        AttemptFence, Completion, ExtensionJob, IntentKey, JobEvent, JobId, JobOwner, ReplayPolicy,
+    use oxplow_domain::job_run::{
+        AttemptFence, Completion, IntentKey, JobEvent, JobId, JobOwner, JobRun, ReplayPolicy,
     };
-    use oxplow_domain::extension_job_context::{JobExecutionIdentity, JobInvocationContext};
+    use oxplow_domain::job_run_context::{JobExecutionIdentity, JobInvocationContext};
     use oxplow_domain::run::{Mode, Outcome, RunContext};
     use oxplow_domain::DomainError;
 
@@ -629,7 +629,7 @@ async fn observe_job_attempt(
             let id = JobId::generate();
             let start = observed.began().unix_ms();
             let intent_key = IntentKey::new(id.as_str().to_string()).map_err(|e| invalid(&e))?;
-            let job = ExtensionJob::queued(
+            let job = JobRun::queued(
                 id.clone(),
                 JobOwner {
                     contribution: owner.id.clone(),
@@ -645,7 +645,7 @@ async fn observe_job_attempt(
             .map_err(|e| invalid(&e))?;
             let EnqueueResult::Created(queued) = enqueue_with_context_tx(
                 tx,
-                &NewExtensionJob {
+                &NewJobRun {
                     job,
                     operation: "fixture".into(),
                     invoker: "system".into(),

@@ -293,8 +293,10 @@ lines to read further. A captured file's row comes from
 `oxplow.snapshot.restore_file`, which writes
 into that row's stream's worktree.
 
-**Commands.** Every write is a command through `run_command { id, input
-}`. `list_commands` with no arguments is an index of `{ id, summary }`;
+**Commands.** Every write is a command through `run_command { id, input }`.
+A completed call returns `{ result, command_run_id, event_id, inverse? }`.
+When present, `command_run_id` names the integer `v_command_run.id`.
+`list_commands` with no arguments is an index of `{ id, summary }`;
 with `id` or `prefix` (`oxtask.task.`) it gives each command's
 `input_schema`, an `example` input, whether a person `confirm`s it and
 whether it's `undoable` ([commands.md](./commands.md) "Exposure to

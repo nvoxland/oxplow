@@ -2604,16 +2604,19 @@ mod tests {
         })
         .unwrap();
         let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
-        assert_eq!(count(
-            "SELECT count(*) FROM extension_job_attempt a JOIN contribution_run r USING (run_id)
-              JOIN extension_job j ON j.id = a.job_id
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM job_run_attempt a JOIN contribution_run r USING (run_id)
+              JOIN job_run j ON j.id = a.job_id
               WHERE r.parent_run_id = j.queued_by_run_id AND r.kind = 'job' AND r.outcome IS NULL
                 AND a.fence = 1 AND a.lease_until_ms = 200",
-        ), 1);
-        assert_eq!(count("SELECT count(*) FROM extension_job_output"), 1);
+            ),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM job_run_output"), 1);
         let refused = conn
             .execute_batch(
-                "INSERT INTO extension_job_context (job_id, originating_run_id, context_json)
+                "INSERT INTO job_run_context (job_id, originating_run_id, context_json)
                  VALUES ('job', 'fedcba98-7654-7321-8123-456789abcdef',
                          '{\"schema_version\":1,\"originating_run_id\":\"fedcba98-7654-7321-8123-456789abcdef\"}');",
             )

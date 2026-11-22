@@ -67,7 +67,6 @@ the Review page (`ImpactReportView`) never drops it.
 stored payloads in place, keeping each event's ID, sequence, anchors and
 proposal links. Expired payloads stay empty.
 
-
 `event_types:` (P8.D3; **stable since P9.D6**, so a shared or bundled
 extension may use it — below; `extension_event_types.rs`,
 `vocabulary_reactor.rs`) declares event types

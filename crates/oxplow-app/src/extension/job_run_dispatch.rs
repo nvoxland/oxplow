@@ -7,15 +7,15 @@
 use std::{sync::Arc, time::Duration};
 
 use oxplow_db::{
-    extension_job_store::{
-        transition_tx, transition_with_run_tx, ExtensionJobStoreError, LateOutcomeObservation,
-        RecoveryCursor, SqliteExtensionJobStore, StoredExtensionJob,
+    job_run_store::{
+        transition_tx, transition_with_run_tx, JobRunStoreError, LateOutcomeObservation,
+        RecoveryCursor, SqliteJobRunStore, StoredJobRun,
     },
     map_sql_err, Database, TxError,
 };
 use oxplow_domain::{
-    extension_job::{AttemptFence, Completion, JobEvent, JobId, JobState},
-    extension_job_context::JobExecutionIdentity,
+    job_run::{AttemptFence, Completion, JobEvent, JobId, JobState},
+    job_run_context::JobExecutionIdentity,
     run::RunContext,
     time::Timestamp,
     DomainError,
@@ -24,8 +24,8 @@ use serde_json::Value;
 use tokio::time::Instant;
 
 use crate::{
-    extension::extension_job_authority::{JobAuthorityError, JobAuthorityHost, JobExecution},
-    extension::extension_job_operations::{
+    extension::job_run_authority::{JobAuthorityError, JobAuthorityHost, JobExecution},
+    extension::job_run_operations::{
         JobOperationError, JobWork, JobWorkOutcome, RegisteredJobOperation,
     },
 };
@@ -39,7 +39,7 @@ const MAX_CAS_RETRIES: usize = 4;
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
     #[error("extension job storage failed: {0}")]
-    Store(#[from] ExtensionJobStoreError),
+    Store(#[from] JobRunStoreError),
     #[error("extension job database failed: {0}")]
     Database(#[from] DomainError),
     #[error(transparent)]
@@ -86,19 +86,19 @@ pub(crate) enum Stage {
 #[cfg(test)]
 pub(crate) type CrashHook = Arc<dyn Fn(Stage) + Send + Sync>;
 
-pub struct ExtensionJobDispatcher {
+pub struct JobRunDispatcher {
     db: Database,
-    store: SqliteExtensionJobStore,
+    store: SqliteJobRunStore,
     host: Arc<JobAuthorityHost>,
     vocabulary: Option<oxplow_domain::vocabulary::VocabularyHandle>,
     #[cfg(test)]
     crash: Option<CrashHook>,
 }
 
-impl ExtensionJobDispatcher {
+impl JobRunDispatcher {
     pub fn new(db: Database, host: Arc<JobAuthorityHost>) -> Self {
         Self {
-            store: SqliteExtensionJobStore::new(db.clone()),
+            store: SqliteJobRunStore::new(db.clone()),
             db,
             host,
             vocabulary: None,
@@ -169,10 +169,7 @@ impl ExtensionJobDispatcher {
             {
                 Ok(recovered) if recovered.job.state == JobState::Queued => requeued += 1,
                 Ok(_) => interrupted += 1,
-                Err(
-                    ExtensionJobStoreError::Conflict
-                    | ExtensionJobStoreError::TransitionRejected(_),
-                ) => {}
+                Err(JobRunStoreError::Conflict | JobRunStoreError::TransitionRejected(_)) => {}
                 Err(error) => return Err(error.into()),
             }
         }
@@ -202,7 +199,7 @@ impl ExtensionJobDispatcher {
         }
         let context = match self.store.get_context(id.clone()).await {
             Ok(context) => context,
-            Err(ExtensionJobStoreError::MissingContext | ExtensionJobStoreError::InvalidData) => {
+            Err(JobRunStoreError::MissingContext | JobRunStoreError::InvalidData) => {
                 return Ok(DispatchOutcome::Skipped);
             }
             Err(error) => return Err(error.into()),
@@ -229,9 +226,7 @@ impl ExtensionJobDispatcher {
                         .await
                     {
                         Ok(rebound) => stored = rebound,
-                        Err(ExtensionJobStoreError::Conflict) => {
-                            return Ok(DispatchOutcome::Skipped)
-                        }
+                        Err(JobRunStoreError::Conflict) => return Ok(DispatchOutcome::Skipped),
                         Err(error) => return Err(error.into()),
                     }
                     next
@@ -278,7 +273,7 @@ impl ExtensionJobDispatcher {
             .await
         {
             Ok(claimed) => claimed,
-            Err(ExtensionJobStoreError::Conflict) => return Ok(DispatchOutcome::Skipped),
+            Err(JobRunStoreError::Conflict) => return Ok(DispatchOutcome::Skipped),
             Err(error) => return Err(error.into()),
         };
         let token = AttemptFence {
@@ -399,8 +394,8 @@ impl ExtensionJobDispatcher {
                         .await
                     {
                         Ok(_) => {}
-                        Err(ExtensionJobStoreError::Conflict)
-                        | Err(ExtensionJobStoreError::TransitionRejected(_)) => {
+                        Err(JobRunStoreError::Conflict)
+                        | Err(JobRunStoreError::TransitionRejected(_)) => {
                             self.request_cancellation(&id).await?;
                             execution.run().cancel().cancel();
                             cancellation_at = Some(now);
@@ -461,7 +456,7 @@ impl ExtensionJobDispatcher {
             let published = self
                 .host
                 .read_generation(db.transaction_or(move |tx| {
-                    tx.execute_batch("SAVEPOINT extension_job_publication")
+                    tx.execute_batch("SAVEPOINT job_run_publication")
                         .map_err(|error| TxError::Storage(map_sql_err(error)))?;
                     let publish_result = (|| {
                         savepoint_execution
@@ -485,7 +480,7 @@ impl ExtensionJobDispatcher {
                             hook(Stage::BetweenTransitionAndAnnounce);
                         }
                         if let Some(vocabulary) = &vocabulary {
-                            crate::extension::extension_jobs::announce_tx(
+                            crate::extension::job_runs::announce_tx(
                                 tx,
                                 &vocabulary.current(),
                                 &completed.job,
@@ -499,14 +494,14 @@ impl ExtensionJobDispatcher {
                     })();
                     match publish_result {
                         Ok(()) => {
-                            tx.execute_batch("RELEASE SAVEPOINT extension_job_publication")
+                            tx.execute_batch("RELEASE SAVEPOINT job_run_publication")
                                 .map_err(|error| TxError::Storage(map_sql_err(error)))?;
                             Ok(())
                         }
                         Err(failure) => {
                             tx.execute_batch(
-                                "ROLLBACK TO SAVEPOINT extension_job_publication;
-                                 RELEASE SAVEPOINT extension_job_publication",
+                                "ROLLBACK TO SAVEPOINT job_run_publication;
+                                 RELEASE SAVEPOINT job_run_publication",
                             )
                             .map_err(|error| TxError::Storage(map_sql_err(error)))?;
                             match failure {
@@ -514,7 +509,7 @@ impl ExtensionJobDispatcher {
                                 PublishFailure::Revoked => {
                                     Err(TxError::Aborted(PublishAbort::Revoked))
                                 }
-                                PublishFailure::Store(ExtensionJobStoreError::Storage(error)) => {
+                                PublishFailure::Store(JobRunStoreError::Storage(error)) => {
                                     Err(TxError::Storage(error))
                                 }
                                 PublishFailure::Store(error) => {
@@ -544,11 +539,11 @@ impl ExtensionJobDispatcher {
                         .confirm_stopped(id, token, Some(partial), Some(execution.run()))
                         .await;
                 }
-                Err(TxError::Aborted(PublishAbort::Store(ExtensionJobStoreError::Conflict))) => {
+                Err(TxError::Aborted(PublishAbort::Store(JobRunStoreError::Conflict))) => {
                     continue;
                 }
                 Err(TxError::Aborted(PublishAbort::Store(
-                    ExtensionJobStoreError::TransitionRejected(_),
+                    JobRunStoreError::TransitionRejected(_),
                 ))) => {
                     self.record_late(id, token, completion, evidence).await?;
                     return Ok(DispatchOutcome::Interrupted);
@@ -585,8 +580,7 @@ impl ExtensionJobDispatcher {
                 Ok(DispatchOutcome::Cancelled)
             }
             Ok(_) => Ok(DispatchOutcome::Interrupted),
-            Err(ExtensionJobStoreError::Conflict)
-            | Err(ExtensionJobStoreError::TransitionRejected(_)) => {
+            Err(JobRunStoreError::Conflict) | Err(JobRunStoreError::TransitionRejected(_)) => {
                 self.recover_after_lease(id, token).await
             }
             Err(error) => Err(error.into()),
@@ -615,14 +609,14 @@ impl ExtensionJobDispatcher {
                 .await
             {
                 Ok(_) => return Ok(()),
-                Err(ExtensionJobStoreError::Conflict)
-                | Err(ExtensionJobStoreError::TransitionRejected(
-                    oxplow_domain::extension_job::TransitionError::InvalidTransition,
+                Err(JobRunStoreError::Conflict)
+                | Err(JobRunStoreError::TransitionRejected(
+                    oxplow_domain::job_run::TransitionError::InvalidTransition,
                 )) => continue,
                 Err(error) => return Err(error.into()),
             }
         }
-        Err(ExtensionJobStoreError::Conflict.into())
+        Err(JobRunStoreError::Conflict.into())
     }
 
     async fn recover_after_lease(
@@ -657,8 +651,8 @@ impl ExtensionJobDispatcher {
                         return Ok(DispatchOutcome::Requeued)
                     }
                     Ok(_) => return Ok(DispatchOutcome::Interrupted),
-                    Err(ExtensionJobStoreError::Conflict)
-                    | Err(ExtensionJobStoreError::TransitionRejected(_)) => continue,
+                    Err(JobRunStoreError::Conflict)
+                    | Err(JobRunStoreError::TransitionRejected(_)) => continue,
                     Err(error) => return Err(error.into()),
                 }
             }
@@ -684,12 +678,12 @@ impl ExtensionJobDispatcher {
         event: JobEvent,
         result: Option<Value>,
         run: Option<RunContext>,
-    ) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
+    ) -> Result<StoredJobRun, JobRunStoreError> {
         let vocabulary = self.vocabulary.clone();
         self.db
             .transaction_or(move |tx| {
                 let aborted = |e| match e {
-                    ExtensionJobStoreError::Storage(storage) => TxError::Storage(storage),
+                    JobRunStoreError::Storage(storage) => TxError::Storage(storage),
                     other => TxError::Aborted(other),
                 };
                 let mut changed = transition_with_run_tx(
@@ -705,7 +699,7 @@ impl ExtensionJobDispatcher {
                     changed = requeue_tx(tx, changed).map_err(aborted)?;
                 }
                 if let Some(vocabulary) = &vocabulary {
-                    crate::extension::extension_jobs::announce_tx(
+                    crate::extension::job_runs::announce_tx(
                         tx,
                         &vocabulary.current(),
                         &changed.job,
@@ -716,7 +710,7 @@ impl ExtensionJobDispatcher {
             })
             .await
             .map_err(|e| match e {
-                TxError::Storage(storage) => ExtensionJobStoreError::Storage(storage),
+                TxError::Storage(storage) => JobRunStoreError::Storage(storage),
                 TxError::Aborted(reason) => reason,
             })
     }
@@ -747,7 +741,7 @@ impl ExtensionJobDispatcher {
         &self,
         id: &JobId,
         event: JobEvent,
-    ) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
+    ) -> Result<StoredJobRun, JobRunStoreError> {
         for _ in 0..MAX_CAS_RETRIES {
             let latest = self.store.metadata(id.clone()).await?;
             match self
@@ -761,11 +755,11 @@ impl ExtensionJobDispatcher {
                 .await
             {
                 Ok(updated) => return Ok(updated),
-                Err(ExtensionJobStoreError::Conflict) => continue,
+                Err(JobRunStoreError::Conflict) => continue,
                 Err(error) => return Err(error),
             }
         }
-        Err(ExtensionJobStoreError::Conflict)
+        Err(JobRunStoreError::Conflict)
     }
 
     async fn transition_result_retry(
@@ -774,7 +768,7 @@ impl ExtensionJobDispatcher {
         event: JobEvent,
         result: Option<Value>,
         run: Option<&RunContext>,
-    ) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
+    ) -> Result<StoredJobRun, JobRunStoreError> {
         for _ in 0..MAX_CAS_RETRIES {
             let latest = self.store.metadata(id.clone()).await?;
             match self
@@ -788,11 +782,11 @@ impl ExtensionJobDispatcher {
                 .await
             {
                 Ok(updated) => return Ok(updated),
-                Err(ExtensionJobStoreError::Conflict) => continue,
+                Err(JobRunStoreError::Conflict) => continue,
                 Err(error) => return Err(error),
             }
         }
-        Err(ExtensionJobStoreError::Conflict)
+        Err(JobRunStoreError::Conflict)
     }
 }
 
@@ -822,28 +816,28 @@ fn publication_failure(error: JobAuthorityError) -> PublishFailure {
 enum PublishFailure {
     Revoked,
     Storage(DomainError),
-    Store(ExtensionJobStoreError),
+    Store(JobRunStoreError),
 }
 
 enum PublishAbort {
     Revoked,
-    Store(ExtensionJobStoreError),
+    Store(JobRunStoreError),
 }
 
 /// `job`, just interrupted, queued again when its replay policy allows
 /// another attempt (`JobEvent::RetryInterrupted`); as it was otherwise.
 fn requeue_tx(
     tx: &rusqlite::Connection,
-    job: StoredExtensionJob,
-) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
+    job: StoredJobRun,
+) -> Result<StoredJobRun, JobRunStoreError> {
     let retry = JobEvent::RetryInterrupted {
         now_ms: job.job.updated_at_ms,
         intent_key: job.job.intent_key.clone(),
     };
     match transition_tx(tx, &job.job.id, job.revision, &retry, None) {
         Ok(requeued) => Ok(requeued),
-        Err(ExtensionJobStoreError::TransitionRejected(
-            oxplow_domain::extension_job::TransitionError::ReplayNotAllowed,
+        Err(JobRunStoreError::TransitionRejected(
+            oxplow_domain::job_run::TransitionError::ReplayNotAllowed,
         )) => Ok(job),
         Err(error) => Err(error),
     }

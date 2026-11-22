@@ -5,15 +5,15 @@ What this doc covers: the SQLite tables, their store classes, and the
 assignment queues. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
-## Extension jobs
+## Job runs
 
 What a job is and how it runs: [extensions-jobs.md](./extensions-jobs.md) "Jobs".
-The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
-`oxplow-db/src/extension_job_store.rs`. V67 links each attempt to its
-shared contribution run.
+The lifecycle is pure in `oxplow-domain/src/job_run.rs`; the store is
+`oxplow-db/src/job_run_store.rs`. V67 links each attempt to its
+shared contribution run. V69 gives the five tables their `job_run` names.
 
-- **`extension_job`** — one row per job: owner (`contribution_id`, package
-  version, generation, contract version), operation, invoker, the run that
+- **`job_run`** — one row per enqueued job: owner (`contribution_id`, package
+  version, deployment hash, contract version), operation, invoker, the run that
   asked (`queued_by_run_id`), `intent_key` (`UNIQUE (contribution_id, intent_key)`:
   one intent is one job), replay policy, `state` (`queued`, `running`,
   `succeeded`, `failed`, `cancelled`, `interrupted`), `attempt` and `fence`,
@@ -21,10 +21,10 @@ shared contribution run.
   `request_json` (≤ 1 MiB). Every transition is a revision CAS
   (`transition_tx`); triggers keep identity, the request and the first
   cancellation time immutable, and an ended row frozen.
-- **`extension_job_context`** — the job's immutable provenance (the asking
+- **`job_run_context`** — the job's immutable provenance (the asking
   actor, anchors, subjects, cause), written with the intent; a dispatch
   without it doesn't run. No grant or credential is in it.
-- **`extension_job_attempt`** — one row per attempt, its odd fence kept
+- **`job_run_attempt`** — one row per attempt, its odd fence kept
   after recovery; closed once (succeeded, failed, cancelled with stop
   evidence, interrupted) with its result (≤ 1 MiB). Its unique `run_id`
   references the shared run with a delete cascade. The claim begins the
@@ -33,12 +33,12 @@ shared contribution run.
   closes the run with the attempt and records measured usage. Lease
   recovery closes the shared run as `interrupted` and leaves CPU,
   memory and model costs unknown.
-- **`extension_job_output`** (V56) — what an attempt produced as it ran,
+- **`job_run_output`** (V56) — what an attempt produced as it ran,
   `(job_id, attempt, seq)`: `kind` `text` | `tool_call` | `tool_result` |
   `usage`, `content_json` (≤ 256 KiB). Append-only; a trigger refuses rows
   for an attempt that isn't open, so a worker that lost its attempt writes
   nothing. Written by `append_output` in short transactions of its own.
-- **`extension_job_observation`** — late-outcome evidence: a worker that
+- **`job_run_observation`** — late-outcome evidence: a worker that
   finished after its attempt was fenced off records what it had here, never
   on the job.
 
@@ -642,7 +642,7 @@ entries; the `effort_policy` capability rows; and an effort-only once
 mark. A take an effort asked for (`effort_start` / `effort_end`) stays,
 as `manual`, in `snapshot_op` and its `snapshot.taken` payload. A nudge
 whose cause only an effort told apart keeps its row without its cause.
-`extension_job_context` drops `anchors.effort_id` from stored contexts.
+`job_run_context` drops `anchors.effort_id` from stored contexts.
 On a copy of a real database (2.1 GB, 150k captures, 1.9M facts, 340k
 events) it ran in 12 s.
 
@@ -1951,9 +1951,9 @@ ID. [Effect delivery and retry](./extensions-events.md)
 
 The shared record for a run of contribution code
 (`oxplow_domain::run`, [The run context](./extensions-permissions.md)).
-It holds the fields common to every run. Each kind's detail record holds
-the fields specific to that kind. The existing ledgers still keep their
-own run fields until their detail records move to the shared table.
+It holds the fields common to every run. The command, collector and
+effect detail tables reference it directly. A job references it from each
+attempt so retries have their own timing, costs and outcome.
 
 - **Identity and cause.** `run_id` is a UUIDv7. `contribution` is the
   contribution's URI. The row records its `kind`, `extension`, `version`
@@ -1980,7 +1980,7 @@ own run fields until their detail records move to the shared table.
 - **Readers.** `v_contribution_run` publishes the shared fields, with
   `scopes` and `decisions` for the two JSON columns, and the run's URI.
   `command_run.run_id`, `collector_run.run_id` and `effect_run.run_id`
-  name their shared runs. `extension_job_attempt.run_id` names the
+  name their shared runs. `job_run_attempt.run_id` names the
   attempt's run. `ai_call.run_id` names the run behind a call when one is
   known.
 - **Retention.** `event_retention::sweep` applies all run retention rules

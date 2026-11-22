@@ -20,14 +20,14 @@ use oxplow_ai::{
     fixture::FixtureModel,
     parts::{TypedRequestV1, TypedResponseV1},
 };
-use oxplow_domain::{extension_job::JobId, Actor};
+use oxplow_domain::{job_run::JobId, Actor};
 use serde_json::{json, Value};
 
-use crate::extension::extension_job_dispatch::{
-    CrashHook, DispatchError, DispatchOutcome, ExtensionJobDispatcher, Stage,
+use crate::extension::job_run_dispatch::{
+    CrashHook, DispatchError, DispatchOutcome, JobRunDispatcher, Stage,
 };
-use crate::extension::extension_job_hardening_tests::{expire_lease, observations, state, words};
-use crate::extension::extension_job_stream_tests::{
+use crate::extension::job_run_hardening_tests::{expire_lease, observations, state, words};
+use crate::extension::job_run_stream_tests::{
     ask, completions, fixture_idle, manifest_idempotent, reply, rows, slow, Fixture, MANIFEST,
 };
 
@@ -35,7 +35,7 @@ fn job_id(id: &str) -> JobId {
     serde_json::from_value(json!(id)).expect("a job id")
 }
 
-fn dispatcher(fx: &Fixture, crash: Option<CrashHook>) -> Arc<ExtensionJobDispatcher> {
+fn dispatcher(fx: &Fixture, crash: Option<CrashHook>) -> Arc<JobRunDispatcher> {
     fx.svc.jobs.dispatcher_for_test(
         fx.svc.extension_activation.clone(),
         fx.svc.commands.clone(),
@@ -56,12 +56,12 @@ fn crash_once(at: Stage) -> CrashHook {
 type Dispatched = Result<Result<DispatchOutcome, DispatchError>, tokio::task::JoinError>;
 
 /// One dispatch on a task of its own, so a crash is a panicked task.
-async fn dispatch(d: &Arc<ExtensionJobDispatcher>, id: &str) -> Dispatched {
+async fn dispatch(d: &Arc<JobRunDispatcher>, id: &str) -> Dispatched {
     let (d, id) = (d.clone(), job_id(id));
     tokio::spawn(async move { d.run_one(id).await }).await
 }
 
-async fn recover(d: &ExtensionJobDispatcher) -> (usize, usize) {
+async fn recover(d: &JobRunDispatcher) -> (usize, usize) {
     let page = d.recover_page(None, 64).await.expect("recovery runs");
     (page.interrupted, page.requeued)
 }
@@ -249,7 +249,7 @@ async fn the_queue_is_bounded_across_the_project_and_a_changed_duplicate_conflic
         .transaction(|tx| {
             let mut insert = tx
                 .prepare(
-                    "INSERT INTO extension_job (
+                    "INSERT INTO job_run (
                         id, contribution_id, operation, invoker, queued_by_run_id,
                         intent_key, replay_policy, state, attempt, fence,
                         created_at_ms, updated_at_ms, revision, request_json)
@@ -381,7 +381,7 @@ async fn turning_the_extension_off_between_the_worker_and_the_publish_cancels_th
     let outcome = running.await.unwrap().unwrap();
     assert_eq!(outcome, DispatchOutcome::Cancelled);
 
-    let (state, text) = crate::extension::extension_job_hardening_tests::recorded(&fx, &id).await;
+    let (state, text) = crate::extension::job_run_hardening_tests::recorded(&fx, &id).await;
     assert_eq!(state, "cancelled");
     assert_eq!(text, words(8));
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);

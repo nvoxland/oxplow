@@ -516,7 +516,7 @@ pub struct Services {
     /// Loaded extensions per worktree root, reloaded when a file under
     /// `.oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension::extension_catalog::ExtensionCatalog>,
-    pub jobs: Arc<extension::extension_jobs::ExtensionJobs>,
+    pub jobs: Arc<extension::job_runs::JobRuns>,
     pub extension_secrets: Arc<extension::extension_secrets::ExtensionSecrets>,
     /// Shared publication and reader boundary. Every service that reads a
     /// generation holds it; boot activates the first one (a repairable
@@ -1270,8 +1270,8 @@ impl Services {
             machine.secrets.clone(),
             sql.clone(),
         ));
-        let jobs = Arc::new(extension::extension_jobs::ExtensionJobs::new(
-            extension::extension_jobs::JobsDependencies {
+        let jobs = Arc::new(extension::job_runs::JobRuns::new(
+            extension::job_runs::JobsDependencies {
                 db: db.clone(),
                 catalog: extension_catalog.clone(),
                 root: layout.project_dir.clone(),
@@ -1679,7 +1679,7 @@ impl Services {
         for op in commands::bookmark::ops()
             .into_iter()
             .chain(commands::context_basket::ops())
-            .chain(commands::extension_jobs::ops(jobs.clone()))
+            .chain(commands::job_runs::ops(jobs.clone()))
             .chain(commands::extension_services::ops(
                 extension_services.clone(),
                 collector_runner.clone(),

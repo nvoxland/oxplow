@@ -752,7 +752,7 @@ impl Actor {
     /// Build the attribution actor for a host-owned job execution.
     /// This does not grant generic command access or confirmation authority.
     pub fn job(
-        identity: &crate::extension_job_context::JobExecutionIdentity,
+        identity: &crate::job_run_context::JobExecutionIdentity,
         thread_id: Option<ThreadId>,
         stream_id: Option<StreamId>,
     ) -> Actor {

@@ -509,7 +509,8 @@ the page's own actions, sorted by label.
 `v_command_run` lists command history, including reads and refusals. Filter
 on `command` and order by `started_at` and `id` for the latest runs.
 `changed = 1` selects runs that recorded their input. The row's URI opens
-the run's cost, permissions and model calls.
+the run's cost, permissions and model calls. To look up a run from a
+`command.executed` event, match its `command_run_id` to `v_command_run.id`.
 
 - A script reaches oxplow only through the scopes in `needs`. Today a
   script can call `sql.read`; naming another scope is a load error.

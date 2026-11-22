@@ -157,7 +157,7 @@ pub fn interrupt_unfinished_tx(conn: &rusqlite::Connection) -> Result<usize, Dom
          SET finished_at = ?1, outcome = ?2, error = 'oxplow stopped before the run finished'
          WHERE finished_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM effect_run WHERE run_id = contribution_run.run_id)
-           AND NOT EXISTS (SELECT 1 FROM extension_job_attempt WHERE run_id = contribution_run.run_id)",
+           AND NOT EXISTS (SELECT 1 FROM job_run_attempt WHERE run_id = contribution_run.run_id)",
         params![Timestamp::now().to_string(), Outcome::Interrupted.as_str()],
     )
     .map_err(map_sql_err)

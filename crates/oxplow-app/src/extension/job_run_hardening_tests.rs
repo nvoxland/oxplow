@@ -1,14 +1,14 @@
 //! A job's durability under the things that go wrong around it: a lease
 //! that runs out, an extension turned off, a changed declaration, a restart, a
 //! full queue, a stalled model, and a person cancelling a queued job. All
-//! against the in-process fixture model, as `extension_job_stream_tests`.
+//! against the in-process fixture model, as `job_run_stream_tests`.
 
 use std::{sync::Arc, time::Duration};
 
 use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
-use crate::extension::extension_job_stream_tests::{
+use crate::extension::job_run_stream_tests::{
     ask, calls, completions, fixture, fixture_idle, manifest_idempotent, prepare, reply, rows, run,
     slow, until, Fixture, LOOKUP, MANIFEST,
 };
@@ -73,7 +73,7 @@ pub(super) async fn expire_lease(svc: &crate::Services, id: &str) {
         .transaction(move |tx| {
             let lease: i64 = tx
                 .query_row(
-                    "SELECT started_at_ms + 1 FROM extension_job_attempt
+                    "SELECT started_at_ms + 1 FROM job_run_attempt
                       WHERE job_id = ?1 AND closed_at_ms IS NULL",
                     [&id],
                     |row| row.get(0),
@@ -81,16 +81,16 @@ pub(super) async fn expire_lease(svc: &crate::Services, id: &str) {
                 .map_err(oxplow_db::map_sql_err)?;
             // The store never shortens a lease; only the passing of time does,
             // so the attempt's guard is taken off this throwaway database.
-            tx.execute_batch("DROP TRIGGER IF EXISTS extension_job_attempt_immutable")
+            tx.execute_batch("DROP TRIGGER IF EXISTS job_run_attempt_immutable")
                 .map_err(oxplow_db::map_sql_err)?;
             tx.execute(
-                "UPDATE extension_job_attempt SET lease_until_ms = ?2
+                "UPDATE job_run_attempt SET lease_until_ms = ?2
                   WHERE job_id = ?1 AND closed_at_ms IS NULL",
                 rusqlite::params![&id, lease],
             )
             .map_err(oxplow_db::map_sql_err)?;
             tx.execute(
-                "UPDATE extension_job SET lease_until_ms = ?2, revision = revision + 1
+                "UPDATE job_run SET lease_until_ms = ?2, revision = revision + 1
                   WHERE id = ?1",
                 rusqlite::params![&id, lease],
             )
@@ -107,7 +107,7 @@ pub(super) async fn observations(fx: &Fixture, id: &str) -> i64 {
         .db
         .transaction(move |tx| {
             tx.query_row(
-                "SELECT count(*) FROM extension_job_observation WHERE job_id = ?1",
+                "SELECT count(*) FROM job_run_observation WHERE job_id = ?1",
                 [&id],
                 |row| row.get(0),
             )
