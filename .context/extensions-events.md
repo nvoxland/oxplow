@@ -605,9 +605,10 @@ attempt:
 It asks every time because of what a failure can hide: an attempt
 interrupted with a step outside oxplow under way may have landed that
 step, and a retry sends it again. The confirmation's text says so.
-Settings → Data → Delivery lists reactions whose latest run has outcome
-`failed` (`useFailedReactions`), each with its error and **Retry**
-(`InlineConfirm`).
+Alerts and Settings → Data → Delivery list reactions whose latest attempt
+has `v_effect_run.retryable = 1`. That flag covers `failed`, `denied`,
+`cancelled`, `invalid` and `interrupted` attempts without a proposal.
+The list shows each outcome and reason, with **Retry** and **Retry all**.
 
 **Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An
 attempt that failed in a way that may pass (`CommandError::Unavailable`:

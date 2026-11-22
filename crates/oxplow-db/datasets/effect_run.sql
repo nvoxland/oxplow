@@ -9,5 +9,8 @@ SELECT r.run_id, r.parent_run_id, r.extension, r.contribution, r.kind, r.version
            WHERE later.effect = e.effect AND later.event_id = e.event_id
              AND later.attempt > e.attempt
        ) AS INTEGER) AS latest,
+       CAST(CASE WHEN e.proposal_id IS NULL
+                   AND r.outcome IN ('failed', 'denied', 'cancelled', 'invalid', 'interrupted')
+                 THEN 1 ELSE 0 END AS INTEGER) AS retryable,
        e.command_run_id, e.proposal_id, e.retry_at
 FROM source('effect_run') e JOIN source('contribution_run') r ON r.run_id = e.run_id

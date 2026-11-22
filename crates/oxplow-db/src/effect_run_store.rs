@@ -739,6 +739,69 @@ mod tests {
     /// next attempt — claimed and finished like the first — and an
     /// attempt is made once.
     #[tokio::test]
+    async fn the_dataset_and_retry_store_agree_on_which_attempts_can_retry() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            let outcomes = [
+                None,
+                Some(Outcome::Ok),
+                Some(Outcome::Skipped),
+                Some(Outcome::Failed),
+                Some(Outcome::Denied),
+                Some(Outcome::Cancelled),
+                Some(Outcome::Invalid),
+                Some(Outcome::Interrupted),
+            ];
+            for (index, outcome) in outcomes.into_iter().enumerate() {
+                for proposal_id in [None, Some(1)] {
+                    let key = EffectRunKey {
+                        event_id: format!("event-{index}-{proposal_id:?}"),
+                        ..key()
+                    };
+                    let run = context(&key);
+                    let state = RunState { outcome, proposal_id };
+                    if let Some(outcome) = outcome {
+                        finish_tx(
+                            tx,
+                            &key,
+                            &Finished {
+                                outcome,
+                                reason: None,
+                                command_run_id: None,
+                                proposal_id,
+                            },
+                            Some(&run),
+                            None,
+                        )?;
+                    } else {
+                        claim_tx(tx, &key, &run, None)?;
+                    }
+                    let retryable: bool = tx
+                        .query_row(
+                            "SELECT retryable FROM v_effect_run WHERE event_id = ?1",
+                            [&key.event_id],
+                            |row| row.get(0),
+                        )
+                        .map_err(map_sql_err)?;
+                    assert_eq!(retryable, state.retryable(), "{state:?}");
+                }
+            }
+            let listed = tx
+                .prepare("SELECT effect, event_id FROM v_effect_run WHERE latest = 1 AND retryable = 1 ORDER BY id")
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .map_err(map_sql_err)?;
+            assert_eq!(listed, failed_latest_tx(tx)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn the_latest_attempt_is_the_reactions_state() {
         let db = Database::in_memory();
         db.transaction(|tx| {

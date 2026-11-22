@@ -1939,6 +1939,8 @@ V66 gives each **attempt** at an effect's reaction a shared run.
 `resend_json`. The unique key `(effect, event_id, attempt)` prevents an
 attempt from landing twice. The highest attempt number describes the
 reaction's current state (`latest_tx` and `v_effect_run.latest`).
+`v_effect_run.retryable` identifies attempts that ended failed, denied,
+cancelled, invalid or interrupted and have no proposal.
 
 `effect_run.run_id` uniquely references `contribution_run` with a delete
 cascade. A claimed attempt begins the shared row in the claim transaction.

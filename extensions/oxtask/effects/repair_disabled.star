@@ -21,8 +21,7 @@ SELECT (SELECT w.native_id FROM v_oxplow_task_link l JOIN v_oxplow_task w ON w.u
 """
 
 # Where it is declared, and its recent failures, newest first: a
-# collector's failed syncs, an effect's failed reactions (each reaction at
-# its latest attempt: a failure a retry got past isn't one any more).
+# collector's failed syncs and an effect's latest retryable reactions.
 _FAILURES = """
 SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution WHERE uri = :uri) AS declared,
        (SELECT extension FROM v_contribution WHERE uri = :uri) AS extension,
@@ -34,9 +33,9 @@ SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution WHERE uri = 
              AND json_extract(payload, '$.error') IS NOT NULL
            ORDER BY seq DESC LIMIT 5)) AS collector_errors,
        (SELECT json_group_array(error) FROM (
-          SELECT error FROM v_effect_run
+          SELECT outcome || coalesce(': ' || nullif(error, ''), '') AS error FROM v_effect_run
            WHERE :kind = 'effect' AND effect = :namespace || '/' || :contribution
-             AND outcome = 'failed' AND error IS NOT NULL AND latest = 1
+             AND latest = 1 AND retryable = 1
            ORDER BY id DESC LIMIT 5)) AS effect_errors,
        (SELECT last_error FROM v_contribution_health
          WHERE namespace = :namespace AND contribution = :contribution AND kind = :kind) AS last_error
