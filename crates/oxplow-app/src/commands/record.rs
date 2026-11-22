@@ -12,7 +12,9 @@ pub(super) fn record_effect_tx(
     effect: &RunContext,
     command: &Recorded,
     failed: Option<String>,
+    may_retry: bool,
 ) -> Result<(), oxplow_domain::DomainError> {
+    let account_health = failed.is_none() || !may_retry;
     crate::effects::finished_tx(
         tx,
         vocabulary,
@@ -20,6 +22,7 @@ pub(super) fn record_effect_tx(
         &crate::effects::ran(command.audit_id, failed),
         Some(effect),
         Some(command.event_id.clone()),
+        account_health,
     )
 }
 
@@ -144,9 +147,15 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
-                    RunOrigin::Effect(key, _, effect) => {
-                        record_effect_tx(tx, &vocabulary.current(), key, effect, &recorded, None)?
-                    }
+                    RunOrigin::Effect(key, _, effect) => record_effect_tx(
+                        tx,
+                        &vocabulary.current(),
+                        key,
+                        effect,
+                        &recorded,
+                        None,
+                        false,
+                    )?,
                     RunOrigin::Approval(id) => {
                         let id = *id;
                         proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;

@@ -1234,7 +1234,6 @@ async fn run_collector_held(
     let run = collector_context(ctx, parent, owner, id)?;
     parent.track_child(&run);
     let last_event_id = trigger.event().map(|e| e.seq);
-    let started = std::time::Instant::now();
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     if let Err(RunCollectorError::Denied(error)) = &result {
         ctx.store
@@ -1250,17 +1249,6 @@ async fn run_collector_held(
             .await
             .map_err(RunCollectorError::Storage)?;
         return result;
-    }
-    let recorded = match &result {
-        Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
-        // Stopped (a person's cancel, its extension changed or revoked): the
-        // run is recorded `cancelled`, and says nothing of the collector's health.
-        Err(RunCollectorError::Failed(_)) if run.cancel().is_cancelled() => Ok(()),
-        Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
-        Err(_) => Ok(()),
-    };
-    if let Err(e) = recorded {
-        tracing::warn!(collector = %format!("{owner}/{id}"), error = %e, "recording its health failed");
     }
     result
 }
@@ -1449,6 +1437,7 @@ async fn run_collector_once(
                         oxplow_domain::run::Outcome::Ok,
                         None,
                         &observation,
+                        Some(&vocabulary.current()),
                     )?;
                     let vocabulary = vocabulary.current();
                     let mut synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
@@ -1510,6 +1499,7 @@ async fn run_collector_once(
                     last_event_id,
                     ..CollectorObservation::default()
                 },
+                Some(&vocabulary.current()),
             )?;
             oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &envelope).map(|_| ())
         })
@@ -1748,6 +1738,7 @@ impl RunLog {
                     outcome,
                     error.as_deref(),
                     &observation,
+                    Some(&vocabulary.current()),
                 )?;
                 Ok(true)
             })

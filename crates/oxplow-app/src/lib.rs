@@ -2110,7 +2110,7 @@ mod tests {
             let db = Database::open(&layout.state_db_path).unwrap();
             let run = RunContext::contribution(
                 ContributionRef {
-                    id: ContributionId::new("example", ContributionKind::Command, "check"),
+                    id: ContributionId::new("example", ContributionKind::Implementation, "check"),
                     extension: "example".into(),
                     version: None,
                     generation: None,
@@ -2119,8 +2119,10 @@ mod tests {
                 oxplow_domain::Actor::System,
                 Mode::External,
             );
-            db.transaction_now(|tx| oxplow_db::contribution_run_store::begin_tx(tx, &run))
-                .unwrap();
+            db.transaction_now(|tx| {
+                oxplow_db::contribution_run_store::record_unlogged_tx(tx, &run, None, None)
+            })
+            .unwrap();
         }
         let services = Services::boot(
             layout,

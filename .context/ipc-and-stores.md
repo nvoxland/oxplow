@@ -35,6 +35,13 @@ command):
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized dataset — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
 
+**Contribution runs.** The kind's store owns the shared run row and its
+detail. Use that store so the two rows begin or finish in the same
+transaction. Within oxplow-db, the kind stores use
+`contribution_run_store::begin_tx`, `finish_tx`, and `record_tx`.
+For a run without a kind ledger, such as an implementation run, use
+`contribution_run_store::record_unlogged_tx`.
+
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
 callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,
 oxplow-tauri-ipc and the desktop shell (`apps/desktop/src-tauri`) —

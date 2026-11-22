@@ -156,6 +156,7 @@ impl CommandBus {
                         },
                         Some(run),
                         Some(proposed.id.clone()),
+                        false,
                     )?;
                 }
                 Ok((inserted.id, supersedes))

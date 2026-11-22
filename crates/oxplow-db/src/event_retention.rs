@@ -208,6 +208,53 @@ pub const CONTRIBUTION_RUN_DAYS: i64 = 90;
 /// the writer lock waits milliseconds, not the whole backlog.
 pub const BATCH: i64 = 5000;
 
+/// Apply the contribution run windows in one bounded batch. Detail rows
+/// follow their run through the foreign key, and live runs are untouched.
+pub(crate) fn sweep_run_batch_tx(
+    tx: &rusqlite::Connection,
+    refused_cutoff: &str,
+    run_cutoff: &str,
+    batch: i64,
+) -> Result<(usize, usize), DomainError> {
+    let mut delete = tx
+        .prepare(
+            "DELETE FROM contribution_run WHERE run_id IN (
+            SELECT r.run_id
+              FROM contribution_run r LEFT JOIN command_audit a ON a.run_id = r.run_id
+             WHERE r.finished_at IS NOT NULL AND r.started_at < ?1
+               AND CASE r.kind
+                   WHEN 'command' THEN CASE
+                       WHEN r.outcome IN ('invalid', 'denied') THEN 1
+                       ELSE r.started_at < ?2 AND a.input_json IS NULL
+                   END
+                   WHEN 'collector' THEN r.started_at < ?2 AND NOT EXISTS (
+                       SELECT 1 FROM collector_checkpoint p WHERE p.last_run_id = r.run_id
+                   )
+                   WHEN 'effect' THEN 0
+                   WHEN 'job' THEN r.started_at < ?2 AND NOT EXISTS (
+                       SELECT 1 FROM extension_job_attempt a
+                         JOIN extension_job j ON j.id = a.job_id WHERE a.run_id = r.run_id
+                   )
+                   ELSE r.started_at < ?2
+               END
+             LIMIT ?3
+        ) RETURNING kind = 'command' AND outcome IN ('invalid', 'denied')",
+        )
+        .map_err(map_sql_err)?;
+    let mut deleted = delete
+        .query(params![refused_cutoff, run_cutoff, batch])
+        .map_err(map_sql_err)?;
+    let (mut refused, mut other) = (0, 0);
+    while let Some(row) = deleted.next().map_err(map_sql_err)? {
+        if row.get::<_, bool>(0).map_err(map_sql_err)? {
+            refused += 1;
+        } else {
+            other += 1;
+        }
+    }
+    Ok((refused, other))
+}
+
 /// Apply the windows ([`windows`], with the project's `project`) as of
 /// `now`, in transactions of at most [`BATCH`] rows, so the first sweep
 /// over a large old log never holds the writer lock for long. Idempotent:
@@ -287,38 +334,16 @@ async fn sweep_in_batches(
             }
         }
     }
-    // Refused commands past their shorter window. Their detail rows cascade.
-    let cutoff = before(REFUSED_AUDIT_DAYS);
+    let refused_cutoff = before(REFUSED_AUDIT_DAYS);
+    let run_cutoff = before(CONTRIBUTION_RUN_DAYS);
     loop {
-        let cutoff = cutoff.clone();
-        let n = db
-            .transaction(move |tx| {
-                tx.execute(
-                    "DELETE FROM contribution_run WHERE run_id IN (
-                       SELECT run_id FROM contribution_run
-                        WHERE kind = 'command' AND outcome IN ('invalid', 'denied')
-                          AND started_at < ?1 LIMIT ?2)",
-                    params![cutoff, batch],
-                )
-                .map_err(map_sql_err)
-            })
+        let (refused_cutoff, run_cutoff) = (refused_cutoff.clone(), run_cutoff.clone());
+        let (refused, other) = db
+            .transaction(move |tx| sweep_run_batch_tx(tx, &refused_cutoff, &run_cutoff, batch))
             .await?;
-        report.refused_audit_deleted += n;
-        if (n as i64) < batch {
-            break;
-        }
-    }
-    // Extension runs past their window.
-    let cutoff = before(CONTRIBUTION_RUN_DAYS);
-    loop {
-        let cutoff = cutoff.clone();
-        let n = db
-            .transaction(move |tx| {
-                crate::contribution_run_store::sweep_tx(tx, &cutoff, batch as usize)
-            })
-            .await?;
-        report.contribution_runs_deleted += n;
-        if (n as i64) < batch {
+        report.refused_audit_deleted += refused;
+        report.contribution_runs_deleted += other;
+        if ((refused + other) as i64) < batch {
             break;
         }
     }
@@ -342,118 +367,224 @@ mod tests {
     use super::*;
     use crate::Database;
 
-    /// A backlog larger than one batch is swept in several transactions,
-    /// all of it, and nothing outside the namespace's type range moves.
-    /// A refused run — input that didn't fit, a caller denied — writes
-    /// nothing but its audit row, and nothing points at that row: past
-    /// [`REFUSED_AUDIT_DAYS`] it goes. Runs that did something (`ok`,
-    /// `error`) stay — undo, approvals, effects and `command.executed`
-    /// name them — as does a recent refusal.
-    #[tokio::test]
-    async fn old_refused_runs_leave_the_audit_and_the_rest_stay() {
-        let db = Database::in_memory();
-        let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
-        let at = |days: i64| {
-            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
-                now.unix_ms() - days * DAY_MS,
-            ))
-        };
-        let rows: Vec<(&str, String)> = vec![
-            ("invalid", at(REFUSED_AUDIT_DAYS + 1)),
-            ("denied", at(REFUSED_AUDIT_DAYS + 1)),
-            ("ok", at(365)),
-            ("failed", at(365)),
-            ("invalid", at(1)),
-        ];
-        db.transaction(move |tx| {
-            for (id, (outcome, at)) in rows.iter().enumerate() {
-                tx.execute(
-                    "INSERT INTO contribution_run
-                       (run_id, extension, kind, contribution, mode, actor_kind, started_at, finished_at, outcome)
-                     VALUES (?1, 'core', 'command', 'oxplow:oxplow/command?command=oxplow.x.y',
-                             'external', 'agent', ?2, ?2, ?3)",
-                    params![id.to_string(), at, outcome],
-                )
+    const RUN_SWEEP_NOW_MS: i64 = 400 * DAY_MS;
+
+    fn insert_finished_run(
+        tx: &rusqlite::Connection,
+        id: &str,
+        kind: &str,
+        outcome: &str,
+        age_days: i64,
+    ) -> Result<(), DomainError> {
+        let at = ts_to_string(Timestamp::from_unix_ms(
+            RUN_SWEEP_NOW_MS - age_days * DAY_MS,
+        ));
+        tx.execute(
+            "INSERT INTO contribution_run
+                 (run_id, extension, contribution, kind, mode, actor_kind, started_at, finished_at, outcome)
+             VALUES (?1, 'acme', 'acme/example', ?2, 'external', 'system', ?3, ?3, ?4)",
+            params![id, kind, at, outcome],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    async fn run_ids(db: &Database, sql: &'static str) -> Vec<String> {
+        db.read(move |tx| {
+            let mut statement = tx.prepare(sql).map_err(map_sql_err)?;
+            let ids = statement
+                .query_map([], |row| row.get(0))
+                .map_err(map_sql_err)?
+                .collect::<rusqlite::Result<_>>()
                 .map_err(map_sql_err)?;
+            Ok(ids)
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn command_retention_uses_both_windows_and_keeps_recorded_input() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            for (id, outcome, age, input) in [
+                ("denied", "denied", REFUSED_AUDIT_DAYS + 1, Some("{}")),
+                ("invalid", "invalid", REFUSED_AUDIT_DAYS + 1, Some("{}")),
+                (
+                    "at-refusal-cutoff",
+                    "invalid",
+                    REFUSED_AUDIT_DAYS,
+                    Some("{}"),
+                ),
+                ("old-read", "ok", CONTRIBUTION_RUN_DAYS + 1, None),
+                ("at-run-cutoff", "ok", CONTRIBUTION_RUN_DAYS, None),
+                ("changed", "ok", 365, Some("{}")),
+                ("failed-with-input", "failed", 365, Some("{}")),
+            ] {
+                insert_finished_run(tx, id, "command", outcome, age)?;
                 tx.execute(
                     "INSERT INTO command_audit (command, run_id, input_json)
-                     VALUES ('oxplow.x.y', ?1, '{}')",
-                    [id.to_string()],
-                ).map_err(map_sql_err)?;
+                     VALUES ('acme.example', ?1, ?2)",
+                    params![id, input],
+                )
+                .map_err(map_sql_err)?;
             }
             Ok(())
+        })
+        .await
+        .unwrap();
+
+        let now = Timestamp::from_unix_ms(RUN_SWEEP_NOW_MS);
+        let report = sweep_in_batches(&db, now, &BTreeMap::new(), 2)
+            .await
+            .unwrap();
+        assert_eq!(report.refused_audit_deleted, 2);
+        assert_eq!(report.contribution_runs_deleted, 1);
+        let kept = [
+            "at-refusal-cutoff",
+            "at-run-cutoff",
+            "changed",
+            "failed-with-input",
+        ];
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM contribution_run ORDER BY run_id").await,
+            kept
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM command_audit ORDER BY run_id").await,
+            kept
+        );
+        assert_eq!(
+            sweep(&db, now, &BTreeMap::new()).await.unwrap(),
+            SweepReport::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn collector_retention_keeps_the_checkpoint_run_past_the_window() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            for (id, collector, age) in [
+                ("old", "pull", 365),
+                ("checkpoint", "pull", 364),
+                ("recent", "scan", CONTRIBUTION_RUN_DAYS - 1),
+            ] {
+                insert_finished_run(tx, id, "collector", "ok", age)?;
+                tx.execute(
+                    "INSERT INTO collector_run (run_id, owner, id) VALUES (?1, 'acme', ?2)",
+                    params![id, collector],
+                )
+                .map_err(map_sql_err)?;
+            }
+            tx.execute(
+                "INSERT INTO collector_checkpoint (owner, id, last_run_id)
+                 VALUES ('acme', 'pull', 'checkpoint')",
+                [],
+            )
+            .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let now = Timestamp::from_unix_ms(RUN_SWEEP_NOW_MS);
+        let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert_eq!(report.contribution_runs_deleted, 1);
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM contribution_run ORDER BY run_id").await,
+            ["checkpoint", "recent"]
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM collector_run ORDER BY run_id").await,
+            ["checkpoint", "recent"]
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT last_run_id FROM collector_checkpoint").await,
+            ["checkpoint"]
+        );
+    }
+
+    #[tokio::test]
+    async fn effect_retention_preserves_old_attempts() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            insert_finished_run(tx, "failed", "effect", "failed", 365)?;
+            insert_finished_run(tx, "retry", "effect", "ok", 364)?;
+            tx.execute_batch(
+                "INSERT INTO effect_run (effect, event_id, event_seq, attempt, origin, run_id)
+                 VALUES ('acme/react', 'event', 1, 1, 'live', 'failed'),
+                        ('acme/react', 'event', 1, 2, 'retry', 'retry');",
+            )
+            .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+
+        let now = Timestamp::from_unix_ms(RUN_SWEEP_NOW_MS);
+        assert_eq!(
+            sweep(&db, now, &BTreeMap::new()).await.unwrap(),
+            SweepReport::default()
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM contribution_run ORDER BY run_id").await,
+            ["failed", "retry"]
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM effect_run ORDER BY attempt").await,
+            ["failed", "retry"]
+        );
+    }
+
+    #[tokio::test]
+    async fn job_retention_keeps_an_attempt_while_its_job_exists() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            insert_finished_run(tx, "attempt", "job", "ok", 365)?;
+            tx.execute_batch(
+                "INSERT INTO extension_job (
+                     id, contribution_id, operation, invoker, queued_by_run_id,
+                     intent_key, replay_policy, state, attempt, fence, created_at_ms,
+                     updated_at_ms, revision, request_json
+                 ) VALUES ('job', 'acme/job', 'model', 'human', 'enqueue',
+                           'key', 'never', 'succeeded', 1, 1, 0, 2, 2, '{}');
+                 INSERT INTO extension_job_attempt (
+                     job_id, attempt, fence, started_at_ms, lease_until_ms, closed_at_ms, outcome, run_id
+                 ) VALUES ('job', 1, 1, 0, 2, 1, 'succeeded', 'attempt');",
+            )
+            .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+
+        let now = Timestamp::from_unix_ms(RUN_SWEEP_NOW_MS);
+        assert_eq!(
+            sweep(&db, now, &BTreeMap::new()).await.unwrap(),
+            SweepReport::default()
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM contribution_run").await,
+            ["attempt"]
+        );
+        assert_eq!(
+            run_ids(&db, "SELECT run_id FROM extension_job_attempt").await,
+            ["attempt"]
+        );
+
+        db.transaction(|tx| {
+            tx.execute_batch("DELETE FROM extension_job_attempt; DELETE FROM extension_job;")
+                .map_err(map_sql_err)
         })
         .await
         .unwrap();
         let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
-        assert_eq!(report.refused_audit_deleted, 2);
-        let left: Vec<String> = db
-            .read(|tx| {
-                let mut st = tx
-                    .prepare("SELECT r.outcome FROM command_audit a JOIN contribution_run r USING (run_id) ORDER BY a.id")
-                    .map_err(map_sql_err)?;
-                let rows = st
-                    .query_map([], |r| r.get(0))
-                    .map_err(map_sql_err)?
-                    .collect::<Result<Vec<String>, _>>()
-                    .map_err(map_sql_err)?;
-                Ok(rows)
-            })
+        assert_eq!(report.contribution_runs_deleted, 1);
+        assert!(run_ids(&db, "SELECT run_id FROM contribution_run")
             .await
-            .unwrap();
-        assert_eq!(left, ["ok", "failed", "invalid"]);
+            .is_empty());
     }
 
-    /// Extension runs are kept for [`CONTRIBUTION_RUN_DAYS`]: a sweep drops the
-    /// older ones and leaves the rest, and a second finds nothing more.
-    #[tokio::test]
-    async fn contribution_runs_past_their_window_are_swept() {
-        let db = Database::in_memory();
-        let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
-        let at = |days: i64| {
-            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
-                now.unix_ms() - days * DAY_MS,
-            ))
-        };
-        let (old, kept) = (at(CONTRIBUTION_RUN_DAYS + 1), at(CONTRIBUTION_RUN_DAYS - 1));
-        db.transaction(move |tx| {
-            for (id, started) in [("old", &old), ("kept", &kept)] {
-                tx.execute(
-                    "INSERT INTO contribution_run
-                       (run_id, extension, contribution, kind, actor_kind, mode,
-                        started_at, finished_at, outcome, wall_ms, cpu_ms, peak_bytes,
-                        ai_calls, scopes_json, decisions_json)
-                     VALUES (?1, 'acme', 'oxplow:oxplow/collector?collector=acme/pull', 'collector', 'system',
-                        'external', ?2, ?2, 'ok', 1, 0, 0, 0, '{}', '[]')",
-                    rusqlite::params![id, started],
-                )
-                .map_err(crate::map_sql_err)?;
-            }
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let first = sweep(&db, now, &BTreeMap::new()).await.unwrap();
-        assert_eq!(first.contribution_runs_deleted, 1);
-        let left: Vec<String> = db
-            .read(|c| {
-                let mut st = c
-                    .prepare("SELECT run_id FROM contribution_run ORDER BY run_id")
-                    .map_err(crate::map_sql_err)?;
-                let rows = st
-                    .query_map([], |r| r.get(0))
-                    .map_err(crate::map_sql_err)?
-                    .collect::<Result<_, _>>()
-                    .map_err(crate::map_sql_err)?;
-                Ok(rows)
-            })
-            .await
-            .unwrap();
-        assert_eq!(left, ["kept"]);
-        let second = sweep(&db, now, &BTreeMap::new()).await.unwrap();
-        assert_eq!(second.contribution_runs_deleted, 0);
-    }
-
+    /// A backlog larger than one batch is swept in several transactions,
+    /// all of it, and nothing outside the namespace's type range moves.
     #[tokio::test]
     async fn a_backlog_is_swept_in_batches() {
         let db = Database::in_memory();

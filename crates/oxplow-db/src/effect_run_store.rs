@@ -218,13 +218,34 @@ pub fn schedule_retry_tx(
 }
 
 /// Drop `key`'s scheduled retry: it won't be sent again by itself.
-pub fn drop_retry_tx(conn: &Connection, key: &EffectRunKey) -> Result<(), DomainError> {
-    conn.execute(
-        "UPDATE effect_run SET retry_at = NULL, resend_json = NULL
-          WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3",
-        params![key.effect, key.event_id, key.attempt],
-    )
-    .map_err(map_sql_err)?;
+pub fn drop_retry_tx(
+    conn: &Connection,
+    key: &EffectRunKey,
+    health: Option<(&oxplow_domain::vocabulary::Vocabulary, &str)>,
+) -> Result<(), DomainError> {
+    let dropped = conn
+        .execute(
+            "UPDATE effect_run SET retry_at = NULL, resend_json = NULL
+          WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3 AND retry_at IS NOT NULL",
+            params![key.effect, key.event_id, key.attempt],
+        )
+        .map_err(map_sql_err)?;
+    if dropped > 0 {
+        if let Some((vocabulary, reason)) = health {
+            account_completion_tx(
+                conn,
+                vocabulary,
+                key,
+                &Finished {
+                    outcome: Outcome::Failed,
+                    reason: Some(reason.into()),
+                    audit_id: None,
+                    proposal_id: None,
+                },
+                None,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -460,6 +481,7 @@ pub fn finish_tx(
     key: &EffectRunKey,
     done: &Finished,
     run: Option<&RunContext>,
+    health: Option<&oxplow_domain::vocabulary::Vocabulary>,
 ) -> Result<(), DomainError> {
     let run_id = match (attempt_tx(conn, key)?, run) {
         (Some((id, state)), Some(run)) if state.outcome.is_none() && id == run.run().as_str() => {
@@ -499,7 +521,39 @@ pub fn finish_tx(
         "UPDATE effect_run SET audit_id = ?2, proposal_id = ?3, resend_json = NULL WHERE run_id = ?1",
         params![run_id, done.audit_id, done.proposal_id],
     ).map_err(map_sql_err)?;
+    if let Some(vocabulary) = health {
+        account_completion_tx(conn, vocabulary, key, done, run)?;
+    }
     Ok(())
+}
+
+/// Account for a recorded outcome once retry policy decides it is final.
+pub fn account_completion_tx(
+    conn: &Connection,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    key: &EffectRunKey,
+    done: &Finished,
+    run: Option<&RunContext>,
+) -> Result<(), DomainError> {
+    if let Some(run) = run {
+        if !attempt_tx(conn, key)?.is_some_and(|(id, _)| id == run.run().as_str()) {
+            return Ok(());
+        }
+    }
+    let (namespace, id) = key.effect.split_once('/').unwrap_or(("", &key.effect));
+    let health_key = crate::ContributionKey {
+        namespace: namespace.to_string(),
+        contribution: id.to_string(),
+        kind: "effect",
+    };
+    crate::contribution_health_store::record_completion_tx(
+        conn,
+        vocabulary,
+        &health_key,
+        done.outcome,
+        done.reason.as_deref(),
+        run.map(|run| run.elapsed().as_secs_f64() * 1000.0),
+    )
 }
 
 #[cfg(test)]
@@ -549,9 +603,9 @@ mod tests {
     async fn a_reaction_ends_once_whether_claimed_first_or_not() {
         let db = Database::in_memory();
         db.transaction(|tx| {
-            finish_tx(tx, &key(), &ok(), Some(&context(&key())))?;
+            finish_tx(tx, &key(), &ok(), Some(&context(&key())), None)?;
             assert_eq!(state_tx(tx, &key())?, Some(state(Some(Outcome::Ok))));
-            assert!(finish_tx(tx, &key(), &ok(), Some(&context(&key()))).is_err());
+            assert!(finish_tx(tx, &key(), &ok(), Some(&context(&key())), None).is_err());
             assert!(claim_tx(tx, &key(), &context(&key()), None).is_err());
             let other = EffectRunKey {
                 event_id: "e2".into(),
@@ -560,17 +614,53 @@ mod tests {
             let run = context(&other);
             claim_tx(tx, &other, &run, None)?;
             assert_eq!(state_tx(tx, &other)?, Some(state(None)));
-            finish_tx(tx, &other, &ok(), Some(&run))?;
+            finish_tx(tx, &other, &ok(), Some(&run), None)?;
             assert_eq!(state_tx(tx, &other)?, Some(state(Some(Outcome::Ok))));
             assert_eq!(
-                crate::contribution_run_store::sweep_tx(tx, "2099-01-01", 100)?,
-                0
+                crate::event_retention::sweep_run_batch_tx(tx, "2099-02-01", "2099-01-01", 100)?,
+                (0, 0)
             );
             assert_eq!(state_tx(tx, &key())?, Some(state(Some(Outcome::Ok))));
             Ok(())
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_effect_finish_rolls_back_when_its_health_write_fails() {
+        let db = Database::in_memory();
+        db.call(|conn| {
+            conn.execute_batch(
+                "CREATE TRIGGER reject_health BEFORE INSERT ON contribution_health
+             BEGIN SELECT RAISE(ABORT, 'health write failed'); END;",
+            )
+        })
+        .await
+        .unwrap();
+        let result = db
+            .transaction(|tx| {
+                let key = key();
+                let run = context(&key);
+                let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+                finish_tx(tx, &key, &ok(), Some(&run), Some(&vocabulary))
+            })
+            .await;
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("health write failed"));
+        let counts = db
+            .call(|conn| {
+                conn.query_row(
+            "SELECT (SELECT count(*) FROM effect_run), (SELECT count(*) FROM contribution_run)",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+            })
+            .await
+            .unwrap();
+        assert_eq!(counts, (0, 0));
     }
 
     /// an attempt claimed with what it composed keeps it while it
@@ -590,7 +680,7 @@ mod tests {
                     started_at: run.began().to_string(),
                 })
             );
-            finish_tx(tx, &key(), &ok(), Some(&run))?;
+            finish_tx(tx, &key(), &ok(), Some(&run), None)?;
             assert_eq!(claimed_tx(tx, &key())?, None, "no longer started");
             assert_eq!(latest_tx(tx, "acme/notify", "e1")?.unwrap().resend, None);
             let failing = EffectRunKey {
@@ -605,7 +695,7 @@ mod tests {
                 audit_id: None,
                 proposal_id: None,
             };
-            finish_tx(tx, &failing, &failed, Some(&run))?;
+            finish_tx(tx, &failing, &failed, Some(&run), None)?;
             assert_eq!(latest_tx(tx, "acme/notify", "e2")?.unwrap().resend, None);
             schedule_retry_tx(tx, &failing, "t3", "x")?;
             assert_eq!(
@@ -659,7 +749,7 @@ mod tests {
                 audit_id: None,
                 proposal_id: None,
             };
-            finish_tx(tx, &key(), &failed, Some(&context(&key())))?;
+            finish_tx(tx, &key(), &failed, Some(&context(&key())), None)?;
             assert_eq!(
                 latest_tx(tx, "acme/notify", "e1")?,
                 Some(Latest {
@@ -691,7 +781,7 @@ mod tests {
                 claim_tx(tx, &retry, &context(&retry), None).is_err(),
                 "an attempt is made once"
             );
-            finish_tx(tx, &retry, &ok(), Some(&run))?;
+            finish_tx(tx, &retry, &ok(), Some(&run), None)?;
             assert_eq!(
                 latest_tx(tx, "acme/notify", "e1")?.map(|l| (l.attempt, l.state)),
                 Some((2, state(Some(Outcome::Ok))))

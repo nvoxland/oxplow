@@ -1170,13 +1170,14 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
-                    RunOrigin::Effect(key, _, effect) => super::record_effect_tx(
+                    RunOrigin::Effect(key, resend, effect) => super::record_effect_tx(
                         tx,
                         &vocabulary.current(),
                         key,
                         effect,
                         &recorded,
                         failed_c.clone(),
+                        resend.is_some(),
                     )?,
                     RunOrigin::Approval(id) => {
                         let id = *id;

@@ -154,7 +154,9 @@ impl SqliteCollectorStore {
         observation: CollectorObservation,
     ) -> Result<(), DomainError> {
         self.db
-            .transaction(move |tx| record_run_in(tx, &run, outcome, error.as_deref(), &observation))
+            .transaction(move |tx| {
+                record_run_in(tx, &run, outcome, error.as_deref(), &observation, None)
+            })
             .await
     }
 
@@ -370,6 +372,28 @@ fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
     })
 }
 
+/// Begin a collector run without advancing its last finished checkpoint.
+pub fn begin_run_in(
+    tx: &rusqlite::Transaction<'_>,
+    run: &oxplow_domain::run::RunContext,
+) -> Result<(), DomainError> {
+    let contribution = run
+        .contribution_ref()
+        .filter(|r| r.id.kind == oxplow_domain::contribution::ContributionKind::Collector)
+        .ok_or_else(|| DomainError::Invariant("collector run needs a collector identity".into()))?;
+    crate::contribution_run_store::begin_tx(tx, run)?;
+    tx.execute(
+        "INSERT INTO collector_run (run_id, owner, id) VALUES (?1, ?2, ?3)",
+        rusqlite::params![
+            run.run().as_str(),
+            contribution.id.namespace,
+            contribution.id.local
+        ],
+    )
+    .map(|_| ())
+    .map_err(map_sql_err)
+}
+
 /// Write the run, its per-run detail and the collector's checkpoint on the
 /// transaction that commits its data and event.
 pub fn record_run_in(
@@ -378,6 +402,7 @@ pub fn record_run_in(
     outcome: oxplow_domain::run::Outcome,
     error: Option<&str>,
     observation: &CollectorObservation,
+    vocabulary: Option<&oxplow_domain::vocabulary::Vocabulary>,
 ) -> Result<(), DomainError> {
     use oxplow_domain::{contribution::ContributionKind, run::Outcome};
 
@@ -417,8 +442,23 @@ pub fn record_run_in(
                                     excluded.last_event_id, collector_checkpoint.last_event_id)",
         rusqlite::params![owner, id, run_id, counts, cursor, observation.last_event_id, good],
     )
-    .map(|_| ())
-    .map_err(map_sql_err)
+    .map_err(map_sql_err)?;
+    if let Some(vocabulary) = vocabulary {
+        let key = crate::ContributionKey {
+            namespace: owner.clone(),
+            contribution: id.clone(),
+            kind: "collector",
+        };
+        crate::contribution_health_store::record_completion_tx(
+            tx,
+            vocabulary,
+            &key,
+            outcome,
+            error,
+            Some(run.elapsed().as_secs_f64() * 1000.0),
+        )?;
+    }
+    Ok(())
 }
 
 /// A collector run deferred by its trigger's pacing (`v_pending_run`).
@@ -1136,10 +1176,12 @@ mod tests {
             ]
         );
         let swept = db
-            .transaction(|tx| crate::contribution_run_store::sweep_tx(tx, "2099-01-01", 100))
+            .transaction(|tx| {
+                crate::event_retention::sweep_run_batch_tx(tx, "2099-02-01", "2099-01-01", 100)
+            })
             .await
             .unwrap();
-        assert_eq!(swept, 1);
+        assert_eq!(swept, (0, 1));
         let count = db
             .call(|c| {
                 c.query_row("SELECT count(*) FROM collector_run", [], |r| {

@@ -4,7 +4,7 @@
 //! it used. Written by the host that ran it, in the transaction its own
 //! record lands in where it has one. A run of core's own work (no
 //! contribution behind it) writes nothing. Read as `v_contribution_run`;
-//! swept on the collector window ([`sweep_tx`]).
+//! swept on the collector window ([`crate::event_retention::sweep`]).
 
 use oxplow_domain::run::{Outcome, RunContext};
 use oxplow_domain::{DomainError, Timestamp};
@@ -14,7 +14,7 @@ use crate::command_audit_store::actor_kind_str;
 use crate::database::map_sql_err;
 
 /// Register a contribution run before its work starts.
-pub fn begin_tx(conn: &rusqlite::Connection, run: &RunContext) -> Result<(), DomainError> {
+pub(crate) fn begin_tx(conn: &rusqlite::Connection, run: &RunContext) -> Result<(), DomainError> {
     let Some(contribution) = run.contribution_ref() else {
         return Ok(());
     };
@@ -52,7 +52,7 @@ pub fn begin_tx(conn: &rusqlite::Connection, run: &RunContext) -> Result<(), Dom
 }
 
 /// Finish a contribution run that was previously registered and remains live.
-pub fn finish_tx(
+pub(crate) fn finish_tx(
     conn: &rusqlite::Connection,
     run: &RunContext,
     outcome: Outcome,
@@ -110,7 +110,7 @@ pub(crate) fn finish_at_tx(
 }
 
 /// Record a contribution run that begins and ends in the same transaction.
-pub fn record_tx(
+pub(crate) fn record_tx(
     conn: &rusqlite::Connection,
     run: &RunContext,
     outcome: Outcome,
@@ -118,6 +118,34 @@ pub fn record_tx(
 ) -> Result<(), DomainError> {
     begin_tx(conn, run)?;
     finish_tx(conn, run, outcome, error)
+}
+
+/// Write a run whose contribution kind has no detail ledger.
+pub fn record_unlogged_tx(
+    conn: &rusqlite::Connection,
+    run: &RunContext,
+    outcome: Option<Outcome>,
+    error: Option<&str>,
+) -> Result<(), DomainError> {
+    use oxplow_domain::contribution::ContributionKind;
+
+    if run.contribution_ref().is_some_and(|reference| {
+        matches!(
+            reference.id.kind,
+            ContributionKind::Command
+                | ContributionKind::Collector
+                | ContributionKind::Effect
+                | ContributionKind::Job
+        )
+    }) {
+        return Err(DomainError::Invalid(
+            "write a run with a detail ledger through its kind store".into(),
+        ));
+    }
+    match outcome {
+        Some(outcome) => record_tx(conn, run, outcome, error),
+        None => begin_tx(conn, run),
+    }
 }
 
 /// Close live runs left behind by the previous daemon. The effect ledger
@@ -131,35 +159,6 @@ pub fn interrupt_unfinished_tx(conn: &rusqlite::Connection) -> Result<usize, Dom
            AND NOT EXISTS (SELECT 1 FROM effect_run WHERE run_id = contribution_run.run_id)
            AND NOT EXISTS (SELECT 1 FROM extension_job_attempt WHERE run_id = contribution_run.run_id)",
         params![Timestamp::now().to_string(), Outcome::Interrupted.as_str()],
-    )
-    .map_err(map_sql_err)
-}
-
-/// Delete the runs that began before `cutoff`, at most `limit` of them:
-/// how many went.
-pub fn sweep_tx(
-    conn: &rusqlite::Connection,
-    cutoff: &str,
-    limit: usize,
-) -> Result<usize, DomainError> {
-    conn.execute(
-        "DELETE FROM contribution_run WHERE run_id IN
-           (SELECT r.run_id FROM contribution_run r
-            WHERE r.started_at < ?1 AND r.finished_at IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM command_audit a WHERE a.run_id = r.run_id AND a.input_json IS NOT NULL
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM collector_checkpoint p WHERE p.last_run_id = r.run_id
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM effect_run e WHERE e.run_id = r.run_id
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM extension_job_attempt j WHERE j.run_id = r.run_id
-              )
-            LIMIT ?2)",
-        params![cutoff, limit as i64],
     )
     .map_err(map_sql_err)
 }
@@ -338,26 +337,5 @@ mod tests {
                 r#"{"sql.read":1}"#.into()
             )]
         );
-    }
-
-    /// The sweep removes runs that began before the cutoff, newer ones stay.
-    #[tokio::test]
-    async fn the_sweep_removes_old_runs() {
-        let db = Database::in_memory();
-        let run = effect_run();
-        db.transaction(move |tx| record_tx(tx, &run, Outcome::Failed, Some("no")))
-            .await
-            .unwrap();
-        let gone = db
-            .transaction(|tx| sweep_tx(tx, "2000-01-01T00:00:00Z", 100))
-            .await
-            .unwrap();
-        assert_eq!(gone, 0);
-        let gone = db
-            .transaction(|tx| sweep_tx(tx, "9999-01-01T00:00:00Z", 100))
-            .await
-            .unwrap();
-        assert_eq!(gone, 1);
-        assert!(rows(&db).await.is_empty());
     }
 }

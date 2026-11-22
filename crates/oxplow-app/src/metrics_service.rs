@@ -2356,27 +2356,6 @@ impl MetricsService {
             FactRun::Failed(e) => ("error", 0, Some(e.clone())),
             FactRun::Skipped => return,
         };
-        // The contribution failure policy (P7.C2): the third failure in a row
-        // disables it.
-        let health = log.health();
-        let key = crate::collector_runner::contribution_key(&c.owner, &c.key);
-        let counted = match &error {
-            None => {
-                health
-                    .succeeded(
-                        &key,
-                        Some(std::time::Duration::from_millis(elapsed_ms.max(0) as u64)),
-                    )
-                    .await
-            }
-            // Stopped (cancelled, or its extension changed or was revoked): the
-            // run says nothing of the collector's health.
-            Some(_) if this_run.cancel().is_cancelled() => Ok(()),
-            Some(e) => health.failed(&key, e).await.map(|_| ()),
-        };
-        if let Err(e) = counted {
-            tracing::warn!(key = %c.key, error = %e, "fact collector: recording its health failed");
-        }
         let trigger = match ctx.trigger {
             "manual" => "manual",
             _ => "on",

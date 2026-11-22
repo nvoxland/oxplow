@@ -325,9 +325,7 @@ pub async fn backfill(
             ));
             break;
         }
-        let started = std::time::Instant::now();
         let reacted = run_reaction(svc, ext, decl, event, ReactionOrigin::Backfill, under).await?;
-        effect_triggers::count(&health, decl, &reacted, started.elapsed()).await;
         attempted += 1;
         match reacted {
             Reacted::Ran => {
@@ -448,14 +446,13 @@ async fn retry_one(
     effect: &str,
     event: &str,
 ) -> Result<serde_json::Value, CommandError> {
-    let (ext, decl, health) = ready(svc, effect).await?;
+    let (ext, decl, _) = ready(svc, effect).await?;
     let stored = svc
         .event_log_store
         .get(oxplow_domain::EventId(event.to_string()))
         .await?
         .ok_or_else(|| invalid("/event", format!("no event `{event}` in the log")))?;
     let stored = oxplow_domain::events::at_latest(&svc.vocabulary.current(), &stored)?;
-    let started = std::time::Instant::now();
     let reacted = run_reaction(
         svc,
         &ext,
@@ -469,7 +466,6 @@ async fn retry_one(
         DomainError::Invalid(message) => invalid("/event", message),
         other => CommandError::from(other),
     })?;
-    effect_triggers::count(&health, &decl, &reacted, started.elapsed()).await;
     let attempt = {
         let (effect, id) = (effect.to_string(), event.to_string());
         svc.db

@@ -1352,11 +1352,10 @@ sweep deletes a body after its namespace's window and the event stays. It is sep
 retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
-and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
-ten minutes after boot, then daily. Refused command runs age out after
-`REFUSED_AUDIT_DAYS` (30) through `contribution_run_refused_command`. Their
-details cascade. See [commands.md](./commands.md) "Retention"). The event
-payload sweep works in batches of 5,000 rows per transaction
+and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11).
+It runs ten minutes after boot and then daily. The same sweep applies the
+run retention rules described below.
+The event payload sweep works in batches of 5,000 rows per transaction
 through the partial index `event_log_live_payload (type, at) WHERE
 payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
 can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
@@ -1984,13 +1983,20 @@ own run fields until their detail records move to the shared table.
   name their shared runs. `extension_job_attempt.run_id` names the
   attempt's run. `ai_call.run_id` names the run behind a call when one is
   known.
-- **Retention.** `event_retention::sweep` uses a 90-day window
-  (`CONTRIBUTION_RUN_DAYS`) in batches of 5,000. Commands with recorded
-  input stay, except refusals, which age out after 30 days. A collector's
-  run ages out with its detail row. The finished run named by
-  `collector_checkpoint.last_run_id` is retained. Effect attempts and
-  their shared runs are retained to prevent delivery or backfill from
-  repeating a reaction. Job attempts and their runs stay with the job.
+- **Retention.** `event_retention::sweep` applies all run retention rules
+  in one sweep, in batches of 5,000. It sweeps finished runs only.
+  Deleting a run also deletes its detail row through the foreign key.
+  - Refused commands (`invalid` or `denied`) age out after 30 days
+    (`REFUSED_AUDIT_DAYS`). Other command runs with no recorded input
+    age out after 90 days. Other commands with recorded input stay.
+  - Collector runs age out after 90 days. The run named by
+    `collector_checkpoint.last_run_id` stays for as long as the checkpoint
+    points to it.
+  - Effect attempts and their runs stay to prevent delivery or backfill
+    from repeating a reaction.
+  - Job attempts and their runs stay while the job exists.
+  - Runs without a kind ledger follow the 90-day window
+    (`CONTRIBUTION_RUN_DAYS`).
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 

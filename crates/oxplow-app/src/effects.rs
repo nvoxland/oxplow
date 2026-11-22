@@ -453,13 +453,20 @@ pub fn finished_tx(
     done: &oxplow_db::effect_run_store::Finished,
     run: Option<&oxplow_domain::run::RunContext>,
     cause: Option<oxplow_domain::EventId>,
+    account_health: bool,
 ) -> Result<(), oxplow_domain::DomainError> {
     use oxplow_db::effect_run_store::ReactionOrigin;
     use oxplow_domain::events::schema::{
         EffectOrigin, EffectOutcome, EffectResult, EffectResultV5,
     };
     use oxplow_domain::run::Outcome;
-    oxplow_db::effect_run_store::finish_tx(tx, key, done, run)?;
+    oxplow_db::effect_run_store::finish_tx(
+        tx,
+        key,
+        done,
+        run,
+        account_health.then_some(vocabulary),
+    )?;
     let outcome = match done.outcome {
         _ if done.proposal_id.is_some() => EffectOutcome::Proposed,
         Outcome::Ok => EffectOutcome::Ok,
@@ -547,6 +554,7 @@ pub(crate) mod tests {
                             proposal_id: None,
                         },
                         Some(&run),
+                        None,
                     )?;
                     runs::schedule_retry_tx(tx, k, "2026-10-01T00:00:10Z", "{}")?;
                 }

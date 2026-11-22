@@ -923,35 +923,15 @@ impl CollectionService {
                     entities: Default::default(),
                     facts: 0,
                     elapsed_ms,
-                    error: error.clone(),
+                    error,
                     run,
                     unmeasured_cost: true,
                 },
                 None,
             )
             .await;
-        match recorded {
-            Ok(false) => {}
-            Ok(true) => {
-                let health = log.health();
-                let counted = match &error {
-                    None => {
-                        health
-                            .succeeded(
-                                key,
-                                Some(std::time::Duration::from_millis(elapsed_ms.max(0) as u64)),
-                            )
-                            .await
-                    }
-                    Some(e) => health.failed(key, e).await.map(|_| ()),
-                };
-                if let Err(e) = counted {
-                    tracing::warn!(collector = %key.contribution, error = %e, "recording its health failed");
-                }
-            }
-            Err(e) => {
-                tracing::warn!(collector = %key.contribution, error = %e, "recording its run failed")
-            }
+        if let Err(e) = recorded {
+            tracing::warn!(collector = %key.contribution, error = %e, "recording its run failed");
         }
     }
 

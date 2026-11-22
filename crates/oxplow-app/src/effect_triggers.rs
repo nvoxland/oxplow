@@ -202,10 +202,9 @@ impl EffectTriggers {
             if !matches!(health.disabled_reason(&key).await, Ok(None)) {
                 continue;
             }
-            let started = std::time::Instant::now();
             let reacted = run_reaction(svc, &ext, &decl, event, ReactionOrigin::Live, None).await;
             match reacted {
-                Ok(reacted) => count(&health, &decl, &reacted, started.elapsed()).await,
+                Ok(_) => {}
                 Err(error) if matches!(error, DomainError::Busy(_)) => return Err(error),
                 Err(error) => {
                     tracing::warn!(effect = %decl.name(), %error, "effect failed");
@@ -250,31 +249,6 @@ pub(crate) enum Reacted {
     Nothing,
 }
 
-/// Count an attempt toward the effect's health: a run is a success, a
-/// failure a failure (three in a row disable it); nothing else counts.
-pub(crate) async fn count(
-    health: &crate::contribution_health::ContributionHealth,
-    decl: &EffectDecl,
-    reacted: &Reacted,
-    took: std::time::Duration,
-) {
-    let key = contribution_key(decl);
-    let counted = match reacted {
-        Reacted::Ran => health.succeeded(&key, Some(took)).await,
-        Reacted::Failed(reason) | Reacted::NotResent(reason) => {
-            health.failed(&key, reason).await.map(|_| ())
-        }
-        Reacted::Skipped(_)
-        | Reacted::Proposed
-        | Reacted::Stopped(_)
-        | Reacted::Retrying(_)
-        | Reacted::Nothing => Ok(()),
-    };
-    if let Err(error) = counted {
-        tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
-    }
-}
-
 /// Record how `key`'s reaction ended outside a run (skipped, failed
 /// before any command ran, interrupted); whether this recorded it. A
 /// reaction already recorded — by its run, its proposal or a concurrent
@@ -285,11 +259,20 @@ async fn finish(
     run: Option<&RunContext>,
     done: Finished,
 ) -> Result<bool, DomainError> {
+    let account_health = run.is_some() || find_effect(svc, &key.effect).is_some();
     let (key, run, vocabulary) = (key.clone(), run.cloned(), svc.vocabulary.clone());
     let recorded = svc
         .db
         .transaction(move |tx| {
-            effects::finished_tx(tx, &vocabulary.current(), &key, &done, run.as_ref(), None)
+            effects::finished_tx(
+                tx,
+                &vocabulary.current(),
+                &key,
+                &done,
+                run.as_ref(),
+                None,
+                account_health,
+            )
         })
         .await;
     svc.event_pump.wake();
@@ -362,6 +345,7 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
             None,
             ended(Outcome::Interrupted, INTERRUPTED_RESENDABLE),
             retry,
+            false,
         )
         .await?
         {
@@ -394,7 +378,9 @@ async fn fail(
     run: Option<&RunContext>,
     done: Finished,
     retry: Option<Retry>,
+    previously_deferred: bool,
 ) -> Result<(bool, bool), DomainError> {
+    let active = run.is_some() || find_effect(svc, &key.effect).is_some();
     let (key, run, vocabulary) = (key.clone(), run.cloned(), svc.vocabulary.clone());
     let outcome = svc
         .db
@@ -406,6 +392,7 @@ async fn fail(
                 &done,
                 run.as_ref(),
                 None,
+                false,
             ) {
                 Ok(()) => true,
                 Err(DomainError::Invalid(_)) => false,
@@ -415,6 +402,15 @@ async fn fail(
                 Some(r) if recorded || r.if_already_failed => schedule_retry_tx(tx, &key, r)?,
                 _ => false,
             };
+            if active && !scheduled && (recorded || previously_deferred) {
+                oxplow_db::effect_run_store::account_completion_tx(
+                    tx,
+                    &vocabulary.current(),
+                    &key,
+                    &done,
+                    run.as_ref(),
+                )?;
+            }
             Ok((recorded, scheduled))
         })
         .await;
@@ -434,8 +430,6 @@ pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, Do
         .db
         .read(|tx| oxplow_db::effect_run_store::person_started_tx(tx))
         .await?;
-    let health =
-        crate::contribution_health::ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut recovered = 0;
     for key in started {
         let reacted = cut_off(svc, &key).await?;
@@ -443,10 +437,6 @@ pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, Do
             continue;
         }
         recovered += 1;
-        // Counted as the pump counts one it finds.
-        if let Some((_, decl)) = find_effect(svc, &key.effect) {
-            count(&health, &decl, &reacted, Duration::ZERO).await;
-        }
     }
     Ok(recovered)
 }
@@ -629,7 +619,7 @@ pub(crate) async fn run_reaction(
             .and_then(|json| serde_json::from_str::<Resend>(&json).ok())
             .filter(|r| safe_to_resend(svc, &r.calls));
         let Some(Resend { calls, events }) = resend else {
-            drop_retry(svc, &failed_attempt).await?;
+            drop_retry(svc, &failed_attempt, Some(NO_LONGER_RESENT)).await?;
             return Ok(Reacted::NotResent(NO_LONGER_RESENT.into()));
         };
         (calls, events)
@@ -721,7 +711,16 @@ pub(crate) async fn run_reaction(
                 _ => None,
             };
             Ok(
-                match fail(svc, &key, Some(&run), ended(outcome, reason.clone()), retry).await? {
+                match fail(
+                    svc,
+                    &key,
+                    Some(&run),
+                    ended(outcome, reason.clone()),
+                    retry,
+                    safe,
+                )
+                .await?
+                {
                     (_, true) => Reacted::Retrying(reason),
                     (_, false) => Reacted::Failed(reason),
                 },
@@ -864,25 +863,14 @@ async fn retry_one(
     };
     let (Some((ext, decl)), Some(event), true, false) = (effect.clone(), event, runnable, late)
     else {
-        drop_retry(svc, key).await?;
-        // Its failure, not counted while it waited, counts now.
-        if let Some((_, decl)) = effect {
-            let why = if late {
-                "not sent again by itself: its retry was due more than an hour ago"
-            } else {
-                "not sent again by itself: the effect can't run as it is"
-            };
-            count(
-                health,
-                &decl,
-                &Reacted::NotResent(why.into()),
-                Duration::ZERO,
-            )
-            .await;
-        }
+        let why = if late {
+            "not sent again by itself: its retry was due more than an hour ago"
+        } else {
+            "not sent again by itself: the effect can't run as it is"
+        };
+        drop_retry(svc, key, effect.as_ref().map(|_| why)).await?;
         return Ok(false);
     };
-    let started = std::time::Instant::now();
     // Boxed: a reaction is a large future, which a retry loop would otherwise
     // nest in its own frame.
     let reacted = Box::pin(run_reaction(
@@ -894,16 +882,30 @@ async fn retry_one(
         None,
     ))
     .await?;
-    count(health, &decl, &reacted, started.elapsed()).await;
     Ok(!matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)))
 }
 
 /// A scheduled retry that can't run (the effect gone or disabled):
 /// dropped, so the failure is a person's.
-async fn drop_retry(svc: &Services, key: &EffectRunKey) -> Result<(), DomainError> {
-    let key = key.clone();
+async fn drop_retry(
+    svc: &Services,
+    key: &EffectRunKey,
+    reason: Option<&str>,
+) -> Result<(), DomainError> {
+    let (key, reason, vocabulary) = (
+        key.clone(),
+        reason.map(str::to_owned),
+        svc.vocabulary.clone(),
+    );
     svc.db
-        .transaction(move |tx| oxplow_db::effect_run_store::drop_retry_tx(tx, &key))
+        .transaction(move |tx| {
+            let vocabulary = vocabulary.current();
+            oxplow_db::effect_run_store::drop_retry_tx(
+                tx,
+                &key,
+                reason.as_deref().map(|r| (vocabulary.as_ref(), r)),
+            )
+        })
         .await
 }
 

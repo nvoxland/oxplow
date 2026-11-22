@@ -104,7 +104,22 @@ pub fn insert_tx(
         Outcome::Invalid => RunOutcome::Invalid,
         Outcome::Error => RunOutcome::Failed,
     };
-    crate::contribution_run_store::record_tx(conn, run, outcome, row.error.as_deref())?;
+    insert_with_outcome_tx(conn, run, row, Some(outcome))
+}
+
+/// Write a command with its exact shared outcome.
+pub fn insert_with_outcome_tx(
+    conn: &Connection,
+    run: &RunContext,
+    row: &NewCommandAudit,
+    outcome: Option<RunOutcome>,
+) -> Result<i64, DomainError> {
+    match outcome {
+        Some(outcome) => {
+            crate::contribution_run_store::record_tx(conn, run, outcome, row.error.as_deref())?
+        }
+        None => crate::contribution_run_store::begin_tx(conn, run)?,
+    }
     if !row.scopes.is_empty() {
         conn.execute(
             "UPDATE contribution_run SET scopes_json = json_patch(scopes_json, ?2) WHERE run_id = ?1",
