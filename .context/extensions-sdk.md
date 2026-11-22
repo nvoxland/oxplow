@@ -154,6 +154,9 @@ check already reported is not repeated.
   - `effect` (P8.D12) — `effects: [on-done]` on `thread.closed`, whose
     `effects/on-done.star` composes `oxplow.thread.rename`; its intent example dry-runs it on a fixture
     event;
+  - `job` — a typed model job with commands to enqueue, inspect and
+    cancel it. Its page lists `v_job_run` by `queued_at` and reads the
+    current attempt's streamed reply from `v_job_run_output`;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and an origin that isn't a URI. **What
   it writes passes `check` with no warnings and `extension test` clean**

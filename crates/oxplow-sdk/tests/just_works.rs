@@ -310,7 +310,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     let runs = svc
         .sql
         .query_sql(
-            "SELECT state FROM v_effect_run WHERE state = 'ok'",
+            "SELECT outcome FROM v_effect_run WHERE outcome = 'ok'",
             vec![],
             None,
         )

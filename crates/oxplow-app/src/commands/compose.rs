@@ -249,12 +249,10 @@ mod tests {
     use oxplow_domain::Actor;
     use serde_json::json;
 
-    /// Two thread commands as one run by a person: the sequence runs them
-    /// in one transaction — one audit row naming the sequence with the
-    /// children in its result, one `command.executed`, and one undo that
-    /// reverses both.
+    /// A sequence records its parent and child runs in one transaction.
+    /// The parent has the execution event and an inverse for both children.
     #[tokio::test]
-    async fn a_sequence_of_commands_is_one_audited_run() {
+    async fn a_sequence_records_its_child_runs_and_undoes_them_together() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let thread = fx.thread.to_string();
         let before = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
@@ -281,16 +279,28 @@ mod tests {
             "a sequence in one transaction undoes"
         );
 
-        let audits = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
+        let sequence_id = out.command_run_id.unwrap();
+        let runs = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(20)
             .await
             .unwrap();
-        let ok: Vec<_> = audits
-            .iter()
-            .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
-            .collect();
-        assert_eq!(ok.len(), 1, "{audits:?}");
-        assert_eq!(ok[0].command, SEQUENCE);
+        assert_eq!(runs.len(), 3, "{runs:?}");
+        for run in &runs {
+            assert_eq!(
+                run.outcome,
+                oxplow_domain::events::schema::CommandOutcome::Ok
+            );
+            if run.id == sequence_id {
+                assert_eq!(run.command, SEQUENCE);
+                assert_eq!(run.event_id, out.event_id);
+                assert_eq!(run.inverse, out.inverse);
+            } else {
+                assert_eq!(run.command, "oxplow.thread.rename");
+                assert!(run.event_id.is_none());
+                assert!(run.inverse.is_none());
+            }
+        }
+        assert!(runs.iter().any(|run| run.id == sequence_id));
 
         let events = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
         let executed = events
@@ -301,7 +311,7 @@ mod tests {
 
         fx.svc
             .commands
-            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
+            .undo(&Actor::Human, sequence_id, false)
             .await
             .unwrap();
         let undone = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();

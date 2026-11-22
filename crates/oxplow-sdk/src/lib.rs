@@ -668,12 +668,12 @@ pub fn scaffold_with(
                      \x20 # page follows a running job live.\n\
                      \x20 runs:\n\
                      \x20   sql: |\n\
-                     \x20     SELECT r.id AS job_run, r.intent_key, r.state, r.updated_at,\n\
+                     \x20     SELECT r.id AS job_run, r.intent_key, r.state,\n\
                      \x20            (SELECT group_concat(o.text, '') FROM v_job_run_output o\n\
                      \x20             WHERE o.job_id = r.id AND o.attempt = r.attempt AND o.kind = 'text') AS output\n\
                      \x20     FROM v_job_run r\n\
                      \x20     WHERE r.extension = '{name}'\n\
-                     \x20     ORDER BY r.created_at DESC\n\
+                     \x20     ORDER BY r.queued_at DESC, r.id DESC\n\
                      view:\n\
                      \x20 viz: table\n\
                      \x20 from: runs\n\
