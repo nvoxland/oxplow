@@ -3,7 +3,7 @@
 # settings write republishes the dataset).
 requires: [oxplow-bundled, oxtask]
 when: { sql: "SELECT workflow, definition_of_done FROM v_oxtask_task_workflow" }
-expect: { rows: [{ workflow: agent_tracks, definition_of_done: "" }] }
+expect: { rows: [{ workflow: "off", definition_of_done: "" }] }
 steps:
   - given:
       - { command: oxtask.tasks.set_workflow, input: { workflow: person_files, definition_of_done: Tests pass. } }

@@ -3,23 +3,18 @@
 `.context/` is the project's durable knowledge base — the authoritative
 home for project decisions, system mechanics, gotchas, and conventions.
 
-1. **Read the relevant doc before touching its subsystem.** They're
-   short on purpose — skipping them costs more than reading them.
-2. **Update the relevant doc in the same commit as your change.** Docs
-   that drift from code are worse than no docs.
-3. **Capture new knowledge in `.context/`, not in agent memory.** A
-   non-obvious decision, a recurring gotcha, an undocumented convention
-   → write it into the matching doc.
+Read the relevant section of the linked subsystem doc before editing and
+update it in the same commit when behavior changes. The
+[contributor guide](.context/working-in-this-repo.md) has the full conventions.
 
-Read the relevant `.context/<name>.md` with the `Read` tool before
-touching its subsystem. The "concrete update triggers" checklist lives in
-the full guide below.
+## Keep verification focused
 
-**Full contributor guide: `.context/working-in-this-repo.md`** — repo
-layout, test/lint policy, and how work is tracked. The
-rules below are the always-on essentials; that doc has the detail and
-rationale. Read it (or the linked subsystem doc) when you need the *why*
-or exact mechanics.
+- Reuse completed checks across turns and restarts while their inputs are
+  current. Check the commit and changed files before rebuilding.
+- Finish shared source edits before building. Batch focused checks, keep
+  full logs on disk, and read the final summary or failing excerpts.
+- Run the checks the change warrants. Retry a known machine or harness
+  failure when a relevant condition has changed.
 
 ## Always-on rules
 
@@ -33,37 +28,15 @@ or exact mechanics.
   oxtask enabled in the project, or oxplow not running, file and update
   tasks with `cargo run -q -p oxplow-dev -- task …`
   (`.context/working-in-this-repo.md` "oxplow-dev"); it works over oxtask's
-  own file and says so when oxtask is off. How oxplow tracks work and how
-  to ask the person a question come from oxplow itself, in every session's
-  prompt.
-- **Which tests and lint to run, and when, is your call** — run what
-  the change warrants. Nothing requires a full run before a commit. The
-  commands, all in the foreground (a backgrounded run's reports are
-  never ingested), never bare `cargo test` / `bun test` (they emit no
-  reports):
-  - `bun run test:ext [<name>] [--only <fixture>,…]` — an edit under `extensions/` or
-    `.oxplow/extensions/` is checked with this: check, fixtures and page
-    answers on a throwaway oxplow, in seconds, with no compile (a debug
-    build reads oxplow's own extensions from their folders). After a
-    core change it rebuilds first, so a change to both runs both. A
-    fixture's `ui:` steps (a custom component's own code) draw in the
-    app's webview, so they need the app built once (`bun run build:dev`)
-    and a display that is awake; without either the report lists them
-    as skipped (never passed); `--require-ui` makes them errors
-    instead (CI passes it).
-  - `bun run test:fast` (filtered: `-p oxplow-app some_test`; a
-    `-p` of only pure crates like oxplow-config or oxplow-domain skips the
-    sidecar build) and
-    `bun run test:fast:ts` — quick, write the JUnit reports the
-    request's Tests panel shows.
-  - `bun run test:collect` — the full suite with coverage, the only run
-    that emits lcov for the coverage panel. See `.context/collection.md`.
-  - `bun run lint:collect` — clippy with `-D warnings` (JSON to
-    `target/clippy.json`, which feeds the `oxplow.analysis.*` metrics).
-    CI treats warnings as errors, so Rust changes need it clean before
-    they're pushed. Plain `cargo clippy --workspace --all-targets -- -D
-    warnings` gives readable diagnostics. Run `cargo fmt --all` after
-    editing `.rs`. Don't `#[allow(...)]` a real lint.
+  own file when the store is available. This checkout explicitly enables
+  the agent-managed task workflow.
+- **Testing.** Use `bun run test:ext [<name>]` for extension fixtures,
+  `bun run test:fast -p <crate> [filter]` for Rust, and
+  `bun run test:fast:ts` for the frontend. Run report-emitting checks in
+  the foreground. Use `bun run test:collect` when coverage is warranted.
+  Run `cargo fmt --all` after Rust edits and verify Clippy before pushing.
+  See the [test guide](.context/working-in-this-repo.md#tests) for prerequisites
+  and report handling.
 - **Run oxplow from source with `bun run run:dev`** (oxplow quit): it
   builds (`bun run build:dev`), deploys the extensions whose source
   changed (`oxplow-dev extension deploy`; boot deploys nothing from

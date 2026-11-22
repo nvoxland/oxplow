@@ -123,11 +123,7 @@ mod tests {
     /// and the agent is told so — in the always-on text, and in the skill
     /// that loads when the person asks about an error.
     #[test]
-    fn the_agent_is_told_it_can_read_the_errors_a_person_saw() {
-        assert!(
-            WORKING_IN_OXPLOW.contains("v_op_error"),
-            "{WORKING_IN_OXPLOW}"
-        );
+    fn the_codebase_skill_explains_the_errors_a_person_saw() {
         let text = core_text();
         let skill = text
             .skills

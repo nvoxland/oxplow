@@ -53,6 +53,13 @@ Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD.
 
+## Prompt budget
+
+Keep this repository’s instructions in `AGENTS.md` and the linked
+`.context/` sections. Project config can add a harness prompt when it serves
+a distinct purpose. Shipped preambles carry the minimum needed to use the
+integration. Feature instructions are available on demand.
+
 ## Tracking work
 
 oxplow infers the work ([work-tracking.md](./work-tracking.md)): it groups
@@ -73,10 +80,9 @@ you spot but won't do now (the backlog is the durable record; a reply
 is not). A redo of something just shipped reopens its item rather than
 filing "fix what I just did".
 
-**Asking the user a question.** When your reply needs the user's
-answer, end it with the question itself. A final message that ends in
-a question shows the thread as waiting on them (`.context/work-tracking.md`
-"No gates"), until their next prompt.
+Oxplow can surface a final reply that ends in a question as waiting
+on the person until their next prompt.
+
 
 ### Agent coordination
 

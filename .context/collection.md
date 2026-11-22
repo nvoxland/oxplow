@@ -418,35 +418,13 @@ stream) — `request_analysis` with its span and a signature of what it read
 `v_request_observation`) — by the `request_analysis` asset over the cube,
 `turn_file`, `metric_spec` and `agent_turn`. Due: of the requests with a turn running or ended in the last day, one with none stored or whose stored signature differs from its inputs now (a run reported late, a file captured after the turn closed, its end take landing); older requests keep what they have and are analyzed when asked for. A finished request's file gauges are read at its snapshots: a scan that names its snapshot is placed by it (the baseline at or before the start take, the current at or before the end take, whose scan lands after the last turn ended).
 
-## Report-less-run nudge (PostToolUse)
+## Missing report notices
 
-When the PostToolUse hook detects a test run but no configured report
-was refreshed by it (the agent ran `bun test` instead of the
-report-emitting `bun run test:collect`, for example), the `collection`
-reactor persists a one-shot nudge, which the thread's next tool-hook
-response delivers (`take_undelivered`; see Nudge persistence). The nudge names the project's
-own `fastCommand` when declared, else its `testing.command` — only one:
-which tests to run, and whether to pay for the full run with coverage,
-is the agent's call, and a nudge naming the full run as "the closing
-run" kept agents running it on every commit after nothing required it.
-It says the run wrote none of the reports the project's report
-collectors read when there are some but no `command`, or routes to
-`/oxplow:configure` when the project reads no reports at all. It never
-repeats the agent's command back (the agent just wrote it; heredoc edit
-scripts made that kilobytes).
-When a collector **should** have read a report but didn't count — its
-parse failed, or it is disabled — the nudge
-says that instead, collector by collector (`RunReports::unread`,
-`unread_reports_message`): running the tests again wouldn't help,
-and the reasons name what a person must do. A coverage collector that
-didn't count also leaves the lost coverage's `failed` capture.
-
-**Tool-agnostic design:** the hook never encodes tool→command knowledge.
-It keys only on (1) "was this a test run?" (substring match against
-the extensions' `run_patterns:` + `runPatterns`) and (2) "did a report collector read a
-report this run wrote?" (its mtime inside the run's freshness window). The tool-specific command it
-names comes entirely from the project's config, so it works for any
-test tool, current or future.
+A detected test run can complete without producing a report Oxplow reads.
+When report collection is configured, a missing or unreadable report may
+leave one notice per request in Alerts. The notice names the configured
+report command or the collector's reader error. Report collection and
+notice delivery are independent of the agent's testing decisions.
 
 **What isn't a test run.** The command is split into sub-commands on
 shell operators; a sub-command led by a read-only executable (`grep`,
@@ -484,23 +462,12 @@ general-purpose tool must not make.
 
 ## Nudge persistence
 
-PostToolUse nudges (report-less-run, and post-tool-use advisories) are
-**persisted**
-as well as returned to the agent, so a reviewer can see "what oxplow told the
-agent in this request" after the fact, and the persisted row is what delivers it
-(the next tool-hook response takes the thread's undelivered nudges). When `on_shell_run` decides to
-return a nudge, it also calls `persist_nudge` (best-effort — a write error is
-logged via `tracing::warn!` and swallowed, never failing the hook), which
-records a row in the `agent_nudge` table tagged with `kind`
-(`report-less-run` / `<namespace>/<advisory id>`), the message, and the trigger (the
-bash command); a view of `v_agent_nudge` re-runs on `DatasetsChanged`. Persistence sits **after** the
-durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
-stored. The store
-(`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the
-`v_agent_nudge` view and the oxplow-bundled nudges page are
-covered in [data-model.md](./data-model.md),
-[ipc-and-stores.md](./ipc-and-stores.md), and
-[agent-model.md](./agent-model.md) (Nudge persistence).
+Advisories and missing-report notices are persisted in `agent_nudge`.
+Agent-directed advisories can be delivered through a tool hook.
+Missing-report notices use the person audience and appear in Alerts.
+They are recorded after the durable dedup gate, so a repeated trigger
+does not add another notice.
+
 
 ## Adding a new observation kind
 

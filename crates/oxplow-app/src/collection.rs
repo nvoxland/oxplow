@@ -2282,49 +2282,45 @@ impl CollectionService {
         }) {
             return Ok(None);
         }
-        // The nudge below is paced per request (its turn's), else per
-        // thread. The runs above are already recorded.
-        let request = self.request_of_turn(origin.turn()).await;
-        // Nudge: the agent ran tests but this run regenerated no report
-        // oxplow could parse (so the request gets a command-only test-run
-        // and no coverage). Steer it to the
-        // report-emitting command — at most once per request. This is
-        // tool-agnostic: it keys only on "test run detected" + "no fresh
-        // report", never on which tool ran; the command it names comes
-        // from the project's own config.
-        //
-        // The project's own runner writing no report never got to the tests
-        // (a compile error, a timeout, a pipe cut short): naming the runner
-        // again adds nothing, so that run spends no nudge.
+        // Make missing report details visible to the person without putting
+        // instructions in the agent's next tool response.
         let produced_report = report.is_some() || coverage.is_some();
         let ran_the_runner = reads.unread.is_empty()
             && test_run_segment(bash.command, &test_patterns)
                 .is_some_and(|run| names_configured_runner(&cfg, &run));
-        if !produced_report && !ran_the_runner && self.mark_nudged(thread, request).await {
-            let msg = if reads.unread.is_empty() {
-                let root = self.worktree(thread).await;
-                // A test run's reports are tests and coverage: a linter's
-                // collector (a language pack's clippy) wires none of them.
-                let wired = self.report_collectors(&root).iter().any(|c| {
-                    matches!(
-                        c.spec.records,
-                        Some(
-                            oxplow_config::collectors::Records::Tests
-                                | oxplow_config::collectors::Records::Coverage
-                        )
+        if produced_report || ran_the_runner {
+            return Ok(None);
+        }
+        let message = if reads.unread.is_empty() {
+            let wired = self.report_collectors(&root).iter().any(|c| {
+                matches!(
+                    c.spec.records,
+                    Some(
+                        oxplow_config::collectors::Records::Tests
+                            | oxplow_config::collectors::Records::Coverage
                     )
-                });
-                report_nudge_message(&cfg, wired)
-            } else {
-                unread_reports_message(&reads.unread)
-            };
-            self.persist_nudge(
-                thread,
-                Raised::agent("report-less-run", &msg, bash.command),
-                origin,
-            )
-            .await;
-            return Ok(Some(msg));
+                )
+            });
+            report_nudge_message(&cfg, wired)
+        } else {
+            Some(unread_reports_message(&reads.unread))
+        };
+        if let Some(message) = message {
+            let request = self.request_of_turn(origin.turn()).await;
+            if self.mark_nudged(thread, request).await {
+                self.persist_nudge(
+                    thread,
+                    Raised {
+                        kind: "report-less-run",
+                        message: &message,
+                        trigger: bash.command,
+                        audience: oxplow_db::Audience::Person,
+                    },
+                    origin,
+                )
+                .await;
+                return Ok(Some(message));
+            }
         }
         Ok(None)
     }
@@ -3489,50 +3485,30 @@ fn names_configured_runner(cfg: &oxplow_config::TestingConfig, run: &str) -> boo
         .any(|c| !c.is_empty() && run.contains(&c))
 }
 
-/// The PostToolUse nudge shown when a detected test run produced no
-/// report oxplow could parse. Tool-agnostic: it names only
-/// the project's own configured command (or routes to oxplow's `configure` command),
-/// so it works for any current/future test tool without the hook knowing
-/// anything tool-specific. It doesn't repeat the agent's command back (the
-/// agent just wrote it), and with a `fastCommand` it names only that one:
-/// which tests to run, and whether to pay for the full run, is the agent's
-/// call.
-fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collectors: bool) -> String {
-    let configured = |c: Option<&str>| {
-        c.map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    };
-    if let Some(runner) =
-        configured(cfg.fast_command.as_deref()).or(configured(cfg.command.as_deref()))
-    {
-        format!(
-            "That test run wrote no report oxplow reads, so its results won't show in \
-             oxplow. `{runner}` writes one{}; run it in the foreground.",
-            if cfg.fast_command.is_some() {
-                " and takes a filter"
-            } else {
-                ""
-            }
-        )
-    } else if has_report_collectors {
-        "That test run wrote none of the reports this project's report collectors read. \
-         Run the command that writes them, and set `testing.command` in \
-         .oxplow/project.yaml to make it one step."
-            .to_string()
+/// A missing report notice for a project that has configured collection.
+fn report_nudge_message(
+    cfg: &oxplow_config::TestingConfig,
+    has_report_collectors: bool,
+) -> Option<String> {
+    let runner = [cfg.fast_command.as_deref(), cfg.command.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|command| !command.is_empty());
+    if let Some(runner) = runner {
+        Some(format!(
+            "Oxplow received no report from this test run. The project's report command is `{runner}`."
+        ))
     } else {
-        "That test run's results can't reach oxplow: this project reads no test \
-         reports. Run oxplow's `configure` slash command to wire this stack's report(s)."
-            .to_string()
+        has_report_collectors.then(|| {
+            "Oxplow received none of the reports this project's test collectors read.".to_owned()
+        })
     }
 }
 
-/// The report-less nudge when the run's collectors didn't count:
-/// why each didn't. Running the tests again changes none of it.
 fn unread_reports_message(unread: &[String]) -> String {
     format!(
-        "oxplow read none of that test run's reports: {}. Running the tests again won't \
-         change that.",
+        "Oxplow could not read this test run's reports. {}",
         unread.join("; ")
     )
 }
@@ -4036,7 +4012,7 @@ mod tests {
 
     #[test]
     fn report_nudge_names_configured_test_command() {
-        let msg = report_nudge_message(&testing(Some("bun run test:collect"), None), true);
+        let msg = report_nudge_message(&testing(Some("bun run test:collect"), None), true).unwrap();
         // Names the project's own command — tool-agnostic, no built-in
         // tool→command knowledge in the hook.
         assert!(msg.contains("bun run test:collect"), "{msg}");
@@ -4052,20 +4028,18 @@ mod tests {
         let msg = report_nudge_message(
             &testing(Some("bun run test:collect"), Some("bun run test:fast")),
             true,
-        );
+        )
+        .unwrap();
         assert!(msg.contains("`bun run test:fast`"), "{msg}");
         assert!(!msg.contains("test:collect"), "{msg}");
     }
 
     #[test]
-    fn report_nudge_routes_to_configure_without_profile() {
-        // Nothing reads reports → route to the agent-driven configure flow
-        // (which adapts to any tool).
-        let msg = report_nudge_message(&testing(None, None), false);
-        assert!(msg.contains("`configure` slash command"), "{msg}");
-        let with_collectors = report_nudge_message(&testing(None, None), true);
+    fn missing_report_notices_require_collection_configuration() {
+        assert!(report_nudge_message(&testing(None, None), false).is_none());
+        let with_collectors = report_nudge_message(&testing(None, None), true).unwrap();
         assert!(
-            with_collectors.contains("testing.command"),
+            with_collectors.contains("test collectors"),
             "{with_collectors}"
         );
     }
@@ -4080,7 +4054,7 @@ mod tests {
             (testing(None, None), true),
             (testing(None, None), false),
         ] {
-            let msg = report_nudge_message(&cfg, collectors);
+            let msg = report_nudge_message(&cfg, collectors).unwrap_or_default();
             assert!(!msg.contains(".context/"), "leaked repo path: {msg}");
         }
     }
@@ -7606,6 +7580,8 @@ mod tests {
         #[tokio::test]
         async fn the_report_less_run_nudge_fires_once_per_request() {
             let h = build(None).await;
+            h.service.config.write().unwrap().testing.fast_command =
+                Some("bun run test:fast".into());
             let thread = h.thread.value();
             h.service
                 .nudges
@@ -7644,6 +7620,8 @@ mod tests {
         #[tokio::test]
         async fn a_report_less_run_with_no_request_is_nudged_once_per_thread() {
             let h = build(None).await;
+            h.service.config.write().unwrap().testing.fast_command =
+                Some("bun run test:fast".into());
             let run = || async {
                 h.service
                     .on_shell_run(
@@ -7713,6 +7691,8 @@ mod tests {
             // The nudge is at most once per request — second no-report run
             // in the same turn returns None.
             let h = build(None).await;
+            h.service.config.write().unwrap().testing.fast_command =
+                Some("bun run test:fast".into());
             {
                 let mut cfg = h.service.config.write().unwrap();
                 cfg.testing.command = Some("bun run test:collect".into());
@@ -7766,6 +7746,13 @@ mod tests {
             let rows = h.nudges.list_for_thread("thr1").await.unwrap();
             assert_eq!(rows.len(), 1, "exactly one nudge persisted");
             assert_eq!(rows[0].kind, "report-less-run");
+            assert_eq!(rows[0].audience, oxplow_db::Audience::Person);
+            assert!(h
+                .nudges
+                .take_for_agent(&h.thread.to_string(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty());
             assert!(rows[0].message.contains("bun run test:collect"));
             assert_eq!(rows[0].trigger.as_deref(), Some("bun test --watch false"));
             assert_eq!(rows[0].request_id.as_deref(), Some("req1"));
@@ -7821,8 +7808,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn on_post_tool_use_routes_to_configure_when_no_collection_profile() {
-            // No collection block → nudge routes to oxplow's configure command.
+        async fn no_missing_report_notice_without_collection_configuration() {
             let h = build(None).await;
             // No test command and no report collectors by default.
             let result = h
@@ -7834,11 +7820,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let nudge = result.expect("nudge returned even without report collectors");
-            assert!(
-                nudge.contains("`configure` slash command"),
-                "nudge should route to the configure command when no profile exists; got: {nudge}"
-            );
+            assert!(result.is_none());
+            assert!(h.nudges.list_for_thread("thr1").await.unwrap().is_empty());
         }
 
         #[tokio::test]

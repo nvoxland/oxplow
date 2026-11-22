@@ -357,19 +357,9 @@ impl ServerHandler for OxplowMcp {
         // the default and assign.
         let mut info = ServerConfig::default();
         info.instructions = Some(
-            "Oxplow knows this project's work and code: tasks, requests, \
-             test runs and coverage, commits, metrics and knowledge pages, readable \
-             with `oxplow_query_sql` over the read-only `v_*` datasets (`v_dataset` lists \
-             them). Every write is a command (`run_command`).\n\n\
-             Answering the person: when they ask to see, list, compare or \
-             track something about the work or the code (\"show me\", \
-             \"which files\", \"how well\"), find a page that answers it \
-             (`oxplow_find_page`) and show it with `oxplow_show_page` (that \
-             page with params, or your own `spec`: a table, chart or tree). \
-             It opens beside the conversation, live; the person can save it \
-             as a knowledge page. `oxplow_run_page` reads one yourself, and \
-             `oxplow_get_open_page` is what they are looking at. Keep the \
-             prose around it short, and don't repeat the table as text."
+            "Query project data with `oxplow_query_sql` (`v_dataset` lists datasets). \
+             Use `run_command` for writes. `oxplow_find_page` finds pages. \
+             `oxplow_show_page` opens a page when useful."
                 .into(),
         );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -1077,15 +1067,14 @@ mod tests {
         assert!(info.capabilities.tools.is_some());
     }
 
-    /// Asked to "show me", an agent printed text. The
-    /// instructions every harness reads say to show an answer in the
-    /// person's thread.
+    /// Every MCP client gets the same brief description of the available tools.
     #[tokio::test]
-    async fn get_info_instructions_say_to_show_answers_in_the_thread() {
+    async fn get_info_instructions_briefly_describe_the_tools() {
         let (_proj, _svc, server) = boot().await;
         let instructions = server.get_info().instructions.unwrap_or_default();
         assert!(instructions.contains("oxplow_show_page"), "{instructions}");
         assert!(instructions.contains("oxplow_query_sql"), "{instructions}");
+        assert!(instructions.len() <= 256, "{instructions}");
     }
 
     #[tokio::test]

@@ -50,10 +50,7 @@ pub fn build_session_context_block(
     around: &Surroundings,
 ) -> String {
     let others = &around.others;
-    let mut s = String::from(
-        "<session-context>\n## Oxplow session context\n\n\
-         Oxplow is providing the agent's current workspace assignment. This note is refreshed after a session restart or when the assignment changes.\n\n",
-    );
+    let mut s = String::from("<session-context>\n## Oxplow session context\n\n");
     s.push_str(&format!(
         "- **Stream:** {} (`{}`)\n",
         stream.title, stream.id
@@ -146,8 +143,7 @@ const RUNTIME_TEXT: &str = "runtime_text";
 /// matches.
 fn skill_index_block(text: &oxplow_domain::agent::text::AgentText) -> String {
     let mut out = String::from(
-        "\n# oxplow skills\nBefore doing work one of these describes, call the oxplow MCP tool \
-         `oxplow_get_skill` with its name and follow what it says.\n",
+        "\n# oxplow skills\nUse `oxplow_get_skill` for help with a relevant Oxplow feature.\n",
     );
     for (name, description) in text.skill_index() {
         out.push_str(&format!("- {name}: {description}\n"));
@@ -280,7 +276,6 @@ mod tests {
         assert!(block.contains("**Worktree:** `/repo`"));
         assert!(block.contains("**Branch:** `main`"));
         assert!(block.contains("**Thread:** explore (`thr1`)"));
-        assert!(block.contains("after a session restart or when the assignment changes"));
         assert!(!block.contains("Access"), "{block}");
     }
 
@@ -322,8 +317,8 @@ mod tests {
                 "{prompt}"
             );
         }
-        assert!(oxplow_agent_text::WORKING_IN_OXPLOW.contains("end it with the question"));
         assert!(oxplow_agent_text::WORKING_IN_OXPLOW.contains("oxplow-runtime"));
+        assert!(oxplow_agent_text::WORKING_IN_OXPLOW.len() <= 512);
     }
 
     /// A project's instruction files are its harness's to read: the

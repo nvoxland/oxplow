@@ -51,8 +51,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   - `oxtask` (`oxtask`): the tasks store, oxplow's own task tracker: it fills `oxplow/task_record` (store `oxtask`) from its own SQLite file and holds the commands `oxtask.task.*`.
     It holds the opinion about how its tasks are worked, so bundled names none
     of its commands:
-    - **The task workflow**: the setting `tasks.workflow` (`off`,
-      `person_files`, `agent_tracks` the default, `custom`) with
+    - **The task workflow**: the setting `tasks.workflow` (`off` by default,
+      `person_files`, `agent_tracks`, `custom`) with
       `tasks.definitionOfDone` (free text), in oxtask's own `configuration:`
       (namespace `oxtask`, not `oxplow`'s). `oxtask.tasks.set_workflow
       { workflow?, definition_of_done? }` (a script: it merges into the

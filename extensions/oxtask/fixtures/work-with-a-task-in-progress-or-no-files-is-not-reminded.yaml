@@ -2,6 +2,7 @@
 # files, and while the thread has a task in progress.
 requires: [oxplow-bundled, oxtask]
 given:
+  - { command: oxtask.tasks.set_workflow, input: { workflow: agent_tracks } }
   - observe: { turn: { prompt: What does this do? } }
 when: { sql: "SELECT count(*) AS n FROM v_agent_nudge" }
 expect: { rows: [{ n: 0 }] }

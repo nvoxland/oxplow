@@ -2146,6 +2146,10 @@ the rows through `v_token_usage`: the bundled `task-tokens` page
 (`oxplow/task-detail.sections` slot), foundation's Thread activity (per
 turn) and the usage pages. Tables: [data-model.md](./data-model.md).
 
+MCP initialization briefly describes how to query data, run commands
+and open pages. Tool availability is separate from how the agent chooses
+to answer the person.
+
 ### Collection command and skill
 
 The `configure` command (`crates/oxplow-agent-text/assets/configure.md`;
@@ -2154,24 +2158,23 @@ project's test tooling to write standard-format reports at stable paths,
 then records the `testing:` block in `.oxplow/project.yaml` and one report
 collector per report in the project's extension
 (`.oxplow/extensions/project/extension.yaml`). The `oxplow-collection`
-skill loads when running tests, on questions about coverage, and on
-`configure`; it tells the agent never to parse or report coverage itself,
-because oxplow parses the report. The ingestion side is
-[collection.md](./collection.md). When the PostToolUse path sees a test
-run whose configured report wasn't refreshed, it leaves a one-shot nudge
-steering the agent to the report-emitting command
-([collection.md](./collection.md) "Report-less-run nudge").
+skill describes how report collection works when the project wants it.
+A missing report can leave a one-shot notice for the person in Alerts.
+The integration makes the project's test commands available through
+configuration. Repository guidance can describe when to use them.
+[Collection](./collection.md)
 
 ### Nudge persistence
 
-The nudges — the report-less-run nudge and any advisory hit (kind
-`<namespace>/<advisory id>`), whatever its trigger — are written by pump
+The notices and advisory hits (kind
+`<namespace>/<advisory id>`) are written by pump
 reactors (`collection`, `advisories.post_tool` in
 `post_tool_reactors.rs`; prompt and turn-end advisories too) to the
 `agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`) with
 the kind, message, trigger, turn and **cause** (the event, so a
-redelivered event can't fire the same kind twice). **The persisted nudge
-is the delivery:** `post_tool_context` settles the two post-tool reactors
+redelivered event can't fire the same kind twice). Missing-report notices
+use the person audience. For agent-directed advisories,
+`post_tool_context` settles the two post-tool reactors
 (up to 2.5 s), then takes the thread's undelivered nudges
 (`take_for_agent`, which stamps `delivered_at`; oxplow's own kinds before
 advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
