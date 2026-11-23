@@ -1845,7 +1845,7 @@ datasets:
     - { name: "spends", type: "INT", doc: "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)" }
     - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
-  version: 7
+  version: 8
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   fields:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
@@ -1862,7 +1862,7 @@ datasets:
     - { name: "dry_run", type: "TEXT", doc: "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run." }
     - { name: "decision", type: "TEXT", doc: "`pending`, `approved`, `declined` or `superseded`." }
     - { name: "decided_at", type: "TEXT", doc: "When it was decided or superseded." }
-    - { name: "command_run_id", type: "INTEGER", doc: "The approving run's command audit row." }
+    - { name: "command_run_id", type: "INTEGER", doc: "The approving run's command run row." }
     - { name: "superseded_by", type: "INTEGER", doc: "The proposal that replaced it." }
   tests:
     - { not_null: id }

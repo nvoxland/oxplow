@@ -1,4 +1,4 @@
-//! Audited intent/cancellation and private recorded result operations. Extension
+//! Recorded intent/cancellation and private recorded result operations. Extension
 //! declarations bind these to their own package; inputs contain no owner or grant.
 
 use super::{ops::Op, util::schema, Handler, HandlerOutput};

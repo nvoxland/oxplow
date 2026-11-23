@@ -51,7 +51,7 @@ fn parse_outcome(s: &str) -> Result<Outcome, DomainError> {
     })
 }
 
-/// One audited run.
+/// One recorded run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct CommandRun {
     pub id: i64,
@@ -258,14 +258,14 @@ fn row_to_command_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandRun> {
     })
 }
 
-const AUDIT_WITH_RUN: &str =
+const COMMAND_RUN_SELECT: &str =
     "SELECT a.*, r.started_at AS at, r.actor_kind, r.actor_id, r.thread_id, r.session_id,
             r.outcome, r.error, r.scopes_json
      FROM command_run a JOIN contribution_run r ON r.run_id = a.run_id";
 
 pub fn get_tx(conn: &Connection, id: i64) -> Result<Option<CommandRun>, DomainError> {
     conn.query_row(
-        &format!("{AUDIT_WITH_RUN} WHERE a.id = ?1"),
+        &format!("{COMMAND_RUN_SELECT} WHERE a.id = ?1"),
         params![id],
         row_to_command_run,
     )
@@ -276,7 +276,7 @@ pub fn get_tx(conn: &Connection, id: i64) -> Result<Option<CommandRun>, DomainEr
 /// Newest first.
 pub fn list_recent_tx(conn: &Connection, limit: usize) -> Result<Vec<CommandRun>, DomainError> {
     let mut stmt = conn
-        .prepare(&format!("{AUDIT_WITH_RUN} ORDER BY a.id DESC LIMIT ?1"))
+        .prepare(&format!("{COMMAND_RUN_SELECT} ORDER BY a.id DESC LIMIT ?1"))
         .map_err(map_sql_err)?;
     let rows = stmt
         .query_map(params![limit as i64], row_to_command_run)
@@ -330,7 +330,7 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn audit_rows_round_trip_and_mark_undone_once() {
+    async fn command_run_rows_round_trip_and_mark_undone_once() {
         let db = Database::in_memory();
         let store = SqliteCommandRunStore::new(db.clone());
         let event = EventId::generate();
@@ -405,7 +405,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::Invariant(_)), "{err:?}");
-        // A denied run is audited too, with no inverse.
+        // A denied run is recorded too, with no inverse.
         db.transaction(|tx| {
             insert_tx(
                 tx,

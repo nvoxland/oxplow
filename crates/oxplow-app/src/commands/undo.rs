@@ -1,4 +1,4 @@
-//! Undo (`.context/commands.md` "The pipeline"): the inverse an audited run
+//! Undo (`.context/commands.md` "The pipeline"): the inverse an recorded run
 //! recorded, run through the same pipeline; the row is claimed with it so
 //! two undos — or two approvals — can't both apply.
 
@@ -7,7 +7,7 @@ use oxplow_domain::run::{Mode, RunContext};
 
 impl CommandBus {
     /// Apply the inverse recorded for `command_run_id`, as `actor`, through the
-    /// normal pipeline (policy, confirmation and audit included). The
+    /// normal pipeline (policy, confirmation and command run included). The
     /// original row is marked `undone_by` the new run.
     pub async fn undo(
         &self,
@@ -107,7 +107,7 @@ impl CommandBus {
 /// Marking an undo or an approval failed with `e`: when the row was
 /// undone, or the proposal decided, by a concurrent run (an `Invariant` /
 /// `Invalid` from the store), the `Invalid` this run answers — not a failed
-/// run, so it is never audited; anything else (storage) passes through.
+/// run, so it is never recorded; anything else (storage) passes through.
 pub(super) fn lost_race(
     origin: &RunOrigin,
     e: oxplow_domain::DomainError,
@@ -155,7 +155,7 @@ pub(super) fn finish_undo_claim_tx(
     .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
 }
 
-/// The inverse of an audited run, if it can still be applied.
+/// The inverse of an recorded run, if it can still be applied.
 pub(super) fn undoable(row: &CommandRun) -> Result<CommandCall, CommandError> {
     if row.outcome != Outcome::Ok {
         return Err(CommandError::Failed {

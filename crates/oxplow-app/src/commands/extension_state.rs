@@ -1,5 +1,5 @@
 //! Native operations for the calling contribution's private namespace. Reads
-//! are unaudited; writes audit only metadata and return the resulting stamp.
+//! leave no input or result; writes record only metadata and return the resulting stamp.
 
 use std::sync::Arc;
 

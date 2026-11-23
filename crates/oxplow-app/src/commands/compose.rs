@@ -5,7 +5,7 @@
 //!
 //! - Every call runs in the transaction (a `Tx` command, a composite whose
 //!   calls all do): one run in one transaction (`steps::run_composed`) —
-//!   all or nothing, one audit row and `command.executed` with the
+//!   all or nothing, one command run row and `command.executed` with the
 //!   children's events caused by it, undone by the inverses of the
 //!   children that changed something, reversed.
 //! - Any call leaves it (an `External` command, `task.*` on another
@@ -122,7 +122,7 @@ pub struct Compose {
     pub compose: Arc<Composer>,
     /// Called after all its steps landed (an extension script's `finish`).
     pub finish: Option<Arc<Finisher>>,
-    /// Native API result: keep child details in audit, return only the finished value.
+    /// Native API result: keep child details in the run record, return only the finished value.
     pub(crate) transparent_result: bool,
 }
 
@@ -165,7 +165,7 @@ pub struct SequenceCall {
 }
 
 /// `SequenceInput`'s schema, with its example input: renaming two threads,
-/// one audited run.
+/// one recorded run.
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
@@ -190,13 +190,13 @@ fn sequence_schema() -> Value {
 }
 
 /// `oxplow.command.sequence`'s spec: also what an extension effect's run is
-/// audited as (`effect_triggers`).
+/// recorded as (`effect_triggers`).
 pub fn sequence_spec() -> CommandSpec {
     CommandSpec {
         output_schema: None,
         id: SEQUENCE.into(),
         summary: "Run several commands as one, each one's own policy and confirmation \
-                  checked before any runs; the run has one audit row. In oxplow's own \
+                  checked before any runs; the run has one command run row. In oxplow's own \
                   records they run in one transaction and undo together; when one goes to \
                   an external system they run in order, each landing as it runs, with no undo."
             .into(),
@@ -327,7 +327,7 @@ mod secret_recording_tests {
     use oxplow_domain::{Actor, Envelope};
     use serde_json::json;
 
-    const MARKER: &str = "secret-audit-marker-do-not-record";
+    const MARKER: &str = "secret-record-marker-do-not-record";
 
     fn spec(id: &str, atomicity: Atomicity) -> CommandSpec {
         let mut spec = sequence_spec();
@@ -360,11 +360,14 @@ mod secret_recording_tests {
     }
 
     async fn assert_no_secret_history(svc: &crate::Services) {
-        let audits = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
+        let command_runs = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
             .list_recent(100)
             .await
             .unwrap();
-        assert!(!format!("{audits:?}").contains(MARKER), "{audits:?}");
+        assert!(
+            !format!("{command_runs:?}").contains(MARKER),
+            "{command_runs:?}"
+        );
         let events = svc.event_log_store.read_after(0, 1000).await.unwrap();
         assert!(!format!("{events:?}").contains(MARKER));
         assert!(!events
@@ -374,7 +377,7 @@ mod secret_recording_tests {
     }
 
     /// The authorized read stays useful, while arbitrary transformations of
-    /// its value cannot enter child audit inputs, results, events or undo.
+    /// its value cannot enter child run inputs, results, events or undo.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_secret_read_derived_composite_keeps_values_out_of_history() {
         for external in [false, true] {

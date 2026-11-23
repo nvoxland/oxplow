@@ -52,10 +52,10 @@ pub enum Lifecycle {
     Experimental,
 }
 
-/// Whether the handler runs inside the bus's transaction (with the audit
+/// Whether the handler runs inside the bus's transaction (with the command run
 /// row and `command.executed`), or outside it, against a system the bus
 /// doesn't own — a VCS, a provider process, a collector's script — and is
-/// audited after it returns (`External`). A `Dispatch` command decides
+/// recorded after it returns (`External`). A `Dispatch` command decides
 /// per input (the `task.*` verbs: oxplow's own items in the
 /// transaction, another provider's through its process) and then runs
 /// exactly as one or the other. A test lists the `External` and the
@@ -95,26 +95,26 @@ pub enum Access {
     View,
     /// Reads, changes nothing (`sql.read`).
     Read,
-    /// Changes oxplow's own records (filing and editing tasks): audited,
+    /// Changes oxplow's own records (filing and editing tasks): recorded,
     /// open to any thread.
     Record,
     /// Changes something outside oxplow's records — files, git, processes,
-    /// the configuration: audited, and an agent's or job's run must be
+    /// the configuration: recorded, and an agent's or job's run must be
     /// bound to an open thread (the worktree it changes).
     #[default]
     Write,
 }
 
 impl Access {
-    /// A `View` or a `Read`: runs without an audit row or a
-    /// `command.executed` event (a polling agent must not fill the log), on
-    /// a read snapshot, can't ask for a confirmation, and any thread may
-    /// run it.
+    /// A `View` or a `Read`: runs without a `command.executed` event (a
+    /// polling agent must not fill the log) and leaves a command run row
+    /// with no input or result, on a read snapshot, can't ask for a
+    /// confirmation, and any thread may run it.
     pub fn reads_only(self) -> bool {
         matches!(self, Access::View | Access::Read)
     }
 
-    /// A `Record` or a `Write`: audited, and logs `command.executed`.
+    /// A `Record` or a `Write`: recorded, and logs `command.executed`.
     pub fn records(self) -> bool {
         !self.reads_only()
     }
@@ -179,7 +179,7 @@ pub struct CommandSpec {
     /// Top-level input fields its record leaves out — a file's content —
     /// kept as their size (`{ "omitted_bytes": n }`). The reserved `*`
     /// marker omits the entire input, including non-object inputs: the run is still
-    /// audited, the audit log doesn't grow by every file saved.
+    /// recorded, the command run log doesn't grow by every file saved.
     #[serde(default)]
     pub unrecorded: Vec<String>,
 }
@@ -892,7 +892,7 @@ impl Actor {
         }
     }
 
-    /// The `source` an event or audit row records: `human`, `agent:thr3`,
+    /// The `source` an event or command run row records: `human`, `agent:thr3`,
     /// `oxplow:oxplow/page?page=acme/blocked`, `system`, `effect:acme/notify`.
     pub fn source(&self) -> String {
         match self {
@@ -926,7 +926,7 @@ impl Actor {
         }
     }
 
-    /// The id part of `source`, for the audit's `actor_id`.
+    /// The id part of `source`, for the command run's `actor_id`.
     pub fn id(&self) -> Option<String> {
         match self {
             Actor::Agent {
@@ -1615,7 +1615,7 @@ mod tests {
         );
     }
 
-    /// A view runs as a read does; a record is audited but open to any
+    /// A view runs as a read does; a record is recorded but open to any
     /// thread; only a write needs an open thread.
     #[test]
     fn what_each_access_asks_of_a_run() {

@@ -963,9 +963,8 @@ mod tests {
     }
 
     /// The input is checked: an unknown field and a bad value name their
-    /// field; an action session isn't built; a harness nothing registers,
-    /// or the project hasn't enabled, or the retired `chat` kind or `acp`
-    /// harness, is refused.
+    /// field; a harness nothing registers, or the project hasn't enabled, or the
+    /// retired `acp` harness, is refused.
     #[tokio::test]
     async fn the_input_is_checked() {
         let fx = services_with_thread().await;
@@ -1030,7 +1029,7 @@ mod tests {
     }
 
     /// Closing needs no confirmation: it closes the slot and its open turn
-    /// in one run, audited with its `command.executed`, and undoing it
+    /// in one run, recorded with its `command.executed`, and undoing it
     /// reopens the slot (its process resumes the saved conversation when
     /// its tab mounts). Reopening an open session, or one its thread's
     /// close took, is refused.
@@ -1072,7 +1071,7 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        let audit = fx
+        let run_row = fx
             .svc
             .commands
             .command_run_store()
@@ -1080,12 +1079,12 @@ mod tests {
             .await
             .unwrap()
             .remove(0);
-        assert_eq!(Some(audit.id), out.command_run_id);
+        assert_eq!(Some(run_row.id), out.command_run_id);
         let events = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
         assert!(events
             .iter()
             .any(|e| e.envelope.event_type == "command.executed"
-                && e.envelope.payload["command_run_id"] == audit.id));
+                && e.envelope.payload["command_run_id"] == run_row.id));
         assert!(events
             .iter()
             .any(|e| e.envelope.event_type == "agent.status.changed"

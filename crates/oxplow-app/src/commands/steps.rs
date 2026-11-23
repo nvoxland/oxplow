@@ -11,7 +11,7 @@
 //! 2. **Run in order**, each landing as it runs: a step inside oxplow in
 //!    its own transaction, an external one through its system. The first
 //!    failure stops the run; what landed before it stands.
-//! 3. **Recorded once**: one audit row and one `command.executed` naming
+//! 3. **Recorded once**: one command run row and one `command.executed` naming
 //!    every step that landed (and the one that failed), the steps' events
 //!    caused by it. Not undoable: a system outside the bus can't be rolled
 //!    back with it.
@@ -264,7 +264,7 @@ impl Router<'_> {
             .map_err(|reason| CommandError::Denied { reason })?;
         let composing = run.child(None, oxplow_domain::run::Mode::Pure);
         let composition = (compose.compose)(self.composing, &composing, input);
-        // Read taint survives a composer failure and reaches routing, audit,
+        // Read taint survives a composer failure and reaches routing, the command run,
         // previews and every call derived from the returned values.
         run.trace().add(&composing.trace().summary());
         let composition = composition?;
@@ -1062,7 +1062,7 @@ impl CommandBus {
             }
         }
         // Nothing landed: the run failed like any other, unrecorded but
-        // for its audit row (a late confirmation isn't audited at all).
+        // for its command run row (a late confirmation isn't recorded at all).
         if landed.is_empty() {
             if let Some((_, err)) = failure {
                 self.release(&origin).await;

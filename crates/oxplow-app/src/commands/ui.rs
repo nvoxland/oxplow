@@ -57,7 +57,7 @@ pub struct ReportErrorInput {
     /// Captured stdout: stored as the event's `output` body.
     #[serde(default)]
     pub stdout: Option<String>,
-    /// A command whose run failed: the audit row that recorded it
+    /// A command whose run failed: the command run row that recorded it
     /// (`command_run.id`, the window's IPC error says it).
     #[serde(default)]
     pub command_run_id: Option<i64>,

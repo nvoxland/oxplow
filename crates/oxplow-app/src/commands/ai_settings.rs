@@ -301,7 +301,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        let audited = fx
+        let recorded = fx
             .svc
             .sql
             .query_sql(
@@ -312,8 +312,8 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(audited.rows.len(), 1);
-        let error = format!("{:?}", audited.rows[0][0]);
+        assert_eq!(recorded.rows.len(), 1);
+        let error = format!("{:?}", recorded.rows[0][0]);
         assert!(error.contains("private input"), "{error}");
         assert!(!error.contains("sk-secret-123"), "{error}");
 

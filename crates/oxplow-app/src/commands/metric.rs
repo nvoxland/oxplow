@@ -4,7 +4,7 @@
 //!
 //! - `oxplow.metric.record` asserts a number oxplow didn't compute (a CI import,
 //!   an agent's report) as a fact on the metric's measure, in the bus's
-//!   transaction with its audit.
+//!   transaction with its command run.
 //! - `oxplow.metric.rebuild` runs every fact collector's whole-tree baseline. It
 //!   drives snapshot captures and collector scripts — systems the bus
 //!   doesn't own — so it is `External`. One collector runs now through
@@ -413,9 +413,9 @@ mod tests {
     }
 
     /// P4.8: an asserted fact lands on the metric's measure with
-    /// its subject, in the same transaction as the run's audit row.
+    /// its subject, in the same transaction as the run's command run row.
     #[tokio::test]
-    async fn record_stores_an_asserted_fact_and_audits_the_run() {
+    async fn record_stores_an_asserted_fact_and_records_the_run() {
         let (svc, _dir) = services().await;
         svc.fact_store
             .upsert_spec(oxplow_db::NewMetricSpec::base(
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(facts[0].source, "agent-reported");
         assert_eq!(facts[0].subject_kind.as_deref(), Some("ci/suite"));
         assert_eq!(facts[0].subject.as_deref(), Some("oxplow:ci/suite?id=unit"));
-        let audited: i64 = svc
+        let recorded: i64 = svc
             .db
             .read(|tx| {
                 tx.query_row(
@@ -460,7 +460,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(audited, 1);
+        assert_eq!(recorded, 1);
     }
 
     /// an agent's assertion is its thread's, made in its open

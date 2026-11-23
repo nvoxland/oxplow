@@ -8,9 +8,9 @@
 //! through the same pipeline.
 //!
 //! A handler is either `Tx` (runs inside the bus's transaction, so its
-//! writes, the event and the audit commit together) or `External` (runs
+//! writes, the event and the command run commit together) or `External` (runs
 //! outside it, against a system the bus doesn't own — a VCS, a provider
-//! process, a gauge script — and is audited after it returns).
+//! process, a gauge script — and is recorded after it returns).
 //! [`CommandBus::external_commands`] is pinned by a test, so every
 //! `External` command is a reviewed choice, not a shortcut.
 
@@ -95,7 +95,7 @@ use undo::{finish_undo_claim_tx, lost_race};
 pub struct HandlerOutput {
     /// Returned to the caller (`run_command`'s result).
     pub result: Value,
-    /// Native composite response; the full result above is still audited.
+    /// Native composite response; the full result above is still recorded.
     pub caller_result: Option<Value>,
     /// The call that undoes this run; `None` for a command that declares
     /// `undoable: false`, or when there is nothing to undo.
@@ -146,7 +146,7 @@ pub struct TxCtx<'a> {
     /// learns only while running that a confirmation is needed — a
     /// composite whose child asks (`steps::run_composed`) — checks it
     /// and raises `NeedsConfirmation`, which the bus treats as step 4
-    /// would: rolled back, nothing audited.
+    /// would: rolled back, nothing recorded.
     pub confirmed: bool,
     /// Step 3's gate: whether the agent's thread may write (it is open);
     /// `None` for a person, the system, or a command the gate doesn't
@@ -158,7 +158,7 @@ pub struct TxCtx<'a> {
     /// overflows (a command that composes itself).
     pub depth: usize,
     /// The scopes the run has called: shared by the runs
-    /// nested in it, recorded on its audit row.
+    /// nested in it, recorded on its command run row.
     pub trace: &'a oxplow_domain::scope::ScopeTrace,
 }
 
@@ -253,7 +253,7 @@ pub trait ProviderRouter: Send + Sync {
 pub enum Handler {
     /// Runs inside the bus's transaction.
     Tx(Arc<TxHandler>),
-    /// Runs against a system the bus doesn't own; the bus audits it after
+    /// Runs against a system the bus doesn't own; the bus command_runs it after
     /// it returns.
     External(Arc<ExternalHandler>),
     /// A composite (`compose.rs`): says which calls an input runs; the bus
@@ -517,7 +517,7 @@ impl Command {
 pub type WriteGate =
     Arc<dyn Fn(oxplow_domain::ThreadId) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
 
-/// What a run is, beyond the call itself: the undo of an audited run, or
+/// What a run is, beyond the call itself: the undo of an recorded run, or
 /// the approval of a proposal. Either is marked in the run's own
 /// transaction (a `Tx` handler) or claimed before it (an `External` one).
 impl crate::extension::extensions::RunningCommands for CommandBus {
@@ -1235,7 +1235,7 @@ impl CommandBus {
         .await
     }
 
-    /// [`Self::run`] as `origin`: the undo of an audit row, or a person's
+    /// [`Self::run`] as `origin`: the undo of a command run row, or a person's
     /// approval of a proposal. The row is marked (undone; approved) in the
     /// same transaction as the run (a `Tx` handler) or claimed before it
     /// (an `External` one, released if the run fails), so two undos of one
@@ -1489,7 +1489,8 @@ impl CommandBus {
         // 5a. A read records its run without an execution event.
         if spec.access.reads_only() {
             let read = self.run_read(&resolved, run, input).await;
-            self.ran_unaudited(run, &spec.id, read.as_ref().err()).await;
+            self.ran_without_event(run, &spec.id, read.as_ref().err())
+                .await;
             return read.map(Flow::Done);
         }
         // 5'. A composite's steps run outside one transaction: each lands
@@ -1615,7 +1616,7 @@ impl CommandBus {
                         };
                         if let Err(e) = marked {
                             // An undo or approval that lost a race: not a
-                            // failed run, so it leaves no audit row.
+                            // failed run, so it leaves no command run row.
                             return Err(TxError::Aborted(Abort::Lost(lost_race(&origin_tx, e)?)));
                         }
                         if let RunOrigin::Approval(id) = origin_tx {
@@ -1634,7 +1635,7 @@ impl CommandBus {
                 match ran {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
                     Err(TxError::Aborted(Abort::Unchanged(out))) => {
-                        self.ran_unaudited(run, &spec.id, None).await;
+                        self.ran_without_event(run, &spec.id, None).await;
                         return Ok(Flow::Done(unrecorded(*out)));
                     }
                     Err(TxError::Aborted(Abort::Lost(e))) => return Err(e),
@@ -1672,7 +1673,7 @@ impl CommandBus {
     }
 
     /// An External handler's run: after the bus released the generation,
-    /// then audited and settled like any other.
+    /// then recorded and settled like any other.
     async fn run_external(&self, external: ExternalRun) -> Result<CommandOutcome, CommandError> {
         let ExternalRun {
             command,
@@ -1690,7 +1691,7 @@ impl CommandBus {
         let outcome = async {
             self.claim(&origin).await?;
             // The command's own run: what it starts (a collector run,
-            // a provider's `host/call`s) is part of the run audited.
+            // a provider's `host/call`s) is part of the run recorded.
             let invocation = Invocation {
                 run: run.clone(),
                 confirmed,
@@ -1752,7 +1753,7 @@ impl CommandBus {
             }
             // A confirmation a handler raised while running (a composite
             // whose child asks) is step 4's answer, late: rolled back,
-            // nothing audited — a person is asked, an agent's run proposed.
+            // nothing recorded — a person is asked, an agent's run proposed.
             Err(CommandError::NeedsConfirmation { preview }) => {
                 let prepared = Prepared { command, resolved };
                 Err(self
@@ -1775,7 +1776,12 @@ impl CommandBus {
     }
 
     /// Record a read or unchanged command without a `command.executed` event.
-    async fn ran_unaudited(&self, run: &RunContext, command: &str, failed: Option<&CommandError>) {
+    async fn ran_without_event(
+        &self,
+        run: &RunContext,
+        command: &str,
+        failed: Option<&CommandError>,
+    ) {
         let (ended, error) = match failed {
             None => (Outcome::Ok, None),
             Some(e) => (
@@ -1809,7 +1815,7 @@ impl CommandBus {
             })
             .await
         {
-            tracing::warn!(error = %e, "recording an unaudited run failed");
+            tracing::warn!(error = %e, "recording a run without an event failed");
         }
     }
 
@@ -1846,7 +1852,7 @@ impl CommandBus {
 
     /// Step 5 for a command that only reads (`View` / `Read`): the handler
     /// on a plain connection, nothing recorded. It must not write (it isn't
-    /// audited).
+    /// recorded).
     async fn run_read(
         &self,
         resolved: &Resolved,
@@ -1859,7 +1865,7 @@ impl CommandBus {
                 let run = run.clone();
                 let vocabulary = self.log.vocabulary().clone();
                 // A read snapshot, always rolled back: a reading handler's
-                // stray write can't land (it isn't audited).
+                // stray write can't land (it isn't recorded).
                 self.db
                     .read_or(move |tx| {
                         let ctx = TxCtx {

@@ -282,7 +282,7 @@ mod tests {
     }
 
     /// Over a running server: the rename is written into the worktree,
-    /// logged, audited and undone by putting the file back.
+    /// logged, recorded and undone by putting the file back.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_rename_writes_the_servers_edits_and_undoes() {
         use oxplow_domain::Actor;

@@ -1,6 +1,6 @@
 //! The files of a stream's worktree as commands (`files.write`): `save`
 //! (what the editor's Save writes), `create`, `create_directory`, `rename`
-//! and `delete`. Each is `External` (the worktree), audited like any
+//! and `delete`. Each is `External` (the worktree), recorded like any
 //! write, and logs what it did for whatever should react (`file.saved`,
 //! `file.created`, `file.directory_created`, `file.renamed`,
 //! `file.deleted`: an effect `on: [file.saved]`; the window, which fixes
@@ -348,10 +348,10 @@ mod tests {
     use oxplow_domain::Actor;
     use serde_json::json;
 
-    /// Save writes the file and is audited — its content left out of the
+    /// Save writes the file and is recorded — its content left out of the
     /// record, its size kept — and logs `file.saved` caused by the run.
     #[tokio::test(flavor = "multi_thread")]
-    async fn save_writes_is_audited_without_its_content_and_logs_file_saved() {
+    async fn save_writes_is_recorded_without_its_content_and_logs_file_saved() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0]
             .id
@@ -372,7 +372,7 @@ mod tests {
             std::fs::read_to_string(fx._dir.path().join("notes.txt")).unwrap(),
             "hello"
         );
-        let audit = fx
+        let run_row = fx
             .svc
             .commands
             .command_run_store()
@@ -381,7 +381,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            audit.input,
+            run_row.input,
             json!({ "stream": stream, "path": "notes.txt", "content": { "omitted_bytes": 5 } })
         );
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
@@ -634,7 +634,7 @@ mod tests {
 
     /// An agent's Save — `oxplow.editor.save`, which the window does,
     /// writing the file with `oxplow.file.save` for the call — runs as the
-    /// agent: audited to it, not to the person at the window.
+    /// agent: recorded to it, not to the person at the window.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_save_the_window_does_for_an_agent_runs_as_the_agent() {
         use crate::events::OxplowEvent;
@@ -682,7 +682,7 @@ mod tests {
             .await
             .unwrap();
         let saved = window.await.unwrap();
-        let audit = fx
+        let run_row = fx
             .svc
             .commands
             .command_run_store()
@@ -691,10 +691,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            audit.actor_kind,
+            run_row.actor_kind,
             oxplow_domain::events::schema::ActorKind::Agent
         );
-        assert_eq!(audit.actor_id, Some(fx.thread.to_string()));
+        assert_eq!(run_row.actor_id, Some(fx.thread.to_string()));
     }
 
     /// A person saves in any stream; an agent only in its own (its tools'

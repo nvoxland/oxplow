@@ -2,7 +2,7 @@
 //! (`.context/extensions-permissions.md` "Store services"): commands a
 //! script composes, so they run after policy and confirmation, never inside
 //! `scope()`. Each runs as the composing extension and refuses any other
-//! caller; its private values stay out of the audit.
+//! caller; its private values stay out of the command run.
 
 use std::sync::Arc;
 

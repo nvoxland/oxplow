@@ -11,8 +11,8 @@ impl CommandBus {
     /// (`Actor::proposes`) is kept for a person instead: dry-run (a `Tx` handler, confirmed, in a rolled-back
     /// transaction — what it would have done; an `External` one never
     /// runs), then the proposal and `command.proposed` in one transaction,
-    /// and `Proposed`. A dry run that fails is the run's failure, audited
-    /// like one. No audit row for a proposal: nothing ran.
+    /// and `Proposed`. A dry run that fails is the run's failure, recorded
+    /// like one. No command run row for a proposal: nothing ran.
     pub(super) async fn unconfirmed(
         &self,
         run_ctx: &RunContext,
@@ -49,7 +49,7 @@ impl CommandBus {
         // Proposals retain replayable inputs in a published read dataset.
         // An operation's private fields must never enter that storage. A
         // direct confirmed human invocation can use the ordinary redacted
-        // audit path; unattended callers cannot retain a payload for approval.
+        // command run path; unattended callers cannot retain a payload for approval.
         if private_configuration
             || spec
                 .unrecorded
@@ -229,7 +229,7 @@ impl CommandBus {
 
     /// A person approves proposal `id`: its command runs as them,
     /// confirmed, through the whole pipeline, and the proposal is marked
-    /// approved with the run's audit row (and `command.approved` logged) in
+    /// approved with the run's command run row (and `command.approved` logged) in
     /// the run's own transaction. A run that fails leaves it pending.
     /// Approving is a person's only.
     pub async fn approve(&self, actor: &Actor, id: i64) -> Result<CommandOutcome, CommandError> {
@@ -407,10 +407,10 @@ mod secret_tests {
             .await
             .unwrap();
         assert!(proposals.is_empty());
-        let audits = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
+        let command_runs = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(100)
             .await
             .unwrap();
-        assert!(!format!("{audits:?}").contains("rehearsal-secret-marker"));
+        assert!(!format!("{command_runs:?}").contains("rehearsal-secret-marker"));
     }
 }

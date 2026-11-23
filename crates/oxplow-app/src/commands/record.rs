@@ -53,8 +53,8 @@ pub async fn tracking_failed_run<F: std::future::Future>(fut: F) -> (F::Output, 
 }
 
 impl CommandBus {
-    /// Audit a run that wrote nothing (invalid input, a denied invoker, a
-    /// failed handler). Best effort: an audit failure must not mask the
+    /// Record a run that wrote nothing (invalid input, a denied invoker, a
+    /// failed handler). Best effort: a recording failure must not mask the
     /// error being reported.
     pub(super) async fn record_unapplied(
         &self,
@@ -108,7 +108,7 @@ impl CommandBus {
         }
     }
 
-    /// Record an `External` run whose effects already happened: the audit
+    /// Record an `External` run whose effects already happened: the command run
     /// row and `command.executed` (and, for an undo, the claimed row's
     /// real `undone_by`). If recording fails, the run still happened — it
     /// is reported as done and unrecorded (logged at error level), never
@@ -211,7 +211,7 @@ pub(super) fn command_error(e: TxError<CommandError>) -> CommandError {
 /// How a run's transaction ended short of recording it, besides the
 /// database's own errors (`TxError::Storage`, busy ones retried).
 pub(super) enum Abort {
-    /// The handler failed: rolled back, then audited as the failure.
+    /// The handler failed: rolled back, then recorded as the failure.
     Failed(CommandError),
     /// An undo or approval lost its race: nothing ran; no command detail row.
     Lost(CommandError),
