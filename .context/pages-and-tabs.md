@@ -965,7 +965,7 @@ an extension is a `configChanged`, so its panel appears or leaves at once.
 
 The person's layout — order and group (drag the ⠿ handle), collapsed (the
 chevron), hidden (right-click a header → Hide Panel, or drop it on Remove;
-View ▸ Left Rail brings one back) — is in the local table `panel_layout` (never the repo;
+View ▸ Sidebar Panels brings one back) — is in the local table `panel_layout` (never the repo;
 data-model.md): three lists, the selected thread's, its stream's and the
 project's, and the rail draws them in that order, top to bottom. Each
 panel is in one of them for a viewer; a drop beside a panel puts it in
@@ -987,9 +987,12 @@ bubble or layers, hover "Only in this thread" / "Only in this stream",
 `rail-section-shown-in-<id>`); a project's says nothing. A header's
 right-click menu has **Show in ▸** This thread / This stream / This
 project (the current one checked; `movePanelToGroup`), then Hide Panel.
-**View ▸ Left Rail** (`menuBar.ts` `viewMenu`, the OS's menu bar and the
-in-window one) lists every rail panel, the shown ones checked in rail
-order, then the rest by title (`railPanelItems`); picking one hides it, or
+**View ▸ Sidebar Panels** (`menuBar.ts` `viewMenu`, the OS's menu bar and the
+in-window one) lists every rail panel: the shown ones checked in rail
+order, each group's under its heading (a disabled line, "This thread" /
+"This stream" / "This project", `view.rail.heading:<group>`; a group with
+no panels has none), then a separator and the rest by title
+(`railPanelItems`); picking one hides it, or
 shows it at the end of the project's group. `RailMenuFeed`
 (`components/Panels/RailMenuFeed.tsx`) hands the list up to `App`, and a
 right-click on the rail's own space (`rail-panels`, not a panel) opens the

@@ -59,7 +59,7 @@ interface RailSectionsValue {
   /** Which edge of `id` the insertion line should draw on (before/after),
    *  or null when this section isn't the current drop target. */
   dropSide(id: RailSectionId): "before" | "after" | null;
-  /** Take the panel out of the nav (View ▸ Left Rail brings it back). */
+  /** Take the panel out of the nav (View ▸ Sidebar Panels brings it back). */
   hide(id: RailSectionId): void;
   /** The group a shown panel is in: this thread's, this stream's, the project's. */
   groupOf(id: RailSectionId): PanelGroup | undefined;
@@ -527,7 +527,7 @@ export function RailHud({
         ref={panelsBox}
         data-testid="rail-panels"
         // A right-click on the rail's own space (not a panel) lists every
-        // panel, checked when shown: View ▸ Left Rail's list.
+        // panel, checked when shown: View ▸ Sidebar Panels's list.
         onContextMenu={(e) => {
           if (e.target !== e.currentTarget || filled !== null) return;
           addMenu.open(e, railPanelItems(panelLayout.entries, panelLayout.toggle));

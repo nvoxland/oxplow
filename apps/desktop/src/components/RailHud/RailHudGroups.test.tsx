@@ -143,6 +143,9 @@ test("a right-click on the rail's empty space lists its panels, checked when sho
   for (const id of ["prs", "git", "go", "work"]) {
     expect(view.getByTestId(`menu-item-view.rail:ext:x/${id}`).textContent).toContain("✓");
   }
+  // Under their groups' headings.
+  expect(view.getByTestId("menu-item-view.rail.heading:thread").textContent).toContain("This thread");
+  expect(view.getByTestId("menu-item-view.rail.heading:stream").textContent).toContain("This stream");
   fireEvent.click(view.getByTestId("menu-item-view.rail:ext:x/work"));
   await waitFor(() => expect(saved.length).toBe(1));
   expect(order(view)).toEqual(["ext:x/prs", "ext:x/git", "ext:x/go"]);

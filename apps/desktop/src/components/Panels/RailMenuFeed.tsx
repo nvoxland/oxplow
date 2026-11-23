@@ -1,4 +1,4 @@
-/// View ▸ Left Rail's list (`menuBar.ts` `viewMenu`): the rail's panels as
+/// View ▸ Sidebar Panels's list (`menuBar.ts` `viewMenu`): the rail's panels as
 /// the viewer's layout has them, and what shows or hides one — handed up to
 /// the window that builds the menu bar. Draws nothing.
 import { useEffect } from "react";

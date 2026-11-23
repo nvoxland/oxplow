@@ -169,36 +169,41 @@ test("the Go To pane's rows are read off its body's run: group, title and URI", 
   expect(goRowsOf(null)).toEqual([]);
 });
 
-test("View ▸ Left Rail lists the rail's panels, the shown ones checked in rail order, then the rest by title", () => {
+test("View ▸ Sidebar Panels lists the shown panels under their groups' headings, then the rest by title", () => {
   const toggled: string[] = [];
   const view = viewMenu(
     [
-      { id: "ext:a/work", title: "Work", shown: true },
+      { id: "ext:a/prs", title: "PRs", shown: true, group: "thread" },
+      { id: "ext:a/work", title: "Work", shown: true, group: "project" },
       { id: "ext:a/zed", title: "Zed", shown: false },
-      { id: "ext:a/go", title: "Go To", shown: true },
+      { id: "ext:a/go", title: "Go To", shown: true, group: "project" },
       { id: "ext:a/alpha", title: "Alpha", shown: false },
     ],
     (id) => toggled.push(id),
   );
   expect([view.id, view.label]).toEqual(["view", "View"]);
-  const rail = view.items[0]!;
-  expect(rail.label).toBe("Left Rail");
-  const items = rail.submenu!.filter((i) => !i.separator);
-  expect(items.map((i) => [i.label, i.checked])).toEqual([
+  const panels = view.items[0]!;
+  expect(panels.label).toBe("Sidebar Panels");
+  // A heading is a disabled line; only a group with panels has one.
+  expect(panels.submenu!.map((i) => (i.separator ? "—" : [i.label, i.enabled ? i.checked : "heading"]))).toEqual([
+    ["This thread", "heading"],
+    ["PRs", true],
+    ["This project", "heading"],
     ["Work", true],
     ["Go To", true],
+    "—",
     ["Alpha", false],
     ["Zed", false],
   ]);
-  void items[2]!.run?.();
+  void panels.submenu!.find((i) => i.label === "Alpha")!.run?.();
   expect(toggled).toEqual(["ext:a/alpha"]);
 });
 
-test("a View ▸ Left Rail item is found by its menu id, and the native menu keeps it checked", () => {
-  const view = viewMenu([{ id: "ext:a/go", title: "Go To", shown: true }], () => {});
-  const id = view.items[0]!.submenu![0]!.id;
+test("a View ▸ Sidebar Panels item is found by its menu id, and the native menu keeps it checked", () => {
+  const view = viewMenu([{ id: "ext:a/go", title: "Go To", shown: true, group: "project" }], () => {});
+  const id = view.items[0]!.submenu![1]!.id;
   expect(menuItemById([view], id)?.label).toBe("Go To");
   const native = buildNativeMenuSnapshots([view], []);
   const rail = native.find((g) => g.id === "view")!.items[0]!;
-  expect(rail.submenu?.[0]).toMatchObject({ id, label: "Go To", checked: true });
+  expect(rail.submenu?.[1]).toMatchObject({ id, label: "Go To", checked: true });
 });

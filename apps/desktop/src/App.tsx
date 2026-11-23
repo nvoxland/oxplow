@@ -857,7 +857,7 @@ export function App() {
   }, [offerCtx, offerDeps]);
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
-  // View ▸ Left Rail is the viewer's rail panels (`RailMenuFeed`, inside
+  // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
   // the layout's provider, hands them up as the layout changes).
   const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
   const menuGroups = useMemo(
@@ -2010,7 +2010,7 @@ export function App() {
     // One owner of every extension panel's runs, read by the rail, the
     // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
-    {/* The viewer's left-nav layout, read by the rail and View ▸ Left Rail. */}
+    {/* The viewer's left-nav layout, read by the rail and View ▸ Sidebar Panels. */}
     <PanelLayoutProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
     <GoMenuFeed onRows={setGoRows} />
     <RailMenuFeed onChange={setRailMenu} />

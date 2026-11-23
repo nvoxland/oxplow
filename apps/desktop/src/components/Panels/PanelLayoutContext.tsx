@@ -3,7 +3,7 @@
 /// `get_panel_layout` / `set_panel_layout`, `panelLayout.ts`): which rail
 /// panels show in which group (this thread's, this stream's, the
 /// project's), in what order, collapsed or not. The rail and the View ▸
-/// Left Rail menu read and change the same layout. Provided inside
+/// Sidebar Panels menu read and change the same layout. Provided inside
 /// `PanelRunsProvider` (it reads the panels from there).
 
 import type { ReactNode } from "react";
@@ -47,7 +47,7 @@ export interface PanelLayoutValue {
   moveBeside(id: string, target: string, side: "before" | "after"): void;
   moveToGroup(id: string, group: PanelGroup): void;
   /** Every rail panel, shown ones in rail order then the rest (View ▸
-   *  Left Rail, the rail's right-click list). */
+   *  Sidebar Panels, the rail's right-click list). */
   entries: RailPanelEntry[];
   /** Hide a shown panel; show a hidden one at the end of the project's. */
   toggle(id: string): void;
@@ -107,7 +107,7 @@ export function PanelLayoutProvider({
       moveBeside: (id, target, side) => edit((base) => movePanelBeside(available, base, id, target, side)),
       moveToGroup: (id, group) => edit((base) => movePanelToGroup(available, base, id, group)),
       entries: [
-        ...layout.order.map((id) => ({ id, title: titleOf(id), shown: true })),
+        ...layout.order.map((id) => ({ id, title: titleOf(id), shown: true, group: layout.groupOf.get(id) })),
         ...layout.hidden.map((id) => ({ id, title: titleOf(id), shown: false })),
       ],
       toggle: (id) =>

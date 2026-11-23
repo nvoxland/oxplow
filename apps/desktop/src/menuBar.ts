@@ -6,6 +6,7 @@
 /// dispatch — WKWebView only delivers ⌘C/⌘V with them in the menu.
 import type { MenuGroup as SharedMenuGroup, MenuItem } from "./menu.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
+import { VISIBILITY_SCOPES, visibilityScopeLabel, type VisibilityScope } from "./visibilityScope.js";
 import type {
   MenuGroupSnapshot as NativeMenuGroupSnapshot,
   MenuItemSnapshot as NativeMenuItemSnapshot,
@@ -88,22 +89,26 @@ export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefi
   return undefined;
 }
 
-/// One of the rail's panels, as View ▸ Left Rail lists it.
+/// One of the rail's panels, as View ▸ Sidebar Panels lists it.
 export interface RailPanelEntry {
   /** Its layout id (`ext:<namespace>/<id>`). */
   id: string;
   title: string;
   /** This thread's rail shows it. */
   shown: boolean;
+  /** The group a shown panel is in. */
+  group?: VisibilityScope;
 }
 
-/// Menu-command id prefix for a View ▸ Left Rail entry; the rest is the
-/// panel's layout id.
+/// Menu-command id prefix for a View ▸ Sidebar Panels entry; the rest is
+/// the panel's layout id.
 export const RAIL_PANEL_PREFIX = "view.rail:";
 
-/// The rail's panels as a checked list: the shown ones in rail order, then
-/// the rest by title. Picking one shows or hides it (`toggle`). View ▸
-/// Left Rail and a right-click on the rail's empty space list the same.
+/// The rail's panels as a checked list: the shown ones in rail order, each
+/// group's under its heading (a disabled line: This thread, This stream,
+/// This project; a group with none has none), then the rest by title.
+/// Picking one shows or hides it (`toggle`). View ▸ Sidebar Panels and a
+/// right-click on the rail's empty space list the same.
 export function railPanelItems(panels: RailPanelEntry[], toggle: (id: string) => void): MenuItem[] {
   const item = (p: RailPanelEntry): MenuItem => ({
     id: `${RAIL_PANEL_PREFIX}${p.id}`,
@@ -112,22 +117,27 @@ export function railPanelItems(panels: RailPanelEntry[], toggle: (id: string) =>
     checked: p.shown,
     run: () => toggle(p.id),
   });
-  const shown = panels.filter((p) => p.shown).map(item);
+  const shown = VISIBILITY_SCOPES.flatMap((group) => {
+    const inGroup = panels.filter((p) => p.shown && (p.group ?? "project") === group);
+    return inGroup.length === 0
+      ? []
+      : [{ id: `view.rail.heading:${group}`, label: visibilityScopeLabel(group), enabled: false }, ...inGroup.map(item)];
+  });
   const rest = panels.filter((p) => !p.shown).sort((a, b) => a.title.localeCompare(b.title)).map(item);
   return shown.length > 0 && rest.length > 0
     ? [...shown, { id: "native.separator.1", label: "", separator: true, enabled: true }, ...rest]
     : [...shown, ...rest];
 }
 
-/// The View menu: Left Rail ▸ the rail's panels.
+/// The View menu: Sidebar Panels ▸ the rail's panels.
 export function viewMenu(panels: RailPanelEntry[], toggle: (id: string) => void): MenuGroup {
   return {
     id: "view",
     label: "View",
     items: [
       {
-        id: "view.left-rail",
-        label: "Left Rail",
+        id: "view.sidebar-panels",
+        label: "Sidebar Panels",
         enabled: panels.length > 0,
         submenu: railPanelItems(panels, toggle),
       },
