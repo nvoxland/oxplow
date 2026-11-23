@@ -14,6 +14,7 @@ import { usePanelLayout } from "../Panels/PanelLayoutContext.js";
 import type { PanelGroup } from "../Panels/panelLayout.js";
 import { visibilityScopeLabel } from "../../visibilityScope.js";
 import { railPanelItems } from "../../menuBar.js";
+import { useDragAutoScroll } from "./dragAutoScroll.js";
 import { type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
@@ -466,6 +467,9 @@ export function RailHud({
   const extPanels = useMemo(() => allPanels.filter((p) => !p.dock), [allPanels]);
   const sections = useRailSections();
   const panelLayout = usePanelLayout();
+  // A drag near the rail's top or bottom scrolls it, to reach what's out of view.
+  const panelsBox = useRef<HTMLDivElement | null>(null);
+  useDragAutoScroll(panelsBox, sections.dragging);
   const addMenu = useContextMenu();
   // The panel grown to the whole rail ("+N more"), if any: the window's
   // state only, never the person's layout. One at a time; gone with it.
@@ -520,6 +524,7 @@ export function RailHud({
       }}
     >
       <div
+        ref={panelsBox}
         data-testid="rail-panels"
         // A right-click on the rail's own space (not a panel) lists every
         // panel, checked when shown: View ▸ Left Rail's list.

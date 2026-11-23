@@ -49,3 +49,27 @@ test("every panel drags by its handle: the dividers show, and a drop on one move
   await expect.poll(() => sections(page).then((s) => s[0])).toBe(moved);
   await expect(page.getByTestId(`rail-section-shown-in-${moved}`)).toHaveAttribute("title", "Only in this thread");
 });
+
+test("a drag held near the rail's bottom scrolls it, to reach a drop target out of view", async ({ page, browserName }) => {
+  // Playwright's WebKit drag sends dragover for its first moves only, then
+  // the drop: it can't hold a drag near an edge. A real one does, every few
+  // hundred ms, and the scrolling is the same code in both engines.
+  test.skip(browserName === "webkit", "Playwright's WebKit drag can't hold near an edge");
+  // Short enough that the rail scrolls.
+  await page.setViewportSize({ width: 1200, height: 420 });
+  await load(page);
+  await expect(page.getByTestId("rail-section-ext:oxplow/work")).toBeVisible();
+  const rail = page.getByTestId("rail-panels");
+  expect(await rail.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  const first = (await sections(page))[0]!;
+  const box = (await rail.boundingBox())!;
+  await dragBy(page, first, async () => ({ x: box.x + box.width / 2, y: box.y + box.height - 6 }));
+  // Held there, the rail scrolls until the Remove zone is in view.
+  const zone = page.getByTestId("rail-remove-zone");
+  await expect(zone).toBeInViewport();
+  // The pointer is still near the edge: a move over the zone drops there.
+  const z = (await zone.boundingBox())!;
+  await page.mouse.move(z.x + z.width / 2, z.y + z.height / 2, { steps: 3 });
+  await page.mouse.up();
+  await expect.poll(() => sections(page)).not.toContain(first);
+});

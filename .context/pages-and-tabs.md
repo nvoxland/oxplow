@@ -978,7 +978,10 @@ group the viewer has ("This thread", "This stream", "This project",
 `rail-group-divider-<group>`; no thread, no thread divider), each a drop
 target that moves the panel to that group's end, and a **Remove from the
 rail** zone at the bottom (`rail-remove-zone`, `hidePanel`); both
-highlight while a drag is over them and go when it ends. At rest a thread's
+highlight while a drag is over them and go when it ends. A drag held near the rail's top or bottom edge (48 px, or just past it)
+scrolls the rail, faster closer to the edge (`RailHud/dragAutoScroll.ts`
+`useDragAutoScroll`), so a group or the Remove zone out of view can be
+reached. At rest a thread's
 or stream's panel says so with a small icon after its title (a speech
 bubble or layers, hover "Only in this thread" / "Only in this stream",
 `rail-section-shown-in-<id>`); a project's says nothing. A header's
