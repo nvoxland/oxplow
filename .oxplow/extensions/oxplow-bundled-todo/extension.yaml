@@ -4,7 +4,7 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the agent-interface, merge and branch pages, Explore Data, the history graph and the shared-files advisories.
+description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped. Holds the merge and branch pages, Explore Data, the history graph and advisories.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
@@ -16,7 +16,7 @@ build: { run: "bun install --frozen-lockfile && bun run build", output: dist, ex
 intent:
   purpose: >-
     Hold oxplow's own pages and components that haven't been reviewed yet:
-    the agent interface, merge readiness and remote
+    merge readiness and remote
     branches, Explore Data and the history graph.
   origin: null
   examples:
@@ -68,7 +68,7 @@ advisories:
       SELECT hint AS key,
              'The hint ' || hint || ' has been evaluated ' || sum(evaluated)
              || ' times and has never fired. Its condition may be one this project never meets; '
-             || 'see Agent Interface → Hints.' AS message
+             || 'see Agent Interface → All-time Hints.' AS message
       FROM v_hint_stat
       WHERE hint <> 'oxplow/hint-never-fires'
       GROUP BY hint

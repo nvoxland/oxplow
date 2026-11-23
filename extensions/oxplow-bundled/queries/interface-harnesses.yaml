@@ -1,0 +1,12 @@
+title: Agent harnesses
+loaders:
+  harnesses:
+    sql: |
+      SELECT value, label FROM (
+        SELECT 'all' AS value, 'All harnesses' AS label, 0 AS rank
+        UNION ALL
+        SELECT DISTINCT harness, harness, 1 FROM v_agent_session WHERE harness IS NOT NULL
+        UNION ALL
+        SELECT 'unknown', 'Unknown harness', 2
+      )
+      ORDER BY rank, label

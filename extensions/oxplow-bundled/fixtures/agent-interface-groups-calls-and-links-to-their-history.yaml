@@ -1,0 +1,35 @@
+given:
+  - observe:
+      turn:
+        prompt: Find the project data.
+        tools:
+          - { name: mcp__oxplow__oxplow_query_sql, kind: mcp, ok: true }
+          - { name: mcp__oxplow__oxplow_query_sql, kind: mcp, ok: false }
+          - { name: mcp__other__search, kind: mcp, ok: true }
+          - { name: Bash, kind: shell, ok: true }
+when: { page: agent-interface }
+expect:
+  loaders:
+    interface_tool_calls:
+      rows:
+        - { tool: oxplow_query_sql, calls: 2, failed: 1, denied: 0 }
+  nodes:
+    - { id: interface-hints, viz: table }
+steps:
+  - when: { page: interface-tool-calls, params: { tool: oxplow_query_sql } }
+    expect:
+      loaders:
+        tool_calls:
+          rows:
+            - { status: Failed }
+            - { status: Succeeded }
+  - when: { page: interface-tool-calls, params: { tool: oxplow_query_sql, status: problems } }
+    expect:
+      loaders:
+        tool_calls:
+          rows:
+            - { status: Failed }
+  - params: { range: '2000-01-01..2000-01-02' }
+    expect:
+      loaders:
+        interface_tool_calls: { rows: 0 }

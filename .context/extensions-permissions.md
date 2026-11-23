@@ -202,17 +202,14 @@ its scope trace.
   is set when the parent has a recorded row.
   `oxplow.effect.retry` and `backfill` still run the effect as itself.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
-  (launcher, Activity) is a dashboard of three tables over the last 30 days:
-  `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
-  `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
-  no record of reads harness `unknown`), `interface-commands` (agents' runs by
-  command from `v_command_run`: all completed runs including reads, counts
-  for invalid, denied and failed, and the share that ended in those outcomes.
-  Opening a command shows the `interface-command-errors` page (no category),
-  its most common error texts counted together up to the "Expected one of"
-  list) and `interface-hints` (`v_hint_stat` per hint, those that never fired
-  first). The bundled `hint-never-fires` advisory tells the person, once per
-  hint, about a hint evaluated 100 or more times that never fires.
+  (launcher, Activity) shows Oxplow MCP calls by tool and harness and completed
+  agent command runs by command. The date range defaults to 30 days. The date
+  and harness filters carry into both drill-downs. MCP Tool Calls links recent
+  calls to the session transcript when available. Command Errors groups
+  messages before the `. Expected` suffix and links to individual Run details.
+  All-time Hints uses `v_hint_stat` across every thread and shows hints that
+  never fired first. Its totals are independent of the page filters. The
+  `hint-never-fires` advisory remains parked in the disabled bundled-todo extension.
 - **Failure, retry and freshness are the same everywhere it matters.** A run
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a

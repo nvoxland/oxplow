@@ -1,0 +1,27 @@
+given:
+  - { command: oxplow.sql.query, as: agent, input: { sql: 'SELECT 1' } }
+when: { page: agent-interface }
+steps:
+  - when: { command: oxplow.sql.query, as: agent, input: {} }
+    expect: { ok: false, refused: sql }
+  - when: { command: oxplow.sql.query, as: agent, input: {} }
+    expect: { ok: false, refused: sql }
+  - when: { command: oxplow.sql.query, input: {} }
+    expect: { ok: false, refused: sql }
+  - expect:
+      loaders:
+        interface_commands:
+          rows:
+            - { command: oxplow.sql.query, runs: 3, invalid: 2, denied: 0, failed: 0, not_ok: 2 }
+  - when: { page: interface-command-errors, params: { command: oxplow.sql.query } }
+    expect:
+      loaders:
+        error_groups:
+          rows:
+            - { outcome: invalid, runs: 2, latest_run_uri: "$any" }
+        recent_errors:
+          rows:
+            - { outcome: invalid, run_uri: "$any" }
+            - { outcome: invalid, run_uri: "$any" }
+      nodes:
+        - { id: recent-errors, viz: table }

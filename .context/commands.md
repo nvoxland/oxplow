@@ -576,10 +576,11 @@ cascades to its command detail.
 **Reading it.** `v_command_run` joins the command detail to the shared
 run and exposes every recorded command, including reads and unchanged
 calls. `changed = 1` means the run succeeded and recorded its input. The Command data
-page filters on that field and a row opens Run details. The bundled-todo
-Agent Interface page counts all completed runs over the last 30 days,
-including reads, when it shows the share that ended invalid, denied or
-failed.
+page filters on that field and a row opens Run details. The bundled
+Agent Interface page counts completed agent runs, including reads, over the
+selected date range and harness. It reports invalid, denied and failed runs
+separately, and its Not OK rate includes every recorded outcome other than
+`ok`. Command Errors groups recurring messages and links to shared Run details.
 
 Native commands registered in the `oxplow.*` namespace record
 `oxplow-foundation` as their owner. An external handler receives the

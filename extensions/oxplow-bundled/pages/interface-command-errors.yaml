@@ -1,0 +1,79 @@
+title: Command Errors
+description: Recurring agent errors for one command, with links to the runs that produced them.
+label: '{{param.command}} errors'
+icon: terminal
+params:
+- name: command
+  label: Command
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+- name: harness
+  type: choice
+  role: filter
+  label: Harness
+  default: all
+  options_from: interface-harnesses
+see_also:
+- { page: oxplow/agent-interface, params: { range: { param: range }, harness: { param: harness } } }
+- { from: command_data }
+loaders:
+  command_data:
+    sql: |
+      SELECT 'Command data' AS title, summary AS description,
+             uri_view(uri('oxplow/command', 'command', id), 'who', 'agent', 'range', :range) AS uri
+      FROM v_command WHERE id = :command
+  unsuccessful_runs:
+    sql: |
+      SELECT r.id, r.started_at, r.outcome, r.error,
+             uri('oxplow/contribution_run', 'id', r.run_id) AS run_uri,
+             COALESCE(s.harness, 'unknown') AS harness
+      FROM v_command_run r LEFT JOIN v_agent_session s ON s.id = r.session_id
+      WHERE r.command = :command AND r.actor_kind = 'agent' AND r.outcome <> 'ok'
+        AND (:range_from IS NULL OR r.started_at >= :range_from)
+        AND (:range_to IS NULL OR r.started_at <= :range_to)
+        AND (:harness = 'all' OR COALESCE(s.harness, 'unknown') = :harness)
+  error_groups:
+    sql: |
+      WITH messages AS (
+        SELECT *, substr(error, 1, COALESCE(NULLIF(instr(error, '. Expected'), 0) - 1, length(error))) AS message
+        FROM unsuccessful_runs
+      ), ranked AS (
+        SELECT outcome, message, started_at, run_uri,
+               count(*) OVER (PARTITION BY outcome, message) AS runs,
+               row_number() OVER (PARTITION BY outcome, message ORDER BY started_at DESC, id DESC) AS recency
+        FROM messages
+      )
+      SELECT outcome, COALESCE(message, 'No error message recorded') AS error,
+             runs, started_at AS last_at, run_uri AS latest_run_uri
+      FROM ranked WHERE recency = 1
+      ORDER BY runs DESC, last_at DESC, outcome, error
+  recent_errors:
+    sql: |
+      SELECT started_at, harness, outcome, error, run_uri
+      FROM unsuccessful_runs
+      ORDER BY started_at DESC, id DESC LIMIT 50
+view:
+  stack:
+  - id: error-groups
+    title: Recurring Outcomes
+    from: error_groups
+    viz: table
+    columns:
+    - { key: outcome, label: Outcome }
+    - { key: error, label: Message }
+    - { key: runs, label: Runs, format: integer }
+    - { key: last_at, label: Latest run, format: datetime, link: { kind: page, from: latest_run_uri } }
+    empty: No unsuccessful agent runs match these filters.
+  - id: recent-errors
+    title: Latest 50 Unsuccessful Runs
+    from: recent_errors
+    viz: table
+    columns:
+    - { key: started_at, label: Run details, format: datetime, link: { kind: page, from: run_uri } }
+    - { key: harness, label: Harness }
+    - { key: outcome, label: Outcome }
+    - { key: error, label: Full message }
