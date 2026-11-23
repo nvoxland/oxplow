@@ -256,14 +256,12 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       touched with their deltas (`v_change_function`), the
       `review_signal_api` signals and `v_change_duplicate` blocks. Linked
       from the `code` row.
-  - `file-co-change` ("Usually Changes With", `parts/file-co-change.yaml`):
-    one line above a file's diff (slot `oxplow/diff.file-header`, params
-    `path`, `left`, `right`): "Usually changes with: a.rs, b.rs (unchanged
-    here)", from `v_oxplow_change_co_change` (`usual-co-changers-absent`)
-    of the change whose base and head revisions are `left` and `right`.
-    No row, so nothing drawn, when there is nothing to say.
+  - Co-change surprises are review signals only (area `history`,
+    `review_signal_history`): the review and Signals pages show them. A
+    file's diff does not: a line above every diff repeated, one file at a
+    time, what the review already says for the whole change.
   - Fixtures: `review-signals-*`, `the-review-page-*`, `the-signals-page-*`,
-    `the-tests-*`, `the-diff-header-*`. A commit's message
+    `the-tests-*`. A commit's message
     in a fixture needs `observe: { commit: { sha, subject } }` (the
     indexer doesn't run there).
 - **The review packet**. Its pages, mounted in
@@ -578,10 +576,7 @@ its dataset `change_interest` (`v_oxplow_change_interest`, over
 `change-review` page reads; co-change surprises are its datasets
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
 "the last 180 days" moves with the clock) and
-`change_co_change`, which `change-review` reads — and the
-`file-co-change` page ("Usually Changes With", mounted at the diff
-page's `file-header` slot, `oxplow/diff.file-header`) reads `co_change_pair` for the file a diff
-shows. Full-tree duplicated lines read the tree, not tables, so they
+`change_co_change`, which `change-review` reads. Full-tree duplicated lines read the tree, not tables, so they
 are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
 write. What needs two revisions' trees — files, functions, imports, test

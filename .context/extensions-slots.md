@@ -73,7 +73,7 @@ loaders' first rows and params are what a mount can take):
 | `oxplow/change-review.sections` | oxplow-bundled's Review page (one analysed change; nodes `asked`, `look-here`, `by-area`). A signal belongs on `v_oxplow_review_signal` (`adds_to: oxplow/review_signal`); mount here only a whole section of your own | `change_id` |
 | `oxplow/settings.integrations` | Settings → Integrations, under Capabilities: an extension's own settings for the project. oxtask mounts its Task workflow (`task-workflow-settings`) | none (the page's params: `area`) |
 | `oxplow/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
-| `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
+| `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). Nothing shipped mounts here | `path`, `left`, `right`, `label`, `base`, `lines` |
 
 `change_id` points at the page's change in `v_change`, with its analysis
 in `v_change_file`, `v_change_function`, `v_change_import`, `v_change_hunk`,
