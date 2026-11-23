@@ -1357,6 +1357,54 @@ steps:
     );
 }
 
+/// A step of a fixture that isn't a page's is `{ given }` or `{ when?,
+/// expect }`: one with both is a finding, never a `given` that drops the
+/// check beside it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_with_given_and_a_check_is_a_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: PRs.
+  examples:
+    - { name: merged, input: { event_type: acme.merged }, expect: valid }
+event_types:
+  types:
+    - { type: acme.merged, v: 1, schema: merged.v1.json, summary: Merged. }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/merged.v1.json",
+        r#"{"type": "object", "required": ["pr"]}"#,
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/merged.yaml",
+        "when: { event_type: acme.merged, payload: { pr: 1 } }
+expect: { valid: true }
+steps:
+  - given: [{ command: oxplow.thread.create, input: { stream: str1, title: Fix it } }]
+    expect: { valid: false }
+",
+    );
+    let errors = test_extension(root, "acme", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("fixtures/merged.yaml:")
+            && errors.contains("`steps[0]` has `expect` beside `given`"),
+        "{errors}"
+    );
+}
+
 /// A step whose `when` names another kind — or, in a page's scenario,
 /// another page — runs that instead of the fixture's own, and the
 /// scenario goes on.
@@ -3899,8 +3947,8 @@ expect: { ok: true, result: { book: 1 } }
 when: { collector: books, trigger: start }
 expect: { ok: true, result: { book: 2 } }
 steps:
-  - given: [{ remove_files: [shelf/a.md] }]
-    expect: { ok: true, result: { book: 1 } }
+  - given: [{ files: { \"shelf/e.md\": \"Persuasion\" } }]
+  - expect: { ok: true, result: { book: 3 } }
 ",
             ),
             (

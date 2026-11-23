@@ -198,7 +198,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      example that makes data gets an oxplow of its own: no fixture sees
      another's data, so a fixture makes everything it reads. Every kind
      below takes `given:` and `steps:` the same way; a step of a kind
-     that isn't a page is `{ when?, expect }`, its `when` keys over the
+     that isn't a page is `{ given }` or `{ when?, expect }`, never both
+     (one with both is an error: split it in two), its `when` keys over the
      fixture's (`when: { payload: { .. } }` changes just the payload). A
      step's `when` that names another kind or page runs that instead:
      `- when: { sql: "SELECT …" }` reads what an event or command did,

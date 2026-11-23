@@ -96,6 +96,22 @@ pub(super) async fn scenario(
     for (index, step) in steps.iter().enumerate() {
         let label = format!("steps[{index}]");
         if let Some(given) = step.get("given") {
+            // A step changes the state or checks it, never both: a check
+            // beside a `given` would be dropped.
+            if let Some(key) = ["when", "expect", "bind"]
+                .into_iter()
+                .find(|key| step.get(key).is_some())
+            {
+                return report.errors.push(
+                    error(
+                        shown,
+                        ex.line("steps"),
+                        "fixture.step",
+                        format!("`{label}` has `{key}` beside `given`: a step is one or the other"),
+                    )
+                    .fix("split it: `- given: [..]`, then `- { when?, expect }`"),
+                );
+            }
             if !run_steps(
                 host,
                 ext,

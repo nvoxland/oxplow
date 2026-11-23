@@ -519,7 +519,10 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   - **Every kind has them** (`scenario`): a fixture that isn't a page's
     runs its `given` steps first, its `when` and `expect` read the values
     they bound, and each `{ when?, expect }` step runs the same kind
-    again, its `when` keys over the fixture's. A step whose `when` names
+    again, its `when` keys over the fixture's. A step is `{ given }` or
+    `{ when?, expect }`: one with `when`, `expect` or `bind` beside `given`
+    is a `fixture.step` finding (`runner::scenario`), never a `given` that
+    silently drops the check beside it. A step whose `when` names
     another kind (`kind_of`) runs that instead — an event, then a `sql`
     read of what it did — and in a page's scenario a step with a `when`
     runs it (another page, a query, a command) and the scenario goes on
