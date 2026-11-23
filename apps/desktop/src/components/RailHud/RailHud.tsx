@@ -6,27 +6,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { flushSync } from "react-dom";
 import { Minimize2 } from "lucide-react";
 import type { TabRef } from "../../tabs/tabState.js";
-import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
-import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
-import {
-  extensionPanelId,
-  panelOpenRef,
-  hidePanel,
-  layoutSync,
-  movePanelBeside,
-  resolveLayout,
-  revealPanel,
-  setCollapsed,
-  showPanel,
-  type LayoutEdit,
-  type LayoutSync,
-} from "../Panels/panelLayout.js";
+import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
+import { extensionPanelId, panelOpenRef } from "../Panels/panelLayout.js";
+import { usePanelLayout } from "../Panels/PanelLayoutContext.js";
 import { type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
-import { recordOpError } from "../../opErrors.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 import { OpenPageLink } from "../../kit/OpenPageLink.js";
 
@@ -72,56 +59,23 @@ interface RailSectionsValue {
 
 const RailSectionsContext = createContext<RailSectionsValue | null>(null);
 
-/** Owns the person's panel layout (`panel_layout`, through
- *  `get_panel_layout` / `set_panel_layout`: order, hidden, collapsed) and
- *  the in-flight drag state, for the panels `available` now. Exposes what
+/** The in-flight drag state over the viewer's layout (`usePanelLayout`,
+ *  the person's order, groups and collapsed panels). Exposes what
  *  `RailSection` needs through context. */
-function useRailSections(available: string[]): {
+function useRailSections(): {
   value: RailSectionsValue;
   order: RailSectionId[];
   hidden: RailSectionId[];
   /** The stored layout has arrived: what shows is the person's layout. */
   loaded: boolean;
   show(id: RailSectionId): void;
-  reveal(id: RailSectionId): void;
 } {
-  const [stored, setStored] = useState<PanelPlacement[]>([]);
+  const panels = usePanelLayout();
+  const { layout } = panels;
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
-  // Kept in step with `panel_layout` by `layoutSync`: an
-  // edit before the load is replayed on it, a failed load saves nothing,
-  // saves land in order.
-  const [layoutLoaded, setLayoutLoaded] = useState(false);
-  const sync = useRef<LayoutSync | null>(null);
-  useEffect(() => {
-    const s = layoutSync({
-      load: getPanelLayout,
-      save: setPanelLayout,
-      show: setStored,
-      ready: () => setLayoutLoaded(true),
-      failed: (label, e) => recordOpError({ label, message: e instanceof Error ? e.message : String(e) }),
-    });
-    sync.current = s;
-    return () => {
-      s.close();
-      sync.current = null;
-    };
-  }, []);
-  const layout = useMemo(() => resolveLayout(available, stored), [available, stored]);
-
-  const edit = useCallback((change: LayoutEdit) => sync.current?.edit(change), []);
 
   const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
-  const collapse = useCallback(
-    (id: RailSectionId, collapsed: boolean) => edit((base) => setCollapsed(available, base, id, collapsed)),
-    [available, edit],
-  );
-  const hide = useCallback((id: RailSectionId) => edit((base) => hidePanel(available, base, id)), [available, edit]);
-  const show = useCallback((id: RailSectionId) => edit((base) => showPanel(available, base, id)), [available, edit]);
-  const reveal = useCallback(
-    (id: RailSectionId) => edit((base) => revealPanel(available, base, id)),
-    [available, edit],
-  );
 
   const dragHandle = useCallback((id: RailSectionId) => ({
     draggable: true as const,
@@ -160,9 +114,9 @@ function useRailSections(available: string[]): {
       if (!sourceId || sourceId === id) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const side = e.clientY >= rect.top + rect.height / 2 ? "after" : "before";
-      edit((base) => movePanelBeside(available, base, sourceId, id, side));
+      panels.moveBeside(sourceId, id, side);
     },
-  }), [draggingId, dropTarget, available, edit]);
+  }), [draggingId, dropTarget, panels]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
@@ -171,10 +125,10 @@ function useRailSections(available: string[]): {
   );
 
   const value = useMemo<RailSectionsValue>(
-    () => ({ isExpanded, setCollapsed: collapse, dragHandle, dropZone, dropSide, hide }),
-    [isExpanded, collapse, dragHandle, dropZone, dropSide, hide],
+    () => ({ isExpanded, setCollapsed: panels.setCollapsed, dragHandle, dropZone, dropSide, hide: panels.hide }),
+    [isExpanded, panels, dragHandle, dropZone, dropSide],
   );
-  return { value, order: layout.order, hidden: layout.hidden, loaded: layoutLoaded, show, reveal };
+  return { value, order: layout.order, hidden: layout.hidden, loaded: panels.loaded, show: panels.show };
 }
 
 /** Uniform section: drag handle + chevron + title (+ optional count and
@@ -385,8 +339,7 @@ export function RailHud({
   const { panels: allPanels, runs: panelRuns } = usePanelRuns();
   // A dock panel lives in the dock, not the rail.
   const extPanels = useMemo(() => allPanels.filter((p) => !p.dock), [allPanels]);
-  const available = useMemo(() => extPanels.map(extensionPanelId), [extPanels]);
-  const sections = useRailSections(available);
+  const sections = useRailSections();
   const addMenu = useContextMenu();
   const titleOf = (id: string) => extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
   // The panel grown to the whole rail ("+N more"), if any: the window's

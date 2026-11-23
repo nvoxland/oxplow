@@ -45,8 +45,8 @@ const pageOf = (slug: string) =>
   );
 mock.module("../../api.js", () => ({
   ...realApi,
-  getPanelLayout: async () => [],
-  setPanelLayout: async (layout: unknown) => {
+  getPanelLayout: async () => ({ thread: [], stream: [], project: [] }),
+  setPanelLayout: async (_stream: unknown, _thread: unknown, layout: unknown) => {
     layoutSaves.push(layout);
   },
   listExtensions: async () => [
@@ -56,6 +56,15 @@ mock.module("../../api.js", () => ({
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { RailHud } = await import("./RailHud.js");
+const { PanelLayoutProvider } = await import("../Panels/PanelLayoutContext.js");
+/** The rail as the app draws it: inside the viewer's layout. */
+function LaidOutRail(props: Parameters<typeof RailHud>[0]) {
+  return (
+    <PanelLayoutProvider streamId={props.streamId ?? null} threadId={null}>
+      <RailHud {...props} />
+    </PanelLayoutProvider>
+  );
+}
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 const { usePanelRuns } = await import("../Panels/PanelRunsContext.js");
 
@@ -94,7 +103,7 @@ test("the body page drawn small, the badge page's alert as the count and an Aler
   const openedPages: string[] = [];
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore(opened)}>
-      <RailHud streamId="str1" onOpenPage={(ref) => openedPages.push(ref.id)} />
+      <LaidOutRail streamId="str1" onOpenPage={(ref) => openedPages.push(ref.id)} />
       <Alerts />
     </PanelRunsProvider>,
   );
@@ -124,7 +133,7 @@ test("a panel's \"+N more\" grows it to the whole rail, and shrink or Escape put
   const rows = Array.from({ length: 11 }, (_, i) => [`row ${i}`]);
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([], rows)}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
+      <LaidOutRail streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   const section = () => view.getByTestId("rail-section-ext:z/w");
@@ -171,7 +180,7 @@ test("a capped group's +N more grows the panel, and grown it opens the panel's p
   try {
     const view = render(
       <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([], rows, ["g", "t"])}>
-        <RailHud streamId="str1" onOpenPage={(ref) => opened.push(ref.id)} />
+        <LaidOutRail streamId="str1" onOpenPage={(ref) => opened.push(ref.id)} />
       </PanelRunsProvider>,
     );
     const section = () => view.getByTestId("rail-section-ext:z/w");
@@ -193,7 +202,7 @@ test("a capped group's +N more grows the panel, and grown it opens the panel's p
 test("at rest no rail section carries a view-transition name", async () => {
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([])}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
+      <LaidOutRail streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   await waitFor(() => expect(view.getByTestId("rail-section-ext:z/w").textContent).toContain("body row"));
@@ -206,7 +215,7 @@ test("at rest no rail section carries a view-transition name", async () => {
 test("a panel whose rows fit offers no way to grow it", async () => {
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([])}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
+      <LaidOutRail streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   await waitFor(() => expect(view.getByTestId("rail-section-ext:z/w").textContent).toContain("body row"));
@@ -218,7 +227,7 @@ test("a panel whose rows fit offers no way to grow it", async () => {
 test("a panel's body draws its buttons", async () => {
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([])}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
+      <LaidOutRail streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   const body = await waitFor(() => within(view.getByTestId("rail-section-ext:z/w")).getByTestId("rail-panel-body"));

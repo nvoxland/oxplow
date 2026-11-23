@@ -59,13 +59,22 @@ const panel: ExtensionPanel = {
 };
 mock.module("../../api.js", () => ({
   ...realApi,
-  getPanelLayout: async () => [{ panel: "ext:x/w", hidden: false, collapsed: true }],
+  getPanelLayout: async () => ({ thread: [], stream: [], project: [{ panel: "ext:x/w", hidden: false, collapsed: true }] }),
   setPanelLayout: async () => {},
   listExtensions: async () => [{ name: "x", enabled: true, pages: [], panels: [panel], ui: { slots: [], commands: [], decorators: [], replacements: [] } }],
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { RailHud } = await import("./RailHud.js");
+const { PanelLayoutProvider } = await import("../Panels/PanelLayoutContext.js");
+/** The rail as the app draws it: inside the viewer's layout. */
+function LaidOutRail(props: Parameters<typeof RailHud>[0]) {
+  return (
+    <PanelLayoutProvider streamId={props.streamId ?? null} threadId={null}>
+      <RailHud {...props} />
+    </PanelLayoutProvider>
+  );
+}
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 
 afterEach(cleanup);
@@ -74,7 +83,7 @@ test("a collapsed panel shows its collapsed page; its header counts the count pa
   const { runs } = fakePageRunsBy((key) => pageRun(key.page!, key.params), viewOf);
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
+      <LaidOutRail streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   const section = await waitFor(() => view.getByTestId("rail-section-ext:x/w"));
@@ -91,7 +100,7 @@ test("a body page's choice param is a header toggle; picking re-runs the body wi
   const view = render(
     <RememberedContext.Provider value={store}>
       <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
-        <RailHud streamId="str1" onOpenPage={() => {}} />
+        <LaidOutRail streamId="str1" onOpenPage={() => {}} />
       </PanelRunsProvider>
     </RememberedContext.Provider>,
   );
@@ -110,7 +119,7 @@ test("a choice option with an icon is an icon button, its label the hover", asyn
   const { runs } = fakePageRunsBy((key) => pageRun(key.page!, { ...key.params, ...(key.panel?.choices ?? {}) }), viewOf);
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
+      <LaidOutRail streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   const top = await waitFor(() => view.getByTestId("rail-panel-choice-mode-top"));
@@ -132,7 +141,7 @@ test("a count of zero draws no badge in the header", async () => {
     const { runs } = fakePageRunsBy((key) => pageRun(key.page!, key.params), viewOf);
     const view = render(
       <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
-        <RailHud streamId="str1" onOpenPage={() => {}} />
+        <LaidOutRail streamId="str1" onOpenPage={() => {}} />
       </PanelRunsProvider>,
     );
     await waitFor(() => view.getByTestId("rail-panel-collapsed"));

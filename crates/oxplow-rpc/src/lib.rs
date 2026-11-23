@@ -235,8 +235,8 @@ macro_rules! oxplow_command_table {
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
-                get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
-                set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),
+                get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
+                set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
                 get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
                 set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,

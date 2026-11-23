@@ -131,12 +131,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getPanelLayout: () => typedError<PanelPlacement[], IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout")),
+	getPanelLayout: (streamId: string | null, threadId: string | null) => typedError<ScopedPanelLayout, IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout", { streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setPanelLayout: (layout: PanelPlacement[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { layout })),
+	setPanelLayout: (streamId: string | null, threadId: string | null, layout: ScopedPanelLayout) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { streamId, threadId, layout })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -5356,9 +5356,10 @@ export type PanelDataScope = "project" | "stream" | "thread";
 /**  One of a panel's parts. */
 export type PanelPart = "body" | "collapsed" | "count" | "badge";
 
-/**  One panel's place in the layout. */
+/**  One panel's place in a list. */
 export type PanelPlacement = {
 	panel: string,
+	/**  Only in the project's list: placed, but not shown there. */
 	hidden: boolean,
 	collapsed: boolean,
 };
@@ -5866,6 +5867,16 @@ export type RunsOn =
 { on: "agent" } |
 /**  Nothing invokes it: a vocabulary entry (an event type, a ref kind). */
 { on: "declared" };
+
+/**
+ *  The lists a viewer sees, each in order: its thread's, its stream's and
+ *  the project's (with its hidden rows).
+ */
+export type ScopedPanelLayout = {
+	thread: PanelPlacement[],
+	stream: PanelPlacement[],
+	project: PanelPlacement[],
+};
 
 /**
  *  One ranked search result: the URI it found

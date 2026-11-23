@@ -20,8 +20,8 @@ const saved: unknown[] = [];
 const ran: [string, unknown][] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
-  getPanelLayout: async () => [],
-  setPanelLayout: async (layout: unknown) => {
+  getPanelLayout: async () => ({ thread: [], stream: [], project: [] }),
+  setPanelLayout: async (_stream: unknown, _thread: unknown, layout: unknown) => {
     saved.push(layout);
   },
   listExtensions: async () => [],

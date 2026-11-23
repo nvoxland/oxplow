@@ -1817,14 +1817,24 @@ foundation's `thread-activity`, bundled's `usage`), which re-run on `DatasetsCha
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
-V126 (P6.G1). The person's left-nav layout in this project: one row per
-panel they've placed (`panel` — a core id like `core:bookmarks` or
-`ext:<namespace>/<id>` — `position`, `hidden`, `collapsed`). Local state,
-never the repo. `get` returns the placements in order; `set` replaces
-them all in one transaction. A panel the table doesn't name shows
-expanded after the ones it does, and a named panel that no longer exists
-is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
-RPCs `get_panel_layout` / `set_panel_layout`.
+V126 (P6.G1), in three lists since V79: the person's left-nav layout in
+this project. A row is a panel (`ext:<namespace>/<id>`) at a
+`visibility_scope` — `thread` (`thread_id`), `stream` (`stream_id`) or
+`project` (neither), FKs cascading as bookmarks' — with its `position` in
+that list, `collapsed`, and `hidden` (a project row only). A viewer — a
+thread and its stream — sees its thread's list, then its stream's, then
+the project's (`ScopedPanelLayout`). The store keeps two rules on every
+`set`: **each panel once per viewer** (a set that shows one twice is
+refused; shown in the project's list it leaves every other list, in a
+stream's it leaves that stream's threads' lists), and **the project list
+names every panel placed** (one in a thread's or stream's list keeps a
+hidden project row, so it isn't new for another viewer). So one panel can
+be in threads A and C of stream X and in stream Y's list, and nowhere for
+stream Z. A panel no list names shows expanded at the end of the
+project's, and a named panel that no longer exists is dropped
+(`components/Panels/panelLayout.ts` `resolveLayout`). Local state, never
+the repo. UI-only RPCs `get_panel_layout` / `set_panel_layout { stream_id?,
+thread_id? }` (a thread's stream is its own, `viewer_tx`).
 
 ### `ui_preference` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
 

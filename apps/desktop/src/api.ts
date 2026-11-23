@@ -29,7 +29,7 @@ import { IpcCallError, ipcErrorCode, ipcErrorCommandRunId, ipcErrorDetails, ipcE
 import type {
   AiSettings,
   HarnessListing,
-  PanelPlacement,
+  ScopedPanelLayout,
   UiPreference,
   Extension,
   VizConfig,
@@ -456,14 +456,16 @@ export async function componentForm(id: string, command: string, input: unknown,
 /** What the person can ask: every capability's questions and the enabled
  *  extensions' prompts (the catalog; contextual suggestions). */
 
-/** The person's left-nav layout: each panel's order, and whether it's
- *  hidden or collapsed (P6.G1). */
-export async function getPanelLayout(): Promise<PanelPlacement[]> {
-  return unwrap(await commands.getPanelLayout());
+/** The person's left-nav layout as a viewer sees it (P6.G1): its thread's
+ *  list, its stream's and the project's, each panel's order and whether
+ *  it's collapsed (or, in the project's, hidden). */
+export async function getPanelLayout(streamId: string | null, threadId: string | null): Promise<ScopedPanelLayout> {
+  return unwrap(await commands.getPanelLayout(streamId, threadId));
 }
 
-export async function setPanelLayout(layout: PanelPlacement[]): Promise<void> {
-  unwrap(await commands.setPanelLayout(layout));
+/** Replace the lists the viewer sees. */
+export async function setPanelLayout(streamId: string | null, threadId: string | null, layout: ScopedPanelLayout): Promise<void> {
+  unwrap(await commands.setPanelLayout(streamId, threadId, layout));
 }
 
 /** What the person's oxplow remembers outside any one tab: page memory

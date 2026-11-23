@@ -81,6 +81,7 @@ import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
 import { openHandlerFor, type OpenHandlers } from "./tabs/openHandlers.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
+import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
@@ -2002,6 +2003,8 @@ export function App() {
     // One owner of every extension panel's runs, read by the rail, the
     // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    {/* The viewer's left-nav layout, read by the rail and View ▸ Left Rail. */}
+    <PanelLayoutProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
     <GoMenuFeed onRows={setGoRows} />
     {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
       const live = currentEntry(t).from?.live;
@@ -2167,6 +2170,7 @@ export function App() {
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
+    </PanelLayoutProvider>
     </PanelRunsProvider>
   );
 }

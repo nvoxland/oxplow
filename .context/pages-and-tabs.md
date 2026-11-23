@@ -965,11 +965,20 @@ an extension is a `configChanged`, so its panel appears or leaves at once.
 
 The person's layout — order (drag the ⠿ handle), collapsed (the chevron),
 hidden (right-click a header → Hide Panel; **+ Add Panel** at the bottom
-brings one back) — is one list in the local table `panel_layout` (V126,
-never the repo), read and written through the UI RPCs `get_panel_layout`
-/ `set_panel_layout`. `resolveLayout` reconciles it with the panels
-available now: stored order first, ids that are gone dropped, new panels
-appended expanded. The old `oxplow.rail.*`
+brings one back) — is in the local table `panel_layout` (never the repo;
+data-model.md): three lists, the selected thread's, its stream's and the
+project's, and the rail draws them in that order, top to bottom. Each
+panel is in one of them for a viewer; a drop beside a panel puts it in
+that panel's group (`movePanelBeside`), and `movePanelToGroup` puts it at
+a group's end. A new thread or stream has no list of its own: it shows
+the project's. `PanelLayoutProvider` (`components/Panels/PanelLayoutContext.tsx`,
+inside `PanelRunsProvider`) owns the viewer's layout for the rail; it reads
+and writes it through the UI RPCs `get_panel_layout` / `set_panel_layout`
+with the selected stream and thread, and a new viewer is a new
+`layoutSync`. `resolveLayout` reconciles it with the panels available
+now: each list's stored order, ids that are gone dropped, a panel no list
+names appended expanded to the project's, and a panel the project's list
+has hidden (hidden, or placed on another thread or stream) hidden. The old `oxplow.rail.*`
 localStorage order and expanded keys are gone. The stored layout loads
 after the first render: an edit made before it arrives (a chevron, a
 drag) shows at once and is queued, then replayed on the loaded layout and
@@ -982,7 +991,8 @@ load** is reported and shows the defaults, but saves nothing over the
 layout it couldn't read — the next edit loads again and is replayed on
 what it finds; saves go **one at a time, the latest last**; and an edit
 **keeps the placement of a panel not available yet** (an extension's,
-before extensions load) right after the entry it followed.
+before extensions load) where it is: every edit changes the stored lists
+in place.
 
 ## Page archetypes and the kit
 

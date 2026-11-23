@@ -106,7 +106,7 @@ pub use fact_store::{
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
-pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
+pub use panel_layout_store::{PanelPlacement, ScopedPanelLayout, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
 pub use request_analysis_store::{AnalysisSpan, Observation, SqliteRequestAnalysisStore};
