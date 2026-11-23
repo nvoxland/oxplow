@@ -194,6 +194,9 @@ describe("findUrlMatches", () => {
       "https://en.wikipedia.org/wiki/Foo_(bar)",
     ]);
   });
+  it("a URL's own brackets stay; a closing one it didn't open goes", () => {
+    expect(findUrlMatches("[http://[::1]:5173/x?q=[1]]").map((m) => m.url)).toEqual(["http://[::1]:5173/x?q=[1]"]);
+  });
   it("no scheme, no URL", () => {
     expect(findUrlMatches("example.com and ftp://x")).toEqual([]);
   });

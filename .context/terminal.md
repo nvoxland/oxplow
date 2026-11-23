@@ -461,7 +461,10 @@ the `oxplow/terminal` resource. Three commands (`commands/terminal.rs`, scope
 `terminals.write`) write them: `oxplow.terminal.open { stream, title?, dir? }`
 (`dir`: where its shell starts, relative to the worktree or absolute;
 Open In ▸ Terminal sets it, and `terminal_cwd` falls back to the worktree
-when it is not a directory when the shell starts; auto-numbered "Terminal N": one past the highest numbered title and never
+when it is not a directory when the shell starts; an agent's is a relative
+path with no `..`, so its terminals stay in its stream's worktree; the
+window shows the new one by its title, in the Terminal page's view;
+auto-numbered "Terminal N": one past the highest numbered title and never
 below the count, so a generated title never repeats after renames; answers
 `{ id, uri, title }`; an agent opens only in its own stream),
 `oxplow.terminal.rename { terminal, title }` (undoable) and
@@ -554,8 +557,11 @@ the system browser (`openInBrowser`).
 
 **The right-click menu knows the link under the pointer.** Both providers
 take `onHover(match | null)` (xterm's `ILink.hover` / `leave`); the
-surface keeps the hovered link, and its menu puts that link's items first
-(`terminalMenuItems({ link })`): Open In ▸ (`openIn.ts`) and Copy path /
+surface keeps the hovered link, and its menu puts that link's items first.
+Only a left click activates a link (xterm calls `activate` on any button).
+The URL provider is registered first, so a path inside a URL is the URL's.
+The menu's link items
+(`terminalMenuItems({ link })`) are Open In ▸ (`openIn.ts`) and Copy path /
 Copy link. A path resolves as a click does (`resolveClickedPath`); one that
 ends in `/` is a directory, any other a file (the terminal can't tell).
 

@@ -16,6 +16,8 @@ import { shellAvailable } from "./transport";
 /// `tel:` one in its app: the shell plugin's default scope).
 export async function openInSystemBrowser(url: string): Promise<void> {
   if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) throw new Error(`not a web URL: ${url}`);
+  // The shell's scope reads the scheme in lower case (`HTTPS://` is refused).
+  url = url.replace(/^[a-z]+:/i, (scheme) => scheme.toLowerCase());
   if (shellAvailable()) {
     await shellOpen(url);
     return;

@@ -149,10 +149,14 @@ export interface UrlMatch {
 }
 
 const URL_RE = /https?:\/\/[^\s<>"'`]+/gi;
-const URL_TRAILING = /[.,;:!?'"`>\]}]$/;
+const URL_TRAILING = /[.,;:!?'"`>}]$/;
+
+/** Whether `url` ends in a `close` it has more of than `open`. */
+const unbalanced = (url: string, open: string, close: string) =>
+  url.endsWith(close) && url.split(open).length < url.split(close).length;
 
 /** The http(s) URLs in `line`, without the prose punctuation after one;
- *  a closing parenthesis stays when the URL opened it. */
+ *  a closing parenthesis or bracket stays when the URL opened it. */
 export function findUrlMatches(line: string): UrlMatch[] {
   const out: UrlMatch[] = [];
   URL_RE.lastIndex = 0;
@@ -161,7 +165,7 @@ export function findUrlMatches(line: string): UrlMatch[] {
     let url = m[0];
     for (;;) {
       if (URL_TRAILING.test(url)) url = url.slice(0, -1);
-      else if (url.endsWith(")") && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0)) url = url.slice(0, -1);
+      else if (unbalanced(url, "(", ")") || unbalanced(url, "[", "]")) url = url.slice(0, -1);
       else break;
     }
     if (/^https?:\/\/[^/]/i.test(url)) out.push({ start: m.index, end: m.index + url.length, url });
@@ -273,7 +277,10 @@ export function installFilePathLinkProvider(
         links.push({
           range: cellRange(cols, bufferLineNumber, m.start, m.end),
           text: text.slice(m.start, m.end),
-          activate: () => opts.onActivate(activation),
+          // A left click: xterm calls it on any button's mouseup.
+          activate: (event) => {
+            if (event.button === 0) opts.onActivate(activation);
+          },
           hover: () => opts.onHover?.(activation),
           leave: () => opts.onHover?.(null),
         });
@@ -323,7 +330,9 @@ export function installUrlLinkProvider(
         matches.map((m) => ({
           range: cellRange(term.cols, bufferLineNumber, m.start, m.end),
           text: m.url,
-          activate: () => opts.onActivate(m.url),
+          activate: (event) => {
+            if (event.button === 0) opts.onActivate(m.url);
+          },
           hover: () => opts.onHover?.(m.url),
           leave: () => opts.onHover?.(null),
         })),

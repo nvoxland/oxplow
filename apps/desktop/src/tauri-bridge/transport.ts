@@ -134,7 +134,7 @@ export function parseRemoteInput(input: string): { base: string; token: string |
   return { base, token };
 }
 
-function readRemoteEndpoint(): { base: string | null; token: string | null } {
+function readRemoteEndpoint(): { base: string | null; token: string | null; storedBase: string | null } {
   let stored: Endpoint = {};
   let fragment: string | null = null;
   try {
@@ -157,6 +157,7 @@ function readRemoteEndpoint(): { base: string | null; token: string | null } {
   return {
     base: resolveBase({ stored: stored.base, injected: sources.injected.base, env: sources.env.base }),
     token: resolveToken(sources),
+    storedBase: stored.base ?? null,
   };
 }
 
@@ -556,16 +557,16 @@ export function shellAvailable(): boolean {
 
 /// Whether this window's files are on this machine (`filesLocalFrom`):
 /// Open In ▸ Reveal and Default App need them.
+/// Read once, as the base is (`endpoint`): another window's connect or
+/// disconnect changes the storage, not the daemon this one drives.
 export function filesAreLocal(): boolean {
-  let stored: string | null = null;
-  try {
-    stored = shellStorage.getItem("oxplow.remoteBase");
-  } catch {
-    // No localStorage (tests).
+  if (localFilesAtLoad === null) {
+    const ctx = readWindowContext();
+    localFilesAtLoad = filesLocalFrom({ shell: shellAvailable(), kind: ctx?.kind ?? null, stored: endpoint.storedBase, injected: ctx?.base ?? null });
   }
-  const ctx = readWindowContext();
-  return filesLocalFrom({ shell: shellAvailable(), kind: ctx?.kind ?? null, stored, injected: ctx?.base ?? null });
+  return localFilesAtLoad;
 }
+let localFilesAtLoad: boolean | null = null;
 
 /// Tauri-listen-compatible entry point. In remote mode the three
 /// daemon-multiplexed channels read from the shared WebSocket; any

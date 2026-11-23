@@ -857,24 +857,6 @@ export function App() {
     setRefOfferHost({ ctx: offerCtx, deps: offerDeps });
     return () => setRefOfferHost(null);
   }, [offerCtx, offerDeps]);
-  // Open In ▸ (`openIn.ts`): the stream's worktree, oxplow's web tab, and a
-  // new terminal at a directory, shown once it is open.
-  useEffect(() => {
-    if (!stream) return;
-    const streamId = stream.id;
-    setOpenInHost({
-      worktree: stream.worktree_path,
-      openInApp: (url) => handleOpenPageRef.current?.(externalUrlRef(url)),
-      openTerminalAt: (dir) =>
-        void runCommand("oxplow.terminal.open", { stream: streamId, dir })
-          .then(({ result }) => {
-            const id = (result as { id?: string } | null)?.id;
-            handleOpenPageRef.current?.(id ? pageTabRef("terminal", { terminal: id }) : terminalRef());
-          })
-          .catch((e: unknown) => recordOpError({ label: "Open a terminal", message: e instanceof Error ? e.message : String(e) })),
-    });
-    return () => setOpenInHost(null);
-  }, [stream]);
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
   // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
@@ -1183,6 +1165,27 @@ export function App() {
     }
     handleOpenPageRef.current?.(externalUrlRef(verdict.url));
   }, []);
+
+  // Open In ▸ (`openIn.ts`): the stream's worktree, oxplow's web tab, and a
+  // new terminal at a directory, shown once it is open.
+  useEffect(() => {
+    if (!stream) return;
+    const streamId = stream.id;
+    setOpenInHost({
+      worktree: stream.worktree_path,
+      openInApp: (url) => handleOpenExternalUrl(url),
+      openTerminalAt: (dir) =>
+        void runCommand("oxplow.terminal.open", { stream: streamId, dir })
+          .then(({ result }) => {
+            // The Terminal page picks its shell by title, in its view: the
+            // one tab shows the new terminal.
+            const title = (result as { title?: string } | null)?.title;
+            handleOpenPageRef.current?.(title ? pageTabRef("terminal", undefined, { terminal: title }) : terminalRef());
+          })
+          .catch((e: unknown) => recordOpError({ label: "Open a terminal", message: e instanceof Error ? e.message : String(e) })),
+    });
+    return () => setOpenInHost(null);
+  }, [stream, handleOpenExternalUrl]);
 
   /** Open the commit page for a wikilink-resolved commit SHA. */
   const handleOpenCommit = useCallback((sha: string) => {

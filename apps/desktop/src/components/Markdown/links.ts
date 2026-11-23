@@ -13,6 +13,7 @@ import type { NavigateOptions } from "../../tabs/PageNavigationContext.js";
 import { externalUrlRef } from "../../tabs/pageRefs.js";
 import { openInBrowser, openInForRef, openInForWorktreePath } from "../../openIn.js";
 import { WORKING } from "../../revision.js";
+import { parseUri } from "../../uri/uri.js";
 import { recordLabel, recordOf } from "../../recordStores.js";
 import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
 
@@ -78,9 +79,11 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
   switch (parsed.kind) {
     case "file":
     case "directory": {
-      // Only the working copy on the local filesystem is a file on disk.
-      const onDisk = parsed.kind === "directory" || ((parsed.version ?? WORKING) === WORKING && !parsed.filesystem);
-      const elsewhere = onDisk ? openInForWorktreePath(parsed.kind === "file" ? "file" : "dir", parsed.path) : null;
+      // Only the working copy on the local filesystem is on disk: a URI
+      // href says so itself (`localTarget`), a relative one by what it
+      // resolved to.
+      const onDisk = parsed.kind === "file" && (parsed.version ?? WORKING) === WORKING && !parsed.filesystem;
+      const elsewhere = parseUri(href) ? openInForRef(href) : onDisk ? openInForWorktreePath("file", parsed.path) : null;
       if (elsewhere) items.push(elsewhere);
       items.push(copy("copy-path", "Copy path", parsed.path));
       break;

@@ -95,7 +95,8 @@ caught via `editor.onContextMenu`, which:
 
 Menu items live in a per-render `MenuItem[]` array — `Cut`, `Copy`,
 `Paste` (via `navigator.clipboard` + `editor.executeEdits`), `Save`,
-`Find`, `Go to Definition`, `Format Document`, `Copy Path`,
+`Find`, `Go to Definition`, `Format Document`, `Copy Path`, Open In ▸
+(the file outside oxplow: `openIn.ts`),
 `Annotate with Git Blame`, `Compare with Clipboard`, and Add Selection to Context (Add File to Context with no
 selection; `editorContextEntry`). Items are gated on `enabled` based on
 file path, language LSP support and selection presence. The right-click handler

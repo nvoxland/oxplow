@@ -19,42 +19,128 @@ pub(crate) enum PathUse {
     Open,
 }
 
-/// Extensions the OS runs rather than opens in an app.
+/// Extensions the OS runs, or hands to a program that runs them, rather
+/// than opening in an app: bundles and installers, scripts, launcher
+/// documents (a `.terminal` runs a shell, a `.fileloc` opens what it
+/// names). On Windows, `PATHEXT` adds its own.
 const PROGRAM_EXTENSIONS: &[&str] = &[
-    "app", "command", "tool", "workflow", "pkg", "mpkg", "exe", "com", "bat", "cmd", "ps1", "msi",
-    "scr", "vbs", "vbe", "wsf", "wsh", "lnk", "jar", "desktop", "appimage",
+    // macOS
+    "app",
+    "command",
+    "tool",
+    "workflow",
+    "action",
+    "pkg",
+    "mpkg",
+    "terminal",
+    "term",
+    "fileloc",
+    "inetloc",
+    "webloc",
+    "prefpane",
+    "kext",
+    "scpt",
+    "applescript",
+    "osascript",
+    // Windows
+    "exe",
+    "com",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "msi",
+    "msp",
+    "mst",
+    "scr",
+    "pif",
+    "cpl",
+    "msc",
+    "reg",
+    "hta",
+    "js",
+    "jse",
+    "vb",
+    "vbs",
+    "vbe",
+    "wsf",
+    "wsh",
+    "wsc",
+    "lnk",
+    "url",
+    "scf",
+    "application",
+    "appref-ms",
+    "gadget",
+    "py",
+    "pyw",
+    // Anywhere
+    "jar",
+    "desktop",
+    "appimage",
 ];
 
-/// `path` if `use_` may be done with it: absolute and there, and for
-/// [`PathUse::Open`] not a program (a program's extension, or a file with
-/// an execute bit).
+/// Extensions of a folder that is a program (a macOS bundle): a file
+/// inside one is part of it.
+const BUNDLE_EXTENSIONS: &[&str] = &[
+    "app", "workflow", "action", "prefpane", "kext", "pkg", "mpkg",
+];
+
+/// Whether `ext` (lower case) is a program's.
+fn is_program_extension(ext: &str) -> bool {
+    if PROGRAM_EXTENSIONS.contains(&ext) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(list) = std::env::var("PATHEXT") {
+            return list
+                .split(';')
+                .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(ext));
+        }
+    }
+    false
+}
+
+/// `path` if `use_` may be done with it: absolute and there. For
+/// [`PathUse::Open`] it is what the path resolves to (symlinks and `..`
+/// followed) that is opened, and that is not a program: it has no
+/// program's extension, it is not inside a bundle (a file inside an app
+/// is the app's), and it is not a file with an execute bit.
 pub(crate) fn check_local_path(path: &str, use_: PathUse) -> Result<PathBuf, String> {
     let p = Path::new(path);
     if !p.is_absolute() {
         return Err(format!("not an absolute path: {path}"));
     }
     let meta = std::fs::metadata(p).map_err(|e| format!("{path}: {e}"))?;
-    if use_ == PathUse::Open {
-        let ext = p
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase());
-        if ext
-            .as_deref()
-            .is_some_and(|e| PROGRAM_EXTENSIONS.contains(&e))
-        {
-            return Err(format!("{path} is a program: it is not opened"));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
-                return Err(format!("{path} is executable: it is not opened"));
-            }
+    if use_ == PathUse::Reveal {
+        return Ok(p.to_path_buf());
+    }
+    let real = std::fs::canonicalize(p).map_err(|e| format!("{path}: {e}"))?;
+    let ext_of = |p: &Path| {
+        p.extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+    };
+    // The path itself by every program extension; a folder it is in only
+    // by a bundle's (a repo folder named `three.js` holds documents).
+    let program = ext_of(&real).is_some_and(|e| is_program_extension(&e))
+        || real
+            .ancestors()
+            .skip(1)
+            .any(|a| ext_of(a).is_some_and(|e| BUNDLE_EXTENSIONS.contains(&e.as_str())));
+    if program {
+        return Err(format!("{path} is a program: it is not opened"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
+            return Err(format!("{path} is executable: it is not opened"));
         }
     }
     #[cfg(not(unix))]
     let _ = meta;
-    Ok(p.to_path_buf())
+    Ok(real)
 }
 
 /// Show `path` in the OS file manager, selected.
@@ -113,6 +199,58 @@ mod tests {
     fn a_program_is_not_opened() {
         let dir = tempfile::tempdir().unwrap();
         for name in ["Thing.app", "run.command", "setup.EXE", "x.bat"] {
+            let p = dir.path().join(name);
+            std::fs::write(&p, "").unwrap();
+            assert!(
+                check_local_path(&s(&p), PathUse::Open).is_err(),
+                "{name} must not open"
+            );
+        }
+    }
+
+    /// What is opened is what the path resolves to: a symlink to a
+    /// program, a `..` back out to one, or a file inside an app bundle is
+    /// a program too.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_that_resolves_to_a_program_is_not_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Marker.app");
+        std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        std::fs::write(app.join("Contents/Info.plist"), "").unwrap();
+        let link = dir.path().join("guide.pdf");
+        std::os::unix::fs::symlink(&app, &link).unwrap();
+        let back = format!("{}/Contents/..", app.display());
+        for p in [s(&link), back, s(&app.join("Contents/Info.plist"))] {
+            assert!(
+                check_local_path(&p, PathUse::Open).is_err(),
+                "{p} must not open"
+            );
+        }
+    }
+
+    #[test]
+    fn a_document_in_a_folder_named_like_a_script_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("three.js");
+        std::fs::create_dir(&repo).unwrap();
+        let doc = repo.join("README.md");
+        std::fs::write(&doc, "").unwrap();
+        assert!(check_local_path(&s(&doc), PathUse::Open).is_ok());
+    }
+
+    #[test]
+    fn a_launcher_document_is_not_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "x.terminal",
+            "x.term",
+            "x.fileloc",
+            "x.inetloc",
+            "x.hta",
+            "x.js",
+            "x.reg",
+        ] {
             let p = dir.path().join(name);
             std::fs::write(&p, "").unwrap();
             assert!(

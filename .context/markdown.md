@@ -16,7 +16,9 @@ set**, and a surface never builds its own:
   a revision, a directory, a commit, a record of any shared model's store — a
   task, a knowledge page —, an extension's resource) opens through the page's navigation (`openRef`);
   Cmd/Ctrl-click or middle-click opens it in a new tab; right-click
-  offers Open, Open in new tab and a Copy of what it names (path, SHA,
+  offers Open, Open in new tab, Open In ▸ (the file manager, the default
+  app, a terminal, the browser: `openIn.ts`, [usability.md](./usability.md)
+  "Open In ▸ on every path and URL") and a Copy of what it names (path, SHA,
   id, link). A web link opens in the app's web page when the allowlist
   takes it (`classifyExternalUrl`), else in the browser. An in-page
   anchor jumps. A broken `[[…]]` is inert and marked. A bare ref link

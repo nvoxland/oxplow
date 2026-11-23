@@ -1675,7 +1675,7 @@ commands:
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   # terminals.write
   - name: terminal.open
-    summary: "Open a terminal: a shell (`$SHELL -l`) in a stream's worktree, at the end of its terminals. `title` defaults to the next \"Terminal N\". Answers `{ id, uri, title }`; the shell starts when a page attaches to the URI."
+    summary: "Open a terminal: a shell (`$SHELL -l`) in a stream's worktree, at the end of its terminals. `title` defaults to the next \"Terminal N\". `dir` starts the shell in a directory of the worktree (a relative path; a person may give any directory). Answers `{ id, uri, title }`; the shell starts when a page attaches to the URI."
     scope: terminals.write
     op: open
     example: {"stream": "str2", "title": "build"}

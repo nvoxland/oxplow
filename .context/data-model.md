@@ -615,7 +615,9 @@ the `hnd` id kind.
 
 A stream's terminals, one row per shell: `stream_id` (`ON DELETE CASCADE`;
 an archive deletes the rows itself and ends the shells), `title`, `position`
-(dense order within the stream) and `created_at`. Written only by the
+(dense order within the stream), `created_at` and `dir` (V80: where its
+shell starts, relative to the worktree or absolute; NULL is the worktree).
+Written only by the
 `oxplow.terminal.*` commands through the store's `_tx` cores (`open_tx`
 titles "Terminal N" — one past the highest numbered title, never below the
 count — `rename_tx`, `delete_tx`); read as `v_terminal` (with its `uri`,

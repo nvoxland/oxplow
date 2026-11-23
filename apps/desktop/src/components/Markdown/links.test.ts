@@ -36,6 +36,13 @@ test("a file at another revision has no Open In", () => {
   expect(linkMenu("oxplow:oxplow/file?path=a.ts&rev=git%3AHEAD", () => {}).map((i) => i.label)).toEqual(["Open", "Open in new tab", "Copy path"]);
 });
 
+test("a directory at another revision, or a file on another filesystem, has no Open In", () => {
+  host([]);
+  for (const href of ["oxplow:oxplow/dir?path=src&rev=git%3AHEAD", "oxplow:oxplow/file?path=a%2Fb.ts&filesystem=oxplow%3Aext"]) {
+    expect(linkMenu(href, () => {}).some((i) => i.id === "open-in")).toBe(false);
+  }
+});
+
 test("outside a window (no host) a file link has no Open In", () => {
   expect(linkMenu("oxplow:oxplow/file?path=src%2Fa.ts", () => {}).map((i) => i.label)).toEqual(["Open", "Open in new tab", "Copy path"]);
 });

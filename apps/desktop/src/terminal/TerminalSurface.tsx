@@ -251,6 +251,14 @@ export function TerminalSurface({
     const fit = new FitAddon();
     term.loadAddon(fit);
 
+    // A web URL: a click opens the browser. Registered first, so a path
+    // inside a URL (`?next=/a/b.ts`) is the URL's, not a link of its own.
+    const urlLinkDisp = installUrlLinkProvider(term, {
+      onActivate: openInBrowser,
+      onHover: (url) => {
+        hovered.current = url ? { kind: "url", url } : null;
+      },
+    });
     const linkProviderDisp = installFilePathLinkProvider(term, {
       onActivate: (match: FilePathLinkActivation) => {
         const open = props.current.onOpenFile;
@@ -262,13 +270,6 @@ export function TerminalSurface({
       validatePath: (path: string) => props.current.isLinkablePath?.(path) ?? true,
       onHover: (match) => {
         hovered.current = match ? { kind: "path", match } : null;
-      },
-    });
-    // A web URL: a click opens the browser.
-    const urlLinkDisp = installUrlLinkProvider(term, {
-      onActivate: openInBrowser,
-      onHover: (url) => {
-        hovered.current = url ? { kind: "url", url } : null;
       },
     });
     term.attachCustomKeyEventHandler((event) => {

@@ -95,7 +95,9 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   The shell starts its daemons on this machine, so `filesAreLocal()`
   (`filesLocalFrom`, `transport.ts`) is true for a project window on its
   injected base with no manual connect over it, and for the launcher. A
-  plain browser or a manual connect may drive a daemon elsewhere. Open In
+  plain browser or a manual connect may drive a daemon elsewhere. It is
+  read once at load, as the base is: another window's connect or
+  disconnect changes the storage, not the daemon this one drives. Open In
   ▸ Reveal and Default App show only when it is true.
 
   **Routing is per command.** `invokeRoute(name, base, tauriAvailable)`
