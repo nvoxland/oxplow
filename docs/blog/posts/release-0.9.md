@@ -66,6 +66,7 @@ Settings got a rework:
 
 ## Everything else
 
+- **The left rail has three groups:** This thread, This stream and This project. Drag a panel between them, or to Remove. A long rail scrolls while you drag near its top or bottom. View ▸ Sidebar Panels, also on a right-click on the rail, lists every panel so you can show or hide it.
 - The agent guidance Oxplow adds to a session is down to a few lines, and the rest is opt-in. oxtask's task workflow is off by default now.
 - A reply that ends in a question no longer marks the thread as waiting on you. That guess was often wrong, and it pushed agents to word their replies for Oxplow. A question tool, a plan to approve or a permission prompt still marks it.
 - Restart Terminal restarts an agent's terminal in place.
@@ -78,5 +79,7 @@ About 170 commits since 0.8.
 The database migrates when 0.9 first starts: the old command audit becomes command runs, and earlier runs get their detail rows. Nothing to do by hand.
 
 `oxplow.zones` is now a retired setting, and Oxplow says so if your project file still has it.
+
+A panel's `scope:` in an extension's manifest is now `data_scope:`, and a bookmark's `scope` is now `visibility_scope`. The old names aren't read, so rename them in your own extensions.
 
 Let me know what breaks. I'd especially like to hear whether the change review's signals are useful or just noise.
