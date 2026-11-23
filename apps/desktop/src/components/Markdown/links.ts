@@ -4,12 +4,13 @@
  * right-click offers Open, Open in new tab and a Copy of what it names.
  * A page link opens through the page's navigation (`openRef`); a web
  * link opens in the app's web page when the allowlist takes it, else in
- * the browser.
+ * the system browser.
  */
 import { classifyExternalUrl } from "../../external-url-allowlist.js";
 import type { MenuItem } from "../../menu.js";
 import type { NavigateOptions } from "../../tabs/PageNavigationContext.js";
 import { externalUrlRef } from "../../tabs/pageRefs.js";
+import { openInBrowser } from "../../openIn.js";
 import { recordLabel, recordOf } from "../../recordStores.js";
 import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
 
@@ -24,7 +25,7 @@ export function openExternal(href: string, open: OpenRef, newTab = true): void {
     open(externalUrlRef(verdict.url).id, { newTab });
     return;
   }
-  window.open(href, "_blank", "noopener,noreferrer");
+  openInBrowser(href);
 }
 
 /** Follow `href` as a click does. False when it isn't a link to follow
@@ -61,7 +62,7 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
     if (open && classifyExternalUrl(href).ok) {
       items.push({ id: "open-in-app", label: "Open in app", enabled: true, run: () => openExternal(href, open) });
     }
-    items.push({ id: "open-ext", label: "Open in browser", enabled: true, run: () => void window.open(href, "_blank", "noopener,noreferrer") });
+    items.push({ id: "open-ext", label: "Open in browser", enabled: true, run: () => openInBrowser(href) });
     items.push(copy("copy", "Copy link", href));
     return items;
   }

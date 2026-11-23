@@ -16,7 +16,7 @@ import { listen, onRemoteReconnect, sendSocketFrame, triggerRemoteResync } from 
 
 /** Whether this window is in the desktop shell — false in a plain browser
  *  driving a daemon, which has no native menu or recent projects. */
-export { shellAvailable } from "./tauri-bridge/transport.js";
+export { filesAreLocal, shellAvailable } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS, type EventChannelFrameKey } from "./tauri-bridge/channels.js";
@@ -1501,6 +1501,18 @@ export async function respondLspApplyEdit(
   failureReason?: string,
 ): Promise<void> {
   unwrap(await commands.respondLspApplyEdit(token, applied, failureReason ?? null));
+}
+
+/// Show local `path` (absolute) in the OS file manager (Open In ▸ Reveal
+/// in Finder). The shell does it; only when `filesAreLocal()`.
+export async function revealPath(path: string): Promise<void> {
+  unwrap(await commands.revealPath(path));
+}
+
+/// Open local `path` (absolute) with its default app (Open In ▸ Default
+/// App). The shell refuses a program.
+export async function openPath(path: string): Promise<void> {
+  unwrap(await commands.openPath(path));
 }
 
 export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {

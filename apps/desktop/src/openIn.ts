@@ -1,0 +1,98 @@
+/// Open In ▸: the one submenu a path or URL the window recognizes gets on
+/// right-click — in the terminal, a markdown link, a page row, a tab, the
+/// editor. Oxplow's own items are the OS file manager, the default app, a
+/// terminal there (a file's: its folder), the system browser and oxplow's
+/// web tab, those that apply to the target and to this window; an
+/// extension's items for the link join after them (`extra`).
+/// `.context/usability.md` "Open In".
+import { openInSystemBrowser } from "./api.js";
+import { classifyExternalUrl } from "./external-url-allowlist.js";
+import type { MenuItem } from "./menu.js";
+import { recordOpError } from "./opErrors.js";
+import { revealLabel, type Platform } from "./platform.js";
+import { WORKING } from "./revision.js";
+import { isExternal, paramOf, typeOf } from "./uri/uri.js";
+
+/** What is opened: a local path (absolute) or a web URL. */
+export type OpenTarget = { kind: "file" | "dir"; path: string } | { kind: "url"; url: string };
+
+/** What the window can do with a target, and where it is. */
+export interface OpenInEnv {
+  platform: Platform;
+  /** The window's files are on this machine (`filesAreLocal`). */
+  filesLocal: boolean;
+  reveal(path: string): Promise<void>;
+  openPath(path: string): Promise<void>;
+  openBrowser(url: string): Promise<void>;
+  /** Open `url` in oxplow's web tab; null outside a page. */
+  openInApp: ((url: string) => void) | null;
+  inAppAllowed(url: string): boolean;
+  /** Open an oxplow terminal at directory `dir`; null where none can. */
+  openTerminalAt: ((dir: string) => void) | null;
+}
+
+/** The directory `path` is in. */
+export function parentDir(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const at = trimmed.lastIndexOf("/");
+  return at <= 0 ? "/" : trimmed.slice(0, at);
+}
+
+const report = (label: string) => (e: unknown) =>
+  recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
+
+/** Oxplow's own Open In items for `target`. */
+function builtinItems(target: OpenTarget, env: OpenInEnv): MenuItem[] {
+  const items: MenuItem[] = [];
+  if (target.kind === "url") {
+    const { url } = target;
+    items.push({ id: "open-in.browser", label: "Browser", enabled: true, run: () => void env.openBrowser(url).catch(report("Open in browser")) });
+    const inApp = env.openInApp;
+    if (inApp && env.inAppAllowed(url)) items.push({ id: "open-in.oxplow", label: "Oxplow", enabled: true, run: () => inApp(url) });
+    return items;
+  }
+  const { path } = target;
+  if (env.filesLocal) {
+    items.push({ id: "open-in.reveal", label: revealLabel(env.platform), enabled: true, run: () => void env.reveal(path).catch(report("Reveal a path")) });
+    if (target.kind === "file") {
+      items.push({ id: "open-in.default-app", label: "Default App", enabled: true, run: () => void env.openPath(path).catch(report("Open with the default app")) });
+    }
+  }
+  const terminal = env.openTerminalAt;
+  if (terminal) {
+    const dir = target.kind === "file" ? parentDir(path) : path;
+    items.push({ id: "open-in.terminal", label: "Terminal", enabled: true, run: () => terminal(dir) });
+  }
+  return items;
+}
+
+/** The Open In ▸ item for `target`: oxplow's items, then `extra` (an
+ *  extension's, for this link). Null when nothing applies. */
+export function openInMenu(target: OpenTarget, env: OpenInEnv, extra: MenuItem[] = []): MenuItem | null {
+  const submenu = [...builtinItems(target, env), ...extra];
+  if (submenu.length === 0) return null;
+  return { id: "open-in", label: "Open In", enabled: true, submenu };
+}
+
+/** The target a ref names, with a file or directory URI's path joined
+ *  onto `worktree` (the stream's `worktree_path`): only a working-copy
+ *  path on the local filesystem is a file on disk. A web URL is itself.
+ *  Null for anything else. */
+export function localTarget(ref: string, worktree: string | null): OpenTarget | null {
+  if (isExternal(ref)) return /^https?:\/\//i.test(ref) ? { kind: "url", url: ref } : null;
+  const type = typeOf(ref);
+  if (type !== "oxplow/file" && type !== "oxplow/dir") return null;
+  const rev = paramOf(ref, "rev");
+  if ((rev && rev !== WORKING) || paramOf(ref, "filesystem") || !worktree) return null;
+  const root = worktree.replace(/\/+$/, "");
+  const rel = (paramOf(ref, "path") ?? "").replace(/^\/+/, "").replace(/\/+$/, "");
+  return { kind: type === "oxplow/file" ? "file" : "dir", path: rel ? `${root}/${rel}` : root };
+}
+
+/** Whether oxplow's web tab may show `url` (the allowlist). */
+export const inAppAllowed = (url: string): boolean => classifyExternalUrl(url).ok;
+
+/** Open `url` in the system browser; a failure is reported, not thrown. */
+export function openInBrowser(url: string): void {
+  void openInSystemBrowser(url).catch(report("Open in browser"));
+}

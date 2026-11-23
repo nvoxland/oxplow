@@ -160,6 +160,22 @@ function readRemoteEndpoint(): { base: string | null; token: string | null } {
   };
 }
 
+/// Whether this window's files are on this machine: the shell starts
+/// its daemons here, so a project window on the daemon its shell injected
+/// (no manual connect over it) has them, and so do the launcher's
+/// projects. A plain browser, or a manual connect, may drive a daemon
+/// elsewhere. Pure; exported for tests.
+export function filesLocalFrom(sources: {
+  shell: boolean;
+  kind: string | null;
+  stored: string | null;
+  injected: string | null;
+}): boolean {
+  if (!sources.shell) return false;
+  if (sources.kind === "launcher") return true;
+  return sources.kind === "project" && cleanBase(sources.stored) === null && cleanBase(sources.injected) !== null;
+}
+
 const endpoint = readRemoteEndpoint();
 const remoteBase: string | null = endpoint.base;
 const remoteToken: string | null = endpoint.token;
@@ -536,6 +552,19 @@ export function shellAvailable(): boolean {
   } catch {
     return false;
   }
+}
+
+/// Whether this window's files are on this machine (`filesLocalFrom`):
+/// Open In ▸ Reveal and Default App need them.
+export function filesAreLocal(): boolean {
+  let stored: string | null = null;
+  try {
+    stored = shellStorage.getItem("oxplow.remoteBase");
+  } catch {
+    // No localStorage (tests).
+  }
+  const ctx = readWindowContext();
+  return filesLocalFrom({ shell: shellAvailable(), kind: ctx?.kind ?? null, stored, injected: ctx?.base ?? null });
 }
 
 /// Tauri-listen-compatible entry point. In remote mode the three

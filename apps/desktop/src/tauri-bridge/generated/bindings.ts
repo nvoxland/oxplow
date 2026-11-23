@@ -645,6 +645,10 @@ export const commands = {
 	 *  have to grant the renderer the broader Tauri clipboard plugin permission.
 	 */
 	clipboardReadText: () => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("clipboard_read_text")),
+	/**  Show `path` in the OS file manager, selected. */
+	revealPath: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("reveal_path", { path })),
+	/**  Open `path` with its default app (a directory: in the file manager). */
+	openPath: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("open_path", { path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.

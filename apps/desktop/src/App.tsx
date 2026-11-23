@@ -143,6 +143,7 @@ import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
+import { openInBrowser } from "./openIn.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 
@@ -1152,15 +1153,13 @@ export function App() {
 
   /**
    * Open an http(s) URL as an in-app sandboxed external-url tab.
-   * Validates through the scheme allowlist; rejected URLs are routed to
-   * the OS browser via window.open (which the main process turns into a
-   * shell.openExternal call) so the user still gets to follow the link
-   * even if it can't be embedded.
+   * Validates through the scheme allowlist; a URL it refuses opens in
+   * the system browser, so the person still gets to follow the link.
    */
   const handleOpenExternalUrl = useCallback((rawUrl: string) => {
     const verdict = classifyExternalUrl(rawUrl);
     if (!verdict.ok) {
-      window.open(rawUrl, "_blank", "noopener,noreferrer");
+      openInBrowser(rawUrl);
       return;
     }
     handleOpenPageRef.current?.(externalUrlRef(verdict.url));

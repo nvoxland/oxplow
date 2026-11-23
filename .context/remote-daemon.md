@@ -90,6 +90,14 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   `VITE_OXPLOW_REMOTE` (dev override). All three are read once at module
   load — switching is a window reload.
 
+  **Are the files on this machine?** `isRemote()` is true in every
+  project window (the shell injects a loopback base), so it cannot say.
+  The shell starts its daemons on this machine, so `filesAreLocal()`
+  (`filesLocalFrom`, `transport.ts`) is true for a project window on its
+  injected base with no manual connect over it, and for the launcher. A
+  plain browser or a manual connect may drive a daemon elsewhere. Open In
+  ▸ Reveal and Default App show only when it is true.
+
   **Routing is per command.** `invokeRoute(name, base, tauriAvailable)`
   sends shell commands (windowing, native menus, clipboard, project
   lifecycle — no daemon serves them) to Tauri IPC and everything else to

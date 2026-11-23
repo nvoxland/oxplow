@@ -6,6 +6,7 @@ import {
   onRemoteReconnect,
   resolveBase,
   resolveToken,
+  filesLocalFrom,
   handleSocketOpen,
   scheduleResync,
   parseRemoteInput,
@@ -296,5 +297,23 @@ describe("frames the window writes on the socket", () => {
     writeFrame(socket, waiting, "b");
     expect(sent).toEqual([]);
     expect(waiting).toEqual([]);
+  });
+});
+
+// Open In ▸ Reveal / Default App act on this machine's files: only when
+// the window drives the daemon its shell started (on this machine).
+describe("filesLocalFrom", () => {
+  const injected = "http://127.0.0.1:60331";
+  test("a project window on its shell's daemon has local files", () => {
+    expect(filesLocalFrom({ shell: true, kind: "project", stored: null, injected })).toBe(true);
+  });
+  test("a manual connect to another daemon has not", () => {
+    expect(filesLocalFrom({ shell: true, kind: "project", stored: "http://box:7420", injected })).toBe(false);
+  });
+  test("a plain browser has not", () => {
+    expect(filesLocalFrom({ shell: false, kind: null, stored: null, injected: null })).toBe(false);
+  });
+  test("the launcher's projects are on this machine", () => {
+    expect(filesLocalFrom({ shell: true, kind: "launcher", stored: null, injected: null })).toBe(true);
   });
 });
