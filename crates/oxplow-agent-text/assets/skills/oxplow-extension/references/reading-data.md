@@ -9,6 +9,10 @@ answer is still wrong, and the queries to start from.
   `SELECT name, sql_type, doc FROM v_field WHERE view = 'v_test_run'`
   documents its columns. Read both; a guessed column is an error at best
   and a different column than you meant at worst.
+- `v_dataset_lineage` says what a dataset is built from: one row per input
+  (`view`, `input`, `kind`: `ref` for another dataset, `source` for a
+  table). `WHERE view = 'v_command_run'` is what it reads; `WHERE input =
+  'v_command_run'` is what reads it.
 - `v_metric_catalog` lists the metrics you can read with `MEASURE('<key>')`.
 
 ## What the result says about itself

@@ -499,6 +499,10 @@ pub const MANIFEST: &[Capability] = &[
         "the person's terminal: never an automation API",
     ),
     ui(
+        "restart_agent_terminal",
+        "the person's terminal: never an automation API",
+    ),
+    ui(
         "terminal_session_cwd",
         "the person's terminal: never an automation API",
     ),
