@@ -1,0 +1,46 @@
+title: Job Runs
+description: Queued and running extension jobs, followed by recent jobs and their latest attempt's usage.
+icon: activity
+category: Activity
+params:
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 1d
+  presets: [1d, 7d, 30d, all]
+loaders:
+  job_runs:
+    sql: |
+      SELECT id, uri, job, intent_key, state, attempt, rounds, tool_calls,
+             input_tokens + output_tokens AS tokens, queued_at,
+             state IN ('queued', 'running') AND cancellation_requested = 0 AS can_cancel,
+             CASE WHEN cancellation_requested AND state = 'running' THEN 'Stopping'
+                  ELSE state END AS status
+      FROM v_job_run
+      WHERE state IN ('queued', 'running')
+         OR ((:range_from IS NULL OR COALESCE(finished_at, queued_at) >= :range_from)
+         AND (:range_to IS NULL OR COALESCE(finished_at, queued_at) <= :range_to))
+      ORDER BY state NOT IN ('queued', 'running'),
+               COALESCE(finished_at, started_at, queued_at) DESC, id DESC
+view:
+  id: job-runs
+  from: job_runs
+  viz: table
+  columns:
+  - { key: intent_key, label: Job run, link: { kind: page, from: uri } }
+  - { key: job, label: Job definition, link: { kind: page, from: job } }
+  - { key: status, label: State }
+  - { key: attempt, label: Attempt }
+  - { key: rounds, label: Model rounds }
+  - { key: tool_calls, label: Tool calls }
+  - { key: tokens, label: Tokens }
+  - { key: queued_at, label: Queued, format: datetime }
+  empty: No jobs in this range.
+  actions:
+  - id: cancel
+    label: Cancel job
+    command: oxplow.job_run.cancel
+    when: can_cancel
+    input: { job_run: '{{row.id}}' }
+    row: true

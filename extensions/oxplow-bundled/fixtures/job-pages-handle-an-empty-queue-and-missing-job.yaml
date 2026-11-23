@@ -1,0 +1,16 @@
+steps:
+  - when: { page: job-runs }
+    expect:
+      loaders: { job_runs: { rows: 0 } }
+      nodes:
+        - id: job-runs
+          actions: [cancel]
+      text: { contains: [No jobs in this range.] }
+  - when:
+      page: job-run-output
+      params: { uri: 'oxplow:oxplow/job_run?id=01990000-0000-7000-8000-000000000000' }
+    expect:
+      loaders:
+        job_details: { rows: 0 }
+        job_run_output: { rows: 0 }
+      text: { contains: [This job could not be found.] }

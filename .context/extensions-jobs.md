@@ -308,6 +308,10 @@ commands:
   attempt has outcome `ok`. `rounds` counts completed rounds from
   streamed usage rows. `ai_calls` comes from the attempt's run.
   `v_job_run_output` follows the streamed output live.
+  Bundled's **Job Runs** page lists the queue and recent jobs. The row menu
+  offers Cancel job while the job can still be stopped. A row's job run link
+  opens **Job Run Output** (`oxplow/job_run`), including the transcript across
+  attempts and a link to the latest attempt's shared **Run details**.
 - **What a job can't do**: drive an agent session, ask a person (a
   command that needs confirmation is refused, never proposed), write
   (its tools read), run core's commands, or call a model its extension's

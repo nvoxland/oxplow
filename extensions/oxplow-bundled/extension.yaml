@@ -1,7 +1,7 @@
 manifest: 2
 name: oxplow-bundled
 namespace: oxplow
-description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings, the Work board, the Knowledge pages, the Dashboards and Usage pages, and the code metrics with the Metrics list and Duplicated Code so far; the rest moves here from oxplow-bundled-todo one piece at a time.
+description: Oxplow's optional built-in features, including change review, code metrics, the Work board, Knowledge, Dashboards, Usage and Job Runs.
 engine: ">=0.7"
 # Its `tasks` skill (reading the task model) is written to the agent's runtime.
 permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields', 'commands:oxplow.tasks.assign']
@@ -12,7 +12,7 @@ intent:
   purpose: >-
     Hold the optional features oxplow ships once each has been cleaned up. So
     far that is the review and analysis datasets, their settings, the Work
-    panel and board, the Knowledge pages, the Dashboards index and Usage, the
+    panel and board, the Knowledge pages, the Dashboards index, Usage, Job Runs, the
     code metrics with the Metrics list and Duplicated Code, and their event
     types and commands. Their names come from the
     `oxplow` namespace, so they stay when a piece moves between extensions.

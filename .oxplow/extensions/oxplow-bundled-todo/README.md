@@ -10,8 +10,7 @@ extension" has the rules for a move.
 
 ## What is still here
 
-- **Pages**: Agent Interface and Command Errors, Job Runs and Job Run Output,
-  Merge Readiness and Remote Branches.
+- **Pages**: Agent Interface, Command Errors, Merge Readiness and Remote Branches.
 - **Custom components**: Explore Data and the history graph
   (replaces Git History's plain list at `vcs.history.graph`).
 - **Advisories**: `hint-never-fires`, and `shared-files` /
