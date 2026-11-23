@@ -639,8 +639,10 @@ another branch.
 Every right-click menu of something the window knows as a file, a
 directory or a web URL has one **Open In ▸** submenu: a markdown link,
 a page's file or directory tab, the page ☰ menu, the editor, a stream
-row in the Navigator, a project row in the launcher (and, with the later
-steps, the terminal and page rows). One builder makes it, `openInMenu` /
+row in the Navigator, a project row in the launcher, and a page's row
+that names a file, a directory or a web URL (`rowOpenInRef`: a `file`
+link, a `page` link to one, or a `diff-at` link whose newer side is the
+working copy, as the changes lists have). The terminal gets it next. One builder makes it, `openInMenu` /
 `openInForRef` / `openInForPath` in `apps/desktop/src/openIn.ts`. A new
 surface calls it and adds nothing of its own.
 

@@ -59,6 +59,7 @@ import {
   rowGroups,
   capGroups,
   rowRef,
+  rowOpenInRef,
   sparklineValues,
   stepItems,
   timelineEntries,
@@ -82,6 +83,7 @@ import { addToContext } from "../contextBasket.js";
 import { useContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 import { refCommandMenuItems, useRefOffers } from "../components/refCommands.js";
+import { openInForRef } from "../openIn.js";
 import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
@@ -753,7 +755,11 @@ function RowsBody({
   const first = result.rows[0]?.[0] ?? null;
   const rowActions = viz.actions.filter(rowMenuAction);
   const rowItems = (row: SqlCell[]): MenuItems => {
-    const base = rowBase(row);
+    // The file, directory or web page the row names, outside oxplow
+    // (`openIn.ts`).
+    const named = rowOpenInRef(viz, result.columns, row);
+    const elsewhere = named ? openInForRef(named) : null;
+    const base = elsewhere ? [...rowBase(row), elsewhere] : rowBase(row);
     // The commands about what the row links to (their `ui.about`), as the
     // daemon says they apply to it now: the menu opens once it has.
     const ref = rowRef(viz, result.columns, row);

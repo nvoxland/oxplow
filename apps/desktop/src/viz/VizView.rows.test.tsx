@@ -17,6 +17,7 @@ mock.module("../api.js", () => ({
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { VizView } = await import("./VizView.js");
+const { setOpenInHost } = await import("../openIn.js");
 
 // A viz presses through the page that draws it: a runner stands in for it.
 const press: VizActionRunner = async (_id, action, _params, row) => {
@@ -289,6 +290,25 @@ test("a row that links somewhere isn't draggable, and offers Add to Context in i
   expect(add.textContent).toBe("Add to Context");
   // Every Add to Context entry wears the basket's @.
   expect(add.querySelector("[data-testid=menu-item-icon]")).not.toBeNull();
+});
+
+test("a row that names a file offers Open In ▸ for it", async () => {
+  const opened: string[] = [];
+  setOpenInHost({ worktree: "/w", openInApp: () => {}, openTerminalAt: (d) => opened.push(d) });
+  try {
+    const run = {
+      config: { ...base, viz: "list", columns: [{ key: "path", label: null, link: link("file"), unit: null, icon: null, tone: null }] },
+      params: {},
+      result: { columns: ["path"], rows: [["src/lib/a.ts"]], truncated: false },
+    } as unknown as VizRun;
+    const view = render(<VizView run={run} compact onOpenPage={() => {}} />);
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+    fireEvent.click(await waitFor(() => view.getByTestId("menu-item-open-in")));
+    fireEvent.click(view.getByTestId("menu-item-open-in.terminal"));
+    expect(opened).toEqual(["/w/src/lib"]);
+  } finally {
+    setOpenInHost(null);
+  }
 });
 
 test("a tree's labels follow their column's link", () => {
