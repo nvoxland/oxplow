@@ -258,7 +258,7 @@ function Tab({
         gap: 6,
         flexShrink: 0,
         padding: "7px 14px 6px",
-        background: on ? "var(--accent-soft-bg)" : hover ? "rgba(255, 255, 255, 0.04)" : "transparent",
+        background: on ? "var(--accent-soft-bg)" : hover ? "var(--button-secondary-bg-hover)" : "transparent",
         color: on ? "var(--accent)" : "var(--text-secondary)",
         border: "none",
         borderRight: "1px solid var(--border-strong)",
@@ -398,7 +398,7 @@ function ItemRow({
           onToggle();
         }
       }}
-      style={{ margin: "0 -6px", borderBottom: "1px solid var(--border-subtle)", background: expanded ? "rgba(255, 255, 255, 0.025)" : "transparent" }}
+      style={{ margin: "0 -6px", borderBottom: "1px solid var(--border-subtle)", background: expanded ? "var(--button-secondary-bg-hover)" : "transparent" }}
     >
       <div
         tabIndex={0}
@@ -414,7 +414,7 @@ function ItemRow({
           alignItems: "center",
           gap: 8,
           padding: "5px 6px",
-          background: hover ? "var(--surface-hover, rgba(255, 255, 255, 0.04))" : "transparent",
+          background: hover ? "var(--button-secondary-bg-hover)" : "transparent",
           cursor: "pointer",
           minWidth: 0,
         }}
