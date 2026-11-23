@@ -459,12 +459,15 @@ pub fn clear_op() -> Op {
 }
 
 /// The call that sets `thread`'s next send back to `basket` (by id; none:
-/// its own) and holds `hold` again.
+/// its own) and holds `hold` again. `hold` is always sent (an empty list
+/// included), so the call releases nothing; `None` leaves it out, so a
+/// call back to the thread's own releases its held items, as a person's
+/// Send Next on This Thread does.
 fn re_next(
     conn: &Connection,
     thread: i64,
     basket: Option<i64>,
-    hold: &[i64],
+    hold: Option<&[i64]>,
 ) -> Result<CommandCall, CommandError> {
     let mut input = json!({ "thread": ThreadId::new(thread).to_string() });
     if let Some(id) = basket {
@@ -472,7 +475,7 @@ fn re_next(
             .ok_or_else(|| invalid("/basket", format!("no basket {id}")))?;
         input["basket"] = json!(b.name);
     }
-    if !hold.is_empty() {
+    if let Some(hold) = hold {
         input["hold"] = json!(hold);
     }
     Ok(CommandCall {
@@ -510,13 +513,19 @@ pub fn send_next_op() -> Op {
             };
             let mut calls = Vec::new();
             if let (Some(other), Some(b)) = (before.basket_was_next_for, &basket) {
-                calls.push(re_next(ctx.conn, other, Some(b.id), &[])?);
+                calls.push(re_next(ctx.conn, other, Some(b.id), Some(&[]))?);
             }
             if before.basket != basket.as_ref().map(|b| b.id)
                 || !released.is_empty()
                 || input.hold.is_some()
             {
-                calls.push(re_next(ctx.conn, thread.value(), before.basket, &released)?);
+                // Undoing a call that held items again releases them; any
+                // other undo holds what this call released, and nothing more.
+                let hold = match &input.hold {
+                    Some(ids) if !ids.is_empty() => None,
+                    _ => Some(released.as_slice()),
+                };
+                calls.push(re_next(ctx.conn, thread.value(), before.basket, hold)?);
             }
             Ok(HandlerOutput {
                 result: json!({ "thread": thread.to_string(), "basket": basket.map(|b| b.name) }),
@@ -1060,6 +1069,20 @@ mod tests {
         assert_eq!(items(&fx, Some("Auth")).await[0].held_at, None);
         undo(&fx, &moved).await;
         assert_eq!(held().await, [true], "undoing a move keeps the hold");
+
+        let chose = run(
+            &fx,
+            SEND_NEXT,
+            json!({ "thread": thread, "basket": "Auth" }),
+        )
+        .await;
+        assert_eq!(held().await, [true]);
+        undo(&fx, &chose).await;
+        assert_eq!(
+            held().await,
+            [true],
+            "undoing a named basket's Send Next releases nothing"
+        );
     }
 
     /// A basket's name may not start with "@": the app's marks for This
