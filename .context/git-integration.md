@@ -523,6 +523,9 @@ invoked as a separate binary, never linked as a library.
   omits each remote's symbolic `HEAD`, and sorts by tip commit time. You can
   filter by remote or search branch names and commit subjects. Each row links
   to its tip and to Commits Between Branches against the current stream's branch.
+  These three pages also link to Git History with the relevant commit revealed.
+  Bundled's Git History component opens those links in Graph view. It uses the
+  branch tip as the history root where available, including for remote refs.
 - `oxplow.vcs.push` / `oxplow.vcs.pull` with `remote` + `branch` push the current
   branch to `<remote>/<branch>` (`git push <remote> HEAD:refs/heads/<branch>`,
   a refspec push that never touches another working dir) and pull

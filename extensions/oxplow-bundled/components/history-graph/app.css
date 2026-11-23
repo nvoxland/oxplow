@@ -10,6 +10,19 @@ body { display: flex; flex-direction: column; padding: 0; }
   border-radius: 6px;
   padding: 3px 6px;
 }
+.modes { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 6px; }
+.modes button {
+  font: inherit;
+  font-size: var(--text-xs);
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.modes button[aria-pressed="true"] { background: var(--accent-soft-bg); color: var(--accent); }
+.modes button:focus-visible, .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .grow { flex: 1; min-width: 160px; }
 #rows { flex: 1; min-height: 0; overflow: auto; }
 .row {
@@ -20,6 +33,8 @@ body { display: flex; flex-direction: column; padding: 0; }
   white-space: nowrap;
   overflow: hidden;
   font-size: var(--text-sm);
+  color: inherit;
+  text-decoration: none;
 }
 .row:hover { background: var(--surface-hover, transparent); }
 .row.revealed { background: var(--accent-soft-bg); }

@@ -2,7 +2,7 @@
 // draws them — a lane per line of descent, a dot per commit, edges to its
 // parents — in place of core's plain commit list (the `vcs.history.graph`
 // replacement). Its page walks `v_commit` from the stream's head; the
-// filters here only dim or hide rows, so typing never re-runs the page.
+// Both views filter the loaded rows locally, so typing never re-runs the page.
 // On Git History the filters are the page's view params (`q`, `author`,
 // `branch`, the replacement's contract): they start from the page's,
 // each change writes them, and Back sets them again — a reload, a
@@ -21,6 +21,8 @@
 
   const rowsEl = document.getElementById("rows");
   const queryEl = document.getElementById("query");
+  const listModeEl = document.getElementById("list-mode");
+  const graphModeEl = document.getElementById("graph-mode");
   const authorEl = document.getElementById("author");
   const branchEl = document.getElementById("branch");
   const countEl = document.getElementById("count");
@@ -33,13 +35,35 @@
   oxplow.connect().then((component) => {
     component.applyTheme();
     let history = read(component.run);
-    let revealed = null;
+    const savedMode = (state) => {
+      if (state?.reveal === history.reveal && (state.mode === "list" || state.mode === "graph")) {
+        return state.mode;
+      }
+      return history.reveal ? "graph" : "list";
+    };
+    let mode = savedMode(component.historyState);
 
-    const open = (sha, newTab) => component.navigate("oxplow:oxplow/commit?sha=" + encodeURIComponent(sha), { newTab }).catch(say);
+    const open = (uri, newTab) => component.navigate(uri, { newTab }).catch(say);
     const draw = () => {
-      revealed = render(history, filters(), open);
+      listModeEl.setAttribute("aria-pressed", String(mode === "list"));
+      graphModeEl.setAttribute("aria-pressed", String(mode === "graph"));
+      const revealed = render(history, filters(), mode, open);
       if (revealed) revealed.scrollIntoView({ block: "nearest" });
     };
+    const chooseMode = (next) => {
+      if (mode === next) return;
+      mode = next;
+      draw();
+      if (component.historyState) component.setHistoryState({ mode, reveal: history.reveal }).catch(say);
+    };
+    listModeEl.addEventListener("click", () => chooseMode("list"));
+    graphModeEl.addEventListener("click", () => chooseMode("graph"));
+    component.onHistoryState((state) => {
+      const next = savedMode(state);
+      if (mode === next) return;
+      mode = next;
+      draw();
+    });
     const refill = (author = authorEl.value, branch = branchEl.value) => {
       fill(authorEl, "All authors", unique(history.commits.map((c) => c.author)), author);
       fill(branchEl, "All branches", unique(history.branchHeads.map((b) => b.name)), branch);
@@ -65,7 +89,9 @@
     // The host runs the page again when a commit lands or a ref moves (or
     // the page asks to reveal another commit); the filters stay as set.
     component.onUpdate(({ run }) => {
+      const previousReveal = history.reveal;
       history = read(run);
+      if (history.reveal !== previousReveal) mode = savedMode(component.historyState);
       refill();
       draw();
     });
@@ -115,7 +141,8 @@
       if (tags.length > 0) tagsBySha.set(sha, tags.map(String));
     }
     const reveal = run.params && run.params.reveal_sha ? String(run.params.reveal_sha) : null;
-    return { commits: topoOrder(commits), branchHeads, tagsBySha, reveal };
+    commits.sort((a, b) => b.time - a.time || a.sha.localeCompare(b.sha));
+    return { commits, graphCommits: topoOrder(commits), branchHeads, tagsBySha, reveal };
   }
 
   /** A JSON array column (`parents`, `branches`, `tags`) as a list. */
@@ -246,63 +273,37 @@
   }
 
   /** Draw the rows; returns the revealed row's element, if shown. */
-  function render(history, f, open) {
+  function render(history, f, mode, open) {
     const onBranch = reachable(history, f.branch);
-    const commits = onBranch ? history.commits.filter((c) => onBranch.has(c.sha)) : history.commits;
-    const { rows, width } = layout(commits);
-    const graphWidth = PAD * 2 + LANE * Math.max(1, width);
-    const x = (k) => PAD + k * LANE + LANE / 2;
-    const mid = ROW / 2;
-    let matched = 0;
+    const source = mode === "graph" ? history.graphCommits : history.commits;
+    const commits = onBranch ? source.filter((c) => onBranch.has(c.sha)) : source;
+    const matches = new Set(commits.filter((c) =>
+      (!f.author || c.author === f.author) &&
+      (!f.query || [c.sha, c.subject, c.author, c.email].some((value) => value.toLowerCase().includes(f.query)))
+    ).map((c) => c.sha));
+    const { rows, width } = mode === "graph"
+      ? layout(commits)
+      : { rows: commits.filter((c) => matches.has(c.sha)).map((commit) => ({ commit })), width: 0 };
     let revealed = null;
     rowsEl.textContent = "";
     for (const row of rows) {
       const c = row.commit;
-      const hit =
-        (!f.author || c.author === f.author) &&
-        (!f.query ||
-          c.sha.toLowerCase().includes(f.query) ||
-          c.subject.toLowerCase().includes(f.query) ||
-          c.author.toLowerCase().includes(f.query) ||
-          c.email.toLowerCase().includes(f.query));
-      if (hit) matched += 1;
-
-      const el = document.createElement("div");
-      el.className = "row" + (hit ? "" : " dimmed") + (c.sha === history.reveal ? " revealed" : "");
-      el.setAttribute("role", "listitem");
+      const el = document.createElement("a");
+      const uri = "oxplow:oxplow/commit?sha=" + encodeURIComponent(c.sha);
+      el.href = uri;
+      el.className = "row" + (matches.has(c.sha) ? "" : " dimmed") + (c.sha === history.reveal ? " revealed" : "");
       el.dataset.sha = c.sha;
       el.title = c.sha;
-      el.addEventListener("click", (e) => open(c.sha, e.metaKey || e.ctrlKey || e.button === 1));
-
-      const svg = document.createElementNS(SVG, "svg");
-      svg.setAttribute("width", String(graphWidth));
-      svg.setAttribute("height", String(ROW));
-      const line = (k, x1, y1, x2, y2) => {
-        const l = document.createElementNS(SVG, "line");
-        l.setAttribute("x1", x1);
-        l.setAttribute("y1", y1);
-        l.setAttribute("x2", x2);
-        l.setAttribute("y2", y2);
-        l.setAttribute("stroke-width", "1.5");
-        l.setAttribute("stroke-linecap", "round");
-        l.setAttribute("class", "lane-" + (k % COLORS));
-        svg.appendChild(l);
-      };
-      row.incoming.forEach((sha, k) => {
-        if (!sha) return;
-        if (k !== row.column) line(k, x(k), 0, x(k), ROW);
-        else if (row.fromAbove) line(k, x(k), 0, x(k), mid);
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        open(uri, e.metaKey || e.ctrlKey);
       });
-      if (row.outgoing[row.column]) line(row.column, x(row.column), mid, x(row.column), ROW);
-      for (const to of row.edges) if (to !== row.column) line(to, x(row.column), mid, x(to), ROW);
-      const dot = document.createElementNS(SVG, "circle");
-      dot.setAttribute("cx", x(row.column));
-      dot.setAttribute("cy", mid);
-      dot.setAttribute("r", RADIUS);
-      dot.setAttribute("stroke-width", "1.5");
-      dot.setAttribute("class", "node-" + (row.column % COLORS) + " lane-" + (row.column % COLORS));
-      svg.appendChild(dot);
-      el.appendChild(svg);
+      el.addEventListener("auxclick", (e) => {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        open(uri, true);
+      });
+      if (mode === "graph") el.appendChild(drawLanes(row, width));
 
       const subject = document.createElement("span");
       subject.className = "subject";
@@ -318,8 +319,45 @@
       if (c.sha === history.reveal) revealed = el;
     }
     emptyEl.hidden = rows.length > 0;
-    countEl.textContent = matched + " / " + history.commits.length;
+    emptyEl.textContent = history.commits.length ? "No commits match these filters." : "This branch has no history yet.";
+    countEl.textContent = matches.size + " / " + history.commits.length;
     return revealed;
+  }
+
+  function drawLanes(row, width) {
+    const graphWidth = PAD * 2 + LANE * Math.max(1, width);
+    const x = (k) => PAD + k * LANE + LANE / 2;
+    const mid = ROW / 2;
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("width", String(graphWidth));
+    svg.setAttribute("height", String(ROW));
+    const line = (k, x1, y1, x2, y2) => {
+      const l = document.createElementNS(SVG, "line");
+      l.setAttribute("x1", x1);
+      l.setAttribute("y1", y1);
+      l.setAttribute("x2", x2);
+      l.setAttribute("y2", y2);
+      l.setAttribute("stroke-width", "1.5");
+      l.setAttribute("stroke-linecap", "round");
+      l.setAttribute("class", "lane-" + (k % COLORS));
+      svg.appendChild(l);
+    };
+    row.incoming.forEach((sha, k) => {
+      if (!sha) return;
+      if (k !== row.column) line(k, x(k), 0, x(k), ROW);
+      else if (row.fromAbove) line(k, x(k), 0, x(k), mid);
+    });
+    if (row.outgoing[row.column]) line(row.column, x(row.column), mid, x(row.column), ROW);
+    for (const to of row.edges) if (to !== row.column) line(to, x(row.column), mid, x(to), ROW);
+    const dot = document.createElementNS(SVG, "circle");
+    dot.setAttribute("cx", x(row.column));
+    dot.setAttribute("cy", mid);
+    dot.setAttribute("r", RADIUS);
+    dot.setAttribute("stroke-width", "1.5");
+    dot.setAttribute("class", "node-" + (row.column % COLORS) + " lane-" + (row.column % COLORS));
+    svg.appendChild(dot);
+    return svg;
   }
 
   function badge(text, cls) {

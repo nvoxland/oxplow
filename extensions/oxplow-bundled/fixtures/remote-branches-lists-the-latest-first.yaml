@@ -15,7 +15,14 @@ expect:
     row: { rows: [{ branch: main }] }
     remotes:
       rows:
-        - { short_name: origin/new, subject: newer, remote_ahead: 1, remote_behind: 0, tracking: 1, can_pull: 1, can_push: 0 }
+        - short_name: origin/new
+          subject: newer
+          remote_ahead: 1
+          remote_behind: 0
+          tracking: 1
+          can_pull: 1
+          can_push: 0
+          graph_uri: 'oxplow:oxplow/page?head_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&page=oxplow/git-history&stream_id=1#reveal_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
         - { short_name: upstream/old, subject: older, remote_ahead: 0, remote_behind: 0, tracking: 0, can_pull: 0, can_push: 0 }
 steps:
   - params: { remote: upstream, q: older }

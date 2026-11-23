@@ -217,26 +217,19 @@ choosing one on Settings are the e2e specs'. The pages with every
 enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
 ([tasks.md](./tasks.md), "Conformance").
 
-**The first real one: the history graph.** oxplow-bundled's
-`history-graph` component (`components/history-graph/`, classic scripts on
-the client library and the kit) draws the stream's commits as `git log
---graph` does — a lane per line of descent, a dot per commit — from its
-`history-graph` part (a recursive walk of `v_commit` from
-`:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
-Its text, author and branch filters only dim or hide rows, so typing never
-re-runs the page. On Git History they are the page's `q`, `author` and
-`branch` (the contract's `view`): they start from the page's, each change
-writes them (`setViewParams`; an echo of its own write is ignored, so
-typing is not undone by a late one) and Back sets them again
-(`onViewParams`). With no view (a tile) they are its own. The host re-runs
-the page when a commit lands or a ref moves (its reads). A row opens the
-commit's URI (`oxplow:oxplow/commit?sha=<sha>`); a Cmd/Ctrl-click opens it
-in a new tab (`navigate(uri, { newTab: true })`). It declares no commands,
-so it is not a program to approve. Core keeps no lane code: `CommitList`
-(the fallback, and the Git dashboard's recent commits with their stats) is
-a plain list. `viz/historyGraph.test.ts` runs the bundle's own script
-against its page — lanes, merge lanes, child-before-parent order,
-filters, reveal, Cmd-click.
+**Git History.** Bundled's `history-graph` component replaces the commit
+list at `vcs.history.graph`. It starts in List view. Graph draws each commit
+and its parents in lanes, with children before their parents. Both views
+use the same rows from `:head_sha` through `v_commit` and label local branch
+tips and tags from `v_branch` and `v_tag`. A `reveal_sha` link starts in Graph
+and highlights the commit. The mode is kept in the tab entry's history state.
+The List filters hide nonmatching rows. Graph dims text and author mismatches
+to retain their connections; its branch filter keeps the reachable rows.
+Both share Git History's `q`, `author` and `branch` view params and filter
+locally. The host refreshes the rows when a commit or ref moves. Each row
+links to the commit, with Cmd/Ctrl-click or middle-click opening a new tab.
+Setting `oxplow.replacements.vcs.history.graph` to `oxplow` restores the
+standard list. Bundled's fixtures exercise the replacement and its controls.
 
 **The example that proves views and forms: `examples/extensions/task-views`.**
 An extension with no provider of its own, replacing `task.board`

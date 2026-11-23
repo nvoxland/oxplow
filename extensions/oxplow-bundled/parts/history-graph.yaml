@@ -1,5 +1,5 @@
-title: History Graph
-description: The stream's commits as a graph — a lane per line of descent, a dot per commit — with branch and tag labels. It stands in for oxplow's plain commit list on Git History.
+title: Git History
+description: A commit list and an ancestry graph with shared filters, branch labels and tags.
 params:
 - name: stream_id
   label: Stream
@@ -29,7 +29,7 @@ loaders:
              (SELECT b.name FROM v_branch b
                WHERE b.kind = 'local' AND b.stream_id = :stream_id LIMIT 1) AS current_branch
       FROM v_commit c JOIN reach USING (sha)
-      ORDER BY c.committed_at DESC, c.sha
+      ORDER BY (c.sha = :reveal_sha) DESC, c.committed_at DESC, c.sha
       LIMIT :limit
 view:
   from: history_graph

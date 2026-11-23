@@ -14,15 +14,25 @@ see_also:
 - { page: oxplow/branch-divergence, params: { base: { param: base }, head: { param: head } } }
 - { page: oxplow/git-dashboard, params: { stream_id: { param: stream_id } } }
 loaders:
+  tips:
+    sql: |
+      SELECT (SELECT head_sha FROM v_branch WHERE :head = CASE kind WHEN 'local' THEN name ELSE remote || '/' || name END
+              ORDER BY kind LIMIT 1) AS head_sha,
+             (SELECT head_sha FROM v_branch WHERE :base = CASE kind WHEN 'local' THEN name ELSE remote || '/' || name END
+              ORDER BY kind LIMIT 1) AS base_sha
   incoming:
     sql: |
-      SELECT sha, subject, author, committed_at
+      SELECT sha, subject, author, committed_at, 'Open in History Graph' AS graph_label,
+             uri_view(uri('oxplow/page', 'page', 'oxplow/git-history', 'stream_id', stream_id,
+                          'head_sha', COALESCE((SELECT head_sha FROM tips), sha)), 'reveal_sha', sha) AS graph_uri
       FROM v_commit_between WHERE base = :base AND head = :head
         AND (:stream_id IS NULL OR stream_id = CAST(:stream_id AS INTEGER))
       ORDER BY committed_at DESC, sha
   outgoing:
     sql: |
-      SELECT sha, subject, author, committed_at
+      SELECT sha, subject, author, committed_at, 'Open in History Graph' AS graph_label,
+             uri_view(uri('oxplow/page', 'page', 'oxplow/git-history', 'stream_id', stream_id,
+                          'head_sha', COALESCE((SELECT base_sha FROM tips), sha)), 'reveal_sha', sha) AS graph_uri
       FROM v_commit_between WHERE base = :head AND head = :base
         AND (:stream_id IS NULL OR stream_id = CAST(:stream_id AS INTEGER))
       ORDER BY committed_at DESC, sha
@@ -36,6 +46,7 @@ view:
     - { key: subject, label: Commit, link: { kind: commit, from: sha } }
     - { key: author, label: Author }
     - { key: committed_at, label: Committed, format: relative }
+    - { key: graph_label, label: History, link: { kind: page, from: graph_uri } }
     empty: No commits unique to the compared branch.
   - id: outgoing
     title: Commits Only on the Base
@@ -45,4 +56,5 @@ view:
     - { key: subject, label: Commit, link: { kind: commit, from: sha } }
     - { key: author, label: Author }
     - { key: committed_at, label: Committed, format: relative }
+    - { key: graph_label, label: History, link: { kind: page, from: graph_uri } }
     empty: No commits unique to the base.

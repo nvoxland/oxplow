@@ -11,8 +11,8 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
     execFileSync("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project });
   git("add", "emu.txt");
   git("commit", "-q", "-m", "Add the emu file");
-  await open(page, daemon, "oxplow:oxplow/page?page=git-history");
-  await page.locator('[data-node="history"]:visible').getByText("Add the emu file").click();
+  const sha = git("rev-parse", "HEAD").toString().trim();
+  await open(page, daemon, `oxplow:oxplow/commit?sha=${sha}`);
   // The commit is the foundation's `commit` page.
   const commit = shown(page).getByTestId("page-file");
   await expect(commit).toContainText("Add the emu file");

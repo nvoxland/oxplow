@@ -25,6 +25,12 @@ view:
 `;
 
 test("a replaceable node shows the active replacement, and oxplow's own once it is off", async ({ page, daemon }) => {
+  const chooseHistory = (extension: string) => run(daemon, "oxplow.config.set", {
+    key: "oxplow.replacements",
+    level: "project",
+    value: { "vcs.history.graph": extension },
+  });
+  await chooseHistory("oxplow");
   writeFileSync(join(daemon.project, "wombat.txt"), "wombat\n");
   const git = (...args: string[]) =>
     execFileSync("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project });
@@ -32,7 +38,7 @@ test("a replaceable node shows the active replacement, and oxplow's own once it 
   git("commit", "-q", "-m", "Wombat own history row");
   await open(page, daemon, "oxplow:oxplow/page?page=git-history");
   const host = shown(page).getByTestId("page-host");
-  // Nothing replaces the list yet: oxplow's own shows.
+  // The project's selection keeps the built-in list.
   await expect(host.getByTestId("node-history")).toContainText("Wombat own history row");
   await expect(shown(page).getByTestId("replacement-vcs.history.graph")).toHaveCount(0);
 
@@ -40,6 +46,7 @@ test("a replaceable node shows the active replacement, and oxplow's own once it 
     manifest: "ui:\n  mounts:\n    - { page: wombat-history, at: vcs.history.graph, version: 2 }\n",
     files: { "parts/wombat-history.yaml": graph },
   });
+  await chooseHistory("e2e-replacement");
   const replaced = host.getByTestId("replacement-vcs.history.graph");
   await expect(replaced).toContainText("Wombat history of");
   await expect(replaced).toHaveAttribute("title", /by e2e-replacement/);

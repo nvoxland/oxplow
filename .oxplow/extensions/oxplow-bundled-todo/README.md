@@ -11,8 +11,7 @@ extension" has the rules for a move.
 ## What is still here
 
 - **Page**: Explore Data.
-- **Custom components**: Explore Data and the history graph
-  (replaces Git History's plain list at `vcs.history.graph`).
+- **Custom component**: Explore Data.
 - **Advisories**: `hint-never-fires`, and `shared-files` /
   `shared-files-agent` (two threads changed the same file recently).
 - **Commands**: `oxplow.advisory_policy.read` / `.write`.
