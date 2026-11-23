@@ -1,4 +1,4 @@
-/// Ask About This on a diff (P6.D1): what the right side's selection names
+/// Add to Context on a diff (P6.D1): what the right side's selection names
 /// — its file at the right side's revision (null = the working tree). A
 /// literal right side (a compare with the clipboard) names nothing, so the
 /// pane doesn't offer the action there.

@@ -85,7 +85,7 @@ update it in the same commit when behavior changes. The
 
 | If you're touching… | Read first |
 |---|---|
-| Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
+| Language support — language packs (`languages:` entries of extensions), the `oxplow_code_metrics::Languages` set, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
 | Tables, stores, tasks, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
 | How oxplow infers the agent's work (turns and requests, no gates, hints) and the capabilities direction (swappable snapshots) | `.context/work-tracking.md` |

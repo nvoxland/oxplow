@@ -943,8 +943,8 @@ disclosure (a row's `expand`, a group's fold, a tree's branch, a hunk, a
 collapsible section's toggle) draws the one `DisclosureGlyph`
 (`kit/Disclosure.tsx`, a 16px chevron), and a cell's expand glyph leads
 its first line with the text wrapping beside it, never under it.
-The rail's panels are extensions' (`go-to` and `uncommitted` are foundation's; `waiting`,
-`work` still the holder's): pages over the existing views and commands. One owner
+The rail's panels are extensions' (`go-to`, `uncommitted` and `waiting` are foundation's;
+`work` is bundled's): pages over the existing views and commands. One owner
 holds every panel's runs — `PanelRunsProvider`
 (`components/Panels/PanelRunsContext.tsx`, around the app),
 read by the rail, the status bar's bell and the Alerts page — through

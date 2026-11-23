@@ -1813,7 +1813,7 @@ already-recorded usage. No FK (the transcript outlives any single row).
 
 Store methods: `record`, `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
 reads `v_token_usage` through pages (bundled's `task-tokens`,
-foundation's `thread-activity`, the holder's `usage`), which re-run on `DatasetsChanged`.
+foundation's `thread-activity`, bundled's `usage`), which re-run on `DatasetsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
@@ -1855,7 +1855,7 @@ agent could see them; those weren't carried over.
 
 ### `context_item`, `context_basket` — `context_store` (`crates/oxplow-db/src/context_store.rs`)
 
-V47 (rebuilt from V107's `thread_context_item`, keeping what still
+V47 (rebuilt from the baseline's `thread_context_item`, keeping what still
 waited). What the person collected for agents while exploring, each item
 in one basket: a thread's own (`thread_id`, shown as "This Thread") or a
 named basket (`basket_id`; a CHECK keeps exactly one). `kind` is `page`

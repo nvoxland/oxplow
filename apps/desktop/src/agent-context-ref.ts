@@ -4,7 +4,7 @@
 
 import { fileLinesUri, fileUri } from "./uri/uri.js";
 
-/** The URI of a selection's lines (the same ones Ask About This names). */
+/** The URI of a selection's lines (the same ones Add to Context names). */
 export function selectionUri(
   path: string,
   sel: { startLineNumber: number; endLineNumber: number; endColumn: number },

@@ -53,7 +53,7 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
   const modelsRef = useRef<{ left: any; right: any } | null>(null);
   const specRef = useRef(spec);
   specRef.current = spec;
-  // Whether Ask About This applies to the current spec (a Monaco context
+  // Whether Add to Context applies to the current spec (a Monaco context
   // key the action's precondition reads).
   const askableRef = useRef<{ set(value: boolean): void } | null>(null);
   const askable = diffAskTarget(spec) !== null;
@@ -88,7 +88,7 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
         theme: "vs-dark",
         minimap: { enabled: false },
       });
-      // Ask About This on the right side's selection (P6.D1): its lines
+      // Add to Context on the right side's selection (P6.D1): its lines
       // at the right side's revision. Offered only while the right side
       // names a file (`diffAskTarget`); a literal right side (compare with
       // clipboard) has no ref, so the action isn't there at all.

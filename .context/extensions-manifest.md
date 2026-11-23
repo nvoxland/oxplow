@@ -82,7 +82,7 @@ collector and instance credentials and extension secrets (keychain
 accounts). Everything oxplow ships is in `oxplow`, so a user sees
 `v_oxplow_struggle` and `oxplow/collectors`
 whichever shipped extension declares them, and a piece moves between
-foundation, bundled and the holder without a stored or shown name
+foundation and bundled without a stored or shown name
 changing. `oxplow` is the only namespace extensions share
 (`refuse_shared_namespaces` refuses any other, `check_namespace` keeps
 `oxplow` to what ships). Sharing one shares its names, so its extensions

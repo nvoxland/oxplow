@@ -384,8 +384,6 @@ screens and Bundled's add review and analysis:
 - **Request blocks.** Blocks for a request's tests (coverage, untested
   files, test runs, failed tests, analysis findings), its metric deltas, its
   nudges and its plan, mounted at `oxplow/diff-view.sections`.
-- **Metric nudges.** The `threshold-crossed` advisory (with
-  `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component is
   the Graph view of the Git History page, alongside its commit list.
 - **The wiki screens** have moved to `oxplow-bundled`: see "The knowledge

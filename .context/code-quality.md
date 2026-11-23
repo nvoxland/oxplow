@@ -327,10 +327,11 @@ repo's history (2,351 commits, 19k file rows): the pairs compute in
 
 ### Where it shows
 
-The holder's `change-review` part (commit, uncommitted and Changes
-sections; not shipped yet): summary, look-here-first, a churn treemap,
-function changes, test changes, co-change surprises and duplication (with
-compare links).
+oxplow-bundled's `change-review` page (commit, uncommitted and request
+changes) and its deeper `change-review-signals`, `change-review-tests` and
+`change-review-code` pages: look-here files with their signals, signals by
+area, test changes, function changes and duplication. The `change-review-brief`
+part is the one-line summary with a link to it.
 
 ## Adding a new code/quality signal
 

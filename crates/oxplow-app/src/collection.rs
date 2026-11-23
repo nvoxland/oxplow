@@ -2653,8 +2653,7 @@ impl CollectionService {
     }
 
     /// Roll every metric up over `window` (`v_request_metric_delta`) — the
-    /// structured sibling of the oxplow-bundled `metric-deltas` advisory
-    /// (which builds the agent-prompt text). Reads the spec catalog and, per
+    /// request panel's read. Reads the spec catalog and, per
     /// family, aggregates the window's own facts (T-D; see metrics.md):
     /// - **per-file gauges** (`File`): Σ over the window's files of
     ///   `(current − baseline)` fact value — the slice this work actually

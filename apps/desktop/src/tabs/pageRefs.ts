@@ -263,7 +263,7 @@ function cellsOf(params: Record<string, string>, skip?: string): Record<string, 
 }
 
 // ---------------------------------------------------------------------------
-// Oxplow's own pages (declared in oxplow-foundation's manifest)
+// Oxplow's own pages (declared in oxplow-foundation's and oxplow-bundled's manifests)
 // ---------------------------------------------------------------------------
 
 /** The session picker: what a thread with no agent session shows
@@ -406,7 +406,7 @@ export function knowledgeFreshnessRef(uri: string): TabRef {
 }
 
 /** The Dashboards index — the list of the user's custom dashboards: the
- *  foundation's `dashboards` page. */
+ *  bundled's `dashboards` page. */
 export function dashboardsRef(): TabRef {
   return pageTabRef("dashboards");
 }
