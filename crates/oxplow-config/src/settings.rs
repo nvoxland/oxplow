@@ -1256,15 +1256,15 @@ mod tests {
     /// the last four.
     #[test]
     fn a_mask_shows_its_ends_only_within_a_third_of_the_secret() {
-        let key = json!("sk_live_0123456789abcdefghijklmnWXYZ"); // 36: 3 × 12
+        let key = json!("tk_demo_0123456789abcdefghijklmnWXYZ"); // 36: 3 × 12
         assert_eq!(SecretMask::default().apply(&key), "••••WXYZ");
         let both = SecretMask {
             prefix: 8,
             suffix: 4,
         };
-        assert_eq!(both.apply(&key), "sk_live_••••WXYZ");
+        assert_eq!(both.apply(&key), "tk_demo_••••WXYZ");
         assert_eq!(
-            both.apply(&json!("sk_live_0123456789abcdefghijklmWXYZ")),
+            both.apply(&json!("tk_demo_0123456789abcdefghijklmWXYZ")),
             "••••",
             "35 is short of 3 × 12"
         );
