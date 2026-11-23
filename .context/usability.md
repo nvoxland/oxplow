@@ -622,7 +622,8 @@ Any link that resolves to a page — knowledge page, task, file, directory, comm
 supports the browser conventions: **Cmd/Ctrl-click or middle-click opens
 it in a new tab**, plain click navigates in place. The right-click menu
 carries the same pair (Open / Open in new tab) so the gesture is
-discoverable without knowing the modifier.
+discoverable without knowing the modifier. Opening it outside oxplow
+is the menu's Open In ▸ (below).
 
 The rule that keeps this honest: every page-bearing link resolves
 through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call
@@ -632,6 +633,37 @@ how it drifted before — task links honoured the modifier while file,
 directory and commit links silently ignored it. A new link kind
 gets the behaviour by being added to `linkRef`, not by growing
 another branch.
+
+## Open In ▸ on every path and URL
+
+Every right-click menu of something the window knows as a file, a
+directory or a web URL has one **Open In ▸** submenu: a markdown link,
+a page's file or directory tab, the page ☰ menu, the editor, a stream
+row in the Navigator, a project row in the launcher (and, with the later
+steps, the terminal and page rows). One builder makes it, `openInMenu` /
+`openInForRef` / `openInForPath` in `apps/desktop/src/openIn.ts`. A new
+surface calls it and adds nothing of its own.
+
+| Target | Items |
+|---|---|
+| A file on disk | Reveal in Finder (Show in Explorer, Show in File Manager), Default App, Terminal (its folder) |
+| A directory on disk | Reveal in Finder (…), Terminal |
+| A web URL | Browser, Oxplow (the web tab, when the allowlist takes it) |
+
+- **Only what applies shows.** Reveal and Default App need the files on
+  this machine (`filesAreLocal()`; not over a manual connect or in a
+  plain browser). A file at another revision or on another filesystem is
+  not on disk. Terminal opens in this window's stream, so another
+  stream's row and the launcher have none. With no item left there is no
+  submenu.
+- **The OS names the file manager** (`platform.ts` `revealLabel`).
+- **The shell does the OS part** (`reveal_path`, `open_path`):
+  Default App never runs a program.
+- **Terminal** runs `oxplow.terminal.open { stream, dir }` and shows the
+  new terminal.
+- A failure goes to the error toast (`recordOpError`).
+- A tab builds its Open In as its menu opens (`CenterTab.menuAtOpen`), so
+  it reads the window as it is then.
 
 ## A page changes its own view, it doesn't open itself
 

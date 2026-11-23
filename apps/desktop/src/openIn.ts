@@ -5,11 +5,11 @@
 /// web tab, those that apply to the target and to this window; an
 /// extension's items for the link join after them (`extra`).
 /// `.context/usability.md` "Open In".
-import { openInSystemBrowser } from "./api.js";
+import { filesAreLocal, openInSystemBrowser, openPath, revealPath } from "./api.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import type { MenuItem } from "./menu.js";
 import { recordOpError } from "./opErrors.js";
-import { revealLabel, type Platform } from "./platform.js";
+import { currentPlatform, revealLabel, type Platform } from "./platform.js";
 import { WORKING } from "./revision.js";
 import { isExternal, paramOf, typeOf } from "./uri/uri.js";
 
@@ -95,4 +95,65 @@ export const inAppAllowed = (url: string): boolean => classifyExternalUrl(url).o
 /** Open `url` in the system browser; a failure is reported, not thrown. */
 export function openInBrowser(url: string): void {
   void openInSystemBrowser(url).catch(report("Open in browser"));
+}
+
+/** What only the window knows: its stream's worktree, how it opens a web
+ *  tab and a terminal. `App` sets it (`setOpenInHost`). */
+export interface OpenInHost {
+  worktree: string | null;
+  openInApp(url: string): void;
+  openTerminalAt(dir: string): void;
+}
+
+let host: OpenInHost | null = null;
+
+/** The window says how it opens things (`App`); null when it closes. */
+export function setOpenInHost(next: OpenInHost | null): void {
+  host = next;
+}
+
+/** This window's Open In environment. */
+export function openInEnv(): OpenInEnv {
+  return {
+    platform: currentPlatform(),
+    filesLocal: filesAreLocal(),
+    reveal: revealPath,
+    openPath,
+    openBrowser: openInSystemBrowser,
+    openInApp: host ? host.openInApp : null,
+    inAppAllowed,
+    openTerminalAt: host ? host.openTerminalAt : null,
+  };
+}
+
+/** The Open In ▸ item for `ref` (a file or directory URI, or a web URL)
+ *  in this window, with `extra` after oxplow's items; null when none
+ *  applies. */
+export function openInForRef(ref: string, extra: MenuItem[] = []): MenuItem | null {
+  const target = localTarget(ref, host?.worktree ?? null);
+  if (!target) return extra.length > 0 ? { id: "open-in", label: "Open In", enabled: true, submenu: extra } : null;
+  return openInMenu(target, openInEnv(), extra);
+}
+
+/** The Open In ▸ item for a local `path` (absolute) in this window.
+ *  `terminal: false` leaves out Terminal: a path of another stream (a
+ *  terminal opens in this window's stream). */
+export function openInForPath(
+  kind: "file" | "dir",
+  path: string,
+  extra: MenuItem[] = [],
+  opts: { terminal?: boolean } = {},
+): MenuItem | null {
+  const env = openInEnv();
+  return openInMenu({ kind, path }, opts.terminal === false ? { ...env, openTerminalAt: null } : env, extra);
+}
+
+/** The Open In ▸ item for a path relative to this window's worktree;
+ *  null outside a window. */
+export function openInForWorktreePath(kind: "file" | "dir", relPath: string, extra: MenuItem[] = []): MenuItem | null {
+  const worktree = host?.worktree;
+  if (!worktree) return null;
+  const root = worktree.replace(/\/+$/, "");
+  const rel = relPath.replace(/^\/+/, "").replace(/\/+$/, "");
+  return openInForPath(kind, rel ? `${root}/${rel}` : root, extra);
 }

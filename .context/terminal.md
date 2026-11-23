@@ -455,11 +455,13 @@ group reaches the panes' groups.
 ## Terminals are rows
 
 A stream's terminals are rows of the `terminal` table (`id`, `stream_id`,
-`title`, `position`, `created_at`; `SqliteTerminalStore`), read as the model
+`title`, `position`, `created_at`, `dir`; `SqliteTerminalStore`), read as the model
 `v_terminal` (with its `uri`, `oxplow:oxplow/terminal?id=trm3`) and named by
 the `oxplow/terminal` resource. Three commands (`commands/terminal.rs`, scope
-`terminals.write`) write them: `oxplow.terminal.open { stream, title? }`
-(auto-numbered "Terminal N": one past the highest numbered title and never
+`terminals.write`) write them: `oxplow.terminal.open { stream, title?, dir? }`
+(`dir`: where its shell starts, relative to the worktree or absolute;
+Open In ▸ Terminal sets it, and `terminal_cwd` falls back to the worktree
+when it is not a directory when the shell starts; auto-numbered "Terminal N": one past the highest numbered title and never
 below the count, so a generated title never repeats after renames; answers
 `{ id, uri, title }`; an agent opens only in its own stream),
 `oxplow.terminal.rename { terminal, title }` (undoable) and

@@ -38,6 +38,10 @@ pub struct OpenInput {
     /// Its title; left out, the next "Terminal N".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The directory its shell starts in: relative to the worktree, or
+    /// absolute (Open In ▸ Terminal). Left out, the worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -82,8 +86,8 @@ fn event<T: oxplow_domain::EventType>(
     event.with_subject([terminal_uri(terminal)])
 }
 
-/// `terminal.open { stream, title? }`: a shell at the end of the stream's
-/// terminals; answers `{ id, uri }`. Undone by closing it.
+/// `terminal.open { stream, title?, dir? }`: a shell at the end of the
+/// stream's terminals, started in `dir` (none: the worktree); answers `{ id, uri }`. Undone by closing it.
 pub fn open_op() -> Op {
     Op::new(
         "terminals.write",
@@ -102,7 +106,12 @@ pub fn open_op() -> Op {
                 .map_err(sql)?
                 .filter(|s| s.archived_at.is_none())
                 .ok_or_else(|| invalid("/stream", format!("no stream `{stream}`")))?;
-            let made = open_tx(ctx.conn, stream, input.title.as_deref())?;
+            let made = open_tx(
+                ctx.conn,
+                stream,
+                input.title.as_deref(),
+                input.dir.as_deref(),
+            )?;
             Ok(HandlerOutput {
                 result: json!({ "id": made.id.to_string(), "uri": terminal_uri(made.id), "title": made.title }),
                 events: vec![event::<TerminalOpened>(

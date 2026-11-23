@@ -115,6 +115,23 @@ fn target_of(uri: &str) -> Result<Target, IpcError> {
     )))
 }
 
+/// Where a terminal's shell starts: its `dir` (relative to `worktree`, or
+/// absolute) when that is a directory now, else the worktree.
+pub(crate) fn terminal_cwd(worktree: &str, dir: Option<&str>) -> std::path::PathBuf {
+    let root = std::path::PathBuf::from(worktree);
+    match dir {
+        Some(d) => {
+            let at = root.join(d);
+            if at.is_dir() {
+                at
+            } else {
+                root
+            }
+        }
+        None => root,
+    }
+}
+
 /// Open a renderer-attached terminal session for `uri`: a terminal's shell
 /// or an agent session's agent CLI, run directly in a PTY. There is no
 /// terminal multiplexer: the process lives as long as the daemon,
@@ -142,7 +159,7 @@ pub async fn open_terminal_session(
                 .await?
                 .filter(|s| s.archived_at.is_none())
                 .ok_or_else(|| IpcError::invalid(format!("terminal {id}'s stream is gone")))?;
-            let cwd = std::path::PathBuf::from(&stream.worktree_path);
+            let cwd = terminal_cwd(&stream.worktree_path, row.dir.as_deref());
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
             return Ok(ctx
                 .terminal_sessions
@@ -488,7 +505,27 @@ pub async fn terminate_terminal_session(
 mod tests {
     use serde_json::json;
 
-    use super::{identity_env, session_endpoints};
+    use super::{identity_env, session_endpoints, terminal_cwd};
+
+    /// A terminal opened at a directory starts there: relative to the
+    /// worktree, or absolute. One that is gone, or none, is the worktree.
+    #[test]
+    fn a_terminal_starts_in_its_directory_else_the_worktree() {
+        let wt = tempfile::tempdir().unwrap();
+        std::fs::create_dir(wt.path().join("src")).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let w = wt.path().to_str().unwrap();
+        assert_eq!(terminal_cwd(w, None), wt.path());
+        assert_eq!(terminal_cwd(w, Some("src")), wt.path().join("src"));
+        assert_eq!(
+            terminal_cwd(w, Some(other.path().to_str().unwrap())),
+            other.path()
+        );
+        assert_eq!(terminal_cwd(w, Some("gone")), wt.path());
+        // A file's own path is not a directory: the worktree.
+        std::fs::write(wt.path().join("a.txt"), "").unwrap();
+        assert_eq!(terminal_cwd(w, Some("a.txt")), wt.path());
+    }
     use crate::error::IpcError;
     use crate::test_support::services;
     use oxplow_domain::uri::build::agent_session_uri;

@@ -12,6 +12,7 @@ import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { useContextMenu, useRowContextMenu, type MenuItems } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
+import { openInForPath } from "../openIn.js";
 import { threadUri } from "../uri/uri.js";
 import { refCommandMenuItems, useRefOffers } from "./refCommands.js";
 import { Slideover } from "./Slideover.js";
@@ -234,6 +235,10 @@ export function Navigator({
         run: () => onOpenStreamSettings?.(s.id),
       },
     ];
+    // Its worktree outside oxplow (`openIn.ts`); Terminal only for this
+    // window's stream, where a new terminal opens.
+    const elsewhere = s.worktree_path ? openInForPath("dir", s.worktree_path, [], { terminal: s.id === currentStreamId }) : null;
+    if (elsewhere) items.push(elsewhere);
     if (s.kind !== "primary") {
       items.push({
         id: "stream.remove",

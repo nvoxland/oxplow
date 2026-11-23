@@ -1,6 +1,6 @@
 /// The page nav bar's ☰ menu, as data: everything a page can be acted on
 /// with that isn't how it is navigated, in a fixed order — oxplow's own
-/// first (Add to Context, then the standard actions, in their order, then See also, the page's related pages), then the page's
+/// first (Add to Context, then the standard actions, in their order, then See also, the page's related pages, then Open In ▸), then the page's
 /// and its extensions' own sorted by label (an action, a command about the
 /// page's resource — all at the top level, the command's `ui.group` is its
 /// palette heading and its row menu's grouping, not a submenu here — or a
@@ -41,6 +41,8 @@ export interface PageMenuSource {
   outbound?: number;
   /** The page's "See also" links, and how one opens. */
   seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
+  /** Open In ▸ for the page's file, directory or web URL (`openIn.ts`). */
+  openIn?: MenuItem | null;
   /** The page can be pinned; with a reason, not now. */
   pin?: { disabledReason?: string | null };
   openPanel(panel: PagePanel): void;
@@ -98,6 +100,7 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
       })),
     });
   }
+  if (source.openIn) standard.push(source.openIn);
   sections.push(standard);
 
   // The page's and its extensions' own, sorted by label: an action or a

@@ -39,6 +39,9 @@ export interface CenterTab {
    *  every tab. (Right-click is the per-row action surface project-wide;
    *  there is no visible kebab — see `.context/usability.md`.) */
   contextMenu?: MenuItem[];
+  /** Entries built as the menu opens, after `contextMenu` (what the
+   *  window knows only then: Open In ▸ for a file's or a web page's tab). */
+  menuAtOpen?: () => MenuItem[];
   /** When true, this tab does NOT appear in the strip but its body
    *  still mounts (kept hidden via display:none). Used by the host
    *  to keep back/forward stack entries alive so navigation between
@@ -119,7 +122,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   // so overflowed-but-open tabs still close while back/forward stack entries
   // (`hidden`) are excluded.
   const buildTabMenu = (tab: CenterTab): MenuItem[] => {
-    const items: MenuItem[] = tab.contextMenu ? [...tab.contextMenu] : [];
+    const items: MenuItem[] = [...(tab.contextMenu ?? []), ...(tab.menuAtOpen?.() ?? [])];
     if (onClose) {
       const others = tabsToCloseOthers(bulkClosable, tab.id);
       const toRight = tabsToCloseRight(bulkClosable, tab.id);

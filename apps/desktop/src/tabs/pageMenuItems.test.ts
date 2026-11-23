@@ -149,3 +149,15 @@ test("a page with no see-also links has no See also submenu", () => {
   expect(ids(none)).toEqual(["action-about"]);
   expect(ids(pageMenuItems({ actions: [{ id: "about", label: "About this page", run: noop, standard: true }], openPanel: noop }))).toEqual(["action-about"]);
 });
+
+test("a file's or a web page's Open In ▸ is with oxplow's own, after See also", () => {
+  const openIn: MenuItem = { id: "open-in", label: "Open In", enabled: true, submenu: [{ id: "x", label: "Terminal", enabled: true }] };
+  const items = pageMenuItems({
+    actions: [{ id: "refresh", label: "Refresh", run: noop, standard: true }],
+    context: { add: noop },
+    seeAlso: { links: [{ title: "Doc", uri: "oxplow:oxplow/page?page=doc" }], open: noop },
+    openIn,
+    openPanel: noop,
+  });
+  expect(ids(items).slice(0, 4)).toEqual(["page-add-to-context", "action-refresh", "page-see-also", "open-in"]);
+});

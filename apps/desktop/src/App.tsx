@@ -21,6 +21,7 @@ import {
   selectThread,
   recordUsage,
   switchStream,
+  runCommand,
   runCommandInBackground,
   commandOpenAfter,
   type ThreadMark,
@@ -85,7 +86,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
-import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt, pageTabRef, terminalRef } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
@@ -143,7 +144,7 @@ import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
-import { openInBrowser } from "./openIn.js";
+import { openInBrowser, openInForRef, setOpenInHost } from "./openIn.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 
@@ -856,6 +857,24 @@ export function App() {
     setRefOfferHost({ ctx: offerCtx, deps: offerDeps });
     return () => setRefOfferHost(null);
   }, [offerCtx, offerDeps]);
+  // Open In ▸ (`openIn.ts`): the stream's worktree, oxplow's web tab, and a
+  // new terminal at a directory, shown once it is open.
+  useEffect(() => {
+    if (!stream) return;
+    const streamId = stream.id;
+    setOpenInHost({
+      worktree: stream.worktree_path,
+      openInApp: (url) => handleOpenPageRef.current?.(externalUrlRef(url)),
+      openTerminalAt: (dir) =>
+        void runCommand("oxplow.terminal.open", { stream: streamId, dir })
+          .then(({ result }) => {
+            const id = (result as { id?: string } | null)?.id;
+            handleOpenPageRef.current?.(id ? pageTabRef("terminal", { terminal: id }) : terminalRef());
+          })
+          .catch((e: unknown) => recordOpError({ label: "Open a terminal", message: e instanceof Error ? e.message : String(e) })),
+    });
+    return () => setOpenInHost(null);
+  }, [stream]);
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
   // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
@@ -1934,6 +1953,11 @@ export function App() {
           ...pageActions.map((a) => ({ id: a.id, label: a.label, enabled: !a.disabled, run: () => void a.run() })),
         ];
       }
+      // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`).
+      tab.menuAtOpen = () => {
+        const elsewhere = openInForRef(ref.id);
+        return elsewhere ? [elsewhere] : [];
+      };
       // An agent session's tab: its harness's logo and its status dot.
       if (typeOf(ref.id) === "oxplow/agent_session") {
         const sessionId = paramOf(ref.id, "id") ?? "";

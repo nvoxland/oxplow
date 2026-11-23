@@ -17,6 +17,7 @@ import type { PageAction } from "../kit/actions.js";
 import type { MenuPosition } from "../menu.js";
 import { pageMenuItems, type OpenWithProps, type PagePanel } from "./pageMenuItems.js";
 import type { TabRef } from "./tabState.js";
+import { openInForRef } from "../openIn.js";
 
 export interface PageMenuProps {
   actions?: readonly PageAction[];
@@ -56,6 +57,7 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
     commands: ask ? offers : undefined,
     openWith,
     seeAlso,
+    openIn: ask ? openInForRef(ask.ref) : null,
     backlinks: backlinks?.count,
     outbound: outbound?.count,
     pin: pin ? { disabledReason: pin.disabledReason } : undefined,
