@@ -896,6 +896,13 @@ impl Language {
         crate::grammar::parser(self.grammar()?)
     }
 
+    /// Whether its WebAssembly grammar has been compiled: this language's
+    /// own, so a test reads it whatever other tests load at the same time.
+    #[cfg(test)]
+    fn wasm_grammar_loaded(&self) -> bool {
+        matches!(&self.0.grammar, GrammarSlot::Wasm { loaded, .. } if loaded.get().is_some())
+    }
+
     /// Whether oxplow can parse it.
     pub fn analyzable(&self) -> bool {
         self.0.spec.is_some()
@@ -1230,11 +1237,10 @@ mod lazy_grammar_tests {
     /// parses nothing of it) doesn't pay for it.
     #[test]
     fn a_wasm_grammar_is_loaded_on_first_use() {
-        let before = crate::grammar::loaded_count();
         let lang = Language::build(&clojure("")).unwrap();
-        assert_eq!(crate::grammar::loaded_count(), before, "built, not loaded");
+        assert!(!lang.wasm_grammar_loaded(), "built, not loaded");
         assert!(lang.parser().is_some());
-        assert_eq!(crate::grammar::loaded_count(), before + 1);
+        assert!(lang.wasm_grammar_loaded());
         assert!(lang.check().is_ok());
     }
 
