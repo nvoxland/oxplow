@@ -10,6 +10,16 @@ loaders:
              coalesce(p.category, p.extension) AS offered_by
       FROM v_page_answer a JOIN v_page p ON p.uri = a.page_uri
       ORDER BY coalesce(p.category, p.extension), p.id, a.position
+  data:
+    sql: |
+      SELECT m.view, m.owner,
+             uri_view(uri('oxplow/dataset', 'dataset', CASE WHEN m.owner = 'core' THEN m.name ELSE m.owner || '/' || m.name END),
+                      'oxplow.renderer', 'oxplow/dataset-definition') AS definition,
+             first_sentence(m.description) AS description,
+             (SELECT group_concat(c.name || ' ' || coalesce(c.sql_type, ''), ', ')
+                FROM (SELECT name, sql_type FROM v_field WHERE view = m.view ORDER BY position) c) AS fields
+      FROM v_dataset m
+      ORDER BY m.owner <> 'core', m.owner, m.view
   configure:
     sql: |
       SELECT key, doc
@@ -39,8 +49,18 @@ view:
       row: true
   - id: data
     title: What data there is
-    embed:
-      page: oxplow/data-catalog
+    from: data
+    viz: table
+    columns:
+    - key: view
+      label: Dataset
+      link: { kind: page, from: definition }
+    - key: owner
+      label: Owner
+    - key: description
+      label: Holds
+    - key: fields
+      label: Fields
   - id: configure
     title: What you can configure
     from: configure

@@ -37,8 +37,6 @@ oxplow.metrics:
 - use: oxplow.analysis.errors
   target: 10.0
 oxplow.extensions.project.enabled: true
-# What hasn't moved into oxplow-bundled yet: kept here, off.
-oxplow.extensions.oxplow-bundled-todo.enabled: false
 # This project is Rust and TypeScript: their language packs.
 oxplow.extensions.oxplow-rust.enabled: true
 oxplow.extensions.oxplow-typescript.enabled: true

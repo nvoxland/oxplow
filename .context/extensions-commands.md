@@ -843,8 +843,8 @@ tool: open_work              # offered as <namespace>_open_work
   `oxplow.extension.deploy { name }` (extensions-deploy.md "Sources and deployments"); the
   authoring tools read the source, so the agent checks its work first.
 - **No scaffold tools (decided).** A scaffold tool would write project
-  files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
-  Save as Page in Explore Data. The same rule holds for metrics:
+  files outside the write guard and the caller's worktree. The skill carries the templates instead, and people can
+  save a shown view or a table presentation with Save as Page. The same rule holds for metrics:
   the `oxplow.metric.scaffold` command returns the metric extension's files for
   the agent to write itself.
 - `oxplow_validate_extension(name)` returns load errors, schema errors and a dry

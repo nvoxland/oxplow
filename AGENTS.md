@@ -114,7 +114,7 @@ update it in the same commit when behavior changes. The
 | Extensions — how pages run today: page files, ids, live set, params, checks, IPC/MCP surfaces, panels, desktop UI | `.context/extensions-page-host.md` |
 | Extensions — the page YAML (metadata, params, loaders, view nodes, actions, checks), change links, page layout | `.context/extensions-pages.md` |
 | Extensions — slots, replacements (`ui.mounts`), commands in core menus, decorators | `.context/extensions-slots.md` |
-| Extensions — custom components (frame, protocol, testing one) and Explore Data | `.context/extensions-components.md` |
+| Extensions — custom components (frame, protocol, testing one) | `.context/extensions-components.md` |
 | Extensions — sources and deployments, builds, `extensionSources`, sharing, disabling, reviewing by impact | `.context/extensions-deploy.md` |
 | Extensions — health, disable and repair; candidate publication, vocabulary generations, runtime adapters, ingress | `.context/extensions-activation.md` |
 | Extensions — permissions and approval, the run context, services, grants, secret references | `.context/extensions-permissions.md` |

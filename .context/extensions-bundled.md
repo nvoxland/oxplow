@@ -108,8 +108,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   duplicate scan found (the `oxplow.duplicate_lines` facts, each side's
   `detail` its copy) once, biggest first, with a compare link; not the
   change analyzer's scans, which are per change and never age out. The
-  holder's Findings and Review pages, which showed those per-change rows,
-  were dropped. Fixtures: the collectors' own, `the-metrics-list-*`,
+  old Findings and Review pages, which showed those per-change rows, were dropped. Fixtures: the collectors' own, `the-metrics-list-*`,
   `a-metric-with-no-recordings-*`, `duplicated-code-*`.
 - **Dashboards and Usage** (pages in `oxplow-bundled`). `dashboards` is the
   Dashboards index in the launcher's Data section: every dashboard page,
@@ -341,44 +340,16 @@ Each loads clean (`documented_examples_load_without_errors`):
 
 ## The `oxplow-bundled` extension
 
-**Two shipped extensions, and a holder that doesn't ship.** oxplow ships
-`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default), both
-in the `oxplow` namespace so a contribution can move between them without a rename.
-Foundation is kept as small as it can be while still useful: the host's pages, the
-default capability implementations (snapshots, knowledge)
-and the measures core's change analysis records. `oxplow-bundled` is what has been
-reviewed and kept.
-
-`.oxplow/extensions/oxplow-bundled-todo` holds everything that used to be in
-`oxplow-bundled` and hasn't been reviewed: this repo's, off, and not part of oxplow.
-A contribution moves from it to `oxplow-bundled` one piece at a time, as it is
-accepted, and the holder goes away when it is empty. Add nothing new there.
-
-- **It's off, and can't run.** `oxplow.extensions.oxplow-bundled-todo.enabled: false` in `.oxplow/project.yaml` keeps it
-  off while it sits in `.oxplow/extensions/`, so nothing loads it or tests it. It
-  keeps `namespace: oxplow` so what moves needs no rename, and that namespace is
-  reserved for shipped extensions. Its fixtures stop running too,
-  so it may fall behind core: a piece gets its fixtures working when it moves.
-  `desktop-tests/` holds frontend tests of its components, and `e2e-specs/` the
-  browser specs of its pages. They are reference for that trip, not specs to restore:
-  what they check becomes fixtures, and only what fits "What belongs here"
-  ([working-in-this-repo.md](./working-in-this-repo.md) "The browser suite") goes back.
-- **Nothing may depend on it.** No test, example or doc names its contents. Core
-  machinery a test needs a collector or a component for has its own test data
-  (`crates/oxplow-app/testdata/`) or uses foundation's.
-- **Names don't move.** Every global name comes from the `oxplow` namespace
-  ([extensions-manifest.md](./extensions-manifest.md) "Global names come from the
-  namespace"), so a dataset is `v_oxplow_<name>` and an event type `oxplow.<…>`
-  wherever it sits. The datasets, event types and the commands that emit them moved
-  first anyway: a script emits only the event types its own extension declares, and a
-  decorator reads only its own extension's datasets.
-- **Other docs.** Where `.context/` describes a screen, an advisory or a metric as
-  `oxplow-bundled`'s (or `oxplow/...`) and `extensions/oxplow-bundled/`
-  doesn't have it, it is in the holder and doesn't run today.
+**Two shipped extensions share the `oxplow` namespace.** oxplow ships
+`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default).
+That namespace lets a contribution move between them without a rename.
+Foundation holds the host's pages, the default capability implementations
+(snapshots and knowledge), and the measures core's change analysis records.
+Bundled adds task and knowledge workflows, Git views, and analytics.
 
 What moved out of core, and what it is now. All of it is pages (files in
 `pages/`, read by `v_page`); oxplow-foundation's pages draw the app's own
-screens and the holder's add the review and analysis:
+screens and Bundled's add review and analysis:
 
 - **A page for each kind of contribution.** Every contribution kind an
   extension declares (command, skill, custom component, slot, collector,
@@ -415,18 +386,14 @@ screens and the holder's add the review and analysis:
   nudges and its plan, mounted at `oxplow/diff-view.sections`.
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
-- **Git History's commit graph.** The `history-graph` component, replacing
-  core's plain commit list (`vcs.history.graph`, a `ui.mounts`
-  entry).
+- **Git History's commit graph.** The `history-graph` component is
+  the Graph view of the Git History page, alongside its commit list.
 - **The wiki screens** have moved to `oxplow-bundled`: see "The knowledge
   pages" below.
-- **Explore Data.** The `explore-data` page and its component (source in
-  `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
-  `build:` runs it). Foundation's dataset pages do not link to it.
-- **No Timeline page.** The `timeline` page and its component (and the
-  `vis-timeline` dependency) were removed. Foundation has no build step, no
-  `package.json` and no `node_modules`; its only custom component is the
-  hand-written `integrations`.
+- **Data discovery.** Catalog shows the first sentence of each dataset's description.
+  Dataset definition shows its full description, fields, and upstream and downstream
+  lineage. Dataset data shows its rows with limit, sort, and filter controls.
+  The agent's catalog tool returns full descriptions and the metadata for querying them.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
@@ -609,10 +576,9 @@ change analysis.
 **Deliberately simple.** A basic **metrics explorer** and **simple
 dashboards**. The base version lets people see what metrics exist and
 pin a few to a dashboard as a starting point, a bit like Metabase. It does
-not need to be fancy. Explore Data (oxplow-bundled's `explore-data`
-page) browses the semantic-layer catalog (entities, measures, metrics),
-shows a table or simple chart sliced by a dimension, and saves the result
-as a page. A dashboard is a page with `category: Dashboards` and a grid
+not need to be fancy. Dataset data previews any published dataset. In a
+page's table, **Show as** changes the presentation and **Save as Page**
+keeps that choice as a live view. A dashboard is a page with `category: Dashboards` and a grid
 of nodes ([dashboards.md](./dashboards.md)). Metrics is a catalog (search,
 enabled/all, range, branch, sparkline + latest value); the metric page
 shows trend, recordings, stats and Enable.

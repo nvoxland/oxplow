@@ -3611,7 +3611,7 @@ datasets:
     #[test]
     fn dataset_docs_carry_no_plan_labels() {
         // a dataset's description is read by people (Catalog,
-        // Explore Data) and agents; a plan code ("(P5.E1)") means nothing
+        // the Data catalog) and agents; a plan code ("(P5.E1)") means nothing
         // to either.
         let yaml = include_str!("../datasets/datasets.yaml");
         let bytes = yaml.as_bytes();

@@ -1052,7 +1052,7 @@ The result keeps the two apart.
   `input` fails past 10 000 rows (`collectors::MAX_INPUT_ROWS`) unless it
   declares `input: { sql, limit }`; then the script gets `limit` rows
   and `input.complete` saying whether they were all of them
-  (`collector_runner::input_rows_for_run`). The page view and Explore Data say
+  (`collector_runner::input_rows_for_run`). The page view says
   "Showing the first N rows" above a truncated result
   (`apps/desktop/src/page/completeness.ts`, `ResultCompleteness`); a
   compact strip shows nothing. Exactly the cap is allowed; SQL

@@ -850,7 +850,7 @@ A page's `component` node and `viz: custom` run a web bundle from the
 extension's `custom_components`, sandboxed, fed the page's loaders. The
 reference is extensions-components.md "Custom components" below and `docs/guide/pages.md`. A page
 whose view is one `component` node fills the page under oxplow's bar
-(a custom page; bundled's Explore Data is the example).
+(a custom page; Bundled's Work board is an example).
 
 ### Agents
 

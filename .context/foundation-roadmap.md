@@ -639,7 +639,7 @@ Acceptance: Core detects/report errors even when no task tracker or repair polic
 
 Validation: Exercise healthy/failing contributions, repeated events, no task tracker, a fake alternate provider, disabled policy and recovered contribution. Verify audit and links.
 
-Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`, `crates/oxplow-app/src/commands`.
+Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `extensions/oxplow-bundled/extension.yaml`, `crates/oxplow-app/src/commands`.
 
 Prerequisites: Use one versioned event envelope across runtime and authoring; Compose declared host services through the shared context.
 
@@ -660,7 +660,7 @@ Acceptance: At least one alternative review policy can combine test evidence, cu
 
 Validation: Compare default analysis results before/after extraction on a representative change; build an alternate domain-specific review and ensure it joins existing evidence with custom collected facts.
 
-Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`.
+Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `extensions/oxplow-bundled/extension.yaml`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology; Compose declared host services through the shared context.
 

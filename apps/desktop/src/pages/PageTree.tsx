@@ -33,6 +33,7 @@ import { ComponentNode } from "./PageComponent.js";
 import { pageData } from "../viz/componentBridge.js";
 import { declaredParams, namedLoader, parsePageRef, usePageReads } from "./pageReads.js";
 import { firstLoader } from "./firstLoader.js";
+import { TablePresentation } from "./TablePresentation.js";
 import { VizPagesContext, type ExpansionProps, type VizPages } from "../viz/vizPages.js";
 import { HostedViewContext } from "../viz/hostedView.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
@@ -133,6 +134,8 @@ export interface PageTreeProps {
   /** Its vizes' whole-viz actions as buttons above them; default: unless
    *  compact (an expanded row's page is compact and keeps them). */
   partButtons?: boolean;
+  /** The full page shell offers a different presentation of any table. */
+  showAs?: { onSaved?: (uri: string) => void; inlineYaml?: string };
 }
 
 /** How a node sits in its parent: on its own, a stack's section, a
@@ -365,6 +368,20 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
   const failed = def.from !== null ? run.loaders[def.from]?.error : null;
   if (failed) return <NodeError message={failed} />;
   const lead = leadOf(vizRun);
+  const draw = (view: typeof vizRun) => (
+    <VizView
+      run={view}
+      streamId={streamId}
+      onOpenPage={onOpenPage}
+      onSetParam={onSetParam}
+      partButtons={props.partButtons ?? !compact}
+      isPage={isPage}
+      componentView={componentView}
+      actionOptions={actionOptionsOf(view.config.actions, run.loaders)}
+      {...(compact ? { compact: true, ...(props.uncapped ? {} : { maxRows: COMPACT_ROWS }), ...(props.onMore ? { onMore: props.onMore } : {}) } : {})}
+    />
+  );
+  const showAs = props.showAs;
   return (
     <VizActionRunnerContext.Provider value={runner}>
     <FormSourceContext.Provider value={forms}>
@@ -374,17 +391,21 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
           {lead}
         </p>
       ) : null}
-      <VizView
-        run={vizRun}
-        streamId={streamId}
-        onOpenPage={onOpenPage}
-        onSetParam={onSetParam}
-        partButtons={props.partButtons ?? !compact}
-        isPage={isPage}
-        componentView={componentView}
-        actionOptions={actionOptionsOf(vizRun.config.actions, run.loaders)}
-        {...(compact ? { compact: true, ...(props.uncapped ? {} : { maxRows: COMPACT_ROWS }), ...(props.onMore ? { onMore: props.onMore } : {}) } : {})}
-      />
+      {showAs && def.config.viz === "table" && def.from !== null && !compact ? (
+        <TablePresentation
+          key={`${run.page.id}:${id}`}
+          id={id}
+          run={run}
+          table={vizRun}
+          loader={def.from}
+          title={def.title ? `${run.page.title} · ${def.title}` : run.page.title}
+          streamId={streamId}
+          inlineYaml={props.prefix === undefined ? showAs.inlineYaml : undefined}
+          onSaved={showAs.onSaved}
+        >
+          {draw}
+        </TablePresentation>
+      ) : draw(vizRun)}
     </VizPagesContext.Provider>
     </FormSourceContext.Provider>
     </VizActionRunnerContext.Provider>

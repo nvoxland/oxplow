@@ -18,10 +18,11 @@ Everything oxplow tracks is exposed as read-only SQL views: `v_oxplow_task`
 `v_thread`, `v_oxplow_knowledge_page`, `v_turn_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
-**Explore Data** (launcher → Data) lists every view in its rail. Pick one to
-see its columns and sample rows, edit the SQL (++cmd+enter++ runs it), and
-**Save as Page** when it shows what you want. It is itself an extension's
-custom page.
+Open **Catalog** from the launcher to find datasets. Open a dataset to
+see its definition and the data it reads, or select **Dataset data** to
+browse its rows. On a page table, pick **Show as** to switch to a list,
+number, or chart. Choose the chart's columns, then use **Save as Page**
+to keep that view live.
 
 ## Writing one by hand
 
@@ -406,8 +407,8 @@ rows, truncated }` by name, `component.params` what they ran with, and
 `onUpdate(({ data, params, changed }) => …)` hears each change. While one shows, the frame takes its content's height:
 leave `html` and `body` at `height: auto`. A page can also have a `rail:` node tree: oxplow
 draws it in the page's rail, and a row it picks sets the page's view
-param, which the component hears through `onViewParams`. Explore Data is
-built this way. `viewParams`, `setViewParams` and `historyState`
+param, which the component hears through `onViewParams`. Bundled's Work
+board uses view params for its filters. `viewParams`, `setViewParams` and `historyState`
 are its host's view, where the host shares one: a page's component has
 all of its page's params; a replacement has the keys its view's contract
 lists (`v_replaceable.view`); a component on a page of its own has

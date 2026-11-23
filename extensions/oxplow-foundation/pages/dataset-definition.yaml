@@ -1,5 +1,5 @@
 title: Dataset definition
-description: One dataset — what it holds, who publishes it and its fields with their types and docs.
+description: What a dataset holds, who publishes it, its fields, and what reads it or supplies its data.
 label: '{{row.view}}'
 icon: database
 for: oxplow/dataset
@@ -20,6 +20,25 @@ loaders:
       SELECT f.name, f.sql_type, f.doc || CASE WHEN f.key_part IS NOT NULL THEN ' (part of the key)' ELSE '' END AS doc
       FROM about a JOIN v_field f ON f.view = a.view
       ORDER BY f.position
+  reads:
+    sql: |
+      SELECT l.input, CASE l.kind WHEN 'ref' THEN 'Dataset' WHEN 'source' THEN 'Table' END AS kind,
+             CASE WHEN d.view IS NOT NULL THEN
+               uri_view(uri('oxplow/dataset', 'dataset', CASE WHEN d.owner = 'core' THEN d.name ELSE d.owner || '/' || d.name END),
+                        'oxplow.renderer', 'oxplow/dataset-definition')
+             END AS definition
+      FROM about a JOIN v_dataset_lineage l ON l.view = a.view
+      LEFT JOIN v_dataset d ON l.kind = 'ref' AND d.view = l.input
+      WHERE l.kind IN ('ref', 'source')
+      ORDER BY l.input, l.kind
+  read_by:
+    sql: |
+      SELECT DISTINCT d.view,
+             uri_view(uri('oxplow/dataset', 'dataset', CASE WHEN d.owner = 'core' THEN d.name ELSE d.owner || '/' || d.name END),
+                      'oxplow.renderer', 'oxplow/dataset-definition') AS definition
+      FROM about a JOIN v_dataset_lineage l ON l.kind = 'ref' AND l.input = a.view
+      JOIN v_dataset d ON d.view = l.view
+      ORDER BY d.view
 view:
   stack:
   - id: about
@@ -41,3 +60,18 @@ view:
     - { key: sql_type, label: Type }
     - { key: doc, label: What it holds }
     empty: No fields.
+  - id: reads
+    title: Reads
+    viz: list
+    from: reads
+    columns:
+    - { key: input, label: Input, link: { kind: page, from: definition } }
+    - { key: kind, label: Kind }
+    empty: Reads no datasets or tables.
+  - id: read-by
+    title: Read by
+    viz: list
+    from: read_by
+    columns:
+    - { key: view, label: Dataset, link: { kind: page, from: definition } }
+    empty: No datasets read this one.

@@ -1,0 +1,14 @@
+# Physical tables are text and datasets link to their definition in both directions.
+when:
+  page: oxplow/dataset-definition
+  params: { uri: "oxplow:oxplow/dataset?dataset=agent_turn" }
+expect:
+  loaders:
+    reads:
+      rows:
+      - { input: agent_turn, kind: Table, definition: null }
+      - { input: v_agent_session, kind: Dataset, definition: "oxplow:oxplow/dataset?dataset=agent_session#oxplow.renderer=oxplow/dataset-definition" }
+    read_by:
+      rows:
+        contains:
+        - { view: v_search_turn, definition: "oxplow:oxplow/dataset?dataset=search_turn#oxplow.renderer=oxplow/dataset-definition" }
