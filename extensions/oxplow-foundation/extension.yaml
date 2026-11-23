@@ -1864,10 +1864,10 @@ commands:
     op: stage
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
   - name: agent_terminal.restart
-    summary: "Stop the current agent terminal and launch it again with the installed harness executable. Keeps the session and its saved conversation. A person's only."
+    summary: "Stop the current agent terminal and launch it again with the installed harness executable. Keeps the session and its saved conversation. Refused when nothing runs in it (its pane's Start Again opens it). A person's only."
     scope: agent_terminal.write
     op: restart
-    ui: { label: "Restart Terminal", group: Tasks, keywords: [agent, session, relaunch], when: 'pageKind == "oxplow/agent_session"' }
+    ui: { label: "Restart Terminal", group: Tasks, keywords: [agent, session, relaunch], when: 'pageKind == "oxplow/agent_session" && agentTerminalLive' }
     example: {uri: "oxplow:oxplow/agent_session?id=ses3"}
   # window.show — the window's.
   - name: window.find

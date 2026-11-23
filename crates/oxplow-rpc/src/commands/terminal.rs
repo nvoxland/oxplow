@@ -185,20 +185,21 @@ pub async fn restart_agent_terminal(ctx: &RpcContext, uri: String) -> Result<(),
         // A concurrent open or restart has already started a replacement.
         return Ok(());
     }
-    let (cols, rows) = if let Some(pty) = &current {
-        let size = terminals.size(pty).await.unwrap_or((80, 24));
-        match terminals.close(pty).await {
-            Ok(()) | Err(oxplow_app::terminal_sessions::TerminalSessionError::NotFound(_)) => {}
-            Err(err) => return Err(err.into()),
-        }
-        size
-    } else {
-        (80, 24)
+    // Nothing runs: no pane follows a replacement (an ended one shows
+    // Session ended and takes no keys), so a restart here would start an
+    // agent nobody sees. The pane's own Start Again opens it at its size.
+    let Some(pty) = current else {
+        return Err(IpcError::invalid(
+            "nothing runs in this agent terminal to restart: use Start Again in its pane",
+        ));
     };
-    let result = open_agent_terminal(ctx, id, cols, rows).await;
-    if let Some(old) = requested {
-        terminals.report_restart(old, result.as_ref().err().map(|err| err.message.as_str()));
+    let (cols, rows) = terminals.size(&pty).await.unwrap_or((80, 24));
+    match terminals.close(&pty).await {
+        Ok(()) | Err(oxplow_app::terminal_sessions::TerminalSessionError::NotFound(_)) => {}
+        Err(err) => return Err(err.into()),
     }
+    let result = open_agent_terminal(ctx, id, cols, rows).await;
+    terminals.report_restart(pty, result.as_ref().err().map(|err| err.message.as_str()));
     result.map(|_| ())
 }
 
@@ -1074,6 +1075,25 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_null(), "expected null, got {out}");
+    }
+
+    #[tokio::test]
+    async fn restart_refuses_a_session_with_nothing_running() {
+        // Nothing runs (it never started, or it exited and was
+        // unregistered): no pane follows a replacement, so a restart
+        // would start an agent nobody sees. The pane's Start Again opens it.
+        let (mut ctx, _dir) = services().await;
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await.id;
+        let uri = agent_session_uri(session);
+        let err = crate::dispatch("restart_agent_terminal", json!({ "uri": uri }), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Start Again"), "{err}");
+        let out = crate::dispatch("lookup_terminal_session", json!({ "uri": uri }), &ctx)
+            .await
+            .unwrap();
+        assert!(out.is_null(), "the refused restart spawned {out}");
     }
 
     #[tokio::test]

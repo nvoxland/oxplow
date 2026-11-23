@@ -403,7 +403,13 @@ are two PTY writes, as they were typed. Nothing merges keys any more.
 ## When a session ends or goes away
 
 **Restart Terminal** is available in Quick Open while an agent terminal
-is shown and in the agent session tab's right-click menu. It stops the
+is shown and in the agent session tab's right-click menu, both only while
+a process runs in its pane (`agentTerminalLive`: the pane opened it and it
+has not ended, `useLiveTerminals` in `useTerminalSession.ts`). An ended
+pane offers Start Again instead. `restart_agent_terminal` refuses when no
+PTY is registered for the session: no pane would follow the replacement,
+so it would start an agent nobody sees
+(`restart_refuses_a_session_with_nothing_running`). It stops the
 old PTY process and launches the selected harness again with the same
 session URI, conversation binding, worktree and terminal size. The
 normal launch resolves the currently installed executable. Codex's TUI

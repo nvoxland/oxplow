@@ -142,6 +142,7 @@ import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
 import { startRecordStores } from "./recordStoresLoader.js";
+import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -737,6 +738,9 @@ export function App() {
   // The window's context keys: what a command's `when` reads
   // (`oxplow_domain::when::CONTEXT_KEYS`; `.context/commands.md`).
   const treeDirty = useTreeDirty(stream?.id);
+  // The agent terminals a pane shows running: Restart Terminal is offered
+  // for these only (an ended pane has Start Again).
+  const liveTerminals = useLiveTerminals();
   const whenContext = useMemo<WhenContext>(
     () => ({
       streamShown: !!stream,
@@ -745,6 +749,7 @@ export function App() {
       fileShown: shownFilePath !== null,
       pageDirty: !!centerActive && !!dirtyTabs[centerActive],
       pageKind: centerActive ? kindForTabId(centerActive) : "",
+      agentTerminalLive: liveTerminals.has((centerActive && refFromTabId(centerActive)?.id) || ""),
       vcsEnabled: !!workspaceContext.vcsEnabled,
       treeDirty,
       shellAvailable: shellAvailable(),
@@ -753,7 +758,7 @@ export function App() {
         .map((h) => h.id)
         .join(","),
     }),
-    [centerActive, dirtyTabs, harnesses, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
+    [centerActive, dirtyTabs, harnesses, liveTerminals, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error
@@ -1936,7 +1941,7 @@ export function App() {
           {
             id: "agent_terminal.restart",
             label: "Restart Terminal",
-            enabled: true,
+            enabled: liveTerminals.has(ref.id),
             run: () => void offerDeps.run("Restart Terminal", "oxplow.agent_terminal.restart", { uri: ref.id }),
           },
         ];
@@ -1959,6 +1964,7 @@ export function App() {
     agentThreadStatus,
     selectedThreadSessions,
     sessionStatuses,
+    liveTerminals,
     harnesses,
     openTerminalPath,
     effectiveCenterActive,
