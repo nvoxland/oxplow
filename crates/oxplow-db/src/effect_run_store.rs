@@ -90,6 +90,11 @@ pub struct RunState {
 }
 
 impl RunState {
+    /// Whether this attempt ended so that a retry may follow it: failed,
+    /// without asking anyone. The attempt's part of `v_effect_run.retryable`
+    /// (`the_dataset_and_retry_store_agree_on_which_attempts_can_retry`);
+    /// the effect's part (declared and enabled now) is checked before a
+    /// retry runs (`commands::effect::ready`).
     pub fn retryable(self) -> bool {
         self.proposal_id.is_none()
             && matches!(
@@ -365,18 +370,16 @@ pub fn unfinished_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainError
         .collect()
 }
 
-/// Every reaction whose latest attempt failed, as `(effect, event_id)`
-/// in the order the attempts were recorded: what a person's Retry all
-/// runs again.
+/// Every reaction whose latest attempt can be retried, as `(effect,
+/// event_id)` in the order the attempts were recorded: what a person's
+/// Retry all runs again. `v_effect_run.retryable` is the one rule (the
+/// attempt failed, and the effect is declared and enabled now), so Alerts
+/// and Retry all list the same reactions.
 pub fn failed_latest_tx(conn: &Connection) -> Result<Vec<(String, String)>, DomainError> {
     let mut st = conn
         .prepare(
-            "SELECT r.effect, r.event_id FROM effect_run r JOIN contribution_run c USING (run_id)
-              WHERE c.outcome IN ('failed', 'denied', 'cancelled', 'invalid', 'interrupted')
-                AND r.proposal_id IS NULL
-                AND attempt = (SELECT max(l.attempt) FROM effect_run l
-                                WHERE l.effect = r.effect AND l.event_id = r.event_id)
-              ORDER BY r.id",
+            "SELECT effect, event_id FROM v_effect_run
+              WHERE latest = 1 AND retryable = 1 ORDER BY id",
         )
         .map_err(map_sql_err)?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -864,6 +867,63 @@ mod tests {
         .unwrap();
     }
 
+    /// `acme/notify` (`namespace/local`) declared, as the catalog restates
+    /// an enabled extension's effects into `contribution`.
+    fn declare(tx: &Connection, namespace: &str, local: &str) -> Result<(), DomainError> {
+        tx.execute(
+            "INSERT INTO contribution (id, extension, kind, local, origin, runs_on_json,
+                                       needs_json, after_json, file, namespace)
+             VALUES (?1, ?2, 'effect', ?3, 'project', '{}', '[]', '[]', 'extension.yaml', ?2)",
+            params![format!("{namespace}/effect/{local}"), namespace, local],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    /// Retryable is the effect's now: a failed attempt of an effect no
+    /// enabled extension declares (its extension turned off), or of one
+    /// disabled, can't be retried (`ready` refuses), so the dataset (and
+    /// Alerts, which reads it) and Retry all leave it out.
+    #[tokio::test]
+    async fn a_failed_attempt_of_an_undeclared_or_disabled_effect_is_not_retryable() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            declare(tx, "acme", "notify")?;
+            declare(tx, "acme", "off")?;
+            tx.execute(
+                "INSERT INTO contribution_health (namespace, contribution, kind, state, updated_at)
+                 VALUES ('acme', 'off', 'effect', 'disabled', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .map_err(map_sql_err)?;
+            for effect in ["acme/notify", "acme/off", "gone/notify"] {
+                let key = EffectRunKey::first(effect, "e1", 3, ReactionOrigin::Live);
+                let failed = Finished {
+                    outcome: Outcome::Cancelled,
+                    reason: Some("its extension was turned off".into()),
+                    command_run_id: None,
+                    proposal_id: None,
+                };
+                finish_tx(tx, &key, &failed, Some(&context(&key)), None)?;
+            }
+            let retryable: Vec<String> = tx
+                .prepare("SELECT effect FROM v_effect_run WHERE retryable = 1 ORDER BY effect")
+                .and_then(|mut st| {
+                    st.query_map([], |row| row.get(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .map_err(map_sql_err)?;
+            assert_eq!(retryable, vec!["acme/notify".to_string()]);
+            assert_eq!(
+                failed_latest_tx(tx)?,
+                vec![("acme/notify".to_string(), "e1".to_string())]
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
     /// P9.D4: a reaction's state is its latest attempt's. A retry is the
     /// next attempt — claimed and finished like the first — and an
     /// attempt is made once.
@@ -871,6 +931,7 @@ mod tests {
     async fn the_dataset_and_retry_store_agree_on_which_attempts_can_retry() {
         let db = Database::in_memory();
         db.transaction(|tx| {
+            declare(tx, "acme", "notify")?;
             let outcomes = [
                 None,
                 Some(Outcome::Ok),

@@ -9,8 +9,19 @@ SELECT r.run_id, r.parent_run_id, r.extension, r.contribution, r.kind, r.version
            WHERE later.effect = e.effect AND later.event_id = e.event_id
              AND later.attempt > e.attempt
        ) AS INTEGER) AS latest,
+       -- Retryable is the effect's now, as a person's Retry checks it: the
+       -- attempt failed without asking anyone, and an enabled extension
+       -- declares the effect (`contribution`) and it isn't disabled. The
+       -- one definition: Retry all reads it (`failed_latest_tx`).
        CAST(CASE WHEN e.proposal_id IS NULL
                    AND r.outcome IN ('failed', 'denied', 'cancelled', 'invalid', 'interrupted')
+                   AND EXISTS (
+                       SELECT 1 FROM source('contribution') c
+                       WHERE c.kind = 'effect' AND c.namespace || '/' || c.local = e.effect
+                         AND NOT EXISTS (
+                             SELECT 1 FROM source('contribution_health') h
+                             WHERE h.kind = 'effect' AND h.namespace = c.namespace
+                               AND h.contribution = c.local AND h.state = 'disabled'))
                  THEN 1 ELSE 0 END AS INTEGER) AS retryable,
        e.command_run_id, e.proposal_id, e.retry_at
 FROM source('effect_run') e JOIN source('contribution_run') r ON r.run_id = e.run_id

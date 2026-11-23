@@ -607,7 +607,16 @@ interrupted with a step outside oxplow under way may have landed that
 step, and a retry sends it again. The confirmation's text says so.
 Alerts and Settings → Data → Delivery list reactions whose latest attempt
 has `v_effect_run.retryable = 1`. That flag covers `failed`, `denied`,
-`cancelled`, `invalid` and `interrupted` attempts without a proposal.
+`cancelled`, `invalid` and `interrupted` attempts without a proposal, of
+an effect an enabled extension declares (`contribution`) and that isn't
+disabled (`contribution_health`): exactly what a Retry would run. A
+reaction of an extension turned off, or of a disabled effect, leaves the
+list and the bell's count; it is retryable again once its effect is back.
+The flag is the one rule: Retry all reads it (`failed_latest_tx`), and
+`RunState::retryable` is its attempt's part
+(`a_failed_attempt_of_an_undeclared_or_disabled_effect_is_not_retryable`,
+`alerts-reactions-leave-out-what-cannot-be-retried`). Nothing dismisses a
+reaction: one that can be retried is retried, one that can't isn't listed.
 The list shows each outcome and reason, with **Retry** and **Retry all**.
 
 **Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An

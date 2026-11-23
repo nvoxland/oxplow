@@ -1,0 +1,30 @@
+# Alerts lists a failed reaction only while Retry could run it: its effect
+# is declared by an enabled extension and isn't disabled. A reaction of an
+# extension that was turned off, or of a disabled effect, leaves the list
+# (and the bell's count) instead of staying there with no way out.
+requires: [oxplow-bundled]
+given:
+  - observe:
+      run: { kind: effect, extension: oxplow-bundled, contribution: assign-on-start, outcome: failed, error: Store unreachable }
+  - observe:
+      run: { kind: effect, extension: oxplow-bundled, contribution: release-on-thread-close, outcome: failed, error: Store unreachable }
+  - observe:
+      health: { namespace: oxplow, contribution: release-on-thread-close, kind: effect, disable: Failed too often }
+  # An extension no longer enabled: nothing declares its effect.
+  - observe:
+      run: { kind: effect, extension: acme, contribution: notify, outcome: cancelled, error: Its extension was turned off }
+when: { part: alerts-reactions }
+expect:
+  loaders:
+    alerts_reactions:
+      rows:
+        - { effect: oxplow/assign-on-start, outcome: failed }
+steps:
+  - when:
+      sql: |
+        SELECT effect, retryable FROM v_effect_run ORDER BY effect
+    expect:
+      rows:
+        - { effect: acme/notify, retryable: 0 }
+        - { effect: oxplow/assign-on-start, retryable: 1 }
+        - { effect: oxplow/release-on-thread-close, retryable: 0 }
