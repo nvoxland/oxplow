@@ -1772,9 +1772,10 @@ commands:
     ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
     example: {"stream": "str1"}
   - name: vcs.push
-    summary: "Push the stream's branch (to its upstream, or a named remote branch)."
+    summary: "Push the stream's branch (to its upstream, or a named remote branch). A person is asked first when it names a remote branch."
     scope: vcs.remote
     op: push
+    confirm_says: "Push this stream's branch to {{remote}}/{{branch}}. The remote branch then holds this branch's commits."
     ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
     example: {"stream": "str1"}
   # vcs.write

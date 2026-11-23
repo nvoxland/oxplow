@@ -532,7 +532,10 @@ invoked as a separate binary, never linked as a library.
   `<remote>/<branch>` into it (fetch, then merge; a failed fetch
   short-circuits the merge). The Remote Branches row menu offers Pull when the
   remote has incoming commits and Push when only the local branch has commits
-  to send. Git checks the refs again when it runs the command.
+  to send. Git checks the refs again when it runs the command. A push that
+  names `branch` asks a person first, as a merge does (the push op's
+  `with_confirm_for`, `a_push_to_a_named_remote_branch_asks_first`); a push
+  to the branch's own upstream (the Git menu's Push Changes) doesn't.
 - `remove_workspace` is `git worktree remove --force` then `git worktree
   prune`: a removal that fails (a directory already gone, a locked
   worktree) leaves a stale admin entry in `.git/worktrees/` that a later

@@ -326,7 +326,8 @@ ui:
 skills:
   - { name: oxtask, file: skills/oxtask/SKILL.md, needs: [model:oxplow/task_record] }
   - { name: next-task, kind: command, file: commands/next-task.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] } }
-  # The agent tracks what it works on as tasks (the default).
+  # The agent tracks what it works on as tasks (`agent_tracks`; the default
+  # workflow is `off`).
   - { name: track-work, file: skills/track-work/SKILL.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [agent_tracks] } }
   # The person files the tasks; the agent works them.
   - { name: work-tasks, file: skills/work-tasks/SKILL.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [person_files] } }

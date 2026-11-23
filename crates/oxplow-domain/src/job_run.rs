@@ -204,7 +204,6 @@ pub struct JobRun {
     pub id: JobId,
     pub owner: JobOwner,
     /// Host-generated identity of the originating run; immutable attribution.
-    #[serde(rename = "run_id", alias = "queued_by_run_id")]
     pub queued_by_run_id: RunId,
     pub intent_key: IntentKey,
     pub replay_policy: ReplayPolicy,

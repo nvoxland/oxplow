@@ -636,6 +636,29 @@ mod tests {
 
     use crate::test_fixtures::{commit_all, services_with_thread};
 
+    /// A push to a named remote branch (Remote Branches' Push) asks a
+    /// person first, as a merge does; a push to the branch's own upstream
+    /// (the Git menu's Push Changes) doesn't.
+    #[tokio::test]
+    async fn a_push_to_a_named_remote_branch_asks_first() {
+        let f = services_with_thread().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        let push = |input| {
+            svc.commands
+                .run(&Actor::Human, "oxplow.vcs.push", input, false)
+        };
+        let err = push(json!({ "stream": stream, "remote": "origin", "branch": "main" }))
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
+        let err = push(json!({ "stream": stream })).await.unwrap_err();
+        assert!(!format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
+    }
+
     /// A git op that failed outright — a push with nowhere to go — is the
     /// run's failure, its log the message, and its command run row says `error`:
     /// never an `ok` row whose result says it failed.
