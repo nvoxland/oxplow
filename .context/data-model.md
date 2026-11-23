@@ -1976,7 +1976,8 @@ attempt so retries have their own timing, costs and outcome.
   and `generation` when pinned. `actor_kind` and `actor_id` identify who
   ran it. `stream_id`, `thread_id`, `turn_id`, `session_id` and
   `snapshot_id` are integer anchors. `cause_event_id` identifies the
-  causing event, and `mode` says how the run executes.
+  causing event (indexed with `contribution`: a change's review check reads
+  the run its analysis event caused), and `mode` says how the run executes.
 - **Parent.** `parent_run_id` is set only if the parent's row exists.
   Deleting the parent clears the link. A run without a contribution
   still writes no shared row.

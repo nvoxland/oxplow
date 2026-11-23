@@ -17,8 +17,9 @@ use super::*;
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
-/// - `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls?, error? }`:
-///   a finished run of an extension's code, as the host records it.
+/// - `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls?, error?, live?, caused_by? }`:
+///   a run of an extension's code, as the host records it (`caused_by`: the
+///   latest logged event of that type caused it).
 /// - `health: { namespace, contribution, kind?, disable }`: a contribution
 ///   disabled after failures, with the reason.
 /// - `token_usage: { thread?, session?, model?, prompt?, input_tokens?,
@@ -466,7 +467,8 @@ pub(super) async fn observe_symbols(host: &Host, body: &Value) -> Result<(), Str
 }
 
 /// Observe a contribution run through its store. Use `days_ago` to set
-/// when it began and `live: true` to leave it unfinished.
+/// when it began, `live: true` to leave it unfinished and `caused_by:
+/// <event type>` to make it the run for the latest logged event of that type.
 pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_domain::contribution::{ContributionId, ContributionKind};
     use oxplow_domain::run::{ContributionRef, Mode, Outcome, RunContext, Usage};
@@ -516,6 +518,31 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
             oxplow_domain::Timestamp::now().unix_ms() - (days * 86_400_000.0) as i64,
         );
         run = run.began_at(at);
+    }
+    // Caused by the latest logged event of a type: the run a collector on
+    // it makes for that event (`cause_event_id`).
+    if let Some(event_type) = text("caused_by") {
+        let event_type = event_type.to_string();
+        let id: Option<String> = host
+            .svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT (SELECT id FROM event_log WHERE type = ?1 ORDER BY seq DESC LIMIT 1)",
+                    [&event_type],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let id = id.ok_or_else(|| {
+            format!(
+                "`run.caused_by: {}`: no such event is logged — fix: log it first",
+                text("caused_by").unwrap_or_default()
+            )
+        })?;
+        run = run.caused_by(oxplow_domain::EventId(id));
     }
     let run = run.with_observed_result(
         Usage {

@@ -598,7 +598,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `decision` and `reason` for denials and unenforced checks). For example,
   `{ need: scope, name: sql.read, decision: denied, reason: missing grant }`.
   With `live: true`, the store begins the run and leaves its outcome and
-  costs NULL. Other kinds include `health` (`disable_tx`), `token_usage`, `hint`
+  costs NULL. `caused_by: <event type>` sets its `cause_event_id` to the
+  latest logged event of that type (a collector's run for that event). Other kinds include `health` (`disable_tx`), `token_usage`, `hint`
   and `nudge` (their stores), `conversation` (a harness's saved
   conversation as `v_agent_conversation` lists it, `{ harness, id, title?,
   first_prompt?, started_at?, updated_at?, size_bytes?, parent? }`, or `{
@@ -723,7 +724,9 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
 
 - `requires: [shelf, shelf-folder]` at a fixture's top: the examples
   that run together (the existing key).
-- `given: - { files: { "<path>": "<body>" } }` writes project files;
+- `given: - { files: { "<path>": "<body>" } }` writes project files
+  (`"<path>": { repeat: "<text>", times: n }` writes `text` n times, a
+  large file a fixture need not spell out);
   `given: - { remove_files: ["<path>"] }` removes them; `given: - {
   rename_files: [{ from, to }] }` renames (built, `extension_test/observers.rs`;
   a path is relative to the throwaway's project root, no `..`, not

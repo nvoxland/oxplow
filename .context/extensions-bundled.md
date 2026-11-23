@@ -184,23 +184,33 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       a library call has none) and finds no other mention of with `grep_tree`
       (a text search of the change's head tree, `anchors.revision`, not the worktree's,
       so it says "possibly"), and writes one row per function:
-      `code`, `medium`, `possibly-unused`, at the definition. Its entity
+      `code`, `medium`, `possibly-unused`, at the definition. A file whose
+      own changed lines are past `change_diff`'s 2 MB is `too_large`, never
+      read: the check writes one `too-large-to-check` row for the change
+      (`info`, no path, "N files too large to check", the files in `why`), so
+      it never skips a file in silence. Its entity
       `review_unused` (key `change_id|path|line|signal`) holds the rows; a rerun
       reads the change's earlier keys and tombstones the ones it no longer
       produces. `review_signal_unused` adds them to the list.
     - `v_oxplow_review_check` (`datasets/review_check.sql`): one row per
       analysed change and per check (a collector on `change.analyzed`):
       `change_id, collector, collector_uri, state, last_run_at, error`
-      (version 2). The state is the check's own run for the change: the
+      (version 3). The state is the check's own run for the change: the
       `v_contribution_run` whose `cause_event_id` is the change's latest
       `change.analyzed` (files) event (`v_event` at
       `v_change.files_analyzed_seq`), never the collector's latest run, which
-      is one per collector and may be another change's. `pending` while that
-      run is missing or live, `failed` when it failed, else `ok`; `off` when
-      it has no run and the collector is disabled (`v_contribution_health`):
-      a disabled collector records nothing, so it would stay pending. The
-      Review page shows a pending check as still running and an off one as
-      off.
+      is one per collector and may be another change's (an index on
+      `contribution_run (cause_event_id, contribution)` finds it).
+      `pending` while that run is live, `failed` when it failed, else `ok`.
+      With no run: `off` when the collector is disabled
+      (`v_contribution_health`); `pending` while the collector hasn't handled
+      the event yet (`v_collector_checkpoint.last_event_id`, an event seq, is
+      before `files_analyzed_seq`); else `not_run`. A collector that has
+      handled a later event never runs for this one: it was disabled when the
+      change was analysed, or retention swept the run after 90 days. So a
+      change never stays pending for good. The Review page shows a pending
+      check as still running, an off one as off and a not_run one as did not
+      run.
   - **Any two points.** The page reads one change, of any kind: a commit, a
     request, a turn, the working tree, or a `range` between any two points
     (`git:<sha>`, `snap:<id>`, `working`), which the Changes page makes for
@@ -208,8 +218,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     snapshots). Verification and scope come from a request's runs and task,
     so a range has none.
   - **The About rail** also says where the change's checks stand
-    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", "1 off", or "None
-    ran") and which language packs are off for the files it changed (from
+    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", "1 off", "1 did
+    not run", or "None ran") and which language packs are off for the files it changed (from
     `v_language`, with a link to turn each on).
   - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),
     never the union itself: every row with the project's severity for its

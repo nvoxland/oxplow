@@ -354,7 +354,9 @@ lines it returns, not the files' sizes, so a one-line change to a large file
 is one line). The files past either limit are `rest`, in path order: the script
 loops, asking again with `paths = rest` until it is empty
 (`collectors/review/unused.star` does). A file whose own lines are past 2 MB
-is `too_large`, never returned, so each call makes progress. A file is never
+is `too_large`, never returned, so each call makes progress; a script says
+which files it skipped (`unused.star` writes a "N files too large to check"
+signal). A file is never
 truncated, and a limit is never an error a script can't catch. The worker asks its host across the line (`CallKind::ChangeDiff`), as
 an `ai_*` call does.
 

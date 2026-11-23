@@ -244,8 +244,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
      (the definitions the index read from it), `{ observe: { run: { extension,
      contribution, kind?, version?, outcome?, error?, days_ago?, wall_ms?,
-     cpu_ms?, peak_bytes?, ai_calls?, scopes?, decisions?, live? } } }`
-     (a contribution run, left unfinished with `live: true`; `scopes` maps
+     cpu_ms?, peak_bytes?, ai_calls?, scopes?, decisions?, live?, caused_by? } } }`
+     (a contribution run, left unfinished with `live: true`; `caused_by:
+     <event type>` makes it the run for the latest logged event of that type; `scopes` maps
      scope names to call counts and `decisions` takes entries such as
      `{ need: scope, name: sql.read, decision: denied, reason: missing grant }`),
      `{ observe: { health: { namespace, contribution,
@@ -331,7 +332,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      off in a fixture, but a store command's own write is observed when the
      command runs; any other run needs a step. Make the
      project files it follows in `given:` first — `- { files: { "<path>":
-     "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes
+     "<body>" } }` writes them (`"<path>": { repeat: "<text>", times: n }`
+     writes a large one without spelling it out), `- { remove_files: ["<path>"] }` removes
      them, `- { rename_files: [{ from, to }] }` moves them (paths from the
      project root; with `root: "agent:claude"` or `root: home` on the step,
      from that folder root, the test's own and never the person's). A store that follows its own SQLite file

@@ -1,0 +1,17 @@
+# The unused check reads a file's changed lines through `change_diff`, at
+# most 2 MB of them; a file whose own changed lines are past that is never
+# read (`too_large`). The check says so: one `info` signal for the change,
+# "1 file too large to check", naming the file, so the person knows the
+# check didn't look at it.
+requires: [oxplow-rust]
+given:
+  - { files: { "src/big.rs": { repeat: "pub fn filler() -> u32 { 1 }\n", times: 90000 } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/big.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Big }, bind: change }
+  - observe: { snapshot: { files: [{ path: src/lib.rs, body: "pub fn run() {}\n" }] } }
+  - observe: { change: { target: $change.rev, files: [{ path: src/big.rs, status: modified, additions: 90000, deletions: 1 }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+when: { sql: "SELECT change_id, area, signal, severity, path, line, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_unused'" }
+expect:
+  rows:
+    - { change_id: 1, area: code, signal: too-large-to-check, severity: info, path: null, line: null, title: "1 file too large to check", why: "Its changed lines are past the 2 MB the unused check reads, so it wasn't checked: src/big.rs." }
