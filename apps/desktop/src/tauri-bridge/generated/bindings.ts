@@ -2476,7 +2476,7 @@ export type ExtensionPanel = {
 	extension: string,
 	title: string,
 	icon: string | null,
-	scope: PanelScope,
+	dataScope: PanelDataScope,
 	/**  The body viz (`<extension>/<slug>`). */
 	body: string,
 	/**  The badge viz, which declares an `alert`. */
@@ -5345,6 +5345,14 @@ export type PanelChoice_Serialize = {
 	value: string,
 };
 
+/**
+ *  Which data a left-nav panel shows (`data_scope`): the project's, the
+ *  current stream's, or the current thread's — which of `stream_id` /
+ *  `thread_id` its pages get. Not where it shows: that is the person's
+ *  layout (`VisibilityScope`).
+ */
+export type PanelDataScope = "project" | "stream" | "thread";
+
 /**  One of a panel's parts. */
 export type PanelPart = "body" | "collapsed" | "count" | "badge";
 
@@ -5354,12 +5362,6 @@ export type PanelPlacement = {
 	hidden: boolean,
 	collapsed: boolean,
 };
-
-/**
- *  What a left-nav panel is bound to: the project, the current stream, or
- *  the current thread — which of `stream_id` / `thread_id` its viz nodes get.
- */
-export type PanelScope = "project" | "stream" | "thread";
 
 /**
  *  One of a resource's params: whether every URI carries it, and the

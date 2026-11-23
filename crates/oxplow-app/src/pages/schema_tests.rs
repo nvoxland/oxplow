@@ -626,7 +626,7 @@ fn a_panel_names_its_extensions_pages() {
     std::fs::create_dir_all(ext.join("pages")).unwrap();
     std::fs::write(
         ext.join("extension.yaml"),
-        "manifest: 2\nname: acme\nintent:\n  purpose: test\npanels:\n  - { id: work, title: Work, scope: stream, body: list, badge: count }\n  - { id: bad, title: Bad, scope: project, body: list, badge: list }\n",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\npanels:\n  - { id: work, title: Work, data_scope: stream, body: list, badge: count }\n  - { id: bad, title: Bad, data_scope: project, body: list, badge: list }\n",
     )
     .unwrap();
     std::fs::write(

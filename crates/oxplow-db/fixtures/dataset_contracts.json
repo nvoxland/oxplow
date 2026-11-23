@@ -21235,6 +21235,51 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Bookmark id."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The page's canonical ref (its tab id): what the bookmark opens."
+        },
+        {
+          "name": "page_kind",
+          "type": "TEXT",
+          "doc": "Its page kind (`page`, `file`, `oxplow/knowledge`, …), for the icon."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "The page's title when it was bookmarked."
+        },
+        {
+          "name": "visibility_scope",
+          "type": "TEXT",
+          "doc": "Where it shows: `thread`, `stream` or `project`. (v4: was `scope`)"
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The owning thread, for a `thread` bookmark."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The owning stream, for a `stream` bookmark."
+        },
+        {
+          "name": "added_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "agent_status": {

@@ -1842,13 +1842,15 @@ value_json | null }`; agents read `v_ui_preference`.
 
 ### `bookmark` — `bookmark_store` (`crates/oxplow-db/src/bookmark_store.rs`)
 
-V4. The pages the person starred, each at one scope: `thread`
+V4. The pages the person starred, each at one visibility scope
+(`visibility_scope`, V78; the `VisibilityScope` of
+`crates/oxplow-db/src/visibility_scope.rs`, with its `Viewer`): `thread`
 (`thread_id`), `stream` (`stream_id`) or `project` (neither — the old
 localStorage "global" scope; every ref is this project's anyway). A
 viewer — a thread and its stream — sees its thread's, its stream's and
 the project's, and a ref is bookmarked at most once across those:
-`set_tx` takes it out of every scope the viewer sees before inserting, so
-bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
+`set_tx` takes it out of every visibility scope the viewer sees before
+inserting, so bookmarking at another one moves it. Read through `v_bookmark` (the UI's
 `tabs/bookmarks.ts`, a page, the agent); every write is `oxplow.bookmark.set` /
 `oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither pages nor the
 agent could see them; those weren't carried over.

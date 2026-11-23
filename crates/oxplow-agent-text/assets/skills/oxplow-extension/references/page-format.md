@@ -46,7 +46,7 @@ ui:                     # optional: what it adds to other pages
   mounts:
     - { page: task-history, at: oxplow/task-detail.sections }   # also add requires: [oxplow-bundled]
 panels:                 # optional: a left-nav panel
-  - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
+  - { id: waiting, title: Waiting on Me, icon: bell, data_scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
 
 A manifest without `manifest: 2` doesn't load. Unknown keys are errors;

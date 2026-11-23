@@ -734,7 +734,7 @@ mod tests {
             "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
              datasets:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    fields:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
-             panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
+             panels:\n  - {{ id: inbox, title: Inbox, data_scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
              ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/thread, placement: ref-chip, label: title }}\n"

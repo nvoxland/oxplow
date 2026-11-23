@@ -50,7 +50,7 @@ const panel: ExtensionPanel = {
   extension: "x",
   title: "Work",
   icon: null,
-  scope: "project",
+  dataScope: "project",
   body: "x/body",
   badge: null,
   open: null,

@@ -3803,12 +3803,12 @@ def finish(x):
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "uri": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": fx.thread.to_string() }),
+                json!({ "uri": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "visibility_scope": "project", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
             .unwrap();
-        assert_eq!(out.result["scope"], json!("project"));
+        assert_eq!(out.result["visibility_scope"], json!("project"));
 
         // A replacement that doesn't stage is rejected whole: the old
         // command stays as it was, and the problem is reported.

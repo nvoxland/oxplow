@@ -462,7 +462,7 @@ screens and Bundled's add review and analysis:
   open tasks with `assignee = oxplow:oxplow/person` (`v_oxplow_task`) - In
   progress, then Up next (todo and blocked) in the person's queue order
   (`rank IS NULL, rank, created_at`) - each with its stage, under its
-  epic. A project-scoped panel (`scope: project`): the same in every
+  epic. A panel of project data (`data_scope: project`): the same in every
   thread, with no thread param. The header count is the open ones. It has **no Finished
   group**: a done task is unassigned and no record says who held it
   (`request_task` links threads' requests, a person's command is in no

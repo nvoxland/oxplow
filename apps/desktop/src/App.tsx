@@ -65,7 +65,7 @@ import { PageNavigationContext, type PageNavigation, type TabEditing } from "./t
 import type { PageAction } from "./kit/actions.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
-import type { BookmarkScope } from "./tabs/bookmarks.js";
+import type { VisibilityScope } from "./visibilityScope.js";
 import { reconcileSessionTabs, storedSessionIsStale } from "./tabs/sessionTabs.js";
 import { newThreadOpening } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
@@ -1823,7 +1823,7 @@ export function App() {
       const stored = isCurrent ? currentEntry(sessionTab).from : undefined;
       const origin: Origin | null = stored ? resolvedOrigin(stored, liveItemsOf(liveItems, slot, stored), ref) : null;
       const innerRender = tab.render;
-      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
+      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.visibilityScope ?? null;
       const elsewhere = bookmarkScope === null ? bookmarkedElsewhere(bookmarks, ref) : null;
       const registeredTitle = pageTitles[tabId] ?? (isCurrent ? currentEntry(sessionTab).title : undefined);
       const navValue: PageNavigation = {
@@ -1862,15 +1862,15 @@ export function App() {
         setTabActions: isCurrent ? actionsSetterFor(tabId) : undefined,
         ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
         bookmark: {
-          scope: bookmarkScope,
-          other: elsewhere ? { scope: elsewhere.scope } : null,
+          visibilityScope: bookmarkScope,
+          other: elsewhere ? { visibilityScope: elsewhere.visibilityScope } : null,
           updateOther: elsewhere
             ? () => {
                 moveBookmark({ threadId: selectedThreadId, streamId: stream?.id ?? null }, elsewhere, ref, registeredTitle ?? tab.label).catch((e: unknown) =>
                   recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
               }
             : undefined,
-          toggle: (scope: BookmarkScope) => {
+          toggle: (scope: VisibilityScope) => {
             const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
             const write = bookmarkScope === scope
               ? removeBookmark(viewer, ref.id)

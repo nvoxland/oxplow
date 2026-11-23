@@ -2998,8 +2998,8 @@
           ],
           "default": null
         },
-        "scope": {
-          "$ref": "#/definitions/PanelScope"
+        "data_scope": {
+          "$ref": "#/definitions/PanelDataScope"
         },
         "body": {
           "type": "string"
@@ -3042,12 +3042,12 @@
       "required": [
         "id",
         "title",
-        "scope",
+        "data_scope",
         "body"
       ]
     },
-    "PanelScope": {
-      "description": "What a left-nav panel is bound to: the project, the current stream, or\nthe current thread — which of `stream_id` / `thread_id` its viz nodes get.",
+    "PanelDataScope": {
+      "description": "Which data a left-nav panel shows (`data_scope`): the project's, the\ncurrent stream's, or the current thread's — which of `stream_id` /\n`thread_id` its pages get. Not where it shows: that is the person's\nlayout (`VisibilityScope`).",
       "type": "string",
       "enum": [
         "project",

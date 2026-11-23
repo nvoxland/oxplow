@@ -457,7 +457,7 @@ pub fn scaffold_with(
             "panels:\n\
              \x20 # A {panel} in the left nav: its `body` page, compact. `scope` says what it\n\
              \x20 # follows (project, stream or thread) and the page declares that param.\n\
-             \x20 - {{ id: {name}, title: {title}, scope: stream, body: {name} }}\n",
+             \x20 - {{ id: {name}, title: {title}, data_scope: stream, body: {name} }}\n",
             panel = ContributionKind::Panel.spec().title.to_lowercase(),
             title = title_case(name)
         )),

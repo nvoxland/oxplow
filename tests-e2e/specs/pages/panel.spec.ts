@@ -25,7 +25,7 @@ view: { id: n, viz: number, from: n }
 
 test("a left-nav panel draws its body page, and its badge page's number", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-panel", {
-    manifest: "requires: [oxplow-bundled]\npanels:\n  - { id: gliders, title: Gliders, icon: bell, scope: project, body: glider-body, badge: glider-count }\n",
+    manifest: "requires: [oxplow-bundled]\npanels:\n  - { id: gliders, title: Gliders, icon: bell, data_scope: project, body: glider-body, badge: glider-count }\n",
     files: { "parts/glider-body.yaml": body, "parts/glider-count.yaml": count },
   });
   await load(page);

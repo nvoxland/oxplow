@@ -88,7 +88,7 @@ that exists is refused):
   the values (a scalar key; the values in its `enum` if it has one), and a
   settings change rewrites what's offered;
 - `panel` — a part compact in the left nav, written to `parts/<name>.yaml` (a
-  panel's `scope` is the param its part declares);
+  panel's `data_scope` is the param its part declares);
 - `extension` — the manifest only.
 
 Words used exactly: an **extension** is the folder; a **contribution** is

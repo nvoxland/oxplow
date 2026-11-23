@@ -3,7 +3,7 @@ import { bookmarkedElsewhere, bookmarksFromResult, bookmarksParams, moveBookmark
 import type { SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 const result = (rows: (string | null)[][]): SqlQueryResult =>
-  ({ columns: ["uri", "label", "scope"], rows, reads: { datasets: [] } }) as unknown as SqlQueryResult;
+  ({ columns: ["uri", "label", "visibility_scope"], rows, reads: { datasets: [] } }) as unknown as SqlQueryResult;
 
 describe("bookmarks", () => {
   test("rows become refs; an unparseable ref is skipped", () => {
@@ -14,7 +14,7 @@ describe("bookmarks", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.ref.id).toBe("oxplow:oxplow/task?id=tsk7&provider=oxtask");
     expect(out[0]!.label).toBe("Fix it");
-    expect(out[0]!.scope).toBe("thread");
+    expect(out[0]!.visibilityScope).toBe("thread");
   });
 
   test("the viewer binds as dataset row ids", () => {
@@ -25,16 +25,16 @@ describe("bookmarks", () => {
   test("set names the page, its kind and the thread before the stream", () => {
     const ref = { id: "oxplow:oxplow/page?page=git-dashboard", kind: "git-dashboard", payload: null } as never;
     expect(setBookmarkInput({ threadId: "thr3", streamId: "str2" }, ref, "Git", "project")).toEqual({
-      uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", label: "Git", scope: "project", thread: "thr3",
+      uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", label: "Git", visibility_scope: "project", thread: "thr3",
     });
     expect(setBookmarkInput({ threadId: null, streamId: "str2" }, ref, null, "stream")).toEqual({
-      uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", scope: "stream", stream: "str2",
+      uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", visibility_scope: "stream", stream: "str2",
     });
   });
 });
 
 const ref = (id: string) => ({ id, kind: "page", payload: null }) as never;
-const mark = (id: string, scope: "thread" | "stream" | "project") => ({ ref: ref(id), label: "L", scope });
+const mark = (id: string, visibilityScope: "thread" | "stream" | "project") => ({ ref: ref(id), label: "L", visibilityScope });
 
 describe("a bookmark at other values", () => {
   test("the same page at another view is found; the same view, or another page, is not", () => {
@@ -50,7 +50,7 @@ describe("a bookmark at other values", () => {
     expect(input).toEqual({
       calls: [
         { name: "oxplow.bookmark.remove", input: { uri: "oxplow:oxplow/page?page=x/y#a=1", thread: "thr3" } },
-        { name: "oxplow.bookmark.set", input: { uri: "oxplow:oxplow/page?page=x/y#a=2", page_kind: "x/y", label: "Y", scope: "stream", thread: "thr3" } },
+        { name: "oxplow.bookmark.set", input: { uri: "oxplow:oxplow/page?page=x/y#a=2", page_kind: "x/y", label: "Y", visibility_scope: "stream", thread: "thr3" } },
       ],
     });
   });

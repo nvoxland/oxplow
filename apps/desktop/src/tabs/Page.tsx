@@ -7,7 +7,7 @@ import { TabModalHostContext } from "../components/TabModal.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import { useResources } from "../resources.js";
 import { typeOf } from "../uri/uri.js";
-import type { BookmarkScope } from "./bookmarks.js";
+import type { VisibilityScope } from "../visibilityScope.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { chipsFor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
@@ -37,9 +37,9 @@ export interface PageNavBarConfig {
     onSelect?(index: number): void;
   };
   bookmark?: {
-    scope: BookmarkScope | null;
-    onToggleScope(scope: BookmarkScope): void;
-    other?: { scope: BookmarkScope } | null;
+    visibilityScope: VisibilityScope | null;
+    onToggleVisibilityScope(visibilityScope: VisibilityScope): void;
+    other?: { visibilityScope: VisibilityScope } | null;
     onUpdateOther?(): void;
   };
   /** The page's ref and stream, for the Ask menu. */
@@ -197,8 +197,8 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
       : undefined,
     bookmark: ctxNav.bookmark
       ? {
-          scope: ctxNav.bookmark.scope,
-          onToggleScope: (scope) => ctxNav.bookmark!.toggle(scope),
+          visibilityScope: ctxNav.bookmark.visibilityScope,
+          onToggleVisibilityScope: (visibilityScope) => ctxNav.bookmark!.toggle(visibilityScope),
           other: ctxNav.bookmark.other,
           onUpdateOther: ctxNav.bookmark.updateOther,
         }

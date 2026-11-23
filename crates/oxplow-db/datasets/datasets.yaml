@@ -337,14 +337,14 @@ datasets:
     - { not_null: scope }
     - { not_null: key }
 - name: bookmark
-  version: 3
-  description: "Pages the person bookmarked, each at one scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a URI is bookmarked at most once across those."
+  version: 4
+  description: "Pages the person bookmarked, each at one visibility scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a URI is bookmarked at most once across those."
   fields:
     - { name: "id", type: "INTEGER", doc: "Bookmark id." }
     - { name: "uri", type: "TEXT", doc: "The page's canonical ref (its tab id): what the bookmark opens." }
     - { name: "page_kind", type: "TEXT", doc: "Its page kind (`page`, `file`, `oxplow/knowledge`, …), for the icon." }
     - { name: "label", type: "TEXT", doc: "The page's title when it was bookmarked." }
-    - { name: "scope", type: "TEXT", doc: "`thread`, `stream` or `project`." }
+    - { name: "visibility_scope", type: "TEXT", doc: "Where it shows: `thread`, `stream` or `project`. (v4: was `scope`)" }
     - { name: "thread_id", type: "INTEGER", doc: "The owning thread, for a `thread` bookmark." }
     - { name: "stream_id", type: "INTEGER", doc: "The owning stream, for a `stream` bookmark." }
     - { name: "added_at", type: "TEXT", doc: "RFC 3339 timestamp." }

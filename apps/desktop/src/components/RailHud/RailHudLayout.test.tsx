@@ -25,8 +25,8 @@ mock.module("../../api.js", () => ({
       name: "x",
       enabled: true, pages: [],
       panels: [
-        { id: "x/v", extension: "x", title: "V", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
-        { id: "x/w", extension: "x", title: "W", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
+        { id: "x/v", extension: "x", title: "V", icon: null, dataScope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
+        { id: "x/w", extension: "x", title: "W", icon: null, dataScope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
       ],
       ui: { slots: [], commands: [], decorators: [], replacements: [] },
     },

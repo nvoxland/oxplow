@@ -1,19 +1,19 @@
 title: Thread bookmarks
-description: The pages bookmarked for a thread, its stream or the project, as that thread sees them - each page once, at the narrowest scope it is bookmarked at, newest first (`added_at`, then `id`, for a reader that orders its own).
+description: The pages bookmarked for a thread, its stream or the project, as that thread sees them - each page once, at the narrowest visibility scope it is bookmarked at, newest first (`added_at`, then `id`, for a reader that orders its own).
 params:
 - name: thread_id
 loaders:
   bookmarks:
     sql: |
       SELECT coalesce(nullif(trim(b.label), ''), b.uri) AS title,
-             b.page_kind, b.uri, b.scope, uri_param(t.uri, 'id') AS thread, b.added_at, b.id
+             b.page_kind, b.uri, b.visibility_scope, uri_param(t.uri, 'id') AS thread, b.added_at, b.id
       FROM (
         SELECT bk.*, row_number() OVER (PARTITION BY bk.uri ORDER BY
-                 CASE bk.scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
+                 CASE bk.visibility_scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
         FROM v_bookmark bk
-        WHERE (bk.scope = 'thread' AND bk.thread_id = :thread_id)
-           OR (bk.scope = 'stream' AND bk.stream_id = (SELECT stream_id FROM v_thread WHERE id = :thread_id))
-           OR bk.scope = 'project'
+        WHERE (bk.visibility_scope = 'thread' AND bk.thread_id = :thread_id)
+           OR (bk.visibility_scope = 'stream' AND bk.stream_id = (SELECT stream_id FROM v_thread WHERE id = :thread_id))
+           OR bk.visibility_scope = 'project'
       ) b
       JOIN v_thread t ON t.id = :thread_id
       WHERE b.n = 1

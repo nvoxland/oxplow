@@ -38,8 +38,8 @@ intent:
   origin: null
   examples:
     - name: a person bookmarks a page for their thread
-      input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thr1" } }
-      expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+      input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, visibility_scope: thread, thread: "thr1" } }
+      expect: the page in v_bookmark at the thread's visibility scope, undone by oxplow.bookmark.remove
     - name: run-details-shows-cost-and-denied-decisions-first
       input: { part: run-details }
       expect: the run's cost and scopes, with denied permission decisions before allowed ones
@@ -466,13 +466,13 @@ panels:
   # The left nav's Go To, beside the Go To page its header opens: the
   # thread's bookmarks, recent or most visited pages, one kind at a time
   # (its header's icons); collapsed, the same pages as icons.
-  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-icons, open: 'oxplow:oxplow/page?page=go-to' }
+  - { id: go-to, title: Go To, icon: compass, data_scope: thread, body: go-to-panel, collapsed: go-to-icons, open: 'oxplow:oxplow/page?page=go-to' }
   # The stream's git: its uncommitted files as a folder tree, or where its
   # branch stands (the header picks); its header opens Git Status, which
   # acts on both. Collapsed, one line of counts; counted by files.
-  - { id: git, title: Git, icon: git-branch, scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
+  - { id: git, title: Git, icon: git-branch, data_scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
   # What only the person can move: a question an agent waits on, an open note; counted in its header.
-  - { id: waiting, title: Waiting on you, icon: bell, scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
+  - { id: waiting, title: Waiting on you, icon: bell, data_scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
 # What oxplow runs by default: snapshots, and the agent harnesses and AI
 # providers — core's built-ins, many of each at once (every one of those
 # declared here is active). Knowledge stores are extensions (oxwiki is one).
@@ -1040,12 +1040,12 @@ commands:
     example: {"id": "anthropic", "model": "claude-haiku-5-5"}
   # bookmarks.write — the person's navigation.
   - name: bookmark.set
-    summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
+    summary: "Bookmark a page at a visibility scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
     scope: bookmarks.write
     op: set
-    example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "page", "label": "Git dashboard", "scope": "thread", "thread": "thr3"}
+    example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "page", "label": "Git dashboard", "visibility_scope": "thread", "thread": "thr3"}
   - name: bookmark.remove
-    summary: "Take a page's bookmark off, whichever scope it's at."
+    summary: "Take a page's bookmark off, whichever visibility scope it's at."
     scope: bookmarks.write
     op: remove
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}

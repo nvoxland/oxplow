@@ -15,7 +15,7 @@ const panel: ExtensionPanel = {
   extension: "z",
   title: "Waiting",
   icon: null,
-  scope: "stream",
+  dataScope: "stream",
   body: "z/body",
   badge: "z/badge",
   open: null,

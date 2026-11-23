@@ -55,8 +55,8 @@ view:
       link:
         kind: page
         from: uri
-    - key: scope
-      label: Scope
+    - key: visibility_scope
+      label: Shown in
       width: 90
     empty: No bookmarks yet. Star a page to pin it here.
     actions:
@@ -67,7 +67,7 @@ view:
         uri: '{{row.uri}}'
         page_kind: '{{row.page_kind}}'
         label: '{{row.title}}'
-        scope: thread
+        visibility_scope: thread
         thread: '{{row.thread}}'
       row: true
     - id: to-stream
@@ -77,7 +77,7 @@ view:
         uri: '{{row.uri}}'
         page_kind: '{{row.page_kind}}'
         label: '{{row.title}}'
-        scope: stream
+        visibility_scope: stream
         thread: '{{row.thread}}'
       row: true
     - id: to-project
@@ -87,7 +87,7 @@ view:
         uri: '{{row.uri}}'
         page_kind: '{{row.page_kind}}'
         label: '{{row.title}}'
-        scope: project
+        visibility_scope: project
         thread: '{{row.thread}}'
       row: true
     - id: remove

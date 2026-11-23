@@ -64,6 +64,7 @@ pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod ui_preference_store;
+pub mod visibility_scope;
 
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,
