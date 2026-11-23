@@ -403,7 +403,7 @@ datasets:
     - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
-  version: 6
+  version: 7
   description: "Analyzed changes: a commit (vs its parent), an agent turn (start → end snapshot: what the turn changed), a stream's working tree (vs HEAD) or a range (any two revisions). Created on demand by `oxplow_ensure_change`, or by a query that names one by `kind` and `target` (`kind = 'commit' AND target = <sha>`; `kind = 'working' AND target = ''` for the query's stream; `kind = 'range' AND target = :start || '..' || :end`, each side `working`, `snap:<id>` or `git:<rev>`, the start '' for the whole tree at the end), its analysis then run in the background; a working tree's, a running request's and a range's headed at the working tree are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   fields:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
@@ -423,6 +423,8 @@ datasets:
     - { name: "conflicted", type: "INTEGER", doc: "For a working tree, how many files git reports conflicted; NULL for other kinds." }
     - { name: "in_progress", type: "TEXT", doc: "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds." }
     - { name: "elapsed_ms", type: "INTEGER", doc: "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)." }
+    - { name: "analyzed_files", type: "INTEGER", doc: "How many of its files its last deep analysis read: at most 200, the files the enabled languages parse first (not `generated` or `vendored` files, nor lockfiles), then the rest by path. NULL before one." }
+    - { name: "changed_files", type: "INTEGER", doc: "How many files that analysis was given: the change's files (a request's own). NULL before one." }
   tests:
     - { not_null: id }
     - { unique: id }

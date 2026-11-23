@@ -205,6 +205,40 @@ pub fn analyze_with_language(
         .collect()
 }
 
+/// `source` without its comments, each leaving its newlines (so the lines
+/// still count the same): what counting a test file's assertions reads.
+/// A language with a grammar drops the grammar's comment nodes (every
+/// grammar's comment kinds contain "comment"), so a `/*` or `#` inside a
+/// string literal stays code. One known only by its server strips what its
+/// `comments:` declares, skipping quoted strings. `None` when the language
+/// has neither.
+pub fn strip_comments(source: &str, language: &Language) -> Option<String> {
+    let Some(tree) = parse(source, language) else {
+        return language.decl().comments.as_ref().map(|c| c.strip(source));
+    };
+    let mut out = String::with_capacity(source.len());
+    let mut at = 0;
+    drop_comments(tree.root_node(), source, &mut at, &mut out);
+    out.push_str(source.get(at..).unwrap_or(""));
+    Some(out)
+}
+
+fn drop_comments(node: Node<'_>, src: &str, at: &mut usize, out: &mut String) {
+    if node.kind().contains("comment") {
+        let (start, end) = (node.start_byte().max(*at), node.end_byte());
+        if let (Some(before), Some(comment)) = (src.get(*at..start), src.get(start..end)) {
+            out.push_str(before);
+            out.extend(comment.chars().filter(|c| *c == '\n'));
+            *at = end;
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        drop_comments(child, src, at, out);
+    }
+}
+
 /// A code marker (TODO / FIXME / …) found inside a comment — the
 /// language-agnostic counterpart of [`FunctionMetrics`] for the
 /// `oxplow.todos` metric. The language layer owns "what is a comment"

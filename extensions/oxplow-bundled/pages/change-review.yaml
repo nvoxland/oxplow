@@ -34,6 +34,13 @@ loaders:
              printf('%d file%s · +%d −%d', f.n, CASE f.n WHEN 1 THEN '' ELSE 's' END, f.a, f.d) AS size,
              CASE c.status WHEN 'failed' THEN 'Failed: ' || coalesce(c.error, 'unknown error')
                            WHEN 'done' THEN 'Done' ELSE 'Analyzing…' END AS analysis,
+             -- A change of more files than the analysis reads (200) reads the
+             -- files the languages parse first; say how many it read.
+             CASE WHEN c.analyzed_files IS NOT NULL THEN
+               printf('%d of %d file%s analysed', c.analyzed_files, c.changed_files,
+                      CASE c.changed_files WHEN 1 THEN '' ELSE 's' END)
+               || CASE WHEN c.analyzed_files < c.changed_files THEN ' (source files first)' ELSE '' END
+             END AS analysed,
              c.base_revision, c.head_revision,
              -- Where its checks (collectors on `change.analyzed`) stand.
              (SELECT CASE WHEN count(*) = 0 THEN 'None ran'
@@ -113,6 +120,7 @@ rail:
   - { key: what, label: What }
   - { key: size, label: Size }
   - { key: analysis, label: Analysis }
+  - { key: analysed, label: Files analysed }
   - { key: checks, label: Checks }
   - { key: packs_off, label: Packs off, format: markdown }
 view:

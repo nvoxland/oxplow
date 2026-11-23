@@ -1481,8 +1481,12 @@ oxplow-bundled change cards) only read them.
 - **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream; or `kind = 'range' AND target = :start || '..' || :end`, the two sides as params — a `start` left NULL would make the whole value NULL, so a page defaults it to `''`), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
   the `v_change` row, computing first if needed. It diffs its two
   revisions (`v_change.base_revision` → `head_revision`) through `Trees`
-  (shared with the `diff` IPC, `.context/vcs.md`), reads the
-  first 200 changed files' contents, runs `code_analysis::analyze_files`
+  (shared with the `diff` IPC, `.context/vcs.md`), reads at most 200
+  changed files' contents (`analysis_order`: the files an enabled language
+  parses first — not `generated` or `vendored` files, nor the `lockfile`
+  kind's — then the rest, each by path; `v_change.analyzed_files` of
+  `changed_files` says how many it read, and the Review's About rail shows
+  "N of M files analysed"), runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
   - files: status, +/−, `is_test` (the
     the enabled extensions' `test_conventions:` plus the project's `testing.testPaths`

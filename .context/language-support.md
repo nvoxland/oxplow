@@ -400,7 +400,11 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
    complete on its own), `comments:` and `keywords:` (they sit on the
    declaration, not in `analysis.yaml`, because a language known only by its
    server has comments and keywords too). Core knows none of them: the
-   assertion counter strips the path's language's comments, `unused.star`
+   assertion counter strips the path's language's comments
+   (`oxplow_code_metrics::strip_comments`: a language with a grammar drops
+   the grammar's comment nodes, kinds containing "comment", so a `/*` or `#`
+   inside a string stays code; one without strips its `comments:` markers,
+   skipping `"` and `'` strings, a string left open ending at its line), `unused.star`
    skips its keywords, the editor reads its Monaco id. The one table core
    keeps is `oxplow_domain::language_id` — the editor's highlighting for
    extensions *no enabled pack declares* (Monaco's own ids: kotlin, sql, …);

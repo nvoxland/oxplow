@@ -230,8 +230,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      change: { kind?, target, files?: [{ path, status?, additions?,
      deletions?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
-     complexity_delta?, … }] } } }` (what the change analysis stored for a
-     change: `kind` is `commit` by default; the datasets over a change read it, and the
+     complexity_delta?, … }], analyzed_files? } } }` (what the change analysis stored for a
+     change: `kind` is `commit` by default, `analyzed_files` how many of its files the
+     analysis read, all by default; the datasets over a change read it, and the
      materialized datasets that read the commit index need a step of their
      own to fill), `{ observe: { test_run: { at?, cases?: [{ name,
      status }], asserted_failed? } } }` (a test run: a

@@ -193,6 +193,8 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
             ..Default::default()
         });
     }
+    // How many of its files the analysis read: every one, unless it says.
+    results.analyzed_files = int(body, "analyzed_files").unwrap_or(results.files.len() as i64);
     let stream = first_stream(host).await?;
     let (row, _) = host
         .svc

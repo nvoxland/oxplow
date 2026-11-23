@@ -202,6 +202,8 @@ pub fn build_results(
         imports,
         test_files: Vec::new(),
         hunks: hunk_rows(analysis),
+        // The caller knows which files it read.
+        analyzed_files: 0,
     }
 }
 
@@ -1383,6 +1385,53 @@ pub(crate) async fn request_files(
         .await
 }
 
+/// The paths a change's analysis reads, at most `MAX_ANALYZED_FILES`: the
+/// `analysable` ones first (a language parses it; not a `generated` or
+/// `vendored` file nor a lockfile), then the rest, each in the order given
+/// (by path). A change of more files than that reads its code, not the
+/// first files by name.
+fn analysis_order<'a>(
+    paths: impl Iterator<Item = &'a str>,
+    analysable: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let (mut first, rest): (Vec<&str>, Vec<&str>) = paths.partition(|p| analysable(p));
+    first.extend(rest);
+    first
+        .into_iter()
+        .take(MAX_ANALYZED_FILES)
+        .map(str::to_string)
+        .collect()
+}
+
+/// The enabled `lockfile` file kinds' globs (`v_file_kind_rule`), in
+/// `glob_match`'s dialect; one that doesn't parse is left out.
+async fn lockfile_globs(svc: &crate::Services) -> Result<globset::GlobSet, String> {
+    let globs: Vec<String> = svc
+        .db
+        .read(|c| {
+            let mut st = c
+                .prepare("SELECT glob FROM v_file_kind_rule WHERE kind = 'lockfile'")
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = st
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut set = globset::GlobSetBuilder::new();
+    for glob in globs {
+        if let Ok(glob) = globset::GlobBuilder::new(&glob)
+            .literal_separator(true)
+            .build()
+        {
+            set.add(glob);
+        }
+    }
+    set.build().map_err(|e| e.to_string())
+}
+
 /// Diff `base` → `head` in `root` (limited to `only` when given), read the
 /// changed files' contents, and analyze them.
 async fn compute(
@@ -1404,11 +1453,13 @@ async fn compute(
         .into_iter()
         .filter(|e| only.as_ref().is_none_or(|own| own.contains(&e.path)))
         .collect();
-    let analyzed: Vec<String> = entries
-        .iter()
-        .take(MAX_ANALYZED_FILES)
-        .map(|e| e.path.clone())
-        .collect();
+    let languages = svc.languages.current();
+    let lockfiles = lockfile_globs(svc).await?;
+    let analyzed = analysis_order(entries.iter().map(|e| e.path.as_str()), |path| {
+        languages.for_path(path).is_some()
+            && !languages.is_excluded(path)
+            && !lockfiles.is_match(path.replace('\\', "/"))
+    });
     let text = |b: Option<Vec<u8>>| b.map(|b| String::from_utf8_lossy(&b).into_owned());
     let mut base_contents = Vec::with_capacity(analyzed.len());
     let mut head_contents = Vec::with_capacity(analyzed.len());
@@ -1429,7 +1480,6 @@ async fn compute(
                 .map_err(|e| e.to_string())?,
         ));
     }
-    let languages = svc.languages.current();
     tokio::task::spawn_blocking(move || -> Result<ChangeResults, String> {
         let specs: Vec<AnalyzeFileSpec> = analyzed
             .iter()
@@ -1455,6 +1505,7 @@ async fn compute(
             })
             .collect();
         let mut results = build_results(&files, &analysis, &tests);
+        results.analyzed_files = analyzed.len() as i64;
         results.test_files =
             test_file_rows(&analyzed, &base_contents, &head_contents, &analysis, &tests);
         Ok(results)
@@ -2152,6 +2203,69 @@ mod tests {
             .await
             .unwrap();
         serde_json::to_value(out.rows).unwrap()
+    }
+
+    /// A change of more than `MAX_ANALYZED_FILES` files reads the files the
+    /// languages parse first (not `generated`, `vendored` or lockfiles), so
+    /// a source file sorting after them is still analysed, and the change
+    /// records how many of its files the analysis read.
+    #[tokio::test]
+    async fn a_large_change_analyses_its_source_files_first() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        f.svc.config.write().unwrap().files.kinds.extend(
+            [("generated", "gen/**"), ("lockfile", "**/Cargo.lock")].map(|(kind, glob)| {
+                oxplow_config::FileKindRule {
+                    kind: kind.into(),
+                    glob: glob.into(),
+                    label: None,
+                }
+            }),
+        );
+        crate::config_reactors::restate_file_kinds(&f.svc)
+            .await
+            .unwrap();
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::write(root.join("README.md"), "base\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::create_dir_all(root.join("gen")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for i in 0..MAX_ANALYZED_FILES + 5 {
+            std::fs::write(
+                root.join(format!("gen/g{i:03}.rs")),
+                format!("fn g{i}() {{}}\n"),
+            )
+            .unwrap();
+        }
+        std::fs::write(root.join("Cargo.lock"), "version = 3\n").unwrap();
+        std::fs::write(root.join("src/z.rs"), "fn fresh() {}\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "big");
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Commit {
+                sha,
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, name FROM v_change_function WHERE change_id = ?1 AND path NOT LIKE 'gen/%'",
+                c.id
+            )
+            .await,
+            serde_json::json!([["src/z.rs", "fresh"]])
+        );
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT analyzed_files, changed_files FROM v_change WHERE id = ?1",
+                c.id
+            )
+            .await,
+            serde_json::json!([[MAX_ANALYZED_FILES, MAX_ANALYZED_FILES + 7]])
+        );
     }
 
     #[tokio::test]

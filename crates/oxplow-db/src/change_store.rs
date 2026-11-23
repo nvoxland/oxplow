@@ -129,6 +129,8 @@ pub struct ChangeResults {
     pub imports: Vec<ChangeImportRow>,
     pub test_files: Vec<ChangeTestFileRow>,
     pub hunks: Vec<ChangeHunkRow>,
+    /// How many of `files` the analysis read (`MAX_ANALYZED_FILES` at most).
+    pub analyzed_files: i64,
 }
 
 #[derive(Clone)]
@@ -338,9 +340,19 @@ impl SqliteChangeStore {
                 }
                 tx.execute(
                     "UPDATE change SET status = 'done', error = NULL, computed_at = ?2,
-                       snapshot_id = ?3, events_to = ?4, elapsed_ms = ?5, analyzed_from = ?6
+                       snapshot_id = ?3, events_to = ?4, elapsed_ms = ?5, analyzed_from = ?6,
+                       analyzed_files = ?7, changed_files = ?8
                      WHERE id = ?1",
-                    rusqlite::params![id, at, snapshot_id, events_to, elapsed_ms, analyzed_from],
+                    rusqlite::params![
+                        id,
+                        at,
+                        snapshot_id,
+                        events_to,
+                        elapsed_ms,
+                        analyzed_from,
+                        results.analyzed_files,
+                        results.files.len() as i64
+                    ],
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -913,6 +925,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            analyzed_files: 1,
         };
         store
             .store_results(c.id, results("a.rs"), Some(3), 10, 1, None)

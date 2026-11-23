@@ -2013,7 +2013,8 @@ impl Services {
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
     /// derived state (the snapshot workspace filter, mirroring
-    /// `set_generated`), and emit `ConfigChanged`. Called by the config
+    /// `set_generated`; the project's file kinds when `oxplow.files.kinds`
+    /// moved), and emit `ConfigChanged`. Called by the config
     /// fs-watcher when the file changes out-of-band — e.g. the agent
     /// running `/oxplow:configure` writes a `testing:` block — so the
     /// edit goes live without a process restart. A full reload from disk
@@ -2032,9 +2033,26 @@ impl Services {
             return Ok(());
         }
         self.snapshot_captures.set_generated(&fresh.generated);
-        {
+        let kinds_moved = {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
+            let moved = guard.files.kinds != fresh.files.kinds;
             *guard = fresh;
+            moved
+        };
+        // No command wrote the file, so no `config.changed` restates the
+        // project's file kinds (`v_file_kind_rule`, what a corpus leaves
+        // out): the reload does, as it re-applies the snapshot filter.
+        if kinds_moved {
+            if let (Ok(svc), Ok(runtime)) = (
+                self.services_slot.get(),
+                tokio::runtime::Handle::try_current(),
+            ) {
+                runtime.spawn(async move {
+                    if let Err(error) = config_reactors::restate_file_kinds(&svc).await {
+                        tracing::warn!(%error, "restating the project's file kinds failed");
+                    }
+                });
+            }
         }
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())

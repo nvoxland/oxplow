@@ -246,6 +246,39 @@ mod tests {
             .ignore(Path::new(path), false)
     }
 
+    /// `oxplow.files.kinds` edited on disk (a `git pull` of the project
+    /// file) is restated when the file is reloaded: no command logged a
+    /// `config.changed` for it.
+    #[tokio::test]
+    async fn file_kinds_edited_on_disk_are_restated_on_reload() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        let path = oxplow_config::config_path(&svc.layout.project_dir);
+        let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+        text.push_str("oxplow.files.kinds:\n  - { kind: generated, glob: 'pulled/**' }\n");
+        std::fs::write(&path, text).unwrap();
+        svc.reload_config_from_disk().unwrap();
+        let mut found = json!([]);
+        for _ in 0..100 {
+            let out = svc
+                .sql
+                .query_sql(
+                    "SELECT kind, glob FROM v_file_kind_rule WHERE extension = 'project-settings'",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            found = serde_json::to_value(out.rows).unwrap();
+            if found != json!([]) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(found, json!([["generated", "pulled/**"]]));
+        assert!(svc.languages.current().is_excluded("pulled/a.rs"));
+    }
+
     /// `v_file_kind_rule` lists the foundation's kinds, an enabled
     /// extension's `file_kinds:` and the project's `oxplow.files.kinds`;
     /// a disabled extension's go, and a changed setting is restated.
