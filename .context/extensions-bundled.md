@@ -177,7 +177,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       rows: the collector `oxplow.review.unused` (`collectors/review/unused.star`,
       `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,
       `needs: [tree.read, sql.read]`) reads `change_diff` for the lines the
-      change removed, takes the call-shaped names (`name(`) that aren't also
+      change removed (in rounds: each call names the files past its limit in
+      `rest`, and it asks again for those), takes the call-shaped names (`name(`) that aren't also
       called on an added line of the same file, keeps those the head tree
       defines (a `grep_tree` hit that starts a function of that name by `code_metrics`;
       a library call has none) and finds no other mention of with `grep_tree`

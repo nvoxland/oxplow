@@ -1,8 +1,9 @@
 //! The `change_diff(change_id, paths=None)` Starlark builtin, part of the
 //! `tree.read` service: a script asks for the changed lines of an
-//! analysed change, `[{path, status, hunks: [{head_start, head_end,
-//! base_start, base_end, head_after, added: [{line, text}], removed:
-//! [{line, text}]}]}]`.
+//! analysed change, `{files: [{path, status, hunks: [{head_start,
+//! head_end, base_start, base_end, head_after, added: [{line, text}],
+//! removed: [{line, text}]}]}], rest: [path], too_large: [path]}`: the
+//! files past a call's limits are `rest`, to ask for again.
 //!
 //! The change's two sides live with the host (the app reads them through
 //! its trees), so the script, which runs in a worker, asks across the
@@ -34,7 +35,9 @@ impl ChangeDiffHost {
 #[starlark::starlark_module]
 pub(crate) fn change_diff_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
     /// The changed files of change `change_id` (`v_change.id`) with each
-    /// one's hunks and their lines; `paths` limits it to those files.
+    /// one's hunks and their lines (`files`), the paths past this call's
+    /// limits (`rest`, to ask again) and those too large for any call
+    /// (`too_large`); `paths` limits it to those files.
     fn change_diff<'v>(
         #[starlark(require = pos)] change_id: i32,
         #[starlark(default = starlark::values::none::NoneOr::None)]

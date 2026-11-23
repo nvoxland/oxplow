@@ -15,8 +15,6 @@
 
 KINDS = ["function", "method", "constructor", "macro"]
 MOST_NAMES = 50
-# Files per `change_diff` call: well under its 200-file and 2 MB limits.
-BATCH = 40
 
 def call_names(text):
     """The names called on a line: an identifier right before `(`."""
@@ -33,9 +31,10 @@ def transform(input):
     })
 
     # The files whose removed lines can hold a call: some lines removed, in
-    # a language a pack parses, not generated, vendored or a lockfile. Read
-    # in batches, since one `change_diff` call returns at most 200 files and
-    # 2 MB of text.
+    # a language a pack parses, not generated, vendored or a lockfile. One
+    # `change_diff` call returns the files that fit its limits and names the
+    # rest, so it is asked again for those (each call reads at least one
+    # file or sets one aside as too large, so it ends).
     paths = [
         r["path"]
         for r in scope("sql.read", {
@@ -45,8 +44,13 @@ def transform(input):
         if language_of(r["path"]) != None
     ]
     diffs = []
-    for at in range(0, len(paths), BATCH):
-        diffs.extend(change_diff(change_id, paths = paths[at:at + BATCH]))
+    todo = paths
+    for _ in range(len(paths)):
+        if not todo:
+            break
+        got = change_diff(change_id, paths = todo)
+        diffs.extend(got["files"])
+        todo = got["rest"]
 
     # Each name once, with where its call was removed.
     removed = {}

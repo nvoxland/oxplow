@@ -538,7 +538,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let script = "def transform(input):\n    out = []\n    for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"]):\n        for h in f[\"hunks\"]:\n            for l in h[\"added\"]:\n                out.append({\"ev\": l[\"line\"], \"what\": \"+\" + l[\"text\"]})\n            for l in h[\"removed\"]:\n                out.append({\"ev\": 100 + l[\"line\"], \"what\": \"-\" + l[\"text\"]})\n    return {\"entities\": {\"line\": out}}\n";
+        let script = "def transform(input):\n    out = []\n    for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"])[\"files\"]:\n        for h in f[\"hunks\"]:\n            for l in h[\"added\"]:\n                out.append({\"ev\": l[\"line\"], \"what\": \"+\" + l[\"text\"]})\n            for l in h[\"removed\"]:\n                out.append({\"ev\": 100 + l[\"line\"], \"what\": \"-\" + l[\"text\"]})\n    return {\"entities\": {\"line\": out}}\n";
         let collector = |needs: &str| {
             format!(
                 "  - id: lines\n    runtime: starlark\n    entry: lines.star\n    on: [change.analyzed]\n    sync: upsert\n{needs}    entities:\n      - {{ name: line, key: ev, columns: {{ ev: int, what: text }} }}\n"
@@ -595,7 +595,7 @@ mod tests {
         // A re-run replaces this change's rows without a scoped replace: the
         // script reads the entity's old keys with `sql.read` and tombstones
         // the ones it no longer produces.
-        let again = "def transform(input):\n    old = scope(\"sql.read\", {\"sql\": \"SELECT ev FROM v_work_line\"})\n    out = [{\"ev\": l[\"line\"], \"what\": l[\"text\"]} for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"]) for h in f[\"hunks\"] for l in h[\"added\"] if l[\"line\"] != 2]\n    keep = [r[\"ev\"] for r in out]\n    return {\"entities\": {\"line\": out}, \"deleted\": {\"line\": [r[\"ev\"] for r in old if r[\"ev\"] not in keep]}}\n";
+        let again = "def transform(input):\n    old = scope(\"sql.read\", {\"sql\": \"SELECT ev FROM v_work_line\"})\n    out = [{\"ev\": l[\"line\"], \"what\": l[\"text\"]} for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"])[\"files\"] for h in f[\"hunks\"] for l in h[\"added\"] if l[\"line\"] != 2]\n    keep = [r[\"ev\"] for r in out]\n    return {\"entities\": {\"line\": out}, \"deleted\": {\"line\": [r[\"ev\"] for r in old if r[\"ev\"] not in keep]}}\n";
         std::fs::write(
             fx.svc
                 .layout

@@ -343,14 +343,19 @@ declares (`profile_warnings`, a person's `restrict:`).
 
 `change_diff(change_id, paths=None)` (`tree.read`, so the collector declares
 `needs: [tree.read]` and its extension holds `files.read`) returns the changed
-lines of an analysed change: `[{path, status, hunks: [{head_start, head_end,
-base_start, base_end, head_after, added: [{line, text}], removed: [{line,
-text}]}]}]`, the ranges of `v_change_hunk` with the text of their lines. The
-files are the change's stored ones (`v_change_file`, so a request's own files),
-limited to `paths`; each side is read through `Trees` as the analyzer reads it
-(`change_diff.rs`). A call reads at most 200 files and 2 MB of text; past
-either it fails naming the limit (it never truncates), and `paths` asks for
-fewer. The worker asks its host across the line (`CallKind::ChangeDiff`), as
+lines of an analysed change: `{files: [{path, status, hunks: [{head_start,
+head_end, base_start, base_end, head_after, added: [{line, text}], removed:
+[{line, text}]}]}], rest: [path], too_large: [path]}`, the ranges of
+`v_change_hunk` with the text of their lines. The files are the change's stored
+ones (`v_change_file`, so a request's own files), limited to `paths`; each side
+is read through `Trees` as the analyzer reads it (`change_diff.rs`). A call
+returns at most 200 files and 2 MB of line text (the `added` and `removed`
+lines it returns, not the files' sizes, so a one-line change to a large file
+is one line). The files past either limit are `rest`, in path order: the script
+loops, asking again with `paths = rest` until it is empty
+(`collectors/review/unused.star` does). A file whose own lines are past 2 MB
+is `too_large`, never returned, so each call makes progress. A file is never
+truncated, and a limit is never an error a script can't catch. The worker asks its host across the line (`CallKind::ChangeDiff`), as
 an `ai_*` call does.
 
 A change-triggered entity collector replaces its rows for one change without a

@@ -126,7 +126,9 @@ and summary):
   over the `v_*` datasets.
 - `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
   snapshot's files; `change_diff(change_id, paths?)`, an analysed change's
-  hunks with their added and removed lines (at most 200 files and 2 MB a call). A fact collector has it without declaring it.
+  hunks with their added and removed lines: `{ files, rest, too_large }`,
+  at most 200 files and 2 MB of line text a call, the files past that in
+  `rest` (ask again with `paths = rest` until it is empty). A fact collector has it without declaring it.
 - `ai.compute`: the `ai_*` builtins. The extension declares `ai.compute`. An
   entity collector that calls one has it without declaring it.
 - `ai.discover`: `scope("ai.discover", {role})` says whether a model
@@ -183,8 +185,8 @@ datasets:
 - The script's tree (`files()`, `grep_tree()`) is the change's head, whatever the worktree
   holds now: the event's `anchors.revision`. `language_of(path)` names a file's language
   for `code_metrics`.
-- The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)`
-  gives the hunks with their added and removed lines, `grep_tree(pattern)` the
+- The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)["files"]`
+  gives the hunks with their added and removed lines (loop on its `rest`), `grep_tree(pattern)` the
   tree, `scope("sql.read", …)` the semantic layer (`v_symbol` of the stream in
   `input["rows"][0]["stream_id"]`).
 - Key the rows by change, so one rerun replaces the change's rows: read its

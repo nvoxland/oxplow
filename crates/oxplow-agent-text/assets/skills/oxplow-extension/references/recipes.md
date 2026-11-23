@@ -178,8 +178,9 @@ and a dataset that adds its rows. The full recipe is "A review check" in
 
 - `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,
   `needs: [tree.read, sql.read]`.
-- The script reads `change_diff(change_id)` (the hunks, with their added and
-  removed lines), `grep_tree(pattern)`, `language_of(path)` and
+- The script reads `change_diff(change_id)` (`files`: the hunks, with their
+  added and removed lines; `rest`: the files past this call's limits, to ask
+  for again with `paths = rest`), `grep_tree(pattern)`, `language_of(path)` and
   `code_metrics(text, language, path)`.
 - Its tree is the change's **head**, not the worktree: `files()` and
   `grep_tree()` read the snapshot or commit the change is headed at.
