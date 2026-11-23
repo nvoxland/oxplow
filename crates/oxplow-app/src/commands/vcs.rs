@@ -1,7 +1,7 @@
 //! `vcs.*` and `git.*`: version-control mutations as commands (P5.B6,
 //! `.context/vcs.md`, `.context/commands.md`). Each drives the VCS — a
 //! system the bus doesn't own — so each is `External`: it runs, then the
-//! bus command_runs it, the result (the VCS's `OpOutcome`, conflicts included)
+//! bus records it as a command run, the result (the VCS's `OpOutcome`, conflicts included)
 //! on the command run row. A person's or an agent's — an agent's on its own
 //! stream only, as its terminal's `git` reaches only its own worktree; a
 //! destructive one asks a person first. Only `commit` is undoable (its inverse is `uncommit`, a soft reset of an unpushed commit). Each names the stream it acts on; the router resolves

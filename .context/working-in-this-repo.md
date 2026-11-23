@@ -180,7 +180,7 @@ is opened; an option a command doesn't take is refused (both used to
 become a task's title — tasks named `--help`).
 
 The `knowledge` commands run on a command bus over the project's
-database (validation, audit and events as the app writes them; the acting
+database (validation, the command run record and events as the app writes them; the acting
 thread is `$OXPLOW_THREAD_ID` or `--thread`), on a bus that checks nothing
 active. The database is opened as it is (`Database::open_existing`: no
 migrating, no dataset recompile under the running app; refused at another

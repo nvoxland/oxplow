@@ -383,7 +383,7 @@ pub fn serve_incoming(
 /// the scopes its manifest `needs`, through the gate a
 /// command's handler meets (`scope_calls::Calls`), each call part of the
 /// run of the `invoke` it serves — named by that call's idempotency key —
-/// so the run's audit row records it. A call naming no invoke under way
+/// so the run's command run record records it. A call naming no invoke under way
 /// is refused: nothing a provider does of oxplow is outside a run.
 pub struct HostCalls {
     gate: parking_lot::Mutex<Option<crate::run_context::LiveCheck>>,

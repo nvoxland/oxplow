@@ -205,7 +205,7 @@ impl JobExecutionIdentity {
         self.token
     }
 
-    /// The run's ref (`oxplow:oxplow/job_run?id=<id>`): what its actor's events and audit
+    /// The run's ref (`oxplow:oxplow/job_run?id=<id>`): what its actor's events and command run record
     /// rows name as their source.
     pub fn source(&self) -> String {
         crate::uri::build::job_run_uri(self.job_id.as_str())

@@ -330,7 +330,7 @@ machine/global directory cannot change feature enablement in an isolated host.
 
 A file edited on disk (a `git pull`, an agent's own edit) is not a settings
 write: the watcher's `reload_config_from_disk` logs no `config.changed` (no
-command ran, so there is no actor, audit or undo, and the watcher also fires
+command ran, so there is no actor, command run record or undo, and the watcher also fires
 on a command's own write, which would log it twice). It re-applies what is
 derived from the config itself: the snapshot filter, the project's file kinds
 (`restate_file_kinds`, when `oxplow.files.kinds` moved), extension activation,

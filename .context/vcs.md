@@ -261,7 +261,7 @@ agent's — an agent's on its own stream only, as its terminal's `git`
 reaches only its own worktree (a destructive one becomes a proposal a
 person decides) — not undoable except `commit` (its inverse is `uncommit { stream, rev, parent }`, a soft reset: `Vcs::uncommit`, `oxplow_git::uncommit`; refused, nothing changed, when the head is no longer `rev`, any remote-tracking ref contains it, the working tree has changes (they would be staged with the commit's), or a merge/rebase/cherry-pick/revert is in progress; a first commit has no parent, so no inverse; `Confirm::Never`, as Undo is the person acting and a soft reset loses nothing), and name their `stream` (`WorktreeRouter::resolve_strict`).
 Discard, merge, branch delete, rebase and revert are `Destructive`. The
-audit row keeps the returned `OpOutcome`, so a merge's conflicts are on
+command run record keeps the returned `OpOutcome`, so a merge's conflicts are on
 record. The desktop runs them with `runCommand` through `api.ts`
 wrappers (`vcsMerge`, `vcsPush`, `gitRebase`, …); a destructive one
 passes `confirmed` only from behind the person's own confirmation

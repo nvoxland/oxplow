@@ -2358,7 +2358,7 @@ export type EventBodyKey = "input" | "output" |
 /**
  *  An event's public identity: a UUIDv7 in its canonical text form, so
  *  ids sort by creation time. `seq` (the log's insert order) is the
- *  delivery order; `id` is what other events and the audit log point at.
+ *  delivery order; `id` is what other events and the command run record point at.
  */
 export type EventId = string;
 
@@ -4474,7 +4474,7 @@ export type PageAction_Deserialize = {
 	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
-	 *  the URI it opens. It runs no command (no bus run, no audit): the
+	 *  the URI it opens. It runs no command (no bus run, no command run record): the
 	 *  app navigates, and an agent pressing it is told the URI.
 	 */
 	open?: string | null,
@@ -4676,7 +4676,7 @@ export type PageAction_Serialize = {
 	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
-	 *  the URI it opens. It runs no command (no bus run, no audit): the
+	 *  the URI it opens. It runs no command (no bus run, no command run record): the
 	 *  app navigates, and an agent pressing it is told the URI.
 	 */
 	open?: string | null,

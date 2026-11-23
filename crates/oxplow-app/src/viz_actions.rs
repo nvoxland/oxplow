@@ -1728,7 +1728,7 @@ view:
     }
 
     /// A page acts as its presser and no more: one an agent pressed may run
-    /// what the agent may, which is every command, and the audit names the
+    /// what the agent may, which is every command, and the command run names the
     /// page and the agent's thread that pressed it.
     #[tokio::test]
     async fn a_page_grants_no_power() {

@@ -1185,7 +1185,7 @@ fn run_script_fn(
 /// (`commands/compose.rs`) whose composer reads its `input` rows on the
 /// run's connection, runs the script and returns what it composes. The bus
 /// runs that in one transaction when every call can (each child's
-/// a job's tools, policy and confirmation; one audit row; the reversed children
+/// a job's tools, policy and confirmation; one command run record; the reversed children
 /// undo it), or as steps when one leaves it — a `task.*` call on
 /// another provider's item (P7 review). Pure, so the bus may
 /// compose more than once.

@@ -717,7 +717,7 @@ impl RunContext {
         &self.cancel
     }
 
-    /// The scopes it called, counted (the audit row's `scopes`).
+    /// The scopes it called, counted (the command run record's `scopes`).
     pub fn trace(&self) -> &ScopeTrace {
         &self.trace
     }

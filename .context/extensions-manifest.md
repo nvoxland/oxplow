@@ -439,7 +439,7 @@ with fixed diagnostics before payload access.
 
 Native commands may declare `scope: state.read`, `op: snapshot` to read their own
 namespace. This read returns null when absent or `{stamp, values}` when present;
-it has read access and its result is not copied into command audit. State remains absent from
+it has read access and its result is not copied into command run records. State remains absent from
 SQL datasets. Scripts may declare `needs: [state.read]` and call
 `scope("state.read", {"scope": "project", "area": "state"})`; collectors, fact
 collectors, effects and policies use a separate owned read for each call, with

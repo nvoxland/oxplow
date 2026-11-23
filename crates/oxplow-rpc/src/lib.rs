@@ -100,7 +100,7 @@ macro_rules! rpc_dispatch {
             } else {
                 args
             };
-            // A person's run that fails says which audit row recorded it
+            // A person's run that fails says which command run record recorded it
             // (`IpcError::command_run_id`), so the window's record links the run.
             let (out, audited) = ::oxplow_app::commands::tracking_failed_run(Box::pin(async move { match name {
                 $(

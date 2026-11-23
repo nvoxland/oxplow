@@ -23,7 +23,7 @@ use crate::DomainError;
 
 /// An event's public identity: a UUIDv7 in its canonical text form, so
 /// ids sort by creation time. `seq` (the log's insert order) is the
-/// delivery order; `id` is what other events and the audit log point at.
+/// delivery order; `id` is what other events and the command run record point at.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 pub struct EventId(pub String);

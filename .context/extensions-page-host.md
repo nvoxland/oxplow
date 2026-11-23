@@ -425,7 +425,7 @@ the user guide is `docs/guide/pages.md`.
       agent from MCP `oxplow_run_page_action` (which never confirms). The
       bus applies the agent policy through `on_behalf_of`. A command that
       asks (`confirm`) asks only a person; a page action an agent pressed
-      runs without asking. The audit records the page's URI as its source
+      runs without asking. the command run record holds the page's URI as its source
       (V114 added the `page` actor kind).
     - **The command runs after the read.** An action, a form submit and
       a component's invoke are resolved under one pinned catalog

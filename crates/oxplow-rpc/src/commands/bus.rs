@@ -2,7 +2,7 @@
 //! "Callers"): run any command as the person, and undo a run. A typed
 //! IPC setter is a convenience over one command; anything new the UI
 //! writes goes through here, so the bus's validation, policy,
-//! confirmation, audit and undo apply once.
+//! confirmation, the command run record and undo apply once.
 
 use oxplow_app::Services;
 use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
@@ -220,10 +220,10 @@ mod tests {
     /// What a person's run opens next is bound here, by the bus's own
     /// tokenizer, from the run's result: a field the result lacks opens
     /// nothing and says why, rather than a page with an empty id.
-    /// A person's run that fails says which audit row recorded it, so the
+    /// A person's run that fails says which command run record recorded it, so the
     /// window's record of the failure links the run.
     #[tokio::test]
-    async fn a_failed_run_says_its_audit_row() {
+    async fn a_failed_run_says_its_command_run() {
         let (svc, _dir) = services().await;
         let err = crate::dispatch(
             "run_command",
@@ -238,7 +238,7 @@ mod tests {
         .unwrap_err();
         let audit = err
             .command_run_id
-            .expect("the failed run's audit row")
+            .expect("the failed run's command run record")
             .get();
         let row = svc
             .db

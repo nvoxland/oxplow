@@ -309,7 +309,7 @@ markdown itself, nor edits it in a `<textarea>`.
   component or core screen keeps its own error state for a command, and
   an extension needs no error code: a component draws only a field error.
   The record is `recordOpError` / `reportOpError` (`opErrors.ts`) as
-  `oxplow.ui.report_error` (with the failed run's audit row, which the
+  `oxplow.ui.report_error` (with the failed run's command run record, which the
   daemon's error names, and an approval's proposal), and the dataset
   `v_op_error` — the client keeps
   nothing, so the list survives a reload and the agent reads the same rows

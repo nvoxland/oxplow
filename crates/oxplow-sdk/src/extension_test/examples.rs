@@ -62,7 +62,7 @@ pub(super) async fn event_example(
     }
 }
 
-/// `commands` as audited (name, audit id): a sequence — how an effect's
+/// `commands` as audited (name, run id): a sequence — how an effect's
 /// commands run — is replaced by its steps, in order.
 pub(super) async fn without_sequences(
     host: &Host,
@@ -432,7 +432,7 @@ pub(super) async fn job_example(
 
 /// Run `when: { undo: <command>, as?, confirmed? }` for real: the undo of
 /// that command's newest run that was not undone yet (the inverse its
-/// audit row kept, run through the bus as a run of its own), checked
+/// command run record kept, run through the bus as a run of its own), checked
 /// against `expect`: `{ ok: true }` or `{ ok: false, refused }`.
 pub(super) async fn undo_run(
     host: &Host,

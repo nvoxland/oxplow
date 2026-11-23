@@ -107,7 +107,7 @@ export async function setBookmark(viewer: BookmarkViewer, ref: TabRef, label: st
   await runCommand("oxplow.bookmark.set", setBookmarkInput(viewer, ref, label, scope));
 }
 
-/** Take `ref`'s bookmark off; the outcome carries the audit id its undo
+/** Take `ref`'s bookmark off; the outcome carries the command run id its undo
  *  needs (`undoCommand`). */
 export function removeBookmark(viewer: BookmarkViewer, refId: string): ReturnType<typeof runCommand> {
   return runCommand("oxplow.bookmark.remove", { uri: refId, ...viewerInput(viewer) });

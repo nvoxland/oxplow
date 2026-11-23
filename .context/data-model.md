@@ -608,7 +608,7 @@ Work handed from one thread to another (the `handoff` table,
 do the useful part, and handoffs were used once. V51 dropped the table
 with its `page_ref` edges, its `oxplow/handoff` search rows, its
 `handoff.sent` and `handoff.settled` events and the `oxplow.handoff.*`
-audit rows. `v_handoff` and `v_search_handoff` went with it, and so did
+command run records. `v_handoff` and `v_search_handoff` went with it, and so did
 the `hnd` id kind.
 
 ### `terminal` (`terminal_store.rs`, V106)

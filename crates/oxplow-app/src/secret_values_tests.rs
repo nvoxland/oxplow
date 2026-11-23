@@ -1,6 +1,6 @@
 //! A secret is a kind of value (`writeOnly` in a command's input schema):
 //! whoever sets it — a person, their agent, a page for either — it is
-//! written and never read back. No published dataset, no audit row, no
+//! written and never read back. No published dataset, no command run record, no
 //! event and no result carries it (`.context/commands.md` "Secrets").
 
 use oxplow_domain::Actor;
@@ -50,7 +50,7 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
     leak_sweep(svc, &results, SECRET).await;
 }
 
-/// No result, audit row, event or published dataset carries `secret`.
+/// No result, command run record, event or published dataset carries `secret`.
 async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
     let leaks = |what: &str, text: &str| {
         assert!(!text.contains(secret), "{what} carries the secret: {text}")
@@ -64,7 +64,7 @@ async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
         .list_recent(1_000)
         .await
         .unwrap();
-    leaks("the audit", &format!("{audit:?}"));
+    leaks("the command run record", &format!("{audit:?}"));
     let events = svc.event_log_store.read_after(0, 100_000).await.unwrap();
     leaks("the event log", &format!("{events:?}"));
 

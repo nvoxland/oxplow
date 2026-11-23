@@ -235,7 +235,7 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
         .find(|e| e.envelope.event_type == "command.executed")
         .expect("command.executed logged");
     assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
-    // The run is the bearer's session's: its audit row and its event say so.
+    // The run is the bearer's session's: its command run record and its event say so.
     use oxplow_domain::stores::AgentSessionStore as _;
     let session = services
         .agent_session_store
@@ -254,7 +254,7 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
     assert_eq!(audit.session_id, Some(session));
 }
 
-/// The audit row a `command.executed` names.
+/// The command run record a `command.executed` names.
 fn executed_command_run_id(envelope: &oxplow_domain::events::Envelope) -> i64 {
     envelope.payload["command_run_id"].as_i64().unwrap()
 }

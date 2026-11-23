@@ -677,7 +677,7 @@ is gone, is the toast's (usability.md "A person's command that fails").
   `command` or `open` (`parse_actions` refuses both and neither). The column
   of the row the action is offered on (a whole-page action's first-loader
   row, a holds-one-row viz's, a row action's) holds the URI to open. Nothing
-  runs: no bus run, no audit, no `command.executed`. The press still goes
+  runs: no bus run, no command run record, no `command.executed`. The press still goes
   to the server (`viz_actions::prepare_resolved` → `Prepared::Open`), which
   checks the row and `when` as for a command, and answers `{ "opened": <uri> }`;
   the desktop then opens it (`performVizAction`, as `open_after` does) and

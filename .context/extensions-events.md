@@ -125,7 +125,7 @@ the provider host was), so a kind carries no stability.
 starts like any (K1), when the generation that first runs it publishes.
 A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
-`oxplow.task_record.changed` and the run's audit name the effect (its `native`
+`oxplow.task_record.changed` and the run's command run name the effect (its `native`
 `author` is null). The loader limits effects to no kind of extension.
 
 **Retention** (P8.D5) is the extension's window for its namespace's payloads
@@ -555,7 +555,7 @@ once**, keyed by `(effect, event_id)` in `effect_run`:
    can be stale against what the run then sees (each command's own
    validation is what holds — the composer doesn't re-read). What it
    called is added to the run's trace (`ScopeTrace::add`), so the
-   reaction's audit row records it.
+   reaction's command run record records it.
 
 A run is the registered `oxplow.command.sequence` — its spec and compiled input
 schema, shared (`Command::with_handler`) — over what the script composed

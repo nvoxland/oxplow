@@ -674,7 +674,7 @@ Every open model keeps per-item values beyond its columns.
 ## Rules
 
 - No generic write verbs: no `task.create` that routes to a store, and no
-  standard bindings. Confirm and audit are the bus's, as for any command.
+  standard bindings. Confirm and the command run record are the bus's, as for any command.
 - **Undo is optional and per store (decided 2026-11-12).** A store's
   command may offer one; it doesn't have to (a web app's write often can't
   be taken back). A script that composes a write which leaves oxplow's own
@@ -682,7 +682,7 @@ Every open model keeps per-item values beyond its columns.
   a provider call) runs as steps, which have no automatic undo; it may
   return `"inverse": {"commands": [...]}` beside its `commands`, the calls
   that reverse what it did, and the bus keeps that as the run's undo — the
-  same place, the same Undo, the same policy, confirm and audit as a
+  same place, the same Undo, the same policy, confirm and command run record as a
   built-in one. A run whose script returns no inverse has none. oxtask
   offers one for each of its writes (`create` and `comment` name the row they mint from their `finish`). (Built: the `inverse` key on a
   script command's output, kept by the bus for a steps run — see

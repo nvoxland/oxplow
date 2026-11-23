@@ -573,7 +573,7 @@ migrations without `storage:`, is a load error.
   script's `result` (the calls and the `inverse` are fixed at compose time). The
   rows are in the run's own result, on the write's entry in `children` (`{
   result, children: [{ name: "oxplow.extension_store.write", result: { changes,
-  rows } }] }`, recorded in the audit row), which is what a caller reads; to
+  rows } }] }`, recorded in the command run record), which is what a caller reads; to
   return a minted id in the command's `result`, mint it in the script (a
   random or derived id, passed as a parameter), not in SQL. A mutation that
   needs a minted id in its `inverse` has the same limit: the script picks the

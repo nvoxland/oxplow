@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use crate::commands::Access;
 
-/// What a run called, per scope: the per-run summary its audit row
+/// What a run called, per scope: the per-run summary its command run record
 /// records. One per run, shared by the runs nested in it and by the
 /// provider calls it makes (a capability verb's `host/call`s); a retried
 /// run starts a fresh one.

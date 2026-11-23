@@ -253,7 +253,7 @@ pub trait ProviderRouter: Send + Sync {
 pub enum Handler {
     /// Runs inside the bus's transaction.
     Tx(Arc<TxHandler>),
-    /// Runs against a system the bus doesn't own; the bus command_runs it after
+    /// Runs against a system the bus doesn't own; the bus records it as a command run after
     /// it returns.
     External(Arc<ExternalHandler>),
     /// A composite (`compose.rs`): says which calls an input runs; the bus

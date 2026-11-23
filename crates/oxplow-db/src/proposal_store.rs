@@ -188,7 +188,7 @@ pub fn approve_tx(
     decide_tx(conn, id, ProposalDecision::Approved, Some(command_run_id))
 }
 
-/// Before an `External` approval runs: mark it approved with no audit row
+/// Before an `External` approval runs: mark it approved with no command run record
 /// yet, so a second approval can't run it too. [`finish_claim_tx`] names
 /// the run; [`release_claim_tx`] undoes the claim when the run fails.
 pub fn claim_tx(conn: &Connection, id: i64) -> Result<(), DomainError> {
@@ -427,7 +427,7 @@ mod tests {
     }
 
     /// An `External` approval claims the proposal before it runs, then
-    /// finishes the claim with its audit row — or releases it when the
+    /// finishes the claim with its command run record — or releases it when the
     /// run failed, so it is pending again. A claimed proposal can't be
     /// claimed or declined twice.
     #[tokio::test]
@@ -510,7 +510,7 @@ mod tests {
             })
             .await
             .unwrap();
-        // The audit row an approval names exists (the approving run's).
+        // The command run record an approval names exists (the approving run's).
         let audit = db
             .transaction(|tx| {
                 crate::command_run_store::insert_tx(

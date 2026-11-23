@@ -1352,7 +1352,7 @@ facts and 1.6 s from the cube; the measurement is in
 reached through `run_command`, audited like every command):
 - `oxplow.metric.enable { keys, enabled }` — `Tx`, through `oxplow.config.set`'s core.
 - `oxplow.metric.record { key, value, subject?, dims?, stream? }` — `Tx`: an
-  asserted fact (below) written in the bus transaction with its audit
+  asserted fact (below) written in the bus transaction with its command run record
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
   (the change loop announces `MetricSamplesChanged` for the measure).
 - `oxplow.metric.rebuild { force }` — `BestEffort` over
