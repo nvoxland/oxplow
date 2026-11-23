@@ -225,8 +225,16 @@ tips and tags from `v_branch` and `v_tag`. A `reveal_sha` link starts in Graph
 and highlights the commit. The mode is kept in the tab entry's history state.
 The List filters hide nonmatching rows. Graph dims text and author mismatches
 to retain their connections; its branch filter keeps the reachable rows.
-Both share Git History's `q`, `author` and `branch` view params and filter
-locally. The host refreshes the rows when a commit or ref moves. Each row
+Both share Git History's `q`, `author` and `branch` view params, which the
+replacement page also declares as params, so they flow into its run by
+name. The List shows the `history_matches` loader: the search runs in SQL
+over everything reachable from the head, before `limit`, as core's list
+does, so an older commit is found too. The Graph draws the `history_graph`
+loader, the newest `limit` commits unfiltered: lanes need every commit
+between two matches, so a match beyond the loaded range is not drawn
+there. Both also filter locally, so a change shows before the re-run
+answers, and a tile (no view) filters its loaded rows only
+(`git-history-search-finds-commits-beyond-the-loaded-limit`). The host refreshes the rows when a commit or ref moves. Each row
 links to the commit, with Cmd/Ctrl-click or middle-click opening a new tab.
 Setting `oxplow.replacements.vcs.history.graph` to `oxplow` restores the
 standard list. Bundled's fixtures exercise the replacement and its controls.

@@ -2,12 +2,16 @@
 // draws them — a lane per line of descent, a dot per commit, edges to its
 // parents — in place of core's plain commit list (the `vcs.history.graph`
 // replacement). Its page walks `v_commit` from the stream's head; the
-// Both views filter the loaded rows locally, so typing never re-runs the page.
 // On Git History the filters are the page's view params (`q`, `author`,
 // `branch`, the replacement's contract): they start from the page's,
 // each change writes them, and Back sets them again — a reload, a
-// bookmark and core's own list see the same. Where its host gives no
-// view (a tile) they are its own.
+// bookmark and core's own list see the same. The List shows the page's
+// `history_matches`, searched in SQL over the whole history before the
+// limit, so an older commit is found too; the Graph draws the loaded
+// `history_graph` rows (lanes need every commit between two matches) and
+// dims what doesn't match. Both also filter locally, so a change shows at
+// once, before the page answers with the new search. Where its host gives
+// no view (a tile) the filters are its own and local only.
 // A row opens its commit; Cmd/Ctrl-click opens it in a new tab.
 (function () {
   "use strict";
@@ -34,7 +38,7 @@
 
   oxplow.connect().then((component) => {
     component.applyTheme();
-    let history = read(component.run);
+    let history = read(component.run, component.data);
     const savedMode = (state) => {
       if (state?.reveal === history.reveal && (state.mode === "list" || state.mode === "graph")) {
         return state.mode;
@@ -88,9 +92,9 @@
     draw();
     // The host runs the page again when a commit lands or a ref moves (or
     // the page asks to reveal another commit); the filters stay as set.
-    component.onUpdate(({ run }) => {
+    component.onUpdate(({ run, data }) => {
       const previousReveal = history.reveal;
-      history = read(run);
+      history = read(run, data);
       if (history.reveal !== previousReveal) mode = savedMode(component.historyState);
       refill();
       draw();
@@ -116,14 +120,40 @@
   }, (e) => say(new Error("Couldn't connect to oxplow: " + (e && e.message ? e.message : e))));
 
   /** The run's commits (children before parents), branch heads and tags,
-   *  and the commit to reveal. */
-  function read(run) {
-    const columns = run.result.columns;
+   *  the List's matches (searched in SQL, `data.history_matches`; the run's
+   *  own rows where the host gives none), the filters they ran with, and
+   *  the commit to reveal. */
+  function read(run, data) {
+    const loaded = commitsOf(run.result);
+    const searched = data && data.history_matches ? commitsOf(data.history_matches) : null;
+    const commits = loaded.commits;
+    const reveal = run.params && run.params.reveal_sha ? String(run.params.reveal_sha) : null;
+    const ranBranch = searched && run.params && run.params.branch ? String(run.params.branch) : "";
+    commits.sort((a, b) => b.time - a.time || a.sha.localeCompare(b.sha));
+    const listed = searched ? searched.commits : commits.slice();
+    listed.sort((a, b) => b.time - a.time || a.sha.localeCompare(b.sha));
+    for (const [sha, tags] of searched ? searched.tagsBySha : []) loaded.tagsBySha.set(sha, tags);
+    return {
+      commits,
+      graphCommits: topoOrder(commits),
+      listCommits: listed,
+      searched: searched !== null,
+      ranBranch,
+      branchHeads: loaded.branchHeads,
+      tagsBySha: loaded.tagsBySha,
+      reveal,
+    };
+  }
+
+  /** A loader's rows (`{ columns, rows }`) as commits, with the branch
+   *  heads and tags they carry. */
+  function commitsOf(result) {
+    const columns = result.columns;
     const at = (row, name) => row[columns.indexOf(name)];
     const commits = [];
     const branchHeads = [];
     const tagsBySha = new Map();
-    for (const row of run.result.rows) {
+    for (const row of result.rows) {
       const sha = String(at(row, "sha"));
       const commit = {
         sha,
@@ -140,9 +170,7 @@
       const tags = list(at(row, "tags"));
       if (tags.length > 0) tagsBySha.set(sha, tags.map(String));
     }
-    const reveal = run.params && run.params.reveal_sha ? String(run.params.reveal_sha) : null;
-    commits.sort((a, b) => b.time - a.time || a.sha.localeCompare(b.sha));
-    return { commits, graphCommits: topoOrder(commits), branchHeads, tagsBySha, reveal };
+    return { commits, branchHeads, tagsBySha };
   }
 
   /** A JSON array column (`parents`, `branches`, `tags`) as a list. */
@@ -274,8 +302,11 @@
 
   /** Draw the rows; returns the revealed row's element, if shown. */
   function render(history, f, mode, open) {
-    const onBranch = reachable(history, f.branch);
-    const source = mode === "graph" ? history.graphCommits : history.commits;
+    // The List's matches were searched on the run's branch already (some
+    // lie beyond the loaded rows the local walk sees).
+    const searchedBranch = mode !== "graph" && history.searched && f.branch === history.ranBranch;
+    const onBranch = searchedBranch ? null : reachable(history, f.branch);
+    const source = mode === "graph" ? history.graphCommits : history.listCommits;
     const commits = onBranch ? source.filter((c) => onBranch.has(c.sha)) : source;
     const matches = new Set(commits.filter((c) =>
       (!f.author || c.author === f.author) &&
@@ -320,7 +351,10 @@
     }
     emptyEl.hidden = rows.length > 0;
     emptyEl.textContent = history.commits.length ? "No commits match these filters." : "This branch has no history yet.";
-    countEl.textContent = matches.size + " / " + history.commits.length;
+    // Searched in SQL, the List's matches aren't a part of the loaded rows.
+    countEl.textContent = mode !== "graph" && history.searched
+      ? String(matches.size)
+      : matches.size + " / " + history.commits.length;
     return revealed;
   }
 

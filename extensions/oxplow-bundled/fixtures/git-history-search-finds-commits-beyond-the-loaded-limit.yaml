@@ -1,0 +1,25 @@
+# The List searches the whole history in SQL, before the limit: a commit
+# older than the loaded rows is found by its subject, author or branch.
+# The Graph draws the loaded rows only.
+given:
+  - observe: { commit: { sha: aaaaaaa, at: "2026-01-01T00:00:00Z", author: ann, email: ann@x, subject: First work } }
+  - observe: { commit: { sha: bbbbbbb, at: "2026-01-02T00:00:00Z", author: bob, email: bob@x, subject: Second work, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ccccccc, at: "2026-01-03T00:00:00Z", author: bob, email: bob@x, subject: Third work, parents: [bbbbbbb] } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: ccccccc, stream: 1 }, { name: old, head: aaaaaaa }]
+        heads: [{ stream: 1, sha: ccccccc }]
+when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: ccccccc, limit: 2, q: first } }
+expect:
+  loaders:
+    history/history_graph: { rows: 2 }
+    history/history_matches:
+      rows:
+        - { sha: aaaaaaa }
+steps:
+  - params: { stream_id: 1, head_sha: ccccccc, limit: 2, author: ann }
+    expect: { loaders: { history/history_matches: { rows: [{ sha: aaaaaaa }] } } }
+  - params: { stream_id: 1, head_sha: ccccccc, limit: 2, branch: old }
+    expect: { loaders: { history/history_matches: { rows: [{ sha: aaaaaaa }] } } }
+    ui:
+      - expect: { count: { '.row': 1, '.row[data-sha="aaaaaaa"]': 1 } }
