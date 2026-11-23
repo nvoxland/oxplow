@@ -6,8 +6,8 @@
 -- state, read live:
 --   waiting_on_person  an agent session whose latest turn is the request's
 --                      waits on the person (v_agent_session_status
---                      `awaiting_user`: a final question, a permission
---                      prompt, a question tool);
+--                      `awaiting_user`: a question or plan put to them,
+--                      a permission prompt);
 --   running            else, one of its turns is open;
 --   waiting_on_work    none is open, but a job one of its turns started
 --                      has not reported back (and its session is alive);
@@ -42,8 +42,7 @@ SELECT r.id, r.thread_id,
                      WHERE t.request_id = r.id AND t.cause_basis = 'matched') AS INT) AS matched,
        CAST(CASE
          -- An agent session whose latest turn is the request's waits on the
-         -- person (a question it ended on, a permission prompt, a question
-         -- tool): the status the rail shows, one mechanism.
+         -- person (a question or plan put to them, a permission prompt): the status the rail shows, one mechanism.
          -- Read once for every row: the subquery names no column of `r`.
          WHEN r.id IN (SELECT (SELECT t.request_id FROM source('agent_turn') t
                                 WHERE t.agent_session_id = st.agent_session_id

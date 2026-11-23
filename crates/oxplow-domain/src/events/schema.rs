@@ -1076,7 +1076,7 @@ pub enum LoggedAgentStatus {
     Idle,
     Running,
     /// Parked on the person: a question or plan put to them, a permission
-    /// prompt, a final message ending in a question.
+    /// prompt.
     AwaitingUser,
     Stopped,
     Error,

@@ -66,7 +66,7 @@ datasets:
     - { not_null: hint }
 - name: agent_status
   version: 2
-  description: "Each thread's agent status: its open agent sessions' statuses (v_agent_session_status) rolled up — what the person owes ranks first: `awaiting_user` (waiting on them: a question, a plan to approve, a permission prompt, a final message ending in a question) > `running` > `error` > `stopped` > `idle`. A dead turn's `stalled` is derived live, never logged."
+  description: "Each thread's agent status: its open agent sessions' statuses (v_agent_session_status) rolled up — what the person owes ranks first: `awaiting_user` (waiting on them: a question, a plan to approve, a permission prompt) > `running` > `error` > `stopped` > `idle`. A dead turn's `stalled` is derived live, never logged."
   fields:
     - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
     - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`: the session status that ranks first." }
@@ -120,7 +120,7 @@ datasets:
     - { not_null: id }
     - { unique: id }
 - name: request
-  version: 4
+  version: 5
   description: "Requests: the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when each turn opened. One row per request: who started it and when, what it holds (its turns' tool calls, tokens, jobs), and where it stands now (`state`, read live). Its turns are the v_agent_turn rows whose `request` is its `uri`; their time split sums v_turn_activity over them (heavier: read it for one request). Its files come with the turns' changes."
   relationships: [{ from: first_turn, to: agent_turn.uri }, { from: thread_id, to: thread.id }]
   fields:
@@ -139,7 +139,7 @@ datasets:
     - { name: "output_tokens", type: "INT", doc: "Tokens its turns wrote. (v2)" }
     - { name: "jobs_running", type: "INT", doc: "Jobs its turns started that have not reported back, their session still alive (v_agent_job, state `running`). (v2)" }
     - { name: "matched", type: "INT", doc: "1 when one of its links is oxplow's match, not the harness's word (a cross-session message matched to its send, a job's start guessed from the Stop that listed it): best effort. (v2)" }
-    - { name: "state", type: "TEXT", doc: "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row)" }
+    - { name: "state", type: "TEXT", doc: "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a question or plan put to them, a permission prompt — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row; v5: a final message ending in a question no longer waits)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -250,7 +250,7 @@ datasets:
     - { not_null: turn_id }
     - { unique: turn_id }
 - name: agent_turn
-  version: 20
+  version: 21
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. What a turn changed is `v_turn_file`."
   relationships: [{ from: request, to: request.uri }]
   fields:
@@ -276,7 +276,6 @@ datasets:
     - { name: "sender", type: "TEXT", doc: "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)" }
     - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery), `unknown` (an old turn whose end left no trace). NULL while running. (v13; v14: `unknown`, no `left_running`: a Stop's running work is on its `agent.turn.ended` and in v_agent_job)" }
     - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v15)" }
-    - { name: "question", type: "TEXT", doc: "The question the turn's final message ended on (its last line, when the message ends in a question mark): what the thread waits on the person for. NULL when it ended on none, did not complete, or closed before this was recorded. (v16)" }
     - { name: "request", type: "TEXT", doc: "The request the turn belongs to (its `uri`, v_request): the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when the turn opened. The request of `cause_turn`, else one this turn started. Work recorded against a turn (tool calls, tokens, test runs, jobs) is its request's. NULL for a turn recorded before requests were. (v17; v18: a URI, not an id)" }
     - { name: "request_id", type: "INT", doc: "The request's id (`v_request.id`), to join without a URI. NULL for a turn recorded before requests were." }
   tests:

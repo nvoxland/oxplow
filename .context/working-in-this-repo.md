@@ -80,9 +80,6 @@ you spot but won't do now (the backlog is the durable record; a reply
 is not). A redo of something just shipped reopens its item rather than
 filing "fix what I just did".
 
-Oxplow can surface a final reply that ends in a question as waiting
-on the person until their next prompt.
-
 
 ### Agent coordination
 

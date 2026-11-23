@@ -2256,6 +2256,131 @@
         }
       ],
       "key": []
+    },
+    "21": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The text that opened the turn, as the harness delivered it: a person's words only when `source` is `person`. (v12: every source's text)"
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final message, once the turn ended; NULL when it said nothing (an interrupted turn, one its session left open). (v13: only the agent's words)"
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "transcript_page",
+          "type": "TEXT",
+          "doc": "The session's transcript page shown from this turn (`oxplow:oxplow/page?page=session-transcript&session=ses2#turn=trn7`: the session in its `?`, the turn its view): where a turn opens. NULL for a turn no session claims. (v4; v10: bare ids, the turn in the view; v11: a page URI)"
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model the turn ran on, as its harness reported it with the turn's end; NULL while running, or when the harness said nothing (opencode). (v5)"
+        },
+        {
+          "name": "effort",
+          "type": "TEXT",
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+        },
+        {
+          "name": "context_tokens",
+          "type": "INTEGER",
+          "doc": "Tokens in the agent's context when the turn ended (input plus cache reads and writes of the turn's last request), as its harness reported it with the turn's end; NULL while running, or when the harness said nothing. (v6)"
+        },
+        {
+          "name": "context_window",
+          "type": "INTEGER",
+          "doc": "The size of the model's context window, in tokens, as its harness reported it; NULL while running, or when it said nothing (Claude Code never does). context_tokens / context_window is how full the context was. (v6)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What opened the turn, as its harness read the prompt: `person`, `background_job` (a job the agent started in the background reported back), `subagent` (a subagent handed its report back), `peer` (another agent session's message), `unknown` (the harness said nothing of why). NULL for a turn recorded before sources were. (v12)"
+        },
+        {
+          "name": "harness_turn_id",
+          "type": "TEXT",
+          "doc": "The harness's own id of the turn (Claude Code's `prompt_id`); NULL when it names none. (v12)"
+        },
+        {
+          "name": "cause_turn",
+          "type": "TEXT",
+          "doc": "The turn whose work this one goes on with (its `uri`): the one whose tool call started the background job, or in which the subagent started. NULL when there is none or it isn't known. (v12)"
+        },
+        {
+          "name": "cause_ref",
+          "type": "TEXT",
+          "doc": "The harness's own name for the cause: the tool call id that started the job, the subagent's id, the sender's socket. NULL when it gave none. (v12)"
+        },
+        {
+          "name": "cause_basis",
+          "type": "TEXT",
+          "doc": "How `cause_turn` is known: `reported` (the harness named it) or `matched` (oxplow matched it from what it saw). NULL with no cause turn. Best effort either way. (v12)"
+        },
+        {
+          "name": "sender",
+          "type": "TEXT",
+          "doc": "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)"
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery), `unknown` (an old turn whose end left no trace). NULL while running. (v13; v14: `unknown`, no `left_running`: a Stop's running work is on its `agent.turn.ended` and in v_agent_job)"
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v15)"
+        },
+        {
+          "name": "request",
+          "type": "TEXT",
+          "doc": "The request the turn belongs to (its `uri`, v_request): the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when the turn opened. The request of `cause_turn`, else one this turn started. Work recorded against a turn (tool calls, tokens, test runs, jobs) is its request's. NULL for a turn recorded before requests were. (v17; v18: a URI, not an id)"
+        },
+        {
+          "name": "request_id",
+          "type": "INT",
+          "doc": "The request's id (`v_request.id`), to join without a URI. NULL for a turn recorded before requests were."
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {
@@ -36797,6 +36922,91 @@
           "name": "state",
           "type": "TEXT",
           "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row)"
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Request id (its URI is `oxplow:oxplow/request?id=req<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread its first turn ran in (v_thread.id); a later turn may run on another thread."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it — select and join on this."
+        },
+        {
+          "name": "first_turn",
+          "type": "TEXT",
+          "doc": "The turn that started it (its `uri`)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, …)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The text that started it: the first turn's prompt."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it started: the first turn's start (RFC 3339)."
+        },
+        {
+          "name": "turns",
+          "type": "INT",
+          "doc": "How many turns it holds. (v2)"
+        },
+        {
+          "name": "threads",
+          "type": "INT",
+          "doc": "How many threads its turns ran on: more than one when another session's message joined it. (v2)"
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "doc": "When its latest turn ended, or started while one runs (RFC 3339). (v2)"
+        },
+        {
+          "name": "tool_calls",
+          "type": "INT",
+          "doc": "Tool calls its turns made (a subagent's count with the turn that started it), denied calls left out. (v2)"
+        },
+        {
+          "name": "input_tokens",
+          "type": "INT",
+          "doc": "Tokens its turns read: input plus cache writes and reads. (v2)"
+        },
+        {
+          "name": "output_tokens",
+          "type": "INT",
+          "doc": "Tokens its turns wrote. (v2)"
+        },
+        {
+          "name": "jobs_running",
+          "type": "INT",
+          "doc": "Jobs its turns started that have not reported back, their session still alive (v_agent_job, state `running`). (v2)"
+        },
+        {
+          "name": "matched",
+          "type": "INT",
+          "doc": "1 when one of its links is oxplow's match, not the harness's word (a cross-session message matched to its send, a job's start guessed from the Stop that listed it): best effort. (v2)"
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a question or plan put to them, a permission prompt — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row; v5: a final message ending in a question no longer waits)"
         }
       ],
       "key": []

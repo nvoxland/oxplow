@@ -153,8 +153,8 @@ messaging"); oxplow keeps no record of it.
 - Nothing the agent must call to close work. A request ends when its
   turns do; its last turn's final message is the summary.
 - "Waiting on you" is derived (a pending question or plan approval, the
-  Notification hook's permission prompt, a final message ending in a
-  question), not declared; the next prompt clears it. It's the thread's
+  Notification hook's permission prompt, a Codex approval wait), not
+  declared, and never read from how the agent words its reply; the next prompt clears it. It's the thread's
   logged `agent.status.changed`, read as `v_agent_status`.
 
 ## Hints

@@ -1316,7 +1316,7 @@ more than the stream would even when it's sometimes wrong.
   it open), `session_closed` (oxplow closed the agent session), `restart`
   (oxplow's recovery). A Stop whose harness names no outcome is `completed`. `answer` is only ever the agent's own words: NULL
   when it said nothing (an old turn whose end left no trace is
-  `unknown`). A finished turn whose final message ends in a question **stores that question** (`agent_turn.question`, its last line: `ending_question`, the one reading the thread's waiting status uses too). A Stop also reports **what the turn left running**
+  `unknown`). A Stop also reports **what the turn left running**
   (`TurnRun.left_running`: Claude Code's Stop `background_tasks`, the
   running ones, `{ id, kind, description }` with the id its report back
   names), carried on its `agent.turn.ended` and recorded as jobs
@@ -1470,8 +1470,8 @@ A Stop is never refused ([work-tracking.md](./work-tracking.md) "No
 gates"). The ingest closes the turn, keeps `last_assistant_message` as the
 turn's `answer` (each harness's source in "Per-harness delivery";
 `hook_ingest::LAST_ASSISTANT_MESSAGE`), takes the turn-end snapshot, sets
-the status — `AwaitingUser` when the final message ends in a question,
-keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary is its last turn's answer.
+the status — `Idle`, however the final message is worded (a question at
+the end of a reply is not a wait), keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary is its last turn's answer.
 
 ### Subagents
 

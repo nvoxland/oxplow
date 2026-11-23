@@ -1,7 +1,7 @@
 # What a task in progress is doing now is the state of the assigned
 # thread's latest request, not of the latest request linked to the task: a
-# follow-up that ends on a question, linked to the task or not, reads
-# "waiting on you".
+# follow-up that puts a question to the person, linked to the task or
+# not, reads "waiting on you".
 requires: [oxtask]
 given:
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
@@ -16,5 +16,5 @@ when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect: { loaders: { work: { rows: [{ grp: In progress, title: Doing it, now: "" }] } } }
 steps:
   - given:
-      - observe: { turn: { session: $ses.id, prompt: "Also, quick question", answer: "Which one should I use?" } }
+      - observe: { turn: { session: $ses.id, prompt: "Also, quick question", open: true, tools: [{ name: AskUserQuestion, kind: ask, question: "Which one should I use?", pre: true }] } }
   - expect: { loaders: { work: { rows: [{ grp: In progress, title: Doing it, now: waiting on you }] } } }

@@ -33,8 +33,6 @@ finish.
   your stream and of your thread is `v_stream.prompt` and `v_thread.prompt`
   (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =
   t.stream_id`); they are already in your system prompt.
-- **Waiting on the person.** Oxplow can show a thread as waiting when the
-  agent’s final reply ends with a question.
 - **Context basket.** A `<context-basket>` block is what the person
   collected for you; read each `[oxplow uri …]` with `oxplow_read`. Sent
   by mistake? The context `put_back { thread }` command returns it.

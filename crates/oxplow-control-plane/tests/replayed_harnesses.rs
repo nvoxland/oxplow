@@ -488,28 +488,18 @@ async fn a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompt
     assert!(started[1]["cause_turn"].is_null());
 }
 
-/// A replay's turns, oldest first: source, outcome, error, question and
-/// prompt as the turn view reads them.
-type TurnRow = (
-    Option<String>,
-    String,
-    Option<String>,
-    Option<String>,
-    String,
-);
+/// A replay's turns, oldest first: source, outcome, error and prompt as
+/// the turn view reads them.
+type TurnRow = (Option<String>, String, Option<String>, String);
 async fn turn_rows(r: &Replayed) -> Vec<TurnRow> {
     r.svc
         .db
         .read(|c| {
             let mut stmt = c
-                .prepare(
-                    "SELECT source, outcome, error, question, prompt FROM v_agent_turn ORDER BY id",
-                )
+                .prepare("SELECT source, outcome, error, prompt FROM v_agent_turn ORDER BY id")
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = stmt
-                .query_map([], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-                })
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
                 .map_err(oxplow_db::map_sql_err)?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(oxplow_db::map_sql_err)

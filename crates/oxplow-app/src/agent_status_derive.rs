@@ -46,7 +46,7 @@ pub enum ActivityKind {
     /// A harness session began (`agent.session.started`).
     SessionStarted,
     /// The agent parked on the person (`agent.status.changed{awaiting_user}`:
-    /// a final message ending in a question, a permission prompt, a Codex
+    /// a question or plan put to them, a permission prompt, a Codex
     /// approval wait).
     AwaitingUser,
     /// A status that ends such a wait (`agent.status.changed`, other states).
@@ -212,7 +212,7 @@ pub fn derive_session_status_with_activity(
     // silence thresholds below.
     let mut open_tools: i32 = 0;
 
-    // Parked on the person (a final question, a permission prompt), until a
+    // Parked on the person (a question tool, a permission prompt), until a
     // prompt or another status moves it on.
     let mut awaiting = false;
     for ev in &sorted {

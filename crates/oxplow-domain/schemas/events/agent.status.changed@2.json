@@ -14,7 +14,7 @@
         },
         {
           "const": "awaiting_user",
-          "description": "Parked on the person: a question or plan put to them, a permission\nprompt, a final message ending in a question.",
+          "description": "Parked on the person: a question or plan put to them, a permission\nprompt.",
           "type": "string"
         }
       ]

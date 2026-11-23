@@ -67,6 +67,7 @@ Settings got a rework:
 ## Everything else
 
 - The agent guidance Oxplow adds to a session is down to a few lines, and the rest is opt-in. oxtask's task workflow is off by default now.
+- A reply that ends in a question no longer marks the thread as waiting on you. That guess was often wrong, and it pushed agents to word their replies for Oxplow. A question tool, a plan to approve or a permission prompt still marks it.
 - Restart Terminal restarts an agent's terminal in place.
 - The Alerts panel lists each alert as a row you can open and act on. A failed reaction that can't be retried, because its extension is off, no longer stays in Alerts for good.
 
