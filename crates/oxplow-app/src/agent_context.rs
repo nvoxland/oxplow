@@ -1107,6 +1107,59 @@ mod tests {
         assert!(!again.contains("<context-basket>"), "{again}");
     }
 
+    /// What was put back into This Thread waits, held: the next prompt
+    /// doesn't carry it (an item added since goes alone) until Send Next on
+    /// This Thread; then the prompt after carries it once.
+    #[tokio::test]
+    async fn a_put_back_waits_until_send_next_on_this_thread() {
+        use crate::commands::context_basket::{ADD, PUT_BACK, SEND_NEXT};
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &*fx.svc;
+        let session = crate::test_fixtures::open_session(svc, fx.thread).await;
+        let thread = fx.thread.to_string();
+        let run = |name: &'static str, input: serde_json::Value| async move {
+            svc.commands
+                .run(&Actor::Human, name, input, false)
+                .await
+                .unwrap()
+        };
+        run(
+            ADD,
+            serde_json::json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=abc" }),
+        )
+        .await;
+        let ctx = AgentContext::default();
+        let prompt = || async {
+            ctx.prompt_context(svc, &fx.thread, Some("s1"), Some(session), None)
+                .await
+                .unwrap_or_default()
+        };
+        assert!(prompt().await.contains("sha=abc"));
+
+        run(PUT_BACK, serde_json::json!({ "thread": thread })).await;
+        assert!(
+            !prompt().await.contains("<context-basket>"),
+            "put back is held"
+        );
+        run(
+            ADD,
+            serde_json::json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=new" }),
+        )
+        .await;
+        let with_new = prompt().await;
+        assert!(with_new.contains("sha=new"), "{with_new}");
+        assert!(!with_new.contains("sha=abc"), "still held: {with_new}");
+
+        run(SEND_NEXT, serde_json::json!({ "thread": thread })).await;
+        let released = prompt().await;
+        assert!(
+            released.contains("1. [oxplow uri oxplow:oxplow/commit?sha=abc]"),
+            "{released}"
+        );
+        assert!(!prompt().await.contains("<context-basket>"), "once");
+    }
+
     /// A named basket set to go next replaces the thread's own for one
     /// prompt, under its name; the prompt empties it and the thread sends
     /// its own again, the basket kept.
@@ -1192,6 +1245,7 @@ mod tests {
                 around: None,
                 note: note.map(Into::into),
                 added_at: "2026-11-18T00:00:00Z".into(),
+                held_at: None,
             },
             basket: None,
             stream: Some(oxplow_db::context_store::ItemStream {

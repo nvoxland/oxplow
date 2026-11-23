@@ -64,6 +64,11 @@ pub struct AddInput {
     /// The person's note: what they want done about it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Hold it in the `thread`'s own basket: the thread's next prompt
+    /// doesn't carry it until Send Next on This Thread (as Put Back leaves
+    /// an item; undo uses it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -94,6 +99,10 @@ pub struct MoveInput {
     /// the named basket it moves to, by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub basket: Option<String>,
+    /// Hold it in the `thread`'s own basket it moves to (undo uses it: a
+    /// move drops the hold).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -120,9 +129,14 @@ pub struct SendNextInput {
     /// The thread whose next prompt it is (`thr1`).
     pub thread: String,
     /// The named basket to send instead of the thread's own; absent: the
-    /// thread's own.
+    /// thread's own, which releases its held items (put back) so they go
+    /// too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub basket: Option<String>,
+    /// Items of the thread's own basket to hold again instead of releasing
+    /// any (what undoing a release does).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -135,7 +149,7 @@ pub struct BasketInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NameInput {
-    /// The new basket's name: up to 60 characters, not "This Thread",
+    /// The new basket's name: up to 60 characters, not "This Thread", not starting with "@",
     /// unique in any case.
     pub name: String,
 }
@@ -158,6 +172,17 @@ fn person_only(ctx: &TxCtx<'_>) -> Result<(), CommandError> {
         ));
     }
     Ok(())
+}
+
+/// Refused: only an item in a thread's own basket is held.
+fn held_needs_thread(held: Option<bool>, basket: Basket) -> Result<bool, CommandError> {
+    match (held == Some(true), basket) {
+        (true, Basket::Named(_)) => Err(invalid(
+            "/held",
+            "only an item in a thread's own basket is held",
+        )),
+        (held, _) => Ok(held),
+    }
 }
 
 /// A store refusal as the field it is about.
@@ -234,6 +259,9 @@ fn re_add(conn: &Connection, item: &ContextItem) -> Result<CommandCall, CommandE
             input[k] = v.clone();
         }
     }
+    if item.held_at.is_some() {
+        input["held"] = json!(true);
+    }
     Ok(CommandCall {
         name: ADD.into(),
         input,
@@ -258,7 +286,7 @@ fn op(name: &'static str, input: Value, handler: Handler) -> Op {
     Op::new(CAPABILITY, name, input, true, handler)
 }
 
-/// `add { thread | basket, stream?, uri?, label?, text?, around?, note? }`.
+/// `add { thread | basket, stream?, uri?, label?, text?, around?, note?, held? }`.
 pub fn add_op() -> Op {
     op(
         "add",
@@ -287,6 +315,7 @@ pub fn add_op() -> Op {
                 (None, Basket::Thread(t)) => stream_of_thread(ctx.conn, t)?,
                 (None, Basket::Named(_)) => None,
             };
+            let held = held_needs_thread(input.held, basket)?;
             let id = store::add_tx(
                 ctx.conn,
                 basket,
@@ -300,6 +329,9 @@ pub fn add_op() -> Op {
                 },
             )
             .map_err(at("/"))?;
+            if held {
+                store::hold_tx(ctx.conn, &[id])?;
+            }
             // Undoing an add that made its basket takes the basket too.
             let inverse = match made {
                 Some(name) => CommandCall {
@@ -367,8 +399,8 @@ pub fn note_op() -> Op {
     )
 }
 
-/// `move { item, thread | basket }`: into another basket; undoes to the one
-/// it was in.
+/// `move { item, thread | basket, held? }`: into another basket, dropping
+/// its hold; undoes to the one it was in, held again when it was.
 pub fn move_op() -> Op {
     op(
         "move",
@@ -377,10 +409,17 @@ pub fn move_op() -> Op {
             person_only(ctx)?;
             let input: MoveInput = parse(input)?;
             let to = which(ctx.conn, input.thread.as_deref(), input.basket.as_deref())?;
+            let held = held_needs_thread(input.held, to)?;
             let before = store::move_tx(ctx.conn, input.item, to)?
                 .ok_or_else(|| invalid("/item", format!("no context item {}", input.item)))?;
+            if held {
+                store::hold_tx(ctx.conn, &[input.item])?;
+            }
             let mut back = naming(ctx.conn, before.basket())?;
             back["item"] = json!(input.item);
+            if before.held_at.is_some() {
+                back["held"] = json!(true);
+            }
             Ok(HandlerOutput {
                 result: json!({ "item": input.item }),
                 inverse: (before.basket() != to).then(|| CommandCall {
@@ -420,11 +459,12 @@ pub fn clear_op() -> Op {
 }
 
 /// The call that sets `thread`'s next send back to `basket` (by id; none:
-/// its own).
+/// its own) and holds `hold` again.
 fn re_next(
     conn: &Connection,
     thread: i64,
     basket: Option<i64>,
+    hold: &[i64],
 ) -> Result<CommandCall, CommandError> {
     let mut input = json!({ "thread": ThreadId::new(thread).to_string() });
     if let Some(id) = basket {
@@ -432,17 +472,21 @@ fn re_next(
             .ok_or_else(|| invalid("/basket", format!("no basket {id}")))?;
         input["basket"] = json!(b.name);
     }
+    if !hold.is_empty() {
+        input["hold"] = json!(hold);
+    }
     Ok(CommandCall {
         name: SEND_NEXT.into(),
         input,
     })
 }
 
-/// `send_next { thread, basket? }`: what the thread's next prompt carries —
-/// the named `basket` instead of the thread's own, or (none) the thread's
-/// own again. It lasts one send: then the thread sends its own. A basket
-/// goes next for one thread at a time; undoing puts back both the thread's
-/// choice and the basket's thread before.
+/// `send_next { thread, basket?, hold? }`: what the thread's next prompt
+/// carries — the named `basket` instead of the thread's own, or (none) the
+/// thread's own again, releasing its held items (put back) so they go too.
+/// It lasts one send: then the thread sends its own. A basket goes next for
+/// one thread at a time; undoing puts back both the thread's choice and the
+/// basket's thread before, and holds again what it released (`hold`).
 pub fn send_next_op() -> Op {
     op(
         "send_next",
@@ -456,12 +500,23 @@ pub fn send_next_op() -> Op {
                 None => None,
             };
             let before = store::set_next_tx(ctx.conn, thread, basket.as_ref().map(|b| b.id))?;
+            let released = match (&input.hold, &basket) {
+                (Some(ids), _) => {
+                    store::hold_tx(ctx.conn, ids)?;
+                    Vec::new()
+                }
+                (None, None) => store::release_held_tx(ctx.conn, thread)?,
+                (None, Some(_)) => Vec::new(),
+            };
             let mut calls = Vec::new();
             if let (Some(other), Some(b)) = (before.basket_was_next_for, &basket) {
-                calls.push(re_next(ctx.conn, other, Some(b.id))?);
+                calls.push(re_next(ctx.conn, other, Some(b.id), &[])?);
             }
-            if before.basket != basket.as_ref().map(|b| b.id) {
-                calls.push(re_next(ctx.conn, thread.value(), before.basket)?);
+            if before.basket != basket.as_ref().map(|b| b.id)
+                || !released.is_empty()
+                || input.hold.is_some()
+            {
+                calls.push(re_next(ctx.conn, thread.value(), before.basket, &released)?);
             }
             Ok(HandlerOutput {
                 result: json!({ "thread": thread.to_string(), "basket": basket.map(|b| b.name) }),
@@ -477,7 +532,8 @@ pub fn send_next_op() -> Op {
 }
 
 /// `put_back { thread }`: the thread's last send back where it came from —
-/// each item to its basket, notes kept; nothing is chosen to go next
+/// each item to its basket, notes kept; nothing is chosen to go next, and
+/// what returns to This Thread is held until Send Next on it
 /// (`context_store::put_back_tx`). Undoing takes the items out
 /// again (the copy of the send is gone once it is put back). The one
 /// basket command an agent may run, and only for its own thread: it only
@@ -952,6 +1008,93 @@ mod tests {
         assert!(again.to_string().contains("nothing was sent"), "{again}");
         undo(&fx, &back).await;
         assert!(items(&fx, Some("Auth")).await.is_empty());
+    }
+
+    /// Put Back into This Thread holds the items; Send Next on This Thread
+    /// releases them and undoes to held again. Undoing a remove, a clear or
+    /// a move of a held item keeps it held.
+    #[tokio::test]
+    async fn put_back_holds_and_send_next_releases_with_undo() {
+        let fx = services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let added = run(
+            &fx,
+            ADD,
+            json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=a" }),
+        )
+        .await;
+        let item = added.result["item"].as_i64().unwrap();
+        let t = fx.thread;
+        fx.svc
+            .db
+            .transaction(move |tx| store::take_delivered_tx(tx, t, None, &[item]))
+            .await
+            .unwrap();
+        run(&fx, PUT_BACK, json!({ "thread": thread })).await;
+        let held = || async {
+            items(&fx, None)
+                .await
+                .iter()
+                .map(|i| i.held_at.is_some())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(held().await, [true]);
+
+        let released = run(&fx, SEND_NEXT, json!({ "thread": thread })).await;
+        assert_eq!(held().await, [false]);
+        undo(&fx, &released).await;
+        assert_eq!(held().await, [true], "undo holds it again");
+
+        let id = items(&fx, None).await[0].id;
+        let removed = run(&fx, REMOVE, json!({ "item": id })).await;
+        undo(&fx, &removed).await;
+        assert_eq!(held().await, [true], "undoing a remove keeps the hold");
+
+        let cleared = run(&fx, CLEAR, json!({ "thread": thread })).await;
+        undo(&fx, &cleared).await;
+        assert_eq!(held().await, [true], "undoing a clear keeps the hold");
+
+        run(&fx, CREATE_BASKET, json!({ "name": "Auth" })).await;
+        let id = items(&fx, None).await[0].id;
+        let moved = run(&fx, MOVE, json!({ "item": id, "basket": "Auth" })).await;
+        assert_eq!(items(&fx, Some("Auth")).await[0].held_at, None);
+        undo(&fx, &moved).await;
+        assert_eq!(held().await, [true], "undoing a move keeps the hold");
+    }
+
+    /// A basket's name may not start with "@": the app's marks for This
+    /// Thread and a new basket would read it as theirs.
+    #[tokio::test]
+    async fn a_basket_named_like_a_mark_is_refused() {
+        let fx = services_with_thread().await;
+        for (name, input) in [
+            (CREATE_BASKET, json!({ "name": "@thread" })),
+            (
+                ADD,
+                json!({ "basket": "@new", "uri": "oxplow:oxplow/commit?sha=a" }),
+            ),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, name, input, false)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("\"@\""), "{err}");
+        }
+        run(&fx, CREATE_BASKET, json!({ "name": "Auth" })).await;
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                RENAME_BASKET,
+                json!({ "basket": "Auth", "name": "@thread" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("\"@\""), "{err}");
     }
 
     /// An agent may put back its own thread's last send, not another's.

@@ -49,6 +49,21 @@ test("a thread's next prompt carries one basket: the one sent next, else its own
   expect(sendingNext(empty, "thr7")).toBe("@thread");
 });
 
+test("a held item (put back) waits out the next prompt", () => {
+  const own = itemsFromResult(
+    result(
+      ["id", "kind", "source_uri", "label", "text", "note", "basket", "held_at"],
+      [
+        [1, "page", "u1", null, null, null, null, "2026-11-23T00:00:00Z"],
+        [2, "page", "u2", null, null, null, null, null],
+      ],
+    ),
+  );
+  expect(own.map((i) => i.held)).toEqual([true, false]);
+  const b = basketsFrom(own, result(["id", "name", "next_thread_id"], []));
+  expect(nextPrompt(b, "thr7").map((i) => i.id)).toEqual([2]);
+});
+
 test("an add names its basket and stream, with only what is set", () => {
   expect(addInput({ thread: "thr1" }, "str2", { uri: "oxplow:oxplow/page?page=tasks", label: "Tasks" })).toEqual({ thread: "thr1", stream: "str2", uri: "oxplow:oxplow/page?page=tasks", label: "Tasks" });
   expect(addInput({ basket: "Auth" }, null, { uri: "u", text: "t", label: "" })).toEqual({ basket: "Auth", uri: "u", text: "t" });

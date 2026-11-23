@@ -7,7 +7,9 @@
 /// tooltip saying what happens; on for the basket that goes), then This
 /// Thread's Clear, or a named basket's Rename (in place), Clear and Delete —
 /// also on the tab's right-click; at the bar's right, what the thread's last
-/// send carried and **Put Back**. A send carries one basket and then sets the
+/// send carried and **Put Back**. What Put Back returns to This Thread is
+/// held ("held, will not send" on its row): This Thread's Send Next is then
+/// off, and pressing it releases the held items to go with the next prompt. A send carries one basket and then sets the
 /// thread back to This Thread. Its items are one row each: the name, a note
 /// mark (white when it has one, grey when not), its text on one line (cut to fit) and a ×
 /// at the far right. A row's click expands it in place (animated): its whole
@@ -128,6 +130,7 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
   }
 
   const items = tab === THREAD_MARK ? baskets.own : (named?.items ?? []);
+  const held = baskets.own.filter((i) => i.held).length;
   return (
     <div data-testid="context-panel" style={bodyStyle}>
       <div role="tablist" aria-label="Baskets" style={tabStrip}>
@@ -147,14 +150,16 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
         {tab === THREAD_MARK ? (
           <>
             <SendToggle
-              on={sending === THREAD_MARK}
+              on={sending === THREAD_MARK && held === 0}
               disabledReason={thread ? null : "Select a thread first"}
               tip={
-                sending === THREAD_MARK
-                  ? "Sending next: this thread's next prompt carries This Thread, then empties it. Send Next on another basket to send it instead."
-                  : "Send Next: this thread's next prompt carries This Thread instead of the basket chosen now."
+                held > 0
+                  ? `Send Next: ${held === 1 ? "1 item put back is" : `${held} items put back are`} held. Press to send ${held === 1 ? "it" : "them"} with this thread's next prompt.`
+                  : sending === THREAD_MARK
+                    ? "Sending next: this thread's next prompt carries This Thread, then empties it. Send Next on another basket to send it instead."
+                    : "Send Next: this thread's next prompt carries This Thread instead of the basket chosen now."
               }
-              onPress={() => (thread && sending !== THREAD_MARK ? void sendNext(thread, null) : undefined)}
+              onPress={() => (thread && (sending !== THREAD_MARK || held > 0) ? void sendNext(thread, null) : undefined)}
             />
             <BarButton data-testid="context-panel-clear" disabled={baskets.own.length === 0 || !thread} title="Take everything out of This Thread" onClick={() => thread && void clearContext({ thread })}>
               Clear
@@ -431,6 +436,15 @@ function ItemRow({
         >
           <StickyNote size={13} aria-hidden />
         </span>
+        {item.held ? (
+          <span
+            data-testid="context-panel-held"
+            title="Put back: the next prompt doesn't carry it. Press Send Next on This Thread to send it."
+            style={{ flexShrink: 0, color: "var(--text-muted)", fontStyle: "italic" }}
+          >
+            held, will not send
+          </span>
+        ) : null}
         <span
           data-testid="context-panel-preview"
           style={{ ...ellipsis, flex: "1 1 0", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}

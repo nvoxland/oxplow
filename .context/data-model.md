@@ -1866,8 +1866,13 @@ whose source has no lines to read back (a terminal's scrollback).
 `stream_id` is the stream it was collected in, so a file it names is read
 in that worktree when it is delivered in another stream.
 
+`held_at` (V74) marks an item Put Back returned to the thread's own
+basket: the next prompt skips it until Send Next on This Thread clears it
+(`release_held_tx`; `hold_tx` sets it again for undo; a move drops it).
+
 `context_basket` holds the named baskets: `name` (unique, NOCASE; never
-"This Thread"), and `next_thread_id` (V48), the thread whose next prompt
+"This Thread", never starting with `@`, the app's marks for This Thread and
+a new basket), and `next_thread_id` (V48), the thread whose next prompt
 carries it instead of the thread's own (Send Next; a unique partial index
 keeps one per thread, a basket is next for one thread at a time; SET NULL
 when the thread goes). They belong to the project, across every stream.
@@ -1879,7 +1884,8 @@ the thread sends its own again
 (`agent-model.md` "The context basket"): there is no delivered history.
 `context_sent_item` (V49) is each thread's **last send**: a copy of what it
 carried (`basket_name`, NULL for the thread's own, and the item's fields),
-replaced by the next send, gone once put back (`put_back_tx`; read through
+replaced by the next send, gone once put back (`put_back_tx`, which keeps
+each item's first `added_at`; read through
 `v_context_sent`, one row per thread). Read through `v_context_item` and
 `v_context_basket`; every write is an `oxplow.context.*` command
 (commands.md).

@@ -12,7 +12,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
     ({
-      columns: sql.includes("v_context_sent") ? ["basket", "items"] : sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
+      columns: sql.includes("v_context_sent") ? ["basket", "items"] : sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket", "held_at"],
       rows: sql.includes("v_context_sent") ? sent : sql.includes("v_context_basket") ? baskets : items,
       truncated: false,
       reads: { datasets: [], tables: [], measures: [] },
@@ -213,4 +213,22 @@ test("the last send is named on the bar and put back from it", async () => {
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../../api.js", () => realApi);
+});
+
+// Put Back leaves This Thread's items held: each says it won't send, the
+// badge doesn't count them, and Send Next on This Thread releases them.
+test("held items say they won't send and Send Next on This Thread releases them", async () => {
+  setSelectedThread("thr7");
+  items = [
+    [1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null, null, "2026-11-23T00:00:00Z"],
+    [2, "page", "oxplow:oxplow/commit?sha=def5678", "def5678", null, null, null, null],
+  ];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  await waitFor(() => expect(view.getAllByTestId("context-panel-item").length).toBe(2));
+  expect(view.getAllByTestId("context-panel-held").map((h) => h.textContent)).toEqual(["held, will not send"]);
+  const send = view.getByTestId("context-send-next");
+  expect(send.getAttribute("aria-checked")).toBe("false");
+  expect(send.getAttribute("title")).toContain("held");
+  fireEvent.click(send);
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.send_next", { thread: "thr7" }]));
 });

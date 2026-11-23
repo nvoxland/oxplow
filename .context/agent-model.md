@@ -974,16 +974,26 @@ deletes it).
 There is no delivered history: the turn's links and the transcript are the
 record. Only the last send is kept, so the person can **Put Back**
 (`oxplow.context.put_back`) what they did not mean to send: each item, with
-its note, returns to its basket (a deleted named basket made again); it
-chooses nothing to go next, so the next message doesn't send it straight
-away. An agent may run it for its own thread (the only basket command it
+its note and the time it was first added, returns to its basket (a deleted
+named basket made again); it chooses nothing to go next, so the next
+message doesn't send it straight away. A named basket goes only when it is
+chosen; an item back in the thread's own basket is **held**
+(`context_item.held_at`, V74): the own-basket branch of
+`waiting_for_thread_tx` skips it, an add doesn't release it, and only
+**Send Next on This Thread** (`send_next` with no `basket`,
+`release_held_tx`) does, so it goes with the next prompt; undoing that
+holds it again (`send_next`'s `hold`), and undoing a `remove`, `clear` or
+`move` of a held item keeps the hold (`add`'s and `move`'s `held`; a move
+itself drops it). An agent may run it for its own thread (the only basket command it
 may), when the person says something went by mistake. Claude Code and opencode get it at prompt submit. Codex gets it by
-injection while no turn runs (`context.add`, `move` and `send_next` wake
-`context_watch`), so with two agents in a thread an idle Codex can take
+injection while no turn runs (`context.add`, `move`, `send_next` and
+`put_back` wake `context_watch`; a held put-back changes nothing, so it
+injects nothing), so with two agents in a thread an idle Codex can take
 the baskets before the agent the person prompts. The baskets are the
 person's: an agent's `context.*` run is refused, but it can read
 `v_context_item` and `v_context_basket` ("look at my Auth basket"). Pinned
-by `the_context_basket_reaches_the_next_prompt_once` and
+by `the_context_basket_reaches_the_next_prompt_once`,
+`a_put_back_waits_until_send_next_on_this_thread` and
 `a_basket_sent_next_replaces_the_threads_own_for_one_prompt`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
