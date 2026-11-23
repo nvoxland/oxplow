@@ -11,9 +11,9 @@ import { classifyExternalUrl } from "../../external-url-allowlist.js";
 import type { MenuItem } from "../../menu.js";
 import type { NavigateOptions } from "../../tabs/PageNavigationContext.js";
 import { externalUrlRef } from "../../tabs/pageRefs.js";
-import { openInBrowser, openInForRef, openInForWorktreePath } from "../../openIn.js";
+import { openInBrowser, openInForRef, openInForWorktreePath, withLinkOffers } from "../../openIn.js";
 import { WORKING } from "../../revision.js";
-import { parseUri } from "../../uri/uri.js";
+import { fileUri, parseUri } from "../../uri/uri.js";
 import { recordLabel, recordOf } from "../../recordStores.js";
 import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
 
@@ -97,4 +97,20 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
       break;
   }
   return items;
+}
+
+/** The ref the daemon is asked about for a link to `href` (its commands,
+ *  `withLinkOffers`): a web URL, an oxplow URI, or the file a relative link
+ *  resolves to. Null for anything else. */
+export function linkOffersRef(href: string, base: string | null = null): string | null {
+  if (/^https?:\/\//i.test(href)) return href;
+  if (parseUri(href)) return href;
+  const parsed = parseMarkdownLink(href, base);
+  return parsed.kind === "file" ? fileUri(parsed.path) : null;
+}
+
+/** A link's right-click menu as it opens: `linkMenu`, with the extensions'
+ *  commands about the link (`withLinkOffers`). */
+export function linkMenuAtOpen(href: string, open: OpenRef, base: string | null = null): Promise<MenuItem[]> {
+  return withLinkOffers(linkMenu(href, open, base), linkOffersRef(href, base));
 }

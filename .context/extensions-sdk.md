@@ -765,7 +765,8 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
 - `when: { action_point: <id>, context: {...} }` → `expect: { draws:
   none | button | menu, commands: [ids] }`.
 - `when: { item_commands: "<item uri>" }` → `expect: { commands: [ids]
-  }`.
+  }`. The item may be a web URL (`https://…`, the commands `about: https`)
+  or a file or directory URI, with `accepts.url` / `accepts.path` applied.
 - `when: { search: "<text>", resource?: <id> }` → `expect: { uris: [...]
   }`, through the search index (not a `LIKE`).
 

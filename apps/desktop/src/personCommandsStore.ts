@@ -61,3 +61,9 @@ export function usePersonCommands(): CommandSpec[] {
 }
 
 const EMPTY: CommandSpec[] = [];
+
+/** The commands a person is offered now, outside React (a menu built as
+ *  it opens): what the window's `usePersonCommands` readers keep loaded. */
+export function personCommandsNow(): CommandSpec[] {
+  return value ?? EMPTY;
+}

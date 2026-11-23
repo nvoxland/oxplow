@@ -2382,12 +2382,32 @@
             }
           ],
           "default": null
+        },
+        "url": {
+          "description": "About a web link (`about: https` / `http`): the URLs it is offered\non, a pattern over the whole URL in the param-pattern dialect\n(anchored `^…$`; Rust and the desktop read it alike).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "path": {
+          "description": "About a file or a directory (`oxplow/file`, `oxplow/dir`): the\nworktree paths it is offered on, a glob or a list of them\n(`**/*.ipynb`; `*` stops at `/`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StoreFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
     },
     "StoreFilter": {
-      "description": "One store id or a list of them.",
+      "description": "One store id or a list of them (and one glob or a list, for `path`).",
       "anyOf": [
         {
           "type": "string"

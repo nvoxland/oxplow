@@ -13,6 +13,17 @@
   command, so use it where the operation refuses some states. To offer
   another command there with a fixed input, declare your own over the
   same operation.
+- **A command on a link's Open In ▸** (a web URL, a file or a directory
+  anywhere the app shows one: the terminal, a markdown link, a page row, a
+  tab) has `group: Open In` and is about the link: `about: https` (a web
+  link, by its scheme) or `about: oxplow/file` / `oxplow/dir`. Narrow it
+  with `about: { resource, accepts: { url: <pattern> } }` (the whole URL,
+  anchored `^…$`, a class instead of `.`:
+  `"^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$"`) or
+  `accepts: { path: "**/*.ipynb" }` (globs over the worktree path; `*`
+  stops at `/`). It gets `{ uri }`: the URL, or the file's URI. Test it
+  with a fixture `when: { item_commands: "https://…" }` →
+  `expect: { commands: [<ids>] }`.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional

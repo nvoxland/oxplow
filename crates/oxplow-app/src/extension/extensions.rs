@@ -315,7 +315,7 @@ pub struct ExtensionPanel {
 }
 
 /// The schemes a page may render besides oxplow's resources: a web page.
-pub const RENDERED_SCHEMES: &[&str] = &["https", "http"];
+pub const RENDERED_SCHEMES: &[&str] = oxplow_domain::commands::WEB_SCHEMES;
 
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
 /// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.

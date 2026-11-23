@@ -19,7 +19,7 @@ import { terminalSelectionWhat } from "./terminalSelection.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { installFilePathLinkProvider, installUrlLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 import type { MenuItem } from "../menu.js";
-import { openInBrowser, openInForPath, openInForRef } from "../openIn.js";
+import { linkRefOf, openInBrowser, openInForPath, openInForRef, withLinkOffers } from "../openIn.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import { isMacPlatform } from "../keybindings.js";
 
@@ -167,14 +167,15 @@ export function TerminalSurface({
     });
     if (link.kind === "url") {
       const elsewhere = openInForRef(link.url);
-      return [...(elsewhere ? [elsewhere] : []), copy("copy-link", "Copy link", link.url)];
+      return withLinkOffers([...(elsewhere ? [elsewhere] : []), copy("copy-link", "Copy link", link.url)], link.url);
     }
     const abs = await resolveClickedPath(link.match.text, props.current.cwd, props.current.worktreePath);
     if (!abs) return [];
     // A path the terminal printed may be a file or a directory; one that
     // ends in `/` is a directory.
-    const elsewhere = openInForPath(link.match.text.endsWith("/") ? "dir" : "file", abs.replace(/\/+$/, ""));
-    return [...(elsewhere ? [elsewhere] : []), copy("copy-path", "Copy path", abs)];
+    const target = { kind: link.match.text.endsWith("/") ? ("dir" as const) : ("file" as const), path: abs.replace(/\/+$/, "") };
+    const elsewhere = openInForPath(target.kind, target.path);
+    return withLinkOffers([...(elsewhere ? [elsewhere] : []), copy("copy-path", "Copy path", abs)], linkRefOf(target));
   };
   const openMenu = (event: MouseEvent) => {
     const term = termRef.current;

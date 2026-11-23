@@ -506,6 +506,23 @@ dataset row is truthy (not null, 0, empty or false), for a command whose
 operation refuses some states. In a page's ☰ it sits at the top level among
 the page's own actions, sorted by label.
 
+A command can also act on links. `about: https` makes it a command about
+web links, and `about: oxplow/file` or `oxplow/dir` a command about files
+or directories. `accepts: { url: <pattern> }` or `accepts: { path: <glob> }`
+narrows which links. With `group: Open In`, it is in the link's right-click
+**Open In** submenu wherever the app shows the link: the terminal, a
+markdown link, a page row, a tab.
+
+```yaml
+  - name: pr.review
+    summary: Open the pull request in the review tool.
+    entry: handlers/review.star
+    ui:
+      label: Review Tool
+      group: Open In
+      about: { resource: https, accepts: { url: "^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$" } }
+```
+
 `v_command_run` lists command history, including reads and refusals. Filter
 on `command` and order by `started_at` and `id` for the latest runs.
 `changed = 1` selects successful runs that recorded their input. The row's URI opens

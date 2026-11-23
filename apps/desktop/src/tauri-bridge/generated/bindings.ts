@@ -3543,6 +3543,18 @@ export type ItemAccepts = {
 	 *  rule (`present`, `absent`, an anchored id pattern).
 	 */
 	store?: StoreFilter | null,
+	/**
+	 *  About a web link (`about: https` / `http`): the URLs it is offered
+	 *  on, a pattern over the whole URL in the param-pattern dialect
+	 *  (anchored `^…$`; Rust and the desktop read it alike).
+	 */
+	url?: string | null,
+	/**
+	 *  About a file or a directory (`oxplow/file`, `oxplow/dir`): the
+	 *  worktree paths it is offered on, a glob or a list of them
+	 *  (`**\/*.ipynb`; `*` stops at `/`).
+	 */
+	path?: StoreFilter | null,
 };
 
 /**  A host-recognized operation owned by one extension contribution. */
@@ -6163,7 +6175,7 @@ export type StageDecl = {
 	bucket: Bucket,
 };
 
-/**  One store id or a list of them. */
+/**  One store id or a list of them (and one glob or a list, for `path`). */
 export type StoreFilter = string | string[];
 
 export type Stream = {

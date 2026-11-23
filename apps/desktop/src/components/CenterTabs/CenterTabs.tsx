@@ -41,7 +41,7 @@ export interface CenterTab {
   contextMenu?: MenuItem[];
   /** Entries built as the menu opens, after `contextMenu` (what the
    *  window knows only then: Open In ▸ for a file's or a web page's tab). */
-  menuAtOpen?: () => MenuItem[];
+  menuAtOpen?: () => MenuItem[] | Promise<MenuItem[]>;
   /** When true, this tab does NOT appear in the strip but its body
    *  still mounts (kept hidden via display:none). Used by the host
    *  to keep back/forward stack entries alive so navigation between
@@ -121,8 +121,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   // has no targets. Targets are computed over the real open tabs (`stripTabs`)
   // so overflowed-but-open tabs still close while back/forward stack entries
   // (`hidden`) are excluded.
-  const buildTabMenu = (tab: CenterTab): MenuItem[] => {
-    const items: MenuItem[] = [...(tab.contextMenu ?? []), ...(tab.menuAtOpen?.() ?? [])];
+  const buildTabMenu = (tab: CenterTab): MenuItem[] | Promise<MenuItem[]> => {
+    const later = tab.menuAtOpen?.() ?? [];
+    if (later instanceof Promise) return later.then((atOpen) => withCloseItems(tab, [...(tab.contextMenu ?? []), ...atOpen]));
+    return withCloseItems(tab, [...(tab.contextMenu ?? []), ...later]);
+  };
+  const withCloseItems = (tab: CenterTab, items: MenuItem[]): MenuItem[] => {
     if (onClose) {
       const others = tabsToCloseOthers(bulkClosable, tab.id);
       const toRight = tabsToCloseRight(bulkClosable, tab.id);

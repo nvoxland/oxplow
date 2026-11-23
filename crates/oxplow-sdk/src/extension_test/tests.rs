@@ -2811,6 +2811,63 @@ commands:
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
+/// `when: { item_commands }` takes a web URL and a file too: a command
+/// about `https` is offered on the URLs its `accepts.url` takes, one about
+/// `oxplow/file` on the paths its `accepts.path` globs take.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_which_commands_a_link_is_offered() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Opens links elsewhere.
+  examples:
+    - { name: pr, input: { item_commands: \"https://github.com/acme/app/pull/12\" }, expect: the PR command }
+commands:
+  - name: pr.open
+    summary: Open the pull request in the review tool.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/open.star
+    examples:
+      - { name: happy, input: { uri: \"https://github.com/acme/app/pull/12\" }, expect_commands: [] }
+    ui: { label: Review Tool, group: Open In, about: { resource: https, accepts: { url: \"^https://github[.]com/[a-z]+/[a-z]+/pull/[0-9]+$\" } } }
+  - name: notebook.open
+    summary: Open the notebook in Jupyter.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/open.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/file?path=a.ipynb\" }, expect_commands: [] }
+    ui: { label: Jupyter, group: Open In, about: { resource: oxplow/file, accepts: { path: \"**/*.ipynb\" } } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/open.star",
+        "def transform(x):\n    return {\"commands\": []}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/pr.yaml",
+        "when: { item_commands: \"https://github.com/acme/app/pull/12\" }\nexpect: { commands: [acme.pr.open] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/not-a-pr.yaml",
+        "when: { item_commands: \"https://github.com/acme/app\" }\nexpect: { commands: [] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/notebook.yaml",
+        "when: { item_commands: \"oxplow:oxplow/file?path=work/a.ipynb\" }\nexpect: { commands: [acme.notebook.open] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,

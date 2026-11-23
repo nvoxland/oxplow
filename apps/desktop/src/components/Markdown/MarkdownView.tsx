@@ -18,7 +18,7 @@ import { CopyCodeButton } from "./CopyCodeButton.js";
 import { rehypeHighlightCode } from "./codeHighlight.js";
 import { InlineView } from "./InlineView.js";
 import { INLINE_ELEMENTS } from "./inlineMarkdown.js";
-import { followLink, linkMenu, type OpenRef } from "./links.js";
+import { followLink, linkMenuAtOpen, type OpenRef } from "./links.js";
 import { readBytesAt } from "../../api.js";
 import { mediaType } from "../../filesystem.js";
 import { useVizStream } from "../../viz/VizStream.js";
@@ -40,7 +40,7 @@ function RefLinkSpan({
 }: {
   anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
   handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  items: MenuItem[];
+  items: () => Promise<MenuItem[]>;
   iconKind: string | null;
   /** The ref the link names when it has a title: read from its resource's dataset. */
   titledRef: string | null;
@@ -363,7 +363,7 @@ export function MarkdownView({ body, base = null, maxHeight, style, className, i
             if (parsed.kind === "anchor" || parsed.kind === "empty") {
               return <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />;
             }
-            const items = linkMenu(href, open, base);
+            const items = () => linkMenuAtOpen(href, open, base);
             const iconKind = parsedLinkIconKind(parsed);
             // For links written bare (`[[slug]]`, no `|label`), swap the
             // rendered text from the id to the row's title so readers see

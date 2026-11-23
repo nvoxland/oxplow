@@ -351,9 +351,28 @@ pub struct ItemAccepts {
     /// rule (`present`, `absent`, an anchored id pattern).
     #[serde(default)]
     pub store: Option<StoreFilter>,
+    /// About a web link (`about: https` / `http`): the URLs it is offered
+    /// on, a pattern over the whole URL in the param-pattern dialect
+    /// (anchored `^…$`; Rust and the desktop read it alike).
+    #[serde(default)]
+    pub url: Option<String>,
+    /// About a file or a directory (`oxplow/file`, `oxplow/dir`): the
+    /// worktree paths it is offered on, a glob or a list of them
+    /// (`**/*.ipynb`; `*` stops at `/`).
+    #[serde(default)]
+    pub path: Option<StoreFilter>,
 }
 
-/// One store id or a list of them.
+/// The URL schemes a command may be about (`ui.about: https`) and a page
+/// may draw (`for: https`): a web link is named by its scheme.
+pub const WEB_SCHEMES: &[&str] = &["https", "http"];
+
+/// Whether `resource` is a web link's scheme ([`WEB_SCHEMES`]).
+pub fn is_web_resource(resource: &str) -> bool {
+    WEB_SCHEMES.contains(&resource)
+}
+
+/// One store id or a list of them (and one glob or a list, for `path`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(untagged)]
 pub enum StoreFilter {
@@ -462,11 +481,39 @@ impl CommandUi {
         }
         if let Some(about) = &self.about {
             let kind = about.resource();
-            if kind.parse::<crate::uri::ResourceName>().is_err() {
+            if !is_web_resource(kind) && kind.parse::<crate::uri::ResourceName>().is_err() {
                 return bad(
                     "about",
-                    format!("`{kind}` isn't a resource (`<extension>/<name>`)"),
+                    format!(
+                        "`{kind}` isn't a resource (`<extension>/<name>`) or a web link's scheme \
+                         (`https`, `http`)"
+                    ),
                 );
+            }
+            if let Some(accepts) = about.accepts() {
+                if accepts.url.is_some() && !is_web_resource(kind) {
+                    return bad(
+                        "about/accepts/url",
+                        format!("`url` filters a web link: give it `about: https` (not `{kind}`)"),
+                    );
+                }
+                if let Some(path) = &accepts.path {
+                    if !matches!(kind, "oxplow/file" | "oxplow/dir") {
+                        return bad(
+                            "about/accepts/path",
+                            format!(
+                                "`path` filters a file or a directory: give it `about: oxplow/file` \
+                                 or `oxplow/dir` (not `{kind}`)"
+                            ),
+                        );
+                    }
+                    if path.rules().is_empty() {
+                        return bad(
+                            "about/accepts/path",
+                            "`path` names at least one glob".into(),
+                        );
+                    }
+                }
             }
         }
         if let Some(column) = &self.about_when {
@@ -1384,6 +1431,47 @@ mod tests {
 
     fn ui(v: Value) -> CommandUi {
         serde_json::from_value(v).unwrap()
+    }
+
+    /// A command about web links (`about: https`) or about files and
+    /// directories narrows them by the URL (`accepts.url`, a pattern) or
+    /// the path (`accepts.path`, globs); each filter only where it can hold.
+    #[test]
+    fn a_link_command_filters_by_url_or_path_where_one_is() {
+        for good in [
+            json!({ "label": "Open PR", "about": "https" }),
+            json!({ "label": "Open PR", "about": { "resource": "https", "accepts": { "url": "^https://github[.]com/[A-Za-z0-9/_-]+$" } } }),
+            json!({ "label": "Jupyter", "about": { "resource": "oxplow/file", "accepts": { "path": "**/*.ipynb" } } }),
+            json!({ "label": "Here", "about": { "resource": "oxplow/dir", "accepts": { "path": ["src/**", "lib"] } } }),
+        ] {
+            assert_eq!(ui(good.clone()).problem(), None, "{good}");
+        }
+        for (bad, field, says) in [
+            (
+                json!({ "label": "X", "about": { "resource": "oxplow/file", "accepts": { "url": "^x$" } } }),
+                "/ui/about/accepts/url",
+                "web link",
+            ),
+            (
+                json!({ "label": "X", "about": { "resource": "https", "accepts": { "path": "*.md" } } }),
+                "/ui/about/accepts/path",
+                "file or a directory",
+            ),
+            (
+                json!({ "label": "X", "about": { "resource": "oxplow/file", "accepts": { "path": [] } } }),
+                "/ui/about/accepts/path",
+                "at least one",
+            ),
+            (
+                json!({ "label": "X", "about": "ftp" }),
+                "/ui/about",
+                "isn't a resource",
+            ),
+        ] {
+            let (f, message) = ui(bad.clone()).problem().expect("refused");
+            assert_eq!(f, field, "{bad}");
+            assert!(message.contains(says), "{bad}: {message}");
+        }
     }
 
     /// What a window would meet only by its not working is refused when

@@ -404,12 +404,28 @@ opens its form with the context's keys (and the `{{uri}}` bindings) as
 params; the form's submit is the input.
 
 **The store filter.** `ui.about` is either the resource kind (a string) or
-`{ resource, accepts?: { store: <id> | [ids] } }`. An item URI's `store`
+`{ resource, accepts?: { store: <id> | [ids], url?: <pattern>, path?: <glob> | [globs] } }`. An item URI's `store`
 param is matched like a renderer's `accepts` rule: an id equal to the
 entry, or `present`, `absent` or an anchored id pattern
 (`pages::renderers::takes`); a list is any-of. The command shows only on
 items whose store passes; an item with no `store` param passes only a
 filter that says `absent`.
+
+**Links: `url` and `path`.** A command about web links (`about: https`
+or `http`: a URL is named by its scheme, as a page that draws one is,
+`renderers::resource_of`) narrows them by `accepts.url`, a param pattern
+over the whole URL (anchored `^…$`, classes not `.`:
+`^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$`). One
+about files or directories (`oxplow/file`, `oxplow/dir`) narrows them by
+`accepts.path`, globs over the worktree path (`**/*.ipynb`; `*` stops at
+`/`). `CommandUi::problem` refuses a filter on the wrong kind, and
+`ref_commands::link_filter_problem` one that can't compile, where the
+command registers. `ref_commands` checks both (`link_accepted`). A
+command whose `ui.group` is **`Open In`** joins the Open In ▸ of a link to
+its item (`withLinkOffers` / `mergeOpenInOffers`, `openIn.ts`): a markdown
+link, a page row that names a file, a tab, the page ☰, the terminal's
+path or URL. Its other groups stay their own submenus. A fixture tests it
+with `when: { item_commands: <url or file URI> }`.
 
 **Tests.** A fixture `when: { action_point: <id | name>, context? }` has
 `expect: { draws: none | button | menu, commands?: [ids] }`; `when: {

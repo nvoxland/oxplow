@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { MenuItem } from "./menu.js";
-import { localTarget, openInMenu, type OpenInEnv } from "./openIn.js";
+import { linkRefOf, localTarget, openInMenu, setOpenInHost, withLinkOffers, type OpenInEnv } from "./openIn.js";
 
 // Open In ▸ is one submenu for any path or URL the window recognizes:
 // the OS file manager, the default app, a terminal there, the browser,
@@ -83,4 +83,37 @@ test("a working-copy file URI on the local filesystem is a local path; another r
   expect(localTarget("oxplow:oxplow/task?provider=p&id=1", "/w")).toBeNull();
   expect(localTarget("https://example.com", "/w")).toEqual({ kind: "url", url: "https://example.com" });
   expect(localTarget("oxplow:oxplow/file?path=a.ts", null)).toBeNull();
+});
+
+// An extension's command about the link joins Open In ▸ when its
+// `ui.group` is "Open In"; its other commands keep their own groups.
+test("a link's Open In group joins the submenu; other groups stay their own", async () => {
+  const { env: e } = env({ filesLocal: false, openTerminalAt: null });
+  const entry = (id: string, group: string) => ({ id, group, label: id, run: () => {}, searchKey: id });
+  const own = openInMenu({ kind: "url", url: "https://github.com/a/b/pull/1" }, e)!;
+  const got = await withLinkOffers([own, { id: "copy", label: "Copy link", enabled: true }], "https://github.com/a/b/pull/1", async () => [
+    entry("Review Tool", "Open In"),
+    entry("Copy as Markdown", "GitHub"),
+  ]);
+  expect(got.map((i) => (i.separator ? "—" : i.label))).toEqual(["Open In", "Copy link", "—", "GitHub"]);
+  expect(labels(got[0]!)).toEqual(["Browser", "Oxplow", "Review Tool"]);
+});
+
+test("with no Open In of its own, an extension's Open In command makes one", async () => {
+  const entry = { id: "x", group: "Open In", label: "Jupyter", run: () => {}, searchKey: "x" };
+  const got = await withLinkOffers([{ id: "copy", label: "Copy path", enabled: true }], "oxplow:oxplow/file?path=a.ipynb", async () => [entry]);
+  expect(got.map((i) => i.label)).toEqual(["Copy path", "Open In"]);
+  expect(labels(got[1]!)).toEqual(["Jupyter"]);
+});
+
+test("a path inside the worktree is asked about as its file or directory URI; one outside is not", () => {
+  setOpenInHost({ worktree: "/w", openInApp: () => {}, openTerminalAt: () => {} });
+  try {
+    expect(linkRefOf({ kind: "file", path: "/w/src/a.ts" })).toBe("oxplow:oxplow/file?path=src/a.ts");
+    expect(linkRefOf({ kind: "dir", path: "/w" })).toBe("oxplow:oxplow/dir?path=");
+    expect(linkRefOf({ kind: "file", path: "/tmp/a.ts" })).toBeNull();
+    expect(linkRefOf({ kind: "url", url: "https://x.io" })).toBe("https://x.io");
+  } finally {
+    setOpenInHost(null);
+  }
 });

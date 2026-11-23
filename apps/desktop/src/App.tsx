@@ -144,7 +144,7 @@ import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
-import { openInBrowser, openInForRef, setOpenInHost } from "./openIn.js";
+import { openInBrowser, openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 
@@ -1959,7 +1959,11 @@ export function App() {
       // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`).
       tab.menuAtOpen = () => {
         const elsewhere = openInForRef(ref.id);
-        return elsewhere ? [elsewhere] : [];
+        return withLinkOffers(elsewhere ? [elsewhere] : [], ref.id).then((items) =>
+          // The tab's page menu has the ref's other commands; the tab adds
+          // only its Open In ▸.
+          items.filter((i) => i.id === "open-in"),
+        );
       };
       // An agent session's tab: its harness's logo and its status dot.
       if (typeOf(ref.id) === "oxplow/agent_session") {

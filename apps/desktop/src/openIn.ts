@@ -6,12 +6,14 @@
 /// extension's items for the link join after them (`extra`).
 /// `.context/usability.md` "Open In".
 import { filesAreLocal, openInSystemBrowser, openPath, revealPath } from "./api.js";
+import { offersForRef, refCommandMenuItems } from "./components/refCommands.js";
+import type { CommandEntry } from "./components/quickOpenResults.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import type { MenuItem } from "./menu.js";
 import { recordOpError } from "./opErrors.js";
 import { currentPlatform, revealLabel, type Platform } from "./platform.js";
 import { WORKING } from "./revision.js";
-import { isExternal, paramOf, typeOf } from "./uri/uri.js";
+import { dirUri, fileUri, isExternal, paramOf, typeOf } from "./uri/uri.js";
 
 /** What is opened: a local path (absolute) or a web URL. */
 export type OpenTarget = { kind: "file" | "dir"; path: string } | { kind: "url"; url: string };
@@ -156,4 +158,52 @@ export function openInForWorktreePath(kind: "file" | "dir", relPath: string, ext
   const root = worktree.replace(/\/+$/, "");
   const rel = relPath.replace(/^\/+/, "").replace(/\/+$/, "");
   return openInForPath(kind, rel ? `${root}/${rel}` : root, extra);
+}
+
+/** The `ui.group` whose commands about a link join its Open In ▸. */
+export const OPEN_IN_GROUP = "Open In";
+
+/** `items`, a link's menu, with the extensions' commands about `ref`
+ *  as it opens: those in the Open In group after oxplow's items in its
+ *  Open In ▸ (one is added when `items` has none), the rest a submenu per
+ *  group at the end (`refCommandMenuItems`). `offers` is the daemon's say
+ *  on which apply (`offersForRef`). */
+export async function withLinkOffers(
+  items: MenuItem[],
+  ref: string | null,
+  offers: (ref: string) => Promise<CommandEntry[]> = offersForRef,
+): Promise<MenuItem[]> {
+  const entries = ref ? await offers(ref) : [];
+  if (entries.length === 0) return items;
+  const { items: merged, rest } = mergeOpenInOffers(items, entries);
+  return [...merged, ...refCommandMenuItems(rest)];
+}
+
+/** `items` with `entries`' Open In group in its Open In ▸ (one is added
+ *  when `items` has none), and the entries of other groups, for the caller
+ *  to place. */
+export function mergeOpenInOffers(items: MenuItem[], entries: CommandEntry[]): { items: MenuItem[]; rest: CommandEntry[] } {
+  const extra: MenuItem[] = entries
+    .filter((e) => e.group === OPEN_IN_GROUP)
+    .map((e) => ({ id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run }));
+  const rest = entries.filter((e) => e.group !== OPEN_IN_GROUP);
+  if (extra.length === 0) return { items, rest };
+  const at = items.findIndex((i) => i.id === "open-in");
+  const merged =
+    at === -1
+      ? [...items, { id: "open-in", label: "Open In", enabled: true, submenu: extra }]
+      : items.map((i, n) => (n === at ? { ...i, submenu: [...(i.submenu ?? []), ...extra] } : i));
+  return { items: merged, rest };
+}
+
+/** The ref the daemon is asked about for `target` (a link's commands):
+ *  a web URL itself, a path inside this window's worktree as its file or
+ *  directory URI; null for a path outside it. */
+export function linkRefOf(target: OpenTarget): string | null {
+  if (target.kind === "url") return target.url;
+  const root = host?.worktree?.replace(/\/+$/, "");
+  if (!root) return null;
+  if (target.path !== root && !target.path.startsWith(`${root}/`)) return null;
+  const rel = target.path === root ? "" : target.path.slice(root.length + 1);
+  return target.kind === "file" ? fileUri(rel) : dirUri(rel);
 }

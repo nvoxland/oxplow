@@ -511,7 +511,10 @@ fn command_of(
     for need in &f.needs {
         oxplow_domain::capability::check_need(need).map_err(at_name)?;
     }
-    if let Some((field, message)) = f.ui.as_ref().and_then(|ui| ui.problem()) {
+    if let Some((field, message)) = f.ui.as_ref().and_then(|ui| {
+        ui.problem()
+            .or_else(|| crate::commands::ref_commands::link_filter_problem(ui))
+    }) {
         return Err(at_name(format!("`{field}`: {message}")));
     }
     let handlers = [f.entry.is_some(), f.scope.is_some(), f.provider.is_some()];

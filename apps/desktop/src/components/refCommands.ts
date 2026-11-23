@@ -11,8 +11,9 @@ import { refCommands } from "../api.js";
 import { refOffers, type OfferContext, type OfferDeps } from "../commandOffers.js";
 import type { MenuItem } from "../menu.js";
 import { recordOpError } from "../opErrors.js";
-import { usePersonCommands } from "../personCommandsStore.js";
+import { personCommandsNow, usePersonCommands } from "../personCommandsStore.js";
 import type { CommandEntry } from "./quickOpenResults.js";
+import type { CommandSpec } from "../tauri-bridge/generated/bindings.js";
 
 let host: { ctx: OfferContext; deps: OfferDeps } | null = null;
 
@@ -27,23 +28,29 @@ export function refOfferHost(): { ctx: OfferContext; deps: OfferDeps } | null {
   return host;
 }
 
-/** `ref`'s commands as of now: the daemon says which apply to it, the
- *  person's command listing says how each is run. Asked as a menu opens,
- *  so a ref's state (a session closed a moment ago) is current. */
+/** `ref`'s commands as of now, from `specs` (the person's command
+ *  listing, which says how each is run): the daemon says which apply to
+ *  it. Asked as a menu opens, so a ref's state (a session closed a moment
+ *  ago) is current. */
+async function offersWith(specs: CommandSpec[], ref: string): Promise<CommandEntry[]> {
+  if (!host) return [];
+  // A menu without them still opens, and the failure is reported.
+  const applies = await refCommands(ref).catch((e: unknown) => {
+    recordOpError({ label: "Load commands for a ref", message: e instanceof Error ? e.message : String(e) });
+    return [];
+  });
+  return refOffers(specs, ref, applies, host.ctx, host.deps);
+}
+
+/** `ref`'s commands as of now (`offersWith`), for a component. */
 export function useRefOffers(): (ref: string) => Promise<CommandEntry[]> {
   const specs = usePersonCommands();
-  return useCallback(
-    async (ref: string) => {
-      if (!host) return [];
-      // A menu without them still opens, and the failure is reported.
-      const applies = await refCommands(ref).catch((e: unknown) => {
-        recordOpError({ label: "Load commands for a ref", message: e instanceof Error ? e.message : String(e) });
-        return [];
-      });
-      return refOffers(specs, ref, applies, host.ctx, host.deps);
-    },
-    [specs],
-  );
+  return useCallback((ref: string) => offersWith(specs, ref), [specs]);
+}
+
+/** `ref`'s commands as of now, outside React (a menu built as it opens). */
+export function offersForRef(ref: string): Promise<CommandEntry[]> {
+  return offersWith(personCommandsNow(), ref);
 }
 
 /** `entries` by group, in the order groups first appear. */
