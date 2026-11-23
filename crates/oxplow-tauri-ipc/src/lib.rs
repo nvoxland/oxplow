@@ -190,7 +190,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::read_event_content,
             commands::generated::list_agent_statuses,
             // config
-            commands::generated::get_config,
             commands::generated::get_workspace_context,
             commands::generated::run_command,
             commands::generated::command_open_after,

@@ -118,12 +118,6 @@ async fn list_background_tasks_empty_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_config_returns_default_for_fresh_project() {
-    let app = TestApp::build().await;
-    let _ = commands::generated::get_config(app.state()).await.unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn read_workspace_file_missing_path_errors() {
     let app = TestApp::build().await;
     let result = commands::generated::read_workspace_file(

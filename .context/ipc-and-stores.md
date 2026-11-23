@@ -378,8 +378,7 @@ are no hand-written IPC types any more: `api-types.ts` is gone
 renderer-side view over it lives beside what builds it (the branch
 pickers' `BranchRef` / `GroupedGitRefs` / `RefOption` in
 `vcsHistory.ts`).
-Config reads (`getConfig`, the `set*` writers) return the generated
-`OxplowConfig` and the native menu is built as the generated
+The native menu is built as the generated
 `MenuGroupSnapshot`, with no casts at the boundary; a list the daemon
 always sends but the bindings mark optional (a `serde(default)` field)
 is defaulted at one reader (`generatedPaths`).

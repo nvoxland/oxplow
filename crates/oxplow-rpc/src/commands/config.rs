@@ -3,15 +3,9 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_app::config_service::read_config;
 use oxplow_app::Services;
-use oxplow_config::OxplowConfig;
 
 use crate::error::IpcError;
-
-pub async fn get_config(svc: &Services) -> Result<OxplowConfig, IpcError> {
-    Ok(read_config(&svc.config))
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WorkspaceContext {
@@ -39,20 +33,4 @@ pub async fn get_workspace_context(svc: &Services) -> Result<WorkspaceContext, I
         default_branch,
         vcs_enabled,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use crate::test_support::services;
-
-    #[tokio::test]
-    async fn get_config_dispatches_with_no_args() {
-        let (svc, _dir) = services().await;
-        let out = crate::dispatch("get_config", json!(null), &svc)
-            .await
-            .unwrap();
-        assert!(out.is_object(), "expected a config object, got {out}");
-    }
 }

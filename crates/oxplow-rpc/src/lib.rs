@@ -289,7 +289,6 @@ macro_rules! oxplow_command_table {
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
                 // code_quality (duplication only — the metrics scan was retired in)
                 // config
-                get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,

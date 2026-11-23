@@ -6,7 +6,6 @@ import type {
   HookEnvelope,
   OpOutcome,
   PointOffer,
-  OxplowConfig,
   OxplowEvent,
   Reads,
   SymbolLocation,
@@ -236,7 +235,7 @@ let cachedBridge: DesktopBridge | null = null;
 
 // The wire's own shapes, from the generated bindings: nothing converts a
 // shape at the boundary (P11).
-export type { BackgroundTask, OxplowConfig, OxplowEvent };
+export type { BackgroundTask, OxplowEvent };
 export type { OpOutcome } from "./tauri-bridge/index.js";
 
 
@@ -541,17 +540,6 @@ export async function renameCurrentStream(title: string): Promise<Stream> {
   if (!cur) throw new Error("no current stream to rename");
   return renameStream(cur.id, title);
 }
-
-export async function getConfig(): Promise<OxplowConfig> {
-  return unwrap(await commands.getConfig());
-}
-
-/// The enabled agent harnesses, by key, in priority order.
-
-
-/// Set (or clear, with null/blank) one of a harness's declared settings —
-/// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
-/// reads (the harness's listing names its settings).
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
 

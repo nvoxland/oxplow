@@ -110,7 +110,7 @@ pub enum OxplowEvent {
     },
     /// `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
     /// running `/oxplow:configure`). The in-memory config has been swapped;
-    /// the renderer refetches `get_config`.
+    /// the renderer re-reads its settings.
     ConfigChanged,
     /// The extension catalog may have changed: a file under the primary
     /// worktree's `.oxplow/extensions/` did, or the `extensions` config key
