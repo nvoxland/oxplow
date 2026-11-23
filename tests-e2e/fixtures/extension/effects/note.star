@@ -27,5 +27,5 @@ def transform(x):
     stream = "str999999" if "[fail]" in item["title"] else item["stream"]
     return {"commands": [{
         "name": "oxplow.bookmark.set",
-        "input": {"uri": item["uri"], "page_kind": "oxplow/task", "label": item["title"], "scope": "stream", "stream": stream},
+        "input": {"uri": item["uri"], "page_kind": "oxplow/task", "label": item["title"], "visibility_scope": "stream", "stream": stream},
     }]}
