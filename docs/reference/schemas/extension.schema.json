@@ -3279,6 +3279,21 @@
             "type": "string"
           },
           "default": []
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "after_collection": {
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false,
@@ -3356,6 +3371,26 @@
           "type": "string",
           "const": "person"
         }
+      ]
+    },
+    "ConfigCondition": {
+      "description": "`when: { config: <pointer>, in: [<values>] }`: a contribution that is\nthere only while a setting of its extension's own configuration is one\nof `in`. The one condition type every contribution kind that is offered\nby a setting shares.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "A JSON pointer into the extension's own configuration, naming a\nscalar key of `configuration.schema` (`/tasks/workflow`).",
+          "type": "string"
+        },
+        "in": {
+          "description": "The values for which it holds: of the key's type, and of its `enum`\nwhen it has one.",
+          "type": "array",
+          "items": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "config",
+        "in"
       ]
     },
     "EventTypesFile": {
@@ -3641,26 +3676,6 @@
       "required": [
         "capability",
         "id"
-      ]
-    },
-    "ConfigCondition": {
-      "description": "`when: { config: <pointer>, in: [<values>] }`: a contribution that is\nthere only while a setting of its extension's own configuration is one\nof `in`. The one condition type every contribution kind that is offered\nby a setting shares.",
-      "type": "object",
-      "properties": {
-        "config": {
-          "description": "A JSON pointer into the extension's own configuration, naming a\nscalar key of `configuration.schema` (`/tasks/workflow`).",
-          "type": "string"
-        },
-        "in": {
-          "description": "The values for which it holds: of the key's type, and of its `enum`\nwhen it has one.",
-          "type": "array",
-          "items": true
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "config",
-        "in"
       ]
     },
     "SkillFile": {

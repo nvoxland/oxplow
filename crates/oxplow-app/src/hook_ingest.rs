@@ -162,6 +162,8 @@ pub struct IngestOutcome {
     /// The harness of the agent session the hook came from (its registry
     /// key): what renders the answer. `None` when no session claims it.
     pub harness: Option<String>,
+    /// The finished tool event this hook appended, if any.
+    pub finished_tool_seq: Option<i64>,
 }
 
 /// What the transaction decided, applied after it commits.
@@ -175,6 +177,7 @@ struct Applied {
     opened_turn: bool,
     closed_turn: Option<AgentTurnId>,
     status: Option<(AgentStatusState, Option<String>)>,
+    finished_tool_seq: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -273,6 +276,7 @@ impl HookIngestService {
         // `v_event` / `v_agent_turn` on the commit's `DatasetsChanged`.
         outcome.closed_turn = applied.closed_turn;
         outcome.harness = applied.harness.clone();
+        outcome.finished_tool_seq = applied.finished_tool_seq;
         match applied.status {
             Some((state, detail)) => self.announce(thread, applied.session, state, detail).await,
             None => {
@@ -811,7 +815,10 @@ fn record_tx(
             let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
-                log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
+                let seq = log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
+                if env.kind == HookKind::PostToolUse {
+                    applied.finished_tool_seq = seq;
+                }
                 // A call that started a background job opens its record: the
                 // turn that made the call started it, as the harness reports.
                 if let Some(job) = &tool.started_job {
@@ -1460,7 +1467,7 @@ fn log_tool_tx(
     env: &HookEnvelope,
     tool: &ToolUse,
     session: Option<&str>,
-) -> Result<(), DomainError> {
+) -> Result<Option<i64>, DomainError> {
     let recorded = crate::tool_calls::recorded(tool, &row.worktree);
     let content = |value: &Option<serde_json::Value>| -> Result<Option<ContentRef>, DomainError> {
         match value {
@@ -1551,13 +1558,14 @@ fn log_tool_tx(
     };
     let turn = anchors.turn_id.map(AgentTurnId::new);
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
-    let first = append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    let seq = oxplow_db::event_log_store::append_unique_seq_tx(conn, ev.vocabulary, &envelope)?;
     // A message the call sends to another session, so its receipt can be
     // matched to this turn: once per call (a re-posted hook records
     // nothing), only when the policy let it run, and only with something to
     // match on.
     let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
-    if let (true, true, HookKind::PreToolUse, Some(sent)) = (first, allowed, env.kind, &tool.sent) {
+    if let (Some(_), true, HookKind::PreToolUse, Some(sent)) = (seq, allowed, env.kind, &tool.sent)
+    {
         if !sent.text.trim().is_empty() {
             agent_message_store::record_sent_tx(
                 conn,
@@ -1574,7 +1582,7 @@ fn log_tool_tx(
             )?;
         }
     }
-    Ok(())
+    Ok(seq)
 }
 
 #[cfg(test)]

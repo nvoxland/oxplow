@@ -887,6 +887,7 @@ impl Services {
             collection: self.collection.clone(),
             capabilities: self.capabilities.clone(),
             config: self.config.clone(),
+            global_config_dir: self.global_config_dir.clone(),
         }
     }
 
@@ -1769,9 +1770,18 @@ impl Services {
             collection: collection.clone(),
             capabilities: capabilities.clone(),
             config: config_arc.clone(),
+            global_config_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
         };
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisory_deps.clone(),
+            after_collection: false,
+        }));
+        event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
+            deps: advisory_deps.clone(),
+            after_collection: true,
         }));
         // Hints a turn's end raises, for the agent's next prompt.
         event_pump.register_async(Arc::new(advisories::TurnEndAdvisories {

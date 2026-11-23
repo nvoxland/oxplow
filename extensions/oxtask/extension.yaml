@@ -371,13 +371,14 @@ advisories:
   - id: untracked-work
     on: post-tool-use
     once_per: request
+    needs: [model:oxplow/task_record]
+    when: { config: /tasks/workflow, in: [agent_tracks] }
+    after_collection: false
     query: |
       SELECT 'This request changed files, and no task is in progress on this thread. If it is '
              || 'work the person will want to see on the Work panel, take or file its task and '
              || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
       WHERE :request_id IS NOT NULL
-        -- Only in the workflow where the agent tracks everything.
-        AND config('/tasks/workflow') = 'agent_tracks'
         AND EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record')
         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
                      WHERE t.request_id = :request_id)

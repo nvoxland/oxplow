@@ -172,6 +172,15 @@ pub struct Advisory {
     /// The capabilities (or features) it needs; without them it doesn't
     /// run.
     pub needs: Vec<String>,
+    #[serde(default)]
+    pub when: Option<config_schema::ConfigCondition>,
+    /// Post-tool advisories read collection results unless they opt out.
+    #[serde(default = "after_collection_default")]
+    pub after_collection: bool,
+}
+
+fn after_collection_default() -> bool {
+    true
 }
 
 /// An advisory as written in `extension.yaml`.
@@ -189,6 +198,10 @@ struct AdvisoryFile {
     audience: AdvisoryAudience,
     #[serde(default)]
     needs: Vec<String>,
+    #[serde(default)]
+    when: Option<config_schema::ConfigCondition>,
+    #[serde(default = "after_collection_default")]
+    after_collection: bool,
 }
 
 /// Where a mount goes among a page's parts: `start`, `end` (the default),
@@ -2396,6 +2409,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 heading: a.heading,
                 audience: a.audience,
                 needs: a.needs,
+                when: a.when,
+                after_collection: a.after_collection,
             }) {
                 Ok(a)
                     if a.needs
@@ -2432,7 +2447,20 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         ),
                     ))
                 }
-                Ok(a) => ext.advisories.push(a),
+                Ok(a) => {
+                    if let Some((code, why)) = a
+                        .when
+                        .as_ref()
+                        .and_then(|w| w.problem(ext.configuration.as_ref()))
+                    {
+                        ext.errors.push(
+                            at(code, man, line_under(&manifest, "advisories", &a.id), why)
+                                .contribution(format!("{}/{}", ext.namespace, a.id)),
+                        );
+                    } else {
+                        ext.advisories.push(a);
+                    }
+                }
                 Err(e) => ext.errors.push(at(
                     "advisory.invalid",
                     man,

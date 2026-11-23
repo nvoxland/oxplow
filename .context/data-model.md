@@ -1276,6 +1276,11 @@ producer's second `append_tx` fails with `Constraint` and writes nothing;
 NOTHING` and reports whether it landed, so a concurrent twin is skipped by
 the insert itself rather than a check before it).
 `seq` (AUTOINCREMENT) is the delivery order; `id` is the public identity.
+V73 initializes the immediate post-tool advisory consumer from the existing
+post-tool advisory checkpoint. On upgrade, the new consumer starts at the
+same position in the log and can process the outstanding events.
+The existing consumer remains the completion barrier for both groups of
+post-tool advisories for extensions that declare it in `after:`.
 
 These are the schema's first **STRICT** tables; every later spine table
 is STRICT too.
@@ -1451,7 +1456,8 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
 | `thread.checkpoint` | async | `snapshot.taken` (`turn_end`) | logs `thread.checkpoint` (changed since the turn began, writing tool count) | `Services::new` |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
-| `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
+| `advisories.post_tool` | async | `agent.tool.finished` | post-tool advisories that follow collection, persisted as nudges | boot |
+| `advisories.post_tool.immediate` | async | `agent.tool.finished` | post-tool advisories that need only the tool projection, persisted as nudges | boot |
 | `advisories.turn_end` | async | `thread.checkpoint` | turn-end advisories (hints) for the request holding the turn's end, persisted as undelivered nudges for the next prompt | `Services::new` |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |

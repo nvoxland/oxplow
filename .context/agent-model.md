@@ -2173,14 +2173,18 @@ configuration. Repository guidance can describe when to use them.
 
 The notices and advisory hits (kind
 `<namespace>/<advisory id>`) are written by pump
-reactors (`collection`, `advisories.post_tool` in
+reactors (`collection`, `advisories.post_tool` and `advisories.post_tool.immediate` in
 `post_tool_reactors.rs`; prompt and turn-end advisories too) to the
 `agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`) with
 the kind, message, trigger, turn and **cause** (the event, so a
 redelivered event can't fire the same kind twice). Missing-report notices
 use the person audience. For agent-directed advisories,
-`post_tool_context` settles the two post-tool reactors
-(up to 2.5 s), then takes the thread's undelivered nudges
+`post_tool_context` checks the active agent advisories and waits only when
+one can respond to the recorded tool event. It watches the matching consumer's
+checkpoint through that event, up to 2.5 s. The ordinary advisory consumer
+still follows collection. Advisories declared `after_collection: false`
+can respond after the tool call is projected. Collection and person-facing
+notices run in the background. The hook takes the thread's undelivered nudges
 (`take_for_agent`, which stamps `delivered_at`; oxplow's own kinds before
 advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
 `prompt_context` takes them the same way. One that lands after its hook
@@ -2214,11 +2218,10 @@ They carry no prompt, tool, or context contents.
   `prompt_commit` records the bytes marked for delivery and the time spent
   updating delivery bookkeeping. The terminal hook does this before writing
   its response. The chat host does it after accepting the context.
-- `post_tool_context` measures time waiting for reactors, time reading
-  pending nudges, and the size of the hook's context. `settled=false`
-  means settlement did not complete successfully within the hook.
-  `post_tool_reactor` measures each reactor's own run. A reactor may
-  finish after the hook returns, and runs in the same level overlap.
+- `post_tool_context` measures advisory eligibility, time waiting for the
+  selected consumer, time reading pending nudges, and returned bytes.
+  `waited_for` identifies the consumer when the hook waited. `settled=false`
+  means its checkpoint did not reach the tool event within the hook's wait.
 
 Total `bytes` fields use the returned UTF-8 text. Section lengths can
 differ from the total because the total includes formatting and trimming.

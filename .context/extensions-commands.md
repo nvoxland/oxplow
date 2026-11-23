@@ -518,7 +518,7 @@ advisories:
 ```
 
 - **Triggers.** `post-tool-use` runs on each `agent.tool.finished`
-  (`advisories.post_tool`), `prompt` on each prompt the person sends, and
+  (`advisories.post_tool` or `advisories.post_tool.immediate`), `prompt` on each prompt the person sends, and
   `turn-end` on each `thread.checkpoint` (`advisories.turn_end`): evaluated when the turn ends, heard when the agent
   next hears from oxplow. A turn's end is the one point every harness
   reaches, blocked or not.
@@ -541,6 +541,12 @@ advisories:
   the person dismisses one (`oxplow.hint.dismiss`, the row's right-click)
   or all (`oxplow.hint.dismiss_all`, Clear notices on the page and the
   dock panel's Clear).
+- **Eligibility and ordering.** `when: { config: /tasks/workflow, in: [agent_tracks] }`
+  uses the extension's effective settings to decide whether an advisory runs.
+  Post-tool advisories keep collection-before-advisory ordering by default.
+  An advisory that reads no results from the current tool run can declare
+  `after_collection: false` and run after tool-call projection. Oxtask uses
+  both declarations for `untracked-work`.
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<namespace>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call

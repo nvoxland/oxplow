@@ -255,13 +255,13 @@ hook + MCP wiring):
   `oxplow.test.record_run` command and a by-hand `oxplow.collector.sync` of a report
   collector log them too, anchored
   to the thread (in the collector's transaction: they're `External`, so their
-  events aren't caused by the run's `command.executed`). The hook waits ≤2.5 s for the `collection` and
-  `advisories.post_tool` consumers (`EventPump::settle`; the advisories
-  consumer declares `after: [collection]`, so it sees a run only once
-  collection has recorded it — an advisory reading `v_request_observation`
-  judges the run's own coverage) and then returns the thread's
-  **undelivered** nudges; one that
-  lands later goes out on the thread's next tool call.
+  events aren't caused by the run's `command.executed`). Collection runs
+  in the background. A hook waits up to 2.5 seconds for an eligible
+  agent-facing advisory's consumer to checkpoint the current tool event.
+  Post-tool advisories follow collection by default, so they can read
+  the current run. An advisory with `after_collection: false` reads the
+  tool projection independently. A nudge that lands later can be delivered
+  by the next tool or prompt hook.
   **The legs are isolated and coverage retries:** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
   failure can't kill the legs after it), and the coverage leg retries once

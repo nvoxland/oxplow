@@ -854,6 +854,9 @@ export type Advisory = {
 	 *  run.
 	 */
 	needs: string[],
+	when?: ConfigCondition | null,
+	/**  Post-tool advisories read collection results unless they opt out. */
+	afterCollection?: boolean,
 };
 
 /**  Who a hint is for. */

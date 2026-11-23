@@ -96,7 +96,16 @@ pub fn append_unique_tx(
     vocabulary: &Vocabulary,
     env: &Envelope,
 ) -> Result<bool, DomainError> {
-    Ok(insert_tx(conn, vocabulary, env, true)?.is_some())
+    Ok(append_unique_seq_tx(conn, vocabulary, env)?.is_some())
+}
+
+/// Append a deduplicated event and return its sequence when it was new.
+pub fn append_unique_seq_tx(
+    conn: &Connection,
+    vocabulary: &Vocabulary,
+    env: &Envelope,
+) -> Result<Option<i64>, DomainError> {
+    insert_tx(conn, vocabulary, env, true)
 }
 
 /// Append one envelope. Returns its `seq`. The payload must validate

@@ -12,7 +12,9 @@ use oxplow_domain::events::schema::{EventType as _, ThreadCheckpoint};
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
-use crate::extension::extensions::{AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension};
+use crate::extension::extensions::{
+    Advisory, AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension,
+};
 
 /// The params every advisory query may use.
 pub const PARAMS: &[&str] = &["thread_id", "stream_id", "turn_id", "request_id"];
@@ -282,6 +284,54 @@ pub struct AdvisoryDeps {
     /// What's active, for an advisory's needs.
     pub capabilities: std::sync::Arc<crate::capabilities::CapabilityRegistry>,
     pub config: std::sync::Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
+    pub global_config_dir: std::path::PathBuf,
+}
+
+pub(crate) fn visit_eligible(
+    svc: &AdvisoryDeps,
+    on: AdvisoryOn,
+    accept: impl Fn(&Advisory) -> bool,
+    mut visit: impl FnMut(&Extension, Vec<&Advisory>),
+) {
+    let root = svc.worktrees.project_dir();
+    let catalog = svc.extension_catalog.get(root);
+    let mut active = None;
+    for ext in catalog.iter().filter(|ext| ext.enabled) {
+        let candidates = ext.advisories.iter().filter(|a| a.on == on && accept(a));
+        let mut settings = None;
+        let selected: Vec<_> = candidates
+            .filter(|a| {
+                let meets_needs = a.needs.is_empty()
+                    || active
+                        .get_or_insert_with(|| {
+                            svc.capabilities
+                                .snapshot(&crate::config_service::read_config(&svc.config))
+                        })
+                        .unmet(&a.needs)
+                        .is_empty();
+                meets_needs
+                    && a.when.as_ref().is_none_or(|when| {
+                        settings
+                            .get_or_insert_with(|| {
+                                ext.configuration.as_ref().and_then(|decl| {
+                                    crate::extension::extension_configuration::effective_values(
+                                        root,
+                                        &svc.global_config_dir,
+                                        &ext.namespace,
+                                        decl,
+                                    )
+                                    .ok()
+                                })
+                            })
+                            .as_ref()
+                            .is_some_and(|values| when.holds(values))
+                    })
+            })
+            .collect();
+        if !selected.is_empty() {
+            visit(ext, selected);
+        }
+    }
 }
 
 /// Run the `on` advisories for `thread`, reading extensions from the main
@@ -294,15 +344,49 @@ pub async fn for_thread(
     on: AdvisoryOn,
     cause: Option<&crate::collection::RunCause>,
 ) -> Vec<AdvisoryHit> {
+    for_thread_matching(svc, thread, on, AdvisoryOrigin::Context(cause), |_| true)
+        .await
+        .unwrap_or_default()
+}
+
+enum AdvisoryOrigin<'a> {
+    Context(Option<&'a crate::collection::RunCause>),
+    Tool(&'a StoredEvent),
+}
+
+pub(crate) async fn for_tool_event(
+    svc: &AdvisoryDeps,
+    thread: &oxplow_domain::ThreadId,
+    event: &StoredEvent,
+    after_collection: bool,
+) -> Result<(), DomainError> {
+    for_thread_matching(
+        svc,
+        thread,
+        AdvisoryOn::PostToolUse,
+        AdvisoryOrigin::Tool(event),
+        |a| a.after_collection == after_collection,
+    )
+    .await
+    .map(|_| ())
+}
+
+async fn for_thread_matching(
+    svc: &AdvisoryDeps,
+    thread: &oxplow_domain::ThreadId,
+    on: AdvisoryOn,
+    origin: AdvisoryOrigin<'_>,
+    accept: impl Fn(&Advisory) -> bool,
+) -> Result<Vec<AdvisoryHit>, DomainError> {
     match svc
         .sql
-        .read_generation(for_thread_in_generation(svc, thread, on, cause))
+        .read_generation(for_thread_in_generation(svc, thread, on, origin, accept))
         .await
     {
         Ok(hits) => hits,
         Err(error) => {
             tracing::warn!(%error, "thread advisory generation read failed");
-            Vec::new()
+            Ok(Vec::new())
         }
     }
 }
@@ -311,29 +395,31 @@ async fn for_thread_in_generation(
     svc: &AdvisoryDeps,
     thread: &oxplow_domain::ThreadId,
     on: AdvisoryOn,
-    cause: Option<&crate::collection::RunCause>,
-) -> Vec<AdvisoryHit> {
+    origin: AdvisoryOrigin<'_>,
+    accept: impl Fn(&Advisory) -> bool,
+) -> Result<Vec<AdvisoryHit>, DomainError> {
     use oxplow_domain::stores::ThreadStore as _;
+    let mut extensions = Vec::new();
+    visit_eligible(svc, on, accept, |ext, advisories| {
+        let mut ext = ext.clone();
+        ext.advisories = advisories.into_iter().cloned().collect();
+        extensions.push(ext);
+    });
+    if extensions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tool_cause;
+    let cause = match origin {
+        AdvisoryOrigin::Context(cause) => cause,
+        AdvisoryOrigin::Tool(event) => {
+            tool_cause = crate::post_tool_reactors::cause_of(&svc.db, event).await?;
+            Some(&tool_cause)
+        }
+    };
     let stream = match svc.thread_store.get(thread).await {
         Ok(Some(t)) => Some(t.stream_id),
         _ => None,
     };
-    // An advisory whose needs aren't met (no task tracker active) doesn't run.
-    let active = svc
-        .capabilities
-        .snapshot(&crate::config_service::read_config(&svc.config));
-    // An extension with advisories declares `agent` (it doesn't load
-    // otherwise): what it says was approved when it was deployed.
-    let extensions: Vec<Extension> = svc
-        .extension_catalog
-        .get(svc.worktrees.project_dir())
-        .iter()
-        .cloned()
-        .map(|mut e| {
-            e.advisories.retain(|a| active.unmet(&a.needs).is_empty());
-            e
-        })
-        .collect();
     let scope = AdvisoryScope {
         thread: thread.value(),
         stream: stream.map(|s| s.value()),
@@ -362,7 +448,7 @@ async fn for_thread_in_generation(
             )
             .await;
     }
-    hits
+    Ok(hits)
 }
 
 /// The request a trigger belongs to: that of `turn` when the trigger names
@@ -482,6 +568,8 @@ mod tests {
             heading: None,
             audience: crate::extension::extensions::AdvisoryAudience::Agent,
             needs: Vec::new(),
+            when: None,
+            after_collection: true,
         }
     }
 

@@ -58,36 +58,54 @@ impl AgentContext {
         state.last_extension_context.remove(session_id);
     }
 
-    /// What the agent hears after a tool call: the thread's undelivered
-    /// agent-directed nudges. The recording itself is the pump's
-    /// (`tool_call_reactors`, `post_tool_reactors`, P3.5–P3.6): this waits
-    /// up to [`POST_TOOL_SETTLE`] for the two reactors that write nudges,
-    /// then takes whatever is undelivered — a nudge that lands after the
-    /// window goes out on the thread's next tool call instead of being lost.
-    /// Nothing for a session whose harness can't carry context after a
-    /// tool call (`tool_context`): its nudges wait for a prompt.
+    /// Deliver queued agent nudges. Wait only for an eligible advisory's
+    /// consumer to reach the event this hook just logged.
     pub async fn post_tool_context(
         &self,
         svc: &Services,
         thread_id: &ThreadId,
         harness: Option<&str>,
+        finished_tool_seq: Option<i64>,
     ) -> Option<String> {
+        use crate::extension::extensions::{AdvisoryAudience, AdvisoryOn};
+        use crate::post_tool_reactors::{IMMEDIATE_ADVISORIES, POST_TOOL_ADVISORIES};
+
         let mut timer = crate::agent_overhead::Timer::start();
         if !carries(svc, harness, TOOL_CONTEXT) {
             return None;
         }
         let harness = harness.unwrap_or("unknown");
-        let settled = svc
-            .event_pump
-            .settle_agent_hook(
-                &[
-                    crate::post_tool_reactors::COLLECTION,
-                    crate::post_tool_reactors::POST_TOOL_ADVISORIES,
-                ],
-                POST_TOOL_SETTLE,
-                timer.enabled().then_some(harness),
-            )
-            .await;
+        let wait = svc
+            .sql
+            .read_generation(async {
+                finished_tool_seq.and_then(|seq| {
+                    let deps = svc.advisory_deps();
+                    let mut consumer = None;
+                    crate::advisories::visit_eligible(
+                        &deps,
+                        AdvisoryOn::PostToolUse,
+                        |a| a.audience == AdvisoryAudience::Agent,
+                        |_, advisories| {
+                            if advisories.iter().any(|a| a.after_collection) {
+                                consumer = Some(POST_TOOL_ADVISORIES);
+                            } else if consumer.is_none() {
+                                consumer = Some(IMMEDIATE_ADVISORIES);
+                            }
+                        },
+                    );
+                    consumer.map(|consumer| (consumer, seq))
+                })
+            })
+            .await
+            .unwrap_or_default();
+        let eligibility_us = timer.lap_us();
+        let settled = if let Some((consumer, seq)) = wait {
+            svc.event_pump
+                .wait_for_hook_event(consumer, seq, POST_TOOL_SETTLE)
+                .await
+        } else {
+            true
+        };
         let reactor_wait_us = timer.lap_us();
         let text = undelivered(svc, thread_id).await;
         tracing::debug!(
@@ -95,6 +113,8 @@ impl AgentContext {
             stage = "post_tool_context",
             harness,
             bytes = text.as_ref().map_or(0, String::len),
+            eligibility_us,
+            waited_for = wait.map(|(consumer, _)| consumer),
             reactor_wait_us,
             settled,
             nudge_read_us = timer.lap_us(),
