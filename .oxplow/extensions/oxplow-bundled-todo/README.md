@@ -10,7 +10,7 @@ extension" has the rules for a move.
 
 ## What is still here
 
-- **Pages**: Explore Data, Merge Readiness and Remote Branches.
+- **Page**: Explore Data.
 - **Custom components**: Explore Data and the history graph
   (replaces Git History's plain list at `vcs.history.graph`).
 - **Advisories**: `hint-never-fires`, and `shared-files` /

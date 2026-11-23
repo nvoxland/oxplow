@@ -4,7 +4,7 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped. Holds the merge and branch pages, Explore Data, the history graph and advisories.
+description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped. Holds Explore Data, the history graph and advisories.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
@@ -15,20 +15,12 @@ permissions: [sql.read, files.read, ai.compute, agent.write]
 build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
-    Hold oxplow's own pages and components that haven't been reviewed yet:
-    merge readiness and remote
-    branches, Explore Data and the history graph.
+    Hold Explore Data, the history graph and advisories until they are reviewed.
   origin: null
   examples:
     - name: settings-lists-a-replaced-component-and-choosing-one-is-a-config-write
       input: { page: oxplow/settings, params: { area: integrations } }
       expect: the history graph's replacement can be chosen
-    - name: merge-readiness-lists-branches-ahead-of-the-stream
-      input: { page: merge-readiness, params: { stream_id: 1 } }
-      expect: nothing is ahead with one branch, so the list is empty
-    - name: remote-branches-lists-the-latest-first
-      input: { page: remote-branches, params: { stream_id: 1 } }
-      expect: the remote's branches newest first, and no local branch
     - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
       input: { page: oxplow/git-history }
       expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
