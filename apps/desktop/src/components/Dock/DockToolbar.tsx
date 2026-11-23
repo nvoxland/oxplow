@@ -34,7 +34,7 @@ export function barButtonStyle(hover: boolean): CSSProperties {
     padding: "3px 8px",
     border: "none",
     borderRadius: 4,
-    background: hover ? "rgba(255, 255, 255, 0.07)" : "transparent",
+    background: hover ? "var(--button-secondary-bg-hover)" : "transparent",
     color: hover ? "var(--text-primary)" : "var(--text-secondary)",
     font: "inherit",
     fontSize: "var(--text-xs)",
