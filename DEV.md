@@ -308,6 +308,78 @@ visible so the thinnest crates (`oxplow-mcp`, `oxplow-tauri-ipc`,
 `oxplow-pty`) get backfill before regressions creep
 in.
 
+## Use a local build for everyday work
+
+Use these steps to run a release build from this checkout on your own
+projects, the same way an installed release runs. A `run:dev` build is
+for working on oxplow. Do not use it for other work: it is a debug
+build, and it runs on whatever project and home you start it with.
+
+1. **Once per Mac: make the signing identity.** A release bundle is
+   ad-hoc signed (`"signingIdentity": "-"`). Thus each rebuild is a new
+   app to the keychain, and macOS asks again for the AI keys. Sign with
+   the stable identity from "Sign dev builds" to stop this:
+
+   ```
+   sh scripts/dev-signing-identity.sh
+   ```
+
+2. **Build from a clean, current `main`.** The bundle embeds the
+   frontend and the extensions as they are in the checkout, uncommitted
+   changes included. Build from a commit you trust:
+
+   ```
+   git status                    # nothing you do not want in the build
+   APPLE_SIGNING_IDENTITY="oxplow dev" CI=true bun run tauri:build:app
+   ```
+
+   `tauri:build:app` builds the `.app` only, with no DMG (you do not
+   need a DMG to install). `CI=true` is necessary only if you build the
+   DMG too ("The DMG step fails locally"). `APPLE_SIGNING_IDENTITY`
+   replaces the ad-hoc identity in `tauri.conf.json` for this build
+   only. Tauri also signs the sidecars with it. Leave it out if you did
+   not do step 1.
+
+3. **Quit the installed oxplow, then replace it:**
+
+   ```
+   rm -rf /Applications/Oxplow.app
+   cp -R target/release/bundle/macos/Oxplow.app /Applications/
+   ```
+
+   A local build does not get the `com.apple.quarantine` attribute, so
+   it opens with no "damaged" warning. Use "Install `oxplow` command
+   line…" one time to put `oxplow` on your `PATH`.
+
+4. **Optional: smoke-test it before you depend on it:**
+
+   ```
+   scripts/installed-smoke.sh /Applications/Oxplow.app
+   ```
+
+5. **To update,** pull, then do steps 2 and 3 again. Your projects'
+   data (`.oxplow/` in each project) and the global state do not
+   change when you replace the app. Each project migrates its database
+   when the new build first opens it.
+
+What is different from a dev build:
+
+- **Extensions come from the binary.** On a project that does not have
+  oxplow's extension sources, the installed app runs the foundation,
+  bundled, oxtask and oxwiki copies that are built into it. Thus you get
+  extension changes only when you rebuild. You do not use `oxplow-dev
+  extension deploy` for these projects. A project's own extensions
+  (`.oxplow/extensions/<name>`) deploy in the app as usual.
+- **Global state is the platform default** (`net.voxland.oxplow`), not
+  an `OXPLOW_HOME`. Keep `OXPLOW_HOME` on your dev commands only
+  ("Running a dev build alongside an installed one"), so that the two
+  builds do not share recents and sessions.
+- **One build per project at a time.** The instance lock is in each
+  project. Thus you cannot open this checkout in both the installed app
+  and a dev build. Give the dev build its own worktree for that.
+- **There are no auto-updates.** The updater plugin is linked, but
+  nothing calls it. You rebuild to update.
+
 ## Build installers
 
 ```
