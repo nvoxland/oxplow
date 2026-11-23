@@ -280,14 +280,14 @@ datasets:
       - { name: why, type: TEXT, doc: "The evidence: where the last call was removed." }
       - { name: uri, type: TEXT, doc: "The function's symbol." }
   - name: review_check
-    version: 1
-    description: "Where each review check stands for each analysed change: one row per change and per check (a collector on `change.analyzed`). `pending` until the check has run for the change's latest analysis, `failed` when that run failed, else `ok`. The Review page shows a pending check as still running."
+    version: 2
+    description: "Where each review check stands for each analysed change: one row per change and per check (a collector on `change.analyzed`), read from the check's own run for that change (the run the change's latest analysis event caused), never another change's. `pending` until that run has finished, `failed` when it failed, `ok` otherwise, `off` when the check is disabled and has no run for it. The Review page shows a pending check as still running."
     fields:
       - { name: change_id, type: INT, doc: "The change (v_change.id)." }
       - { name: collector, type: TEXT, doc: "The check, `<namespace>/<id>`." }
       - { name: collector_uri, type: TEXT, doc: "The check's collector URI (`v_collector.uri`)." }
-      - { name: state, type: TEXT, doc: "`pending`, `failed` or `ok`." }
-      - { name: last_run_at, type: TEXT, doc: "When the check last ran (any change); NULL when it never ran." }
+      - { name: state, type: TEXT, doc: "`pending`, `failed`, `ok` or `off` (v2)." }
+      - { name: last_run_at, type: TEXT, doc: "When the check's run for this change's latest analysis finished; NULL before it has (v2: this change's run, not the check's latest)." }
       - { name: error, type: TEXT, doc: "Why its last run failed, when `state` is `failed`." }
   - name: review_signal_findings
     version: 3

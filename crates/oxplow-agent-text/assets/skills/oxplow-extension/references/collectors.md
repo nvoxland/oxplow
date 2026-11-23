@@ -196,7 +196,7 @@ datasets:
   end_line, title, why, uri` (one you lack is NULL). `severity` is `high`,
   `medium` or `info`.
 - A check runs after the analysis, so a Review page reads
-  `v_oxplow_review_check` (per change and check: `pending`, `failed` or `ok`) to
+  `v_oxplow_review_check` (per change and check: `pending`, `failed`, `ok` or `off`) to
   say a check is still running.
 - The other ways to shape the review (a signal from SQL, a lint rule, ranking, a section) are in `references/recipes.md` "Customize the change review".
 - Test it with a fixture: commits with real files (`- { files: { "<path>": "…" } }`,

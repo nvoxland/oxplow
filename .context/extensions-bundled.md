@@ -189,11 +189,17 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       produces. `review_signal_unused` adds them to the list.
     - `v_oxplow_review_check` (`datasets/review_check.sql`): one row per
       analysed change and per check (a collector on `change.analyzed`):
-      `change_id, collector, collector_uri, state, last_run_at, error`.
-      `state` is `pending` until the check has run for the change's latest
-      `change.analyzed` (files) event (its `collector_checkpoint.last_event_id` is
-      older than that event's seq), `failed` when that run failed, else `ok`.
-      The Review page shows a pending check as still running.
+      `change_id, collector, collector_uri, state, last_run_at, error`
+      (version 2). The state is the check's own run for the change: the
+      `v_contribution_run` whose `cause_event_id` is the change's latest
+      `change.analyzed` (files) event (`v_event` at
+      `v_change.files_analyzed_seq`), never the collector's latest run, which
+      is one per collector and may be another change's. `pending` while that
+      run is missing or live, `failed` when it failed, else `ok`; `off` when
+      it has no run and the collector is disabled (`v_contribution_health`):
+      a disabled collector records nothing, so it would stay pending. The
+      Review page shows a pending check as still running and an off one as
+      off.
   - **Any two points.** The page reads one change, of any kind: a commit, a
     request, a turn, the working tree, or a `range` between any two points
     (`git:<sha>`, `snap:<id>`, `working`), which the Changes page makes for
@@ -201,7 +207,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     snapshots). Verification and scope come from a request's runs and task,
     so a range has none.
   - **The About rail** also says where the change's checks stand
-    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", or "None
+    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", "1 off", or "None
     ran") and which language packs are off for the files it changed (from
     `v_language`, with a link to turn each on).
   - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),

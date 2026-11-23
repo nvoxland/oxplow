@@ -184,7 +184,7 @@ and a dataset that adds its rows. The full recipe is "A review check" in
 - Its tree is the change's **head**, not the worktree: `files()` and
   `grep_tree()` read the snapshot or commit the change is headed at.
 - Key its rows by change. Return the keys it no longer makes in `deleted`.
-- `v_oxplow_review_check` says if the check is `pending`, `failed` or `ok`
+- `v_oxplow_review_check` says if the check is `pending`, `failed`, `ok` or `off`
   for a change. `oxplow.review.unused` is oxplow's own check.
 
 ### A lint rule that reaches the review

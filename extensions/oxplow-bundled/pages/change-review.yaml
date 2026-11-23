@@ -40,7 +40,8 @@ loaders:
                           WHEN sum(state <> 'ok') = 0 THEN 'Done'
                           ELSE trim(
                             CASE WHEN sum(state = 'pending') > 0 THEN printf('%d running ', sum(state = 'pending')) ELSE '' END
-                            || CASE WHEN sum(state = 'failed') > 0 THEN printf('%d failed', sum(state = 'failed')) ELSE '' END)
+                            || CASE WHEN sum(state = 'failed') > 0 THEN printf('%d failed ', sum(state = 'failed')) ELSE '' END
+                            || CASE WHEN sum(state = 'off') > 0 THEN printf('%d off', sum(state = 'off')) ELSE '' END)
                      END
               FROM v_oxplow_review_check k WHERE k.change_id = c.id) AS checks,
              -- The languages of its files whose pack is off: their files get
