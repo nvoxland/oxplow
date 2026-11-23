@@ -12,33 +12,6 @@ extension" has the rules for a move.
 
 - **Page**: Explore Data.
 - **Custom component**: Explore Data.
-- **Advisories**: `hint-never-fires`, and `shared-files` /
-  `shared-files-agent` (two threads changed the same file recently).
-- **Commands**: `oxplow.advisory_policy.read` / `.write`.
 
 `desktop-tests/` and `e2e-specs/` are the old frontend and browser tests of
 these pages. They are reference for a move, not specs to restore.
-
-## Settings
-
-The advisories' constants are this extension's `configuration:`. A project
-changes them without a fork:
-
-| Key | Default | What it controls |
-|---|---|---|
-| `sharedFiles.windowMinutes` | 60 | How recent an edit must be for two threads' requests that changed the same file to count as overlapping work |
-
-`oxplow.advisory_policy.read` returns the effective values, where each one
-came from, and the stamps that a write needs. `oxplow.advisory_policy.write`
-sets the project's or the person's layer, as a compare-and-swap on those
-stamps:
-
-```json
-{ "schema_version": 1,
-  "project": { "expected": { "schema_version": 1, "revision": 2 },
-               "values": { "sharedFiles": { "windowMinutes": 30 } } },
-  "personal": null }
-```
-
-A change takes effect without a restart: the advisory reads it on its next
-run.

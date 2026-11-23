@@ -573,13 +573,9 @@ advisories:
 - oxtask ships one hint: `untracked-work` (post-tool-use,
   `once_per: request`, while the task model has a live store: the request has
   a recorded edit and no linked task, and the thread has no task in
-  progress; the `track-work` skill says what to do). The earlier
-  outcome hints (`large-uncommitted`, `landed-in-progress`, the two
-  shared-files hints (requests on different threads changed one file
-  within `sharedFiles.windowMinutes`; see work-tracking.md "Cross-thread
-  ownership"), `metric-deltas`, `threshold-crossed`) are in the
-  parked `oxplow-bundled-todo` project extension (see
-  [metrics.md](./metrics.md) for the metric ones). **Bundled advisories set no coding
+  progress; the `track-work` skill says what to do). Shared Work shows
+  overlapping edits and Agent Interface shows advisory effectiveness.
+  **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never
   how a project should code — no coverage target, no "add tests" — and
   a project that wants one writes its own advisory (the `coverage-target`

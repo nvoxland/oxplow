@@ -208,8 +208,7 @@ its scope trace.
   calls to the session transcript when available. Command Errors groups
   messages before the `. Expected` suffix and links to individual Run details.
   All-time Hints uses `v_hint_stat` across every thread and shows hints that
-  never fired first. Its totals are independent of the page filters. The
-  `hint-never-fires` advisory remains parked in the disabled bundled-todo extension.
+  never fired first. Its totals are independent of the page filters.
 - **Failure, retry and freshness are the same everywhere it matters.** A run
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a
