@@ -17,7 +17,9 @@ import { useContextMenu } from "../components/useRowContextMenu.js";
 import { terminalMenuItems } from "./terminalMenu.js";
 import { terminalSelectionWhat } from "./terminalSelection.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
-import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
+import { installFilePathLinkProvider, installUrlLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
+import type { MenuItem } from "../menu.js";
+import { openInBrowser, openInForPath, openInForRef } from "../openIn.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import { isMacPlatform } from "../keybindings.js";
 
@@ -150,13 +152,37 @@ export function TerminalSurface({
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const menu = useContextMenu();
+  // The link under the pointer (the link providers' hover / leave): the
+  // right-click menu's Open In ▸ is for it.
+  const hovered = useRef<{ kind: "path"; match: FilePathLinkActivation } | { kind: "url"; url: string } | null>(null);
+  /** The hovered link's items: Open In ▸ and its Copy. */
+  const linkItems = async (): Promise<MenuItem[]> => {
+    const link = hovered.current;
+    if (!link) return [];
+    const copy = (id: string, label: string, text: string): MenuItem => ({
+      id,
+      label,
+      enabled: true,
+      run: () => void navigator.clipboard.writeText(text).catch(() => {}),
+    });
+    if (link.kind === "url") {
+      const elsewhere = openInForRef(link.url);
+      return [...(elsewhere ? [elsewhere] : []), copy("copy-link", "Copy link", link.url)];
+    }
+    const abs = await resolveClickedPath(link.match.text, props.current.cwd, props.current.worktreePath);
+    if (!abs) return [];
+    // A path the terminal printed may be a file or a directory; one that
+    // ends in `/` is a directory.
+    const elsewhere = openInForPath(link.match.text.endsWith("/") ? "dir" : "file", abs.replace(/\/+$/, ""));
+    return [...(elsewhere ? [elsewhere] : []), copy("copy-path", "Copy path", abs)];
+  };
   const openMenu = (event: MouseEvent) => {
     const term = termRef.current;
     if (!term) return;
     const what = terminalSelectionWhat(term, uri);
-    menu.open(
-      event,
+    const build = (link: MenuItem[]) =>
       terminalMenuItems({
+        link,
         selection: term.getSelection(),
         mouseCaptured: term.modes.mouseTrackingMode !== "none",
         mac: isMacPlatform(),
@@ -170,8 +196,8 @@ export function TerminalSurface({
             })
             .catch((error) => logUi("warn", "terminal paste: clipboard read failed", { error: String(error) })),
         add: (what) => void addToContext(what),
-      }),
-    );
+      });
+    menu.open(event, hovered.current ? linkItems().then(build) : build([]));
   };
   // Read at event time: the terminal is set up once.
   const props = useRef({ onOpened, onData, onBinary, onResize, onInterrupt, worktreePath, cwd, onOpenFile, isLinkablePath });
@@ -234,6 +260,16 @@ export function TerminalSurface({
         });
       },
       validatePath: (path: string) => props.current.isLinkablePath?.(path) ?? true,
+      onHover: (match) => {
+        hovered.current = match ? { kind: "path", match } : null;
+      },
+    });
+    // A web URL: a click opens the browser.
+    const urlLinkDisp = installUrlLinkProvider(term, {
+      onActivate: openInBrowser,
+      onHover: (url) => {
+        hovered.current = url ? { kind: "url", url } : null;
+      },
     });
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
@@ -355,6 +391,7 @@ export function TerminalSurface({
       dataDisp.dispose();
       binaryDisp.dispose();
       linkProviderDisp.dispose();
+      urlLinkDisp.dispose();
       termRef.current = null;
       term.dispose();
     };

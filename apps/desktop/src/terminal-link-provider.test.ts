@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createMemoizedScanner, findFilePathMatches } from "./terminal-link-provider.js";
+import { createMemoizedScanner, findFilePathMatches, findUrlMatches } from "./terminal-link-provider.js";
 
 describe("findFilePathMatches", () => {
   it("finds a relative path with extension", () => {
@@ -176,5 +176,25 @@ describe("createMemoizedScanner", () => {
     scan("a"); // still cached because it was recently used
     // Under FIFO "a" would have been evicted by "c" and recomputed here.
     expect(calls).toBe(3); // only a, b, c ever computed
+  });
+});
+
+// A web URL in terminal output is a link of its own: the browser opens it,
+// and the path scanner skips it.
+describe("findUrlMatches", () => {
+  it("finds http(s) URLs, without trailing prose punctuation", () => {
+    const line = "see https://example.com/a?b=1, or (http://x.io/p).";
+    expect(findUrlMatches(line)).toEqual([
+      { start: 4, end: 29, url: "https://example.com/a?b=1" },
+      { start: 35, end: 48, url: "http://x.io/p" },
+    ]);
+  });
+  it("a URL's own balanced parentheses stay", () => {
+    expect(findUrlMatches("https://en.wikipedia.org/wiki/Foo_(bar)").map((m) => m.url)).toEqual([
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    ]);
+  });
+  it("no scheme, no URL", () => {
+    expect(findUrlMatches("example.com and ftp://x")).toEqual([]);
   });
 });

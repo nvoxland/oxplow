@@ -69,3 +69,15 @@ test("with the mouse a program's and nothing selected, the menu says how to sele
   const selected = terminalMenuItems({ selection: "x", uri: URI, mouseCaptured: true, mac: true, copy: () => {}, paste: () => {}, add: () => {} });
   expect(selected.map((i) => i.id)).toEqual(["copy", "paste", "add-to-context"]);
 });
+
+test("over a link, the link's items come first", () => {
+  const items = terminalMenuItems({
+    selection: "",
+    uri: URI,
+    link: [{ id: "open-in", label: "Open In", enabled: true, submenu: [] }, { id: "copy-link", label: "Copy link", enabled: true }],
+    copy: () => {},
+    paste: () => {},
+    add: () => {},
+  });
+  expect(items.map((i) => (i.separator ? "—" : i.id))).toEqual(["open-in", "copy-link", "—", "copy", "paste", "add-to-context"]);
+});

@@ -5,7 +5,9 @@
  * returns offset ranges plus optional `:line[:col]` for each match in
  * a line of terminal text. `installFilePathLinkProvider` registers
  * those ranges as xterm ILinks so they render underlined and route a
- * click through `onActivate`.
+ * click through `onActivate`. `findUrlMatches` / `installUrlLinkProvider`
+ * do the same for http(s) URLs. Both say which link the pointer is over
+ * (`onHover`), for the terminal's right-click Open In ▸.
  */
 
 import type { IDisposable, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
@@ -138,6 +140,35 @@ function looksLikePath(s: string): boolean {
   return true;
 }
 
+export interface UrlMatch {
+  /** Inclusive start offset in the line text (0-based). */
+  start: number;
+  /** Exclusive end offset. */
+  end: number;
+  url: string;
+}
+
+const URL_RE = /https?:\/\/[^\s<>"'`]+/gi;
+const URL_TRAILING = /[.,;:!?'"`>\]}]$/;
+
+/** The http(s) URLs in `line`, without the prose punctuation after one;
+ *  a closing parenthesis stays when the URL opened it. */
+export function findUrlMatches(line: string): UrlMatch[] {
+  const out: UrlMatch[] = [];
+  URL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = URL_RE.exec(line)) !== null) {
+    let url = m[0];
+    for (;;) {
+      if (URL_TRAILING.test(url)) url = url.slice(0, -1);
+      else if (url.endsWith(")") && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0)) url = url.slice(0, -1);
+      else break;
+    }
+    if (/^https?:\/\/[^/]/i.test(url)) out.push({ start: m.index, end: m.index + url.length, url });
+  }
+  return out;
+}
+
 /** Max distinct line-texts kept in the per-provider scan memo. xterm only
  *  asks `provideLinks` about visible/hovered rows, so the working set is
  *  tiny (a viewport plus whatever's been hovered); this cap just bounds a
@@ -193,8 +224,7 @@ export interface FilePathLinkActivation {
 /**
  * Wire the file-path scanner into an xterm Terminal as a link
  * provider. `onActivate` is called when the user clicks a detected
- * link; `getHover` (optional) lets the host customize the hover
- * tooltip — defaults to "Open <text>".
+ * link; `onHover` says which link the pointer is over (null: none).
  *
  * Returns the IDisposable from `term.registerLinkProvider` so the
  * caller can dispose it on terminal teardown.
@@ -203,10 +233,11 @@ export function installFilePathLinkProvider(
   term: Terminal,
   opts: {
     onActivate(match: FilePathLinkActivation): void;
-    getHover?(match: FilePathLinkActivation): string;
     /** Final gate: only linkify a path this returns true for. Read fresh on
      * every line render, so a ref-backed predicate picks up index updates. */
     validatePath?: (path: string) => boolean;
+    /** The pointer is over this link now, or (null) left it. */
+    onHover?(match: FilePathLinkActivation | null): void;
   },
 ): IDisposable {
   // Cache the shape-only scan per row text so scroll/hover over unchanged
@@ -232,40 +263,73 @@ export function installFilePathLinkProvider(
       const cols = term.cols;
       const links: ILink[] = [];
       for (const m of matches) {
-        // Convert 0-based char offsets in the wrapped line text to
-        // xterm 1-based cell coordinates {x, y}, accounting for the
-        // line wrapping at `cols` cells per row. (We assume one cell
-        // per char — wide CJK chars will misalign by a cell here, an
-        // acceptable v1 limitation; the click still resolves the
-        // path correctly because we pass `m.text` straight through.)
-        const startCell = m.start;
-        const endCell = m.end - 1; // inclusive end cell
-        const start = {
-          x: (startCell % cols) + 1,
-          y: bufferLineNumber + Math.floor(startCell / cols),
-        };
-        const end = {
-          x: (endCell % cols) + 1,
-          y: bufferLineNumber + Math.floor(endCell / cols),
-        };
+        // One cell per char: wide CJK chars misalign by a cell (a v1
+        // limit); the click still resolves, as `m.text` goes straight on.
         const activation: FilePathLinkActivation = {
           text: m.text,
           line: m.line,
           column: m.column,
         };
         links.push({
-          range: { start, end },
+          range: cellRange(cols, bufferLineNumber, m.start, m.end),
           text: text.slice(m.start, m.end),
           activate: () => opts.onActivate(activation),
-          hover: opts.getHover
-            ? (_e, _t) => { /* xterm renders default tooltip via `text`; hook reserved */ }
-            : undefined,
+          hover: () => opts.onHover?.(activation),
+          leave: () => opts.onHover?.(null),
         });
       }
       callback(links);
     },
   };
   return term.registerLinkProvider(provider);
+}
+
+/** The cells a `[start, end)` offset range of a wrapped line covers. */
+function cellRange(cols: number, bufferLineNumber: number, startAt: number, endAt: number): ILink["range"] {
+  const endCell = endAt - 1;
+  return {
+    start: { x: (startAt % cols) + 1, y: bufferLineNumber + Math.floor(startAt / cols) },
+    end: { x: (endCell % cols) + 1, y: bufferLineNumber + Math.floor(endCell / cols) },
+  };
+}
+
+/** Wire `findUrlMatches` into `term` as a link provider: a click calls
+ *  `onActivate`, and `onHover` says which URL the pointer is over. */
+export function installUrlLinkProvider(
+  term: Terminal,
+  opts: { onActivate(url: string): void; onHover?(url: string | null): void },
+): IDisposable {
+  const scan = new Map<string, UrlMatch[]>();
+  const scanLine = (text: string): UrlMatch[] => {
+    const hit = scan.get(text);
+    if (hit) return hit;
+    const found = findUrlMatches(text);
+    scan.set(text, found);
+    if (scan.size > MATCH_CACHE_MAX) {
+      const oldest = scan.keys().next().value;
+      if (oldest !== undefined) scan.delete(oldest);
+    }
+    return found;
+  };
+  return term.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const text = readWrappedLine(term, bufferLineNumber);
+      const matches = text ? scanLine(text) : [];
+      if (matches.length === 0) {
+        callback(undefined);
+        return;
+      }
+      callback(
+        matches.map((m) => ({
+          range: cellRange(term.cols, bufferLineNumber, m.start, m.end),
+          text: m.url,
+          activate: () => opts.onActivate(m.url),
+          hover: () => opts.onHover?.(m.url),
+          leave: () => opts.onHover?.(null),
+        })),
+      );
+    },
+  });
 }
 
 /**

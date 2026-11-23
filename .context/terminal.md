@@ -509,7 +509,7 @@ now passes the hook's `guard`, which suppresses the passive closes
   re-attach replays the buffer. The open one is history state
   (`terminalActive`, `Record<streamId, terminalId>`).
 
-## File-path link provider
+## File-path and URL link providers
 
 `apps/desktop/src/terminal-link-provider.ts` exports two pieces:
 
@@ -547,6 +547,18 @@ relative paths against the prop `worktreePath` first (`/`-prefixed
 paths pass through; `~/` paths are dropped — the frontend doesn't
 know HOME).
 
+**Web URLs are links too.** `findUrlMatches(line)` finds `http(s)://…`
+(prose punctuation after one trimmed, a closing parenthesis kept when the
+URL opened it), and `installUrlLinkProvider` registers them: a click opens
+the system browser (`openInBrowser`).
+
+**The right-click menu knows the link under the pointer.** Both providers
+take `onHover(match | null)` (xterm's `ILink.hover` / `leave`); the
+surface keeps the hovered link, and its menu puts that link's items first
+(`terminalMenuItems({ link })`): Open In ▸ (`openIn.ts`) and Copy path /
+Copy link. A path resolves as a click does (`resolveClickedPath`); one that
+ends in `/` is a directory, any other a file (the terminal can't tell).
+
 ## Path resolution and caveats
 
 - Relative paths resolve against the session's **live cwd**, falling
@@ -577,8 +589,6 @@ Compose a separate xterm link provider rather than expanding
 `findFilePathMatches`. xterm allows multiple registered providers;
 each scans the same line. Examples for the future:
 
-- A WebLinks-style URL provider (currently no `WebLinksAddon`
-  installed; URLs in terminal output are not clickable).
 - Stack-trace formats from non-rust/non-js languages
   (`File "x.py", line 42`, `at com.foo.Bar(Bar.java:42)`).
 
