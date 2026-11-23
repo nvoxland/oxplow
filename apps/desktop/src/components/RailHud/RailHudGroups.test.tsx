@@ -95,6 +95,9 @@ test("while a panel is dragged the groups' dividers show, and a drop on one move
   const view = await rail();
   const dt = dataTransfer();
   fireEvent.dragStart(view.getByTestId("rail-section-drag-ext:x/go"), { dataTransfer: dt });
+  // Not during dragstart: WebKit cancels a drag whose page changes then.
+  expect(view.queryByTestId("rail-group-divider-stream")).toBeNull();
+  await waitFor(() => view.getByTestId("rail-group-divider-stream"));
   for (const group of ["thread", "stream", "project"]) {
     expect(view.getByTestId(`rail-group-divider-${group}`).textContent).toContain(
       group === "thread" ? "This thread" : group === "stream" ? "This stream" : "This project",
@@ -114,7 +117,7 @@ test("a drop on the Remove zone takes the panel out of the rail", async () => {
   const view = await rail();
   const dt = dataTransfer();
   fireEvent.dragStart(view.getByTestId("rail-section-drag-ext:x/prs"), { dataTransfer: dt });
-  const zone = view.getByTestId("rail-remove-zone");
+  const zone = await waitFor(() => view.getByTestId("rail-remove-zone"));
   fireEvent(zone, createEvent.dragOver(zone, { dataTransfer: dt }));
   fireEvent(zone, createEvent.drop(zone, { dataTransfer: dt }));
   await waitFor(() => expect(saved.length).toBe(1));

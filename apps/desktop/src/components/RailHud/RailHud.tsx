@@ -50,6 +50,7 @@ interface RailSectionsValue {
     onDragEnd(): void;
   };
   dropZone(id: RailSectionId): {
+    onDragEnter(e: React.DragEvent): void;
     onDragOver(e: React.DragEvent): void;
     onDragLeave(): void;
     onDrop(e: React.DragEvent): void;
@@ -82,6 +83,7 @@ function useRailSections(): {
   dragging: boolean;
   /** A group's divider, or the Remove zone (`null`), as a drop target. */
   groupDrop(group: PanelGroup | null): {
+    onDragEnter(e: React.DragEvent): void;
     onDragOver(e: React.DragEvent): void;
     onDragLeave(): void;
     onDrop(e: React.DragEvent): void;
@@ -99,6 +101,22 @@ function useRailSections(): {
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
   const [groupDropTarget, setGroupDropTarget] = useState<PanelGroup | "remove" | null>(null);
+  // The dividers and the Remove zone come in a tick after the drag starts:
+  // WebKit (macOS's window) cancels a drag whose page changes during
+  // `dragstart`, and the press becomes a text selection.
+  const [showGroups, setShowGroups] = useState(false);
+  const groupsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endDrag = useCallback(() => {
+    if (groupsTimer.current !== null) clearTimeout(groupsTimer.current);
+    groupsTimer.current = null;
+    setDraggingId(null);
+    setDropTarget(null);
+    setGroupDropTarget(null);
+    setShowGroups(false);
+  }, []);
+  useEffect(() => () => {
+    if (groupsTimer.current !== null) clearTimeout(groupsTimer.current);
+  }, []);
 
   const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
 
@@ -108,16 +126,18 @@ function useRailSections(): {
       e.dataTransfer.setData(RAIL_SECTION_DRAG_MIME, id);
       e.dataTransfer.effectAllowed = "move";
       setDraggingId(id);
+      if (groupsTimer.current !== null) clearTimeout(groupsTimer.current);
+      groupsTimer.current = setTimeout(() => {
+        groupsTimer.current = null;
+        setShowGroups(true);
+      }, 0);
     },
-    onDragEnd() {
-      setDraggingId(null);
-      setDropTarget(null);
-      setGroupDropTarget(null);
-    },
-  }), []);
+    onDragEnd: endDrag,
+  }), [endDrag]);
 
-  const groupDrop = useCallback((group: PanelGroup | null) => ({
-    onDragOver(e: React.DragEvent) {
+  const groupDrop = useCallback((group: PanelGroup | null) => {
+    // Safari accepts a drop only where `dragenter` was cancelled too.
+    const accept = (e: React.DragEvent) => {
       if (!draggingId) return;
       if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
       e.preventDefault();
@@ -125,27 +145,30 @@ function useRailSections(): {
       const target = group ?? "remove";
       if (groupDropTarget !== target) setGroupDropTarget(target);
       if (dropTarget) setDropTarget(null);
-    },
+    };
+    return {
+    onDragEnter: accept,
+    onDragOver: accept,
     onDragLeave() {
       if (groupDropTarget === (group ?? "remove")) setGroupDropTarget(null);
     },
     onDrop(e: React.DragEvent) {
       e.preventDefault();
       const sourceId = e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId;
-      setDraggingId(null);
-      setDropTarget(null);
-      setGroupDropTarget(null);
+      endDrag();
       if (!sourceId) return;
       if (group) panels.moveToGroup(sourceId, group);
       else panels.hide(sourceId);
     },
-  }), [draggingId, dropTarget, groupDropTarget, panels]);
+    };
+  }, [draggingId, dropTarget, groupDropTarget, panels, endDrag]);
 
-  const dropZone = useCallback((id: RailSectionId) => ({
-    onDragOver(e: React.DragEvent) {
-      // Only react to our own section drag. Accept it everywhere (even
-      // over the dragged section itself) so the insertion line tracks the
-      // cursor and the cursor resolves to "move" (not the "+" copy icon).
+  const dropZone = useCallback((id: RailSectionId) => {
+    // Only react to our own section drag. Accept it everywhere (even over
+    // the dragged section itself) so the insertion line tracks the cursor
+    // and the cursor resolves to "move" (not the "+" copy icon). Safari
+    // accepts a drop only where `dragenter` was cancelled too.
+    const accept = (e: React.DragEvent) => {
       if (!draggingId) return;
       if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
       e.preventDefault();
@@ -154,21 +177,24 @@ function useRailSections(): {
       const side: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
       if (dropTarget?.id !== id || dropTarget.side !== side) setDropTarget({ id, side });
       if (groupDropTarget) setGroupDropTarget(null);
-    },
+    };
+    return {
+    onDragEnter: accept,
+    onDragOver: accept,
     onDragLeave() {
       if (dropTarget?.id === id) setDropTarget(null);
     },
     onDrop(e: React.DragEvent) {
       e.preventDefault();
       const sourceId = e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId;
-      setDraggingId(null);
-      setDropTarget(null);
+      endDrag();
       if (!sourceId || sourceId === id) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const side = e.clientY >= rect.top + rect.height / 2 ? "after" : "before";
       panels.moveBeside(sourceId, id, side);
     },
-  }), [draggingId, dropTarget, groupDropTarget, panels]);
+    };
+  }, [draggingId, dropTarget, groupDropTarget, panels, endDrag]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
@@ -194,7 +220,7 @@ function useRailSections(): {
     value,
     groups: layout.groups,
     groupList: panels.groups,
-    dragging: draggingId !== null,
+    dragging: draggingId !== null && showGroups,
     groupDrop,
     groupDropTarget,
     order: layout.order,
@@ -551,6 +577,7 @@ function GroupDivider({
 }: {
   group: PanelGroup;
   over: boolean;
+  onDragEnter(e: React.DragEvent): void;
   onDragOver(e: React.DragEvent): void;
   onDragLeave(): void;
   onDrop(e: React.DragEvent): void;

@@ -1130,6 +1130,12 @@ its right-click menu.
   file-drop events (and then reconcile both).
 - **Highlight the drop target** (dashed border + accent glow) whenever
   a compatible drag enters it. Clear the highlight on leave/drop.
+- **Never change the page during `dragstart`.** WebKit (macOS's window)
+  cancels a drag whose DOM changes in its `dragstart` (it ends at once and
+  the press becomes a text selection); Chromium doesn't, so only a WebKit
+  run shows it. Show drop targets a tick later (the rail's group dividers:
+  `setTimeout(…, 0)`). And **cancel `dragenter` as well as `dragover`** on
+  a drop target: Safari accepts a drop only where both were.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. **Every internal MIME
   lives in `apps/desktop/src/dragMimes.ts`** — `RAIL_SECTION_DRAG_MIME`
