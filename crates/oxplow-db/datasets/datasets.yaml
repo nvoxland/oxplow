@@ -34,14 +34,14 @@ field_groups:
 
 datasets:
 - name: agent_nudge
-  version: 4
-  description: "Guidance oxplow raised — a hint (`<extension>/<id>`) or its own nudge (`report-less-run`) — for the coding agent, taken by its next prompt or tool call, or for a person, shown in Alerts until they dismiss it."
+  version: 5
+  description: "Guidance oxplow raised: a hint (`<extension>/<id>`) for the coding agent, taken by its next prompt or tool call, or oxplow's own notice (`report-less-run`, a run that wrote no report) for a person, shown in Alerts until they dismiss it."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "kind", type: "TEXT", doc: "What kind of nudge, e.g. `report-less-run` or an advisory's `<extension>/<id>`." }
-    - { name: "message", type: "TEXT", doc: "The text the agent was given." }
+    - { name: "message", type: "TEXT", doc: "The text the agent or person was given." }
     - { name: "trigger", type: "TEXT", doc: "What prompted it, if recorded." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "delivered_at", type: "TEXT", doc: "When a hook response carried it to the agent, or the person dismissed it; NULL while it waits." }
