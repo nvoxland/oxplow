@@ -174,7 +174,9 @@ Everything a person reaches a command by comes from the offers:
   the project commands among them — beside only the native Edit roles
   (Undo … Select All, done by the OS's responder chain: WKWebView only
   delivers ⌘C/⌘V with them in the menu; File ▸ Open Recent's submenu is
-  built from the recents list and runs `projects.write` `open`);
+  built from the recents list and runs `projects.write` `open`; View ▸
+  Left Rail lists the rail's panels, checked when shown — pages-and-tabs.md
+  "Left-nav panels");
 - **shortcuts** are the offers' `ui.shortcut`s;
 - **a ref's menus** — a page's ☰, a row's right-click menu (a table or
   card row, the Board's card) and the Navigator's thread menu — offer the

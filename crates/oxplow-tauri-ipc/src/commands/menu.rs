@@ -19,7 +19,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 use crate::error::IpcError;
@@ -229,11 +231,27 @@ fn build_submenu(
             continue;
         }
 
+        let shortcut = item
+            .shortcut
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(normalize_accelerator);
+        // An item that says `checked` (View ▸ Left Rail's panels) is a
+        // check item, ticked or not.
+        if let Some(checked) = item.checked {
+            let mut builder = CheckMenuItemBuilder::with_id(item.id.clone(), &item.label)
+                .enabled(item.enabled)
+                .checked(checked);
+            if let Some(accelerator) = shortcut {
+                builder = builder.accelerator(accelerator);
+            }
+            submenu = submenu.item(&builder.build(app)?);
+            continue;
+        }
         let mut builder =
             MenuItemBuilder::with_id(item.id.clone(), &item.label).enabled(item.enabled);
-        if let Some(shortcut) = item.shortcut.as_deref().filter(|s| !s.is_empty()) {
-            let normalized = normalize_accelerator(shortcut);
-            builder = builder.accelerator(normalized);
+        if let Some(accelerator) = shortcut {
+            builder = builder.accelerator(accelerator);
         }
         let menu_item = builder.build(app)?;
         submenu = submenu.item(&menu_item);

@@ -1,15 +1,19 @@
 import { iconFor } from "../../icons.js";
 import type { ReactNode } from "react";
+import { Fragment } from "react";
 import { useAppPreference } from "../../prefs/remembered.js";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Minimize2 } from "lucide-react";
+import { Layers, MessageSquare, Minimize2 } from "lucide-react";
 import type { TabRef } from "../../tabs/tabState.js";
 import { useExtensions } from "../../extensionsStore.js";
 import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
 import { extensionPanelId, panelOpenRef } from "../Panels/panelLayout.js";
 import { usePanelLayout } from "../Panels/PanelLayoutContext.js";
+import type { PanelGroup } from "../Panels/panelLayout.js";
+import { visibilityScopeLabel } from "../../visibilityScope.js";
+import { railPanelItems } from "../../menuBar.js";
 import { type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
@@ -53,8 +57,14 @@ interface RailSectionsValue {
   /** Which edge of `id` the insertion line should draw on (before/after),
    *  or null when this section isn't the current drop target. */
   dropSide(id: RailSectionId): "before" | "after" | null;
-  /** Take the panel out of the nav (the Add Panel menu brings it back). */
+  /** Take the panel out of the nav (View ▸ Left Rail brings it back). */
   hide(id: RailSectionId): void;
+  /** The group a shown panel is in: this thread's, this stream's, the project's. */
+  groupOf(id: RailSectionId): PanelGroup | undefined;
+  /** The groups the viewer has. */
+  groups: PanelGroup[];
+  /** Move the panel to the end of `group` (Show in). */
+  moveToGroup(id: RailSectionId, group: PanelGroup): void;
 }
 
 const RailSectionsContext = createContext<RailSectionsValue | null>(null);
@@ -64,6 +74,20 @@ const RailSectionsContext = createContext<RailSectionsValue | null>(null);
  *  `RailSection` needs through context. */
 function useRailSections(): {
   value: RailSectionsValue;
+  /** Shown panels per group, top to bottom. */
+  groups: Record<PanelGroup, RailSectionId[]>;
+  /** The viewer's groups, top to bottom. */
+  groupList: PanelGroup[];
+  /** A panel is being dragged: the groups' dividers and the Remove zone show. */
+  dragging: boolean;
+  /** A group's divider, or the Remove zone (`null`), as a drop target. */
+  groupDrop(group: PanelGroup | null): {
+    onDragOver(e: React.DragEvent): void;
+    onDragLeave(): void;
+    onDrop(e: React.DragEvent): void;
+  };
+  /** The divider or zone a drag is over now (`"remove"` for the zone). */
+  groupDropTarget: PanelGroup | "remove" | null;
   order: RailSectionId[];
   hidden: RailSectionId[];
   /** The stored layout has arrived: what shows is the person's layout. */
@@ -74,6 +98,7 @@ function useRailSections(): {
   const { layout } = panels;
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
+  const [groupDropTarget, setGroupDropTarget] = useState<PanelGroup | "remove" | null>(null);
 
   const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
 
@@ -87,8 +112,34 @@ function useRailSections(): {
     onDragEnd() {
       setDraggingId(null);
       setDropTarget(null);
+      setGroupDropTarget(null);
     },
   }), []);
+
+  const groupDrop = useCallback((group: PanelGroup | null) => ({
+    onDragOver(e: React.DragEvent) {
+      if (!draggingId) return;
+      if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const target = group ?? "remove";
+      if (groupDropTarget !== target) setGroupDropTarget(target);
+      if (dropTarget) setDropTarget(null);
+    },
+    onDragLeave() {
+      if (groupDropTarget === (group ?? "remove")) setGroupDropTarget(null);
+    },
+    onDrop(e: React.DragEvent) {
+      e.preventDefault();
+      const sourceId = e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId;
+      setDraggingId(null);
+      setDropTarget(null);
+      setGroupDropTarget(null);
+      if (!sourceId) return;
+      if (group) panels.moveToGroup(sourceId, group);
+      else panels.hide(sourceId);
+    },
+  }), [draggingId, dropTarget, groupDropTarget, panels]);
 
   const dropZone = useCallback((id: RailSectionId) => ({
     onDragOver(e: React.DragEvent) {
@@ -102,6 +153,7 @@ function useRailSections(): {
       const rect = e.currentTarget.getBoundingClientRect();
       const side: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
       if (dropTarget?.id !== id || dropTarget.side !== side) setDropTarget({ id, side });
+      if (groupDropTarget) setGroupDropTarget(null);
     },
     onDragLeave() {
       if (dropTarget?.id === id) setDropTarget(null);
@@ -116,7 +168,7 @@ function useRailSections(): {
       const side = e.clientY >= rect.top + rect.height / 2 ? "after" : "before";
       panels.moveBeside(sourceId, id, side);
     },
-  }), [draggingId, dropTarget, panels]);
+  }), [draggingId, dropTarget, groupDropTarget, panels]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
@@ -125,10 +177,31 @@ function useRailSections(): {
   );
 
   const value = useMemo<RailSectionsValue>(
-    () => ({ isExpanded, setCollapsed: panels.setCollapsed, dragHandle, dropZone, dropSide, hide: panels.hide }),
-    [isExpanded, panels, dragHandle, dropZone, dropSide],
+    () => ({
+      isExpanded,
+      setCollapsed: panels.setCollapsed,
+      dragHandle,
+      dropZone,
+      dropSide,
+      hide: panels.hide,
+      groupOf: (id) => layout.groupOf.get(id),
+      groups: panels.groups,
+      moveToGroup: panels.moveToGroup,
+    }),
+    [isExpanded, panels, layout, dragHandle, dropZone, dropSide],
   );
-  return { value, order: layout.order, hidden: layout.hidden, loaded: panels.loaded, show: panels.show };
+  return {
+    value,
+    groups: layout.groups,
+    groupList: panels.groups,
+    dragging: draggingId !== null,
+    groupDrop,
+    groupDropTarget,
+    order: layout.order,
+    hidden: layout.hidden,
+    loaded: panels.loaded,
+    show: panels.show,
+  };
 }
 
 /** Uniform section: drag handle + chevron + title (+ optional count and
@@ -180,6 +253,8 @@ function RailSection({
   }, [filled]);
   const headerMenu = useContextMenu();
   const side = ctx ? ctx.dropSide(id) : null;
+  const group = ctx?.groupOf(id);
+  const shownIn = group === "thread" || group === "stream" ? group : null;
   const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-primary)";
   return (
     // Wrapper holds the inter-pane margin + drop-zone and (unlike the card)
@@ -247,7 +322,22 @@ function RailSection({
         }}
         onContextMenu={(e) =>
           ctx
-            ? headerMenu.open(e, [{ id: "hide-panel", label: "Hide Panel", enabled: true, run: () => ctx.hide(id) }])
+            ? headerMenu.open(e, [
+                {
+                  id: "panel.show-in",
+                  label: "Show in",
+                  enabled: true,
+                  submenuHeader: "Where this panel shows: this thread, every thread of this stream, or every thread.",
+                  submenu: ctx.groups.map((group) => ({
+                    id: `panel.show-in.${group}`,
+                    label: visibilityScopeLabel(group),
+                    enabled: true,
+                    checked: ctx.groupOf(id) === group,
+                    run: () => ctx.moveToGroup(id, group),
+                  })),
+                },
+                { id: "hide-panel", label: "Hide Panel", enabled: true, run: () => ctx.hide(id) },
+              ])
             : undefined
         }
       >
@@ -298,6 +388,15 @@ function RailSection({
             {filled ? <Minimize2 size={12} aria-hidden /> : expanded ? "▾" : "▸"}
           </span>
           <span>{title}</span>
+          {shownIn ? (
+            <span
+              data-testid={`rail-section-shown-in-${id}`}
+              title={shownIn === "thread" ? "Only in this thread" : "Only in this stream"}
+              style={{ display: "inline-flex", color: "var(--text-muted)" }}
+            >
+              {shownIn === "thread" ? <MessageSquare size={11} aria-hidden /> : <Layers size={11} aria-hidden />}
+            </span>
+          ) : null}
           {count != null && count > 0 ? (
             <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500 }}>{count}</span>
           ) : null}
@@ -340,8 +439,8 @@ export function RailHud({
   // A dock panel lives in the dock, not the rail.
   const extPanels = useMemo(() => allPanels.filter((p) => !p.dock), [allPanels]);
   const sections = useRailSections();
+  const panelLayout = usePanelLayout();
   const addMenu = useContextMenu();
-  const titleOf = (id: string) => extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
   // The panel grown to the whole rail ("+N more"), if any: the window's
   // state only, never the person's layout. One at a time; gone with it.
   const [filledWanted, setFilled] = useState<RailSectionId | null>(null);
@@ -394,29 +493,92 @@ export function RailHud({
         fill(null);
       }}
     >
-      <div style={{ flex: 1, overflow: filled ? "hidden" : "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div
+        data-testid="rail-panels"
+        // A right-click on the rail's own space (not a panel) lists every
+        // panel, checked when shown: View ▸ Left Rail's list.
+        onContextMenu={(e) => {
+          if (e.target !== e.currentTarget || filled !== null) return;
+          addMenu.open(e, railPanelItems(panelLayout.entries, panelLayout.toggle));
+        }}
+        style={{ flex: 1, overflow: filled ? "hidden" : "auto", display: "flex", flexDirection: "column", minHeight: 0 }}
+      >
         <RailSectionsContext.Provider value={sections.value}>
-          {sections.order.map((id) => renderSection(id))}
+          {sections.groupList.map((group) => (
+            <Fragment key={group}>
+              {sections.dragging ? (
+                <GroupDivider
+                  group={group}
+                  over={sections.groupDropTarget === group}
+                  {...sections.groupDrop(group)}
+                />
+              ) : null}
+              {sections.groups[group].map((id) => renderSection(id))}
+            </Fragment>
+          ))}
+          {sections.dragging ? (
+            <div
+              data-testid="rail-remove-zone"
+              {...sections.groupDrop(null)}
+              style={{
+                margin: "2px 6px 6px",
+                padding: "10px 6px",
+                textAlign: "center",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                borderRadius: 6,
+                border: `1px dashed ${sections.groupDropTarget === "remove" ? "var(--accent)" : "var(--border-subtle)"}`,
+                boxShadow: sections.groupDropTarget === "remove" ? "0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent)" : undefined,
+              }}
+            >
+              Remove from the rail
+            </div>
+          ) : null}
         </RailSectionsContext.Provider>
-        {sections.hidden.length > 0 && filled === null ? (
-          <button
-            type="button"
-            data-testid="rail-add-panel"
-            onClick={(e) =>
-              addMenu.open(
-                e,
-                sections.hidden.map((id) => ({ id: `show-${id}`, label: titleOf(id), enabled: true, run: () => sections.show(id) })),
-              )
-            }
-            style={{ margin: "0 6px 6px", background: "none", border: "1px dashed var(--border-subtle)", borderRadius: 6, padding: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
-          >
-            + Add Panel
-          </button>
-        ) : null}
         {addMenu.menu}
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
+  );
+}
+
+/** A group's divider while a panel is dragged: its name, and a drop
+ *  target that moves the panel to the group's end. */
+function GroupDivider({
+  group,
+  over,
+  ...drop
+}: {
+  group: PanelGroup;
+  over: boolean;
+  onDragOver(e: React.DragEvent): void;
+  onDragLeave(): void;
+  onDrop(e: React.DragEvent): void;
+}) {
+  return (
+    <div
+      data-testid={`rail-group-divider-${group}`}
+      {...drop}
+      style={{
+        margin: "0 6px 6px",
+        padding: "4px 6px",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 10,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+        color: over ? "var(--accent-fg)" : "var(--text-muted)",
+        borderRadius: 6,
+        border: `1px dashed ${over ? "var(--accent)" : "transparent"}`,
+        boxShadow: over ? "0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent)" : undefined,
+      }}
+    >
+      <span style={{ flex: 1, height: 1, background: "var(--border-subtle)" }} />
+      {visibilityScopeLabel(group)}
+      <span style={{ flex: 1, height: 1, background: "var(--border-subtle)" }} />
+    </div>
   );
 }
 

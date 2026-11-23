@@ -29,8 +29,9 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, type GoRow } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
 import { GoMenuFeed } from "./components/Panels/GoMenuFeed.js";
+import { RailMenuFeed, type RailMenu } from "./components/Panels/RailMenuFeed.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -856,7 +857,13 @@ export function App() {
   }, [offerCtx, offerDeps]);
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
-  const menuGroups = useMemo(() => buildMenuBar(offers), [offers]);
+  // View ▸ Left Rail is the viewer's rail panels (`RailMenuFeed`, inside
+  // the layout's provider, hands them up as the layout changes).
+  const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
+  const menuGroups = useMemo(
+    () => [...buildMenuBar(offers), viewMenu(railMenu.panels, railMenu.toggle)],
+    [offers, railMenu],
+  );
   // The stars the thread sees (a page's star says where it is starred).
   const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
   // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
@@ -2006,6 +2013,7 @@ export function App() {
     {/* The viewer's left-nav layout, read by the rail and View ▸ Left Rail. */}
     <PanelLayoutProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
     <GoMenuFeed onRows={setGoRows} />
+    <RailMenuFeed onChange={setRailMenu} />
     {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
       const live = currentEntry(t).from?.live;
       return live ? (

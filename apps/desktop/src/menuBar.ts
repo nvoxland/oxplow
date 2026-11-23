@@ -12,7 +12,7 @@ import type {
   PageRun,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type MenuId = "file" | "edit";
+export type MenuId = "file" | "edit" | "view";
 
 export interface MenuGroup extends SharedMenuGroup {
   id: MenuId;
@@ -71,13 +71,68 @@ export function buildMenuBar(offers: CommandEntry[]): MenuGroup[] {
   ];
 }
 
-/** The menu item `id` of `groups`. */
+/** The menu item `id` of `groups`, in a submenu too. */
 export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefined {
+  const find = (items: MenuItem[]): MenuItem | undefined => {
+    for (const item of items) {
+      if (item.id === id) return item;
+      const inner = item.submenu ? find(item.submenu) : undefined;
+      if (inner) return inner;
+    }
+    return undefined;
+  };
   for (const group of groups) {
-    const item = group.items.find((i) => i.id === id);
+    const item = find(group.items);
     if (item) return item;
   }
   return undefined;
+}
+
+/// One of the rail's panels, as View ▸ Left Rail lists it.
+export interface RailPanelEntry {
+  /** Its layout id (`ext:<namespace>/<id>`). */
+  id: string;
+  title: string;
+  /** This thread's rail shows it. */
+  shown: boolean;
+}
+
+/// Menu-command id prefix for a View ▸ Left Rail entry; the rest is the
+/// panel's layout id.
+export const RAIL_PANEL_PREFIX = "view.rail:";
+
+/// The rail's panels as a checked list: the shown ones in rail order, then
+/// the rest by title. Picking one shows or hides it (`toggle`). View ▸
+/// Left Rail and a right-click on the rail's empty space list the same.
+export function railPanelItems(panels: RailPanelEntry[], toggle: (id: string) => void): MenuItem[] {
+  const item = (p: RailPanelEntry): MenuItem => ({
+    id: `${RAIL_PANEL_PREFIX}${p.id}`,
+    label: p.title,
+    enabled: true,
+    checked: p.shown,
+    run: () => toggle(p.id),
+  });
+  const shown = panels.filter((p) => p.shown).map(item);
+  const rest = panels.filter((p) => !p.shown).sort((a, b) => a.title.localeCompare(b.title)).map(item);
+  return shown.length > 0 && rest.length > 0
+    ? [...shown, { id: "native.separator.1", label: "", separator: true, enabled: true }, ...rest]
+    : [...shown, ...rest];
+}
+
+/// The View menu: Left Rail ▸ the rail's panels.
+export function viewMenu(panels: RailPanelEntry[], toggle: (id: string) => void): MenuGroup {
+  return {
+    id: "view",
+    label: "View",
+    items: [
+      {
+        id: "view.left-rail",
+        label: "Left Rail",
+        enabled: panels.length > 0,
+        submenu: railPanelItems(panels, toggle),
+      },
+    ],
+  };
 }
 
 /// Menu-command id prefix for a dynamic "Open Recent ▸ <project>" entry.
@@ -192,5 +247,6 @@ function nativeItem(item: MenuItem): NativeMenuItemSnapshot {
     shortcut: item.shortcut ?? null,
     enabled: item.enabled,
     checked: item.checked ?? null,
+    ...(item.submenu ? { submenu: item.submenu.map(nativeItem) } : {}),
   };
 }

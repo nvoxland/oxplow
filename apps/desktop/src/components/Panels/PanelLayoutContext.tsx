@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { getPanelLayout, setPanelLayout } from "../../api.js";
+import type { RailPanelEntry } from "../../menuBar.js";
 import { recordOpError } from "../../opErrors.js";
 import type { ScopedPanelLayout } from "../../tauri-bridge/generated/bindings.js";
 import {
@@ -45,6 +46,11 @@ export interface PanelLayoutValue {
   show(id: string): void;
   moveBeside(id: string, target: string, side: "before" | "after"): void;
   moveToGroup(id: string, group: PanelGroup): void;
+  /** Every rail panel, shown ones in rail order then the rest (View ▸
+   *  Left Rail, the rail's right-click list). */
+  entries: RailPanelEntry[];
+  /** Hide a shown panel; show a hidden one at the end of the project's. */
+  toggle(id: string): void;
 }
 
 const PanelLayoutContext = createContext<PanelLayoutValue | null>(null);
@@ -100,6 +106,14 @@ export function PanelLayoutProvider({
       show: (id) => edit((base) => showPanel(available, base, id)),
       moveBeside: (id, target, side) => edit((base) => movePanelBeside(available, base, id, target, side)),
       moveToGroup: (id, group) => edit((base) => movePanelToGroup(available, base, id, group)),
+      entries: [
+        ...layout.order.map((id) => ({ id, title: titleOf(id), shown: true })),
+        ...layout.hidden.map((id) => ({ id, title: titleOf(id), shown: false })),
+      ],
+      toggle: (id) =>
+        edit((base) =>
+          resolveLayout(available, base).groupOf.has(id) ? hidePanel(available, base, id) : showPanel(available, base, id),
+        ),
     }),
     [available, titleOf, layout, loaded, threadId, streamId, edit],
   );

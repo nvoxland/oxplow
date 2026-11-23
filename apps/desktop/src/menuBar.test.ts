@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildMenuBar, buildNativeMenuSnapshots, GO_PREFIX, goMenuItems, goRowsOf, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, GO_PREFIX, goMenuItems, goRowsOf, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu } from "./menuBar.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
@@ -167,4 +167,38 @@ test("the Go To pane's rows are read off its body's run: group, title and URI", 
   } as never;
   expect(goRowsOf(run)).toEqual([{ group: "Bookmarks", title: "Git", uri: "oxplow:x" }]);
   expect(goRowsOf(null)).toEqual([]);
+});
+
+test("View ▸ Left Rail lists the rail's panels, the shown ones checked in rail order, then the rest by title", () => {
+  const toggled: string[] = [];
+  const view = viewMenu(
+    [
+      { id: "ext:a/work", title: "Work", shown: true },
+      { id: "ext:a/zed", title: "Zed", shown: false },
+      { id: "ext:a/go", title: "Go To", shown: true },
+      { id: "ext:a/alpha", title: "Alpha", shown: false },
+    ],
+    (id) => toggled.push(id),
+  );
+  expect([view.id, view.label]).toEqual(["view", "View"]);
+  const rail = view.items[0]!;
+  expect(rail.label).toBe("Left Rail");
+  const items = rail.submenu!.filter((i) => !i.separator);
+  expect(items.map((i) => [i.label, i.checked])).toEqual([
+    ["Work", true],
+    ["Go To", true],
+    ["Alpha", false],
+    ["Zed", false],
+  ]);
+  void items[2]!.run?.();
+  expect(toggled).toEqual(["ext:a/alpha"]);
+});
+
+test("a View ▸ Left Rail item is found by its menu id, and the native menu keeps it checked", () => {
+  const view = viewMenu([{ id: "ext:a/go", title: "Go To", shown: true }], () => {});
+  const id = view.items[0]!.submenu![0]!.id;
+  expect(menuItemById([view], id)?.label).toBe("Go To");
+  const native = buildNativeMenuSnapshots([view], []);
+  const rail = native.find((g) => g.id === "view")!.items[0]!;
+  expect(rail.submenu?.[0]).toMatchObject({ id, label: "Go To", checked: true });
 });
