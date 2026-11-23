@@ -26,7 +26,7 @@ time = { workspace = true }
 # come from the languages oxplow's packs declare (oxplow-code-metrics).
 # See .context/smart-merge.md.
 tree-sitter = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dependencies.serde_json]
 workspace = true

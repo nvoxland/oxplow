@@ -19,7 +19,7 @@ path = "src/main.rs"
 oxplow-daemon = { workspace = true }
 oxplow-ai = { workspace = true }
 tokio = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json"] }

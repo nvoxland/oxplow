@@ -14,7 +14,7 @@ serde_json = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [features]
 # `codex::app_server::fake`: a scripted app server for other crates' tests.

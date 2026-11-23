@@ -36,7 +36,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 parking_lot = "0.12"
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 oxplow-config = { workspace = true }

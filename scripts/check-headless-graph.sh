@@ -5,8 +5,8 @@
 #
 # The daemon runs where there's no display (CI installs no WebKit for it)
 # and the providers ship on their own, so none of them may reach Tauri,
-# WebKit, GTK or AppKit through any dependency, the workspace-hack
-# included. Fails listing each crate that does, on each platform the hack
+# WebKit, GTK or AppKit through any dependency, the unified-deps crate
+# included. Fails listing each crate that does, on each platform the unified-deps crate
 # is generated for.
 set -euo pipefail
 

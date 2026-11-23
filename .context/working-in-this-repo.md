@@ -639,7 +639,7 @@ resolved different sets (tokio with or without `test-util`, seven
 serde_json variants…). Every switch rebuilt the graph under new hashes
 and kept every copy — 85 GB of `target/debug` was about five builds of
 duplicates, and rebuilds were slow for the same reason. The
-**`oxplow-workspace-hack`** crate (managed by
+**`oxplow-unified-deps`** crate (managed by
 [cargo-hakari](https://docs.rs/cargo-hakari), config
 `.config/hakari.toml`) pins the union: every core crate depends on it,
 so any subset builds the same artifacts, and an alternating build is a
@@ -647,13 +647,13 @@ no-op. Build-script (host) dependencies keep their own features
 (`unify-target-host = "none"`), so the app never ships what only a build
 script asked for.
 
-What the hack leaves out, and why:
+What the unified-deps crate leaves out, and why:
 
 - **The providers stay out.** `oxplow-provider-{fake,mcp}`,
   `oxplow-provider-protocol` and the crates they're built from
   (`oxplow-domain`, `oxplow-script`, `oxplow-code-dup`,
   `oxplow-code-metrics`, `oxplow-coverage`) are traversal-excluded and
-  don't depend on the hack: a provider ships as its own binary
+  don't depend on the unified-deps crate: a provider ships as its own binary
   (built with `-p`) and is built from its
   own dependencies only. Their second copy inside a workspace build is
   small.
@@ -663,7 +663,7 @@ What the hack leaves out, and why:
   `scripts/check-headless-graph.sh` (in CI) fails if the daemon,
   `oxplow-rpc` or a provider reaches any of them.
 
-What the hack still adds to every core crate, the daemon included, is
+What the unified-deps crate still adds to every core crate, the daemon included, is
 features of crates they already build, unified so builds don't churn:
 tokio's `test-util` (test APIs only); reqwest's `system-proxy` and
 rustls's `ring` provider, which Tauri's updater turns on (so the daemon
@@ -674,7 +674,7 @@ aws-lc-rs).
   features), run `cargo hakari generate` (and `cargo hakari manage-deps`
   for a new crate). A new crate the providers are built from goes in
   `traversal-excludes`; a new crate only Tauri pulls in, in
-  `final-excludes`. CI fails when the hack is stale (`cargo hakari
+  `final-excludes`. CI fails when the unified-deps crate is stale (`cargo hakari
   generate --diff`). Install with `cargo install cargo-hakari --locked`.
 - **A workspace crate never takes a feature only tests turn on**: hakari
   covers third-party crates only, so a `test-support`-style feature on

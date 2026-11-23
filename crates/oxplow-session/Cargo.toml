@@ -15,7 +15,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
 async-trait = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [lints]
 workspace = true

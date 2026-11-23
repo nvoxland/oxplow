@@ -127,7 +127,7 @@ jobs:
         run: cargo fmt --all --check
 
       # One feature set per third-party crate for every build (the
-      # `oxplow-workspace-hack` crate, managed by cargo-hakari): without it a
+      # `oxplow-unified-deps` crate, managed by cargo-hakari): without it a
       # `-p` build, a test build and the app build each resolved different
       # features, rebuilt the graph and kept every copy. A changed
       # dependency must regenerate it.
@@ -136,13 +136,13 @@ jobs:
         with:
           tool: cargo-hakari
 
-      - name: The workspace-hack is current
+      - name: The unified-deps crate is current
         run: |
           cargo hakari generate --diff
           cargo hakari manage-deps --dry-run
 
       # The daemon and the providers never build Tauri, WebKit or AppKit,
-      # through the hack or otherwise.
+      # through the unified-deps crate or otherwise.
       - name: The headless binaries stay headless
         run: scripts/check-headless-graph.sh
 

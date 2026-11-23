@@ -244,6 +244,7 @@ disallowed-methods = [
   { path = "oxplow_db::page_ref_store::replace_source_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::page_ref_store::upsert_edge_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::panel_layout_store::SqlitePanelLayoutStore::set", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::panel_layout_store::set_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::proposal_store::approve_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::proposal_store::claim_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::proposal_store::decline_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

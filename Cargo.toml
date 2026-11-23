@@ -37,7 +37,7 @@ members = [
     "crates/oxplow-oauth-sim",
     "crates/oxplow-oauth-redirect",
     "crates/oxplow-ai-fake",
-    "crates/oxplow-workspace-hack",
+    "crates/oxplow-unified-deps",
 ]
 
 [workspace.package]

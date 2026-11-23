@@ -1,7 +1,7 @@
 # This file contains settings for `cargo hakari`.
 # See https://docs.rs/cargo-hakari/latest/cargo_hakari/config for a full list of options.
 
-hakari-package = "oxplow-workspace-hack"
+hakari-package = "oxplow-unified-deps"
 
 # Format version for hakari's output. Version 4 requires cargo-hakari 0.9.22 or above.
 dep-format-version = "4"
@@ -36,7 +36,7 @@ platforms = [
 # exact-versions = true
 
 # Crates only the desktop shell builds (Tauri and what only it pulls in)
-# stay out of the hack's output, or every crate, the headless daemon among
+# stay out of the unified-deps crate's output, or every crate, the headless daemon among
 # them, would build Tauri, AppKit and, on Linux, WebKit. No core crate
 # builds these, so leaving them out costs no rebuilds. The features the
 # shell turns on in crates the core shares stay unified (see
@@ -44,7 +44,7 @@ platforms = [
 #
 # The providers are binaries of their own, shipped out of the workspace
 # (built with `-p`, as the desktop's sidecars are): they and the crates
-# they're built from don't depend on the hack, so a provider is built from
+# they're built from don't depend on the unified-deps crate, so a provider is built from
 # its own dependencies only. Their features still count toward the union,
 # so a workspace build and a `-p` build of the core stay the same build.
 [final-excludes]

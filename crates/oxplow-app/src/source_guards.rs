@@ -573,7 +573,7 @@ fn is_test_double(name: &str) -> bool {
 /// workspace crate reaches one through a normal or build edge of the
 /// **resolved** graph (`cargo metadata`), however its manifest spells
 /// the dependency (a `[dependencies.x]` table, a renamed `package =`, the
-/// workspace-hack).
+/// unified-deps crate).
 #[test]
 fn no_test_double_is_a_production_dependency() {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());

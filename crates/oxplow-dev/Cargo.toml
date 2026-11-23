@@ -24,7 +24,7 @@ oxplow-sdk = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
