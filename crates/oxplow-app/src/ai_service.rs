@@ -606,6 +606,109 @@ impl AiService {
         })
     }
 
+    /// Whether provider and role bindings are settings (the one settings
+    /// service writes them); without it they are the service's own file.
+    pub fn uses_settings(&self) -> bool {
+        self.settings_store.is_some()
+    }
+
+    /// The settings writes that save `provider`: checked here (its id is its
+    /// kind, a kind with no default URL has one), written by the caller through
+    /// the one settings write path (`settings_commands::write_changes`).
+    pub fn provider_changes(
+        &self,
+        provider: &ProviderConfig,
+    ) -> Result<Vec<(String, Option<serde_json::Value>)>, AiServiceError> {
+        if provider.id != provider.kind {
+            return Err(AiServiceError::Config(
+                "AI provider id must be its declared provider id".into(),
+            ));
+        }
+        self.provider_of(provider)?;
+        Ok(vec![
+            (
+                format!("oxplow.ai.{}.enabled", provider.id),
+                Some(serde_json::json!(true)),
+            ),
+            (
+                format!("oxplow.ai.{}.baseUrl", provider.id),
+                Some(serde_json::json!(provider
+                    .base_url
+                    .as_deref()
+                    .unwrap_or(""))),
+            ),
+        ])
+    }
+
+    /// Store `key` (when given and not blank) for `provider`, bound to its
+    /// URL: the part of saving a provider that is the keychain's, not a setting
+    /// the settings write path takes.
+    pub fn store_provider_key(
+        &self,
+        provider: &ProviderConfig,
+        key: Option<String>,
+    ) -> Result<(), AiServiceError> {
+        if let Some(key) = key.filter(|key| !key.trim().is_empty()) {
+            self.write_key(
+                &provider.id,
+                Some(
+                    StoredKey {
+                        key,
+                        endpoint: endpoint_of(Some(provider)),
+                    }
+                    .encode(),
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The settings writes that remove provider `id` (it is switched off),
+    /// refused while a role still uses it.
+    pub fn removal_changes(
+        &self,
+        id: &str,
+    ) -> Result<Vec<(String, Option<serde_json::Value>)>, AiServiceError> {
+        let global = self.global()?;
+        let users: Vec<String> = global
+            .roles
+            .iter()
+            .filter(|(_, b)| b.provider == id)
+            .map(|(r, _)| r.to_string())
+            .collect();
+        if !users.is_empty() {
+            return Err(AiServiceError::Config(format!(
+                "`{id}` is used by {}; assign those roles elsewhere first",
+                users.join(", ")
+            )));
+        }
+        Ok(vec![(
+            format!("oxplow.ai.{id}.enabled"),
+            Some(serde_json::json!(false)),
+        )])
+    }
+
+    /// Take `id`'s stored key out of the keychain.
+    pub fn forget_provider_key(&self, id: &str) -> Result<(), AiServiceError> {
+        self.write_key(id, None)
+    }
+
+    /// The settings write that binds `role` (`None`: unbinds it).
+    pub fn role_change(
+        &self,
+        role: &Role,
+        binding: Option<RoleBinding>,
+    ) -> Result<(String, Option<serde_json::Value>), AiServiceError> {
+        let key = crate::settings::ai_role_key(&role.to_string());
+        let value = match binding {
+            Some(binding) => Some(
+                serde_json::to_value(binding).map_err(|e| AiServiceError::Config(e.to_string()))?,
+            ),
+            None => None,
+        };
+        Ok((key, value))
+    }
+
     /// Add or replace a provider in the global `global.yaml`. A non-empty `key`
     /// is stored in the keychain; `None` leaves any stored key alone.
     pub fn save_provider(

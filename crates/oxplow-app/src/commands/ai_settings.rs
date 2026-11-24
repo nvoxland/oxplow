@@ -96,9 +96,10 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "ai.settings",
             "set_provider",
             schema::<SetProviderInput>(),
-            false,
-            Handler::External(Arc::new(move |_: Invocation, input| {
+            true,
+            Handler::External(Arc::new(move |invocation: Invocation, input| {
                 let services = services.clone();
+                let actor = invocation.actor().clone();
                 Box::pin(async move {
                     let input: SetProviderInput = parse(input)?;
                     let svc = services.get()?;
@@ -115,17 +116,38 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         kind: input.kind,
                         base_url: input.base_url.filter(|u| !u.trim().is_empty()),
                     };
-                    svc.ai
-                        .save_provider(provider, input.key)
+                    if !svc.ai.uses_settings() {
+                        svc.ai
+                            .save_provider(provider, input.key)
+                            .map_err(|e| refused("/id", e))?;
+                        let events = svc.events.clone();
+                        return Ok(HandlerOutput {
+                            result: json!({ "id": id, "key_given": key_set }),
+                            after_commit: Some(Box::new(move || {
+                                events.emit(OxplowEvent::ConfigChanged)
+                            })),
+                            ..HandlerOutput::default()
+                        });
+                    }
+                    // A provider is its settings (`oxplow.ai.<id>.*`), written by
+                    // the one settings write path: checked, logged, undoable; its
+                    // key is the keychain's and is not undone.
+                    let changes = svc
+                        .ai
+                        .provider_changes(&provider)
                         .map_err(|e| refused("/id", e))?;
-                    let events = svc.events.clone();
-                    Ok(HandlerOutput {
-                        result: json!({ "id": id, "key_given": key_set }),
-                        after_commit: Some(Box::new(move || {
-                            events.emit(OxplowEvent::ConfigChanged)
-                        })),
-                        ..HandlerOutput::default()
-                    })
+                    let mut out = super::settings_commands::write_changes(
+                        &svc.config_target(),
+                        &actor,
+                        changes,
+                        oxplow_config::settings::Level::Global,
+                    )?;
+                    svc.ai
+                        .store_provider_key(&provider, input.key)
+                        .map_err(|e| refused("/id", e))?;
+                    out.result["id"] = json!(id);
+                    out.result["key_given"] = json!(key_set);
+                    Ok(out)
                 })
             })),
         )
@@ -136,23 +158,41 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "ai.settings",
             "remove_provider",
             schema::<ProviderInput>(),
-            false,
-            Handler::External(Arc::new(move |_: Invocation, input| {
+            true,
+            Handler::External(Arc::new(move |invocation: Invocation, input| {
                 let services = services.clone();
+                let actor = invocation.actor().clone();
                 Box::pin(async move {
                     let input: ProviderInput = parse(input)?;
                     let svc = services.get()?;
-                    svc.ai
-                        .remove_provider(&input.id)
+                    if !svc.ai.uses_settings() {
+                        svc.ai
+                            .remove_provider(&input.id)
+                            .map_err(|e| refused("/id", e))?;
+                        let events = svc.events.clone();
+                        return Ok(HandlerOutput {
+                            result: json!({ "id": input.id }),
+                            after_commit: Some(Box::new(move || {
+                                events.emit(OxplowEvent::ConfigChanged)
+                            })),
+                            ..HandlerOutput::default()
+                        });
+                    }
+                    let changes = svc
+                        .ai
+                        .removal_changes(&input.id)
                         .map_err(|e| refused("/id", e))?;
-                    let events = svc.events.clone();
-                    Ok(HandlerOutput {
-                        result: json!({ "id": input.id }),
-                        after_commit: Some(Box::new(move || {
-                            events.emit(OxplowEvent::ConfigChanged)
-                        })),
-                        ..HandlerOutput::default()
-                    })
+                    let mut out = super::settings_commands::write_changes(
+                        &svc.config_target(),
+                        &actor,
+                        changes,
+                        oxplow_config::settings::Level::Global,
+                    )?;
+                    svc.ai
+                        .forget_provider_key(&input.id)
+                        .map_err(|e| refused("/id", e))?;
+                    out.result["id"] = json!(input.id);
+                    Ok(out)
                 })
             })),
         )
@@ -163,9 +203,10 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "ai.settings",
             "set_role",
             schema::<SetRoleInput>(),
-            false,
-            Handler::External(Arc::new(move |_: Invocation, input| {
+            true,
+            Handler::External(Arc::new(move |invocation: Invocation, input| {
                 let services = services.clone();
+                let actor = invocation.actor().clone();
                 Box::pin(async move {
                     let input: SetRoleInput = parse(input)?;
                     let svc = services.get()?;
@@ -184,19 +225,34 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                             )),
                         };
                     let bound = binding.is_some();
-                    svc.ai
-                        .set_role(&role, binding)
+                    if !svc.ai.uses_settings() {
+                        svc.ai
+                            .set_role(&role, binding)
+                            .map_err(|e| refused("/role", e))?;
+                        let events = svc.events.clone();
+                        return Ok(HandlerOutput {
+                            result: json!({ "role": input.role, "bound": bound }),
+                            after_commit: Some(Box::new(move || {
+                                events.emit(OxplowEvent::ConfigChanged)
+                            })),
+                            ..HandlerOutput::default()
+                        });
+                    }
+                    // A role's binding is a setting (`oxplow.ai.roles.<role>`),
+                    // written by the one settings write path.
+                    let change = svc
+                        .ai
+                        .role_change(&role, binding)
                         .map_err(|e| refused("/role", e))?;
-                    // A role's binding is config: the effective-config view
-                    // refreshes the one way.
-                    let events = svc.events.clone();
-                    Ok(HandlerOutput {
-                        result: json!({ "role": input.role, "bound": bound }),
-                        after_commit: Some(Box::new(move || {
-                            events.emit(OxplowEvent::ConfigChanged)
-                        })),
-                        ..HandlerOutput::default()
-                    })
+                    let mut out = super::settings_commands::write_changes(
+                        &svc.config_target(),
+                        &actor,
+                        vec![change],
+                        oxplow_config::settings::Level::Global,
+                    )?;
+                    out.result["role"] = json!(input.role);
+                    out.result["bound"] = json!(bound);
+                    Ok(out)
                 })
             })),
         )
@@ -378,6 +434,75 @@ mod tests {
             .providers
             .iter()
             .any(|p| p.id == "openrouter"));
+    }
+
+    /// A provider and a role binding are settings written by the one write
+    /// path: each logs `config.changed`, and the command undoes (the key,
+    /// which is the keychain's, stays).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provider_and_role_writes_are_logged_and_undoable() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let me = Actor::Human;
+        run(
+            &fx,
+            &me,
+            super::SET_PROVIDER,
+            json!({ "id": "openrouter", "kind": "openrouter", "key": "k" }),
+        )
+        .await
+        .unwrap();
+        let bound = run(
+            &fx,
+            &me,
+            super::SET_ROLE,
+            json!({ "role": "summarize", "provider": "openrouter", "model": "m" }),
+        )
+        .await
+        .unwrap();
+        let logged = |key: &'static str| {
+            let db = fx.svc.db.clone();
+            async move {
+                db.read(move |c| {
+                    c.query_row(
+                        "SELECT count(*) FROM event_log WHERE type = 'config.changed'
+                            AND json_extract(payload, '$.key') = ?1",
+                        [key],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            logged("oxplow.ai.openrouter.enabled").await,
+            1,
+            "the provider's switch"
+        );
+        assert_eq!(
+            logged("oxplow.ai.roles.summarize").await,
+            1,
+            "the role's binding"
+        );
+        let role = |fx: &crate::test_fixtures::ThreadFixture| {
+            let svc = fx.svc.clone();
+            async move {
+                svc.ai.settings().await.unwrap().roles.iter().any(|r| {
+                    r.role.to_string() == "summarize"
+                        && r.binding
+                            .as_ref()
+                            .is_some_and(|b| b.provider == "openrouter")
+                })
+            }
+        };
+        assert!(role(&fx).await);
+        fx.svc
+            .commands
+            .undo(&me, bound.command_run_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert!(!role(&fx).await, "undoing the command unbinds the role");
     }
 
     /// A role's binding is config, so changing it announces `ConfigChanged`

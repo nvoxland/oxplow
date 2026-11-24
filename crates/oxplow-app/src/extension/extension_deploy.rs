@@ -1279,13 +1279,16 @@ fn write_enabled(
     value: Option<bool>,
     level: oxplow_config::settings::Level,
 ) -> Result<(), DomainError> {
-    let store = enablement_store(svc, name)?;
     let key = format!("oxplow.extensions.{name}.enabled");
-    match value {
-        Some(value) => store.set(&key, serde_json::json!(value), level),
-        None => store.unset(&key, level),
-    }
-    .map_err(storage)?;
+    crate::commands::settings_commands::write_logged(
+        svc,
+        &oxplow_domain::Actor::System,
+        vec![(key, value.map(|v| serde_json::json!(v)))],
+        level,
+        // The extension may be one no layer has heard of yet.
+        vec![oxplow_config::core_settings::extension_definition(name)],
+    )
+    .map_err(|e| DomainError::Storage(e.to_string()))?;
     svc.reload_config_from_disk().map_err(storage)
 }
 
@@ -2996,6 +2999,41 @@ mod tests {
         assert!(!extension_store::deployment_dir(&root, "acme", &deployed.hash).exists());
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
         assert!(dir.join("extension.yaml").is_file());
+    }
+
+    /// Turning an extension on or off is a settings write through the one
+    /// write path: it is checked like any config write and each switch it
+    /// moves logs `config.changed`, so the reactors hear it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn turning_an_extension_off_and_on_logs_config_changed() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        source(svc, "One");
+        deploy(svc, "acme", true).await.unwrap();
+        set_enabled(svc, "acme", false, true).await.unwrap();
+        set_enabled(svc, "acme", true, true).await.unwrap();
+        let logged = || async {
+            svc.db
+                .read(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM event_log WHERE type = 'config.changed'
+                            AND json_extract(payload, '$.key') = 'oxplow.extensions.acme.enabled'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        // The events are appended in the background: wait for both.
+        for _ in 0..50 {
+            if logged().await >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(logged().await >= 2, "off and on are each logged");
     }
 
     /// Sharing lets git see the source and moves the name to the team's

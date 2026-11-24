@@ -126,7 +126,15 @@ invalid value.
 
 **One write.** `config.set`, `config.unset`, `config.update` and every domain
 action (`file.mark_generated`, `capability.choose`, `replacement.choose`, the
-agent settings, `metric.enable`) go through `settings_commands::write_changes`.
+agent settings, `metric.enable`, `ai.set_provider`, `ai.remove_provider`, `ai.set_role`) go
+through `settings_commands::write_changes`; a service that writes a setting
+outside a command (a deploy turning an extension on or off,
+`oxplow.extensions.<name>.enabled`) goes through `write_logged`: the same
+checks and write, with each `config.changed` it makes appended to the event
+log (no undo: the deploy is the unit). The AI keys
+(`oxplow.ai.<provider>.*`, `oxplow.ai.roles.<role>`) are registered in the one
+registry (`settings::store`), so no caller forks one. A provider's API key is
+the keychain's and is not undone.
 It checks each value (a required extension's switch is registered `const: true`
 before the switches the files name, so it can't be turned off), skips a key
 whose stored value is the same (no write, no `config.changed`, no undo; nothing

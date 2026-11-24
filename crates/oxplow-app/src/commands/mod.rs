@@ -40,7 +40,7 @@ pub mod ops;
 mod proposals;
 pub mod provider_instances;
 mod record;
-mod settings_commands;
+pub(crate) mod settings_commands;
 pub use record::tracking_failed_run;
 pub mod action_point_offers;
 pub mod ref_commands;

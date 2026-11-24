@@ -1460,6 +1460,7 @@ impl Services {
             config: config_arc.clone(),
             project_dir: layout.project_dir.clone(),
             events: event_bus.clone(),
+            extra_definitions: Vec::new(),
         };
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
@@ -2020,6 +2021,20 @@ impl Services {
         let services = Arc::new(Self::build(layout, config, db, machine)?);
         services.services_slot.fill(&services);
         Ok(services)
+    }
+
+    /// What the config commands act on, for a caller that writes settings
+    /// itself (`settings_commands::write_logged`).
+    pub fn config_target(&self) -> commands::config_commands::ConfigTarget {
+        commands::config_commands::ConfigTarget {
+            config: self.config.clone(),
+            global_dir: self.global_config_dir.clone(),
+            secrets: self.secrets.clone(),
+            catalog: Some(self.extension_catalog.clone()),
+            project_dir: self.layout.project_dir.clone(),
+            events: self.events.clone(),
+            extra_definitions: Vec::new(),
+        }
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
