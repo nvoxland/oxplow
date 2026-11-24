@@ -924,24 +924,25 @@ mod tests {
     /// A service with `summarize` bound and the profile `acme/review`
     /// declared (unbound).
     fn ai_service(dir: &tempfile::TempDir) -> std::sync::Arc<crate::ai_service::AiService> {
-        use oxplow_ai::config::{AiConfig, BuiltinRole, Role, RoleBinding};
-        let mut cfg = AiConfig::default();
-        cfg.providers.push(crate::ai_service::ProviderConfig {
-            id: "or".into(),
-            kind: "openrouter".into(),
-            base_url: Some("http://unused".into()),
-        });
-        cfg.roles
-            .insert(Role::SUMMARIZE, RoleBinding::new("or", "m"));
-        cfg.save(dir.path()).unwrap();
-        let svc = crate::ai_service::AiService::new(
-            Default::default(),
-            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        use oxplow_ai::config::{BuiltinRole, Role, RoleBinding};
+        let svc = crate::ai_service::AiService::for_tests(
+            crate::ai_service::test_providers(),
             std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(
                 oxplow_db::Database::in_memory(),
             )),
-            Some(dir.path().into()),
+            dir.path(),
         );
+        svc.save_provider(
+            crate::ai_service::ProviderConfig {
+                id: "openrouter".into(),
+                kind: "openrouter".into(),
+                base_url: Some("http://unused".into()),
+            },
+            None,
+        )
+        .unwrap();
+        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("openrouter", "m")))
+            .unwrap();
         svc.set_profiles(std::sync::Arc::new(|| {
             vec![crate::ai_service::AiProfile {
                 namespace: "acme".into(),
@@ -1018,14 +1019,17 @@ mod tests {
             .unwrap();
         assert_eq!(
             bound,
-            json!({ "role": "summarize", "model": { "provider": "or", "model": "m" }, "problem": null })
+            json!({ "role": "summarize", "model": { "provider": "openrouter", "model": "m" }, "problem": null })
         );
         // The profile is unbound: its fallback's model serves it.
         let profile = calls
             .serve("ai.discover", json!({ "role": "review" }))
             .unwrap();
         assert_eq!(profile["role"], "acme/review");
-        assert_eq!(profile["model"], json!({ "provider": "or", "model": "m" }));
+        assert_eq!(
+            profile["model"],
+            json!({ "provider": "openrouter", "model": "m" })
+        );
         // `decide` has no model; an undeclared profile says so.
         let unbound = calls
             .serve("ai.discover", json!({ "role": "decide" }))

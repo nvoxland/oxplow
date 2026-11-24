@@ -402,15 +402,6 @@ impl AiConfig {
         Ok(())
     }
 
-    /// Role bindings with `overrides` (from a project) layered on top.
-    pub fn with_overrides(&self, overrides: &BTreeMap<Role, RoleBinding>) -> AiConfig {
-        let mut out = self.clone();
-        for (role, b) in overrides {
-            out.roles.insert(role.clone(), b.clone());
-        }
-        out
-    }
-
     /// The provider and binding `role` uses, if it's configured: its own
     /// binding, else its fallback's (Default, or a profile's own). A profile none of
     /// `profiles` declares resolves to nothing, bound or not.
@@ -634,22 +625,6 @@ roles:
         c.roles
             .insert(Role::SUMMARIZE, RoleBinding::new("anthropic", "s"));
         assert_eq!(c.resolve(&profile.role(), &profiles).unwrap().1.model, "s");
-    }
-
-    #[test]
-    fn project_overrides_win() {
-        let mut o = BTreeMap::new();
-        o.insert(
-            Role::DEFAULT,
-            RoleBinding::new("openai_compatible", "llama"),
-        );
-        let c = cfg().with_overrides(&o);
-        assert_eq!(c.resolve(&Role::DEFAULT, &[]).unwrap().1.model, "llama");
-        assert_eq!(
-            c.resolve(&Role::DECIDE, &[]).unwrap().1.model,
-            "jev-latest",
-            "others untouched"
-        );
     }
 
     #[test]

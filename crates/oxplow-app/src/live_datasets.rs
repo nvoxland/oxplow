@@ -116,7 +116,6 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "key",
             "value",
             "origin",
-            "extension",
             "doc",
             "schema",
             "title",
@@ -905,11 +904,6 @@ impl LiveSources {
                         .as_ref()
                         .map(|origin| text(wire_name(origin)))
                         .unwrap_or(SqlCell::Null(())),
-                    if d.owner == "core" {
-                        SqlCell::Null(())
-                    } else {
-                        text(d.owner.strip_prefix("extension/").unwrap_or(&d.owner))
-                    },
                     text(d.description),
                     json(&d.schema),
                     text(d.title),

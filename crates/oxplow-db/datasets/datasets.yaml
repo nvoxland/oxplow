@@ -1743,21 +1743,20 @@ datasets:
     - { unique: run_id }
     - { accepted_values: { column: outcome, values: [ok, skipped, failed, denied, cancelled, invalid, interrupted] } }
 - name: config_value
-  version: 7
+  version: 8
   key: [key]
   description: "Registered core and extension settings with redacted effective values, schema and display metadata. Overrides resolve local, project, global, then default; metric and dimension definitions are not settings. Write through oxplow.config.set with an explicit level."
   fields:
     - { name: key, type: TEXT, doc: "The registered fully qualified setting key." }
     - { name: value, type: TEXT, doc: "Effective value as JSON; NULL for secrets or absent values." }
     - { name: origin, type: TEXT, doc: "Effective origin: local, project, global, or default; NULL when unavailable or absent." }
-    - { name: extension, type: TEXT, doc: "Owning extension, or NULL for core." }
     - { name: doc, type: TEXT, doc: "Setting description." }
     - { name: schema, type: TEXT, doc: "Value validation schema as JSON." }
     - { name: title, type: TEXT, doc: "Display title." }
     - { name: category, type: TEXT, doc: "Display category, independent of namespace ownership." }
     - { name: secret, type: INT, doc: "1 when the value is stored securely." }
     - { name: is_set, type: INT, doc: "1 when an effective value is present, including secrets." }
-    - { name: owner, type: TEXT, doc: "Registry owner: core or extension namespace." }
+    - { name: owner, type: TEXT, doc: "Registry owner: `core`, or `extension/<name>` for a setting an extension declares." }
     - { name: ui, type: TEXT, doc: "Display hints as JSON." }
     - { name: local_value, type: TEXT, doc: "Explicit local override as JSON; SQL NULL when absent or secret. JSON null remains the text null." }
     - { name: project_value, type: TEXT, doc: "Explicit shared project override as JSON; SQL NULL when absent or secret." }

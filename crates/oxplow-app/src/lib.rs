@@ -1079,18 +1079,13 @@ impl Services {
         let pty = oxplow_pty::PtyManager::spawn();
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
-        let project_config = config_arc.clone();
         // The model providers foundation declares, registered with the
         // other declarations below.
         let model_providers = oxplow_ai::client::ModelProviders::default();
         let ai = Arc::new(
             ai_service::AiService::new(
                 model_providers.clone(),
-                machine.secrets.clone(),
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-                machine.config_dir.clone(),
-            )
-            .with_settings(
                 crate::settings::store(
                     &layout.project_dir,
                     &machine
@@ -1104,16 +1099,7 @@ impl Services {
                     AppInitError::Config(oxplow_config::ConfigError::Invalid(e.to_string()))
                 })?,
             )
-            .with_activation(extension_activation.clone())
-            // Read live, so project.yaml edits and reloads apply at once.
-            .with_project_overrides(Arc::new(move || {
-                ai_service::project_overrides(
-                    &project_config
-                        .read()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .ai_roles,
-                )
-            })),
+            .with_activation(extension_activation.clone()),
         );
         let ai_compute = Arc::new(ai_compute::AiCompute::new(
             ai.clone(),
@@ -1460,6 +1446,7 @@ impl Services {
             config: config_arc.clone(),
             project_dir: layout.project_dir.clone(),
             events: event_bus.clone(),
+            extra_definitions: Vec::new(),
         };
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
@@ -2020,6 +2007,20 @@ impl Services {
         let services = Arc::new(Self::build(layout, config, db, machine)?);
         services.services_slot.fill(&services);
         Ok(services)
+    }
+
+    /// What the config commands act on, for a caller that writes settings
+    /// itself (`settings_commands::write_logged`).
+    pub fn config_target(&self) -> commands::config_commands::ConfigTarget {
+        commands::config_commands::ConfigTarget {
+            config: self.config.clone(),
+            global_dir: self.global_config_dir.clone(),
+            secrets: self.secrets.clone(),
+            catalog: Some(self.extension_catalog.clone()),
+            project_dir: self.layout.project_dir.clone(),
+            events: self.events.clone(),
+            extra_definitions: Vec::new(),
+        }
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply

@@ -32,6 +32,10 @@ pub struct ConfigTarget {
     pub catalog: Option<Arc<crate::extension::extension_catalog::ExtensionCatalog>>,
     pub project_dir: PathBuf,
     pub events: EventBus,
+    /// Settings to register beyond what the catalog declares: a caller that
+    /// writes one the catalog doesn't list yet (an extension just written,
+    /// not yet loaded).
+    pub extra_definitions: Vec<oxplow_config::settings::SettingDefinition>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -112,7 +116,7 @@ impl ConfigTarget {
             .catalog
             .as_ref()
             .map(|catalog| catalog.unpinned(&self.project_dir, "settings registry"));
-        crate::settings::store(
+        let store = crate::settings::store(
             &self.project_dir,
             &self.global_dir,
             self.secrets.clone(),
@@ -120,7 +124,20 @@ impl ConfigTarget {
         )
         .map_err(|e| CommandError::Failed {
             message: e.to_string(),
-        })
+        })?;
+        if !self.extra_definitions.is_empty() {
+            let mut registry = store.registry.write().unwrap_or_else(|e| e.into_inner());
+            for definition in &self.extra_definitions {
+                if registry.get(&definition.key).is_none() {
+                    registry
+                        .register(definition.clone())
+                        .map_err(|e| CommandError::Failed {
+                            message: e.to_string(),
+                        })?;
+                }
+            }
+        }
+        Ok(store)
     }
     pub(crate) fn refresh(&self) -> Result<(), CommandError> {
         let fresh = oxplow_config::load_project_config_with_global(
@@ -308,6 +325,7 @@ mod tests {
             )),
             project_dir: dir.path().to_path_buf(),
             events: EventBus::new(),
+            extra_definitions: Vec::new(),
         };
         let db = Database::in_memory();
         let log = SqliteEventLogStore::new(

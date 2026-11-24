@@ -426,6 +426,37 @@ pub(crate) fn write_changes(
     })
 }
 
+/// [`write_changes`] for a service that writes settings outside a command
+/// (a deploy turning an extension on): the same checks and the same one
+/// write, and each `config.changed` it makes goes into the event log so the
+/// reactors hear it. No undo: the caller's own operation is the unit a
+/// person undoes.
+pub(crate) fn write_logged(
+    svc: &crate::Services,
+    actor: &Actor,
+    changes: Vec<(String, Option<Value>)>,
+    level: Level,
+    extra_definitions: Vec<oxplow_config::settings::SettingDefinition>,
+) -> Result<(), CommandError> {
+    let mut target = svc.config_target();
+    target.extra_definitions = extra_definitions;
+    let output = write_changes(&target, actor, changes, level)?;
+    if output.events.is_empty() {
+        return Ok(());
+    }
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        let store = svc.event_log_store.clone();
+        runtime.spawn(async move {
+            for event in output.events {
+                if let Err(error) = store.append(event).await {
+                    tracing::warn!(%error, "logging config.changed failed");
+                }
+            }
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
@@ -532,6 +563,7 @@ mod ownership_tests {
             secrets: fx.svc.secrets.clone(),
             catalog: Some(fx.svc.extension_catalog.clone()),
             events: fx.svc.events.clone(),
+            extra_definitions: Vec::new(),
         }
     }
 
