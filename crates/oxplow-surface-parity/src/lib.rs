@@ -459,6 +459,14 @@ pub const MANIFEST: &[Capability] = &[
         "clipboard_read_text",
         "the OS clipboard, for the person's paste",
     ),
+    ui(
+        "reveal_path",
+        "Open In ▸ Reveal in Finder: the person's file manager on the shell's own machine",
+    ),
+    ui(
+        "open_path",
+        "Open In ▸ Default App: the person's desktop app on the shell's own machine; never an agent's",
+    ),
     // ---- lsp (shared sessions + installer) ----
     ui(
         "list_installed_lsp_packages",
