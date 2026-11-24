@@ -1079,18 +1079,13 @@ impl Services {
         let pty = oxplow_pty::PtyManager::spawn();
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
-        let project_config = config_arc.clone();
         // The model providers foundation declares, registered with the
         // other declarations below.
         let model_providers = oxplow_ai::client::ModelProviders::default();
         let ai = Arc::new(
             ai_service::AiService::new(
                 model_providers.clone(),
-                machine.secrets.clone(),
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-                machine.config_dir.clone(),
-            )
-            .with_settings(
                 crate::settings::store(
                     &layout.project_dir,
                     &machine
@@ -1104,16 +1099,7 @@ impl Services {
                     AppInitError::Config(oxplow_config::ConfigError::Invalid(e.to_string()))
                 })?,
             )
-            .with_activation(extension_activation.clone())
-            // Read live, so project.yaml edits and reloads apply at once.
-            .with_project_overrides(Arc::new(move || {
-                ai_service::project_overrides(
-                    &project_config
-                        .read()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .ai_roles,
-                )
-            })),
+            .with_activation(extension_activation.clone()),
         );
         let ai_compute = Arc::new(ai_compute::AiCompute::new(
             ai.clone(),

@@ -1430,16 +1430,9 @@ pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Ve
         .collect()
 }
 
-/// The AI bindings a call from `root` would use: this machine's `ai.yaml`
-/// with the project's `ai.roles` over it. Never a key.
+/// The AI bindings a call from `root` would use, from the settings. Never a key.
 fn ai_bindings(root: &Path) -> oxplow_ai::config::AiConfig {
-    let global = oxplow_config::global_config_dir()
-        .and_then(|dir| oxplow_ai::config::AiConfig::load(&dir).ok())
-        .unwrap_or_default();
-    let overrides = oxplow_config::load_project_config(root)
-        .map(|c| oxplow_app::ai_service::project_overrides(&c.ai_roles))
-        .unwrap_or_default();
-    global.with_overrides(&overrides)
+    oxplow_app::ai_service::role_bindings(root)
 }
 
 pub fn render_services(report: &CheckReport) -> String {

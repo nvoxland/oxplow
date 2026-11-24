@@ -2617,13 +2617,16 @@ pub(crate) mod tests {
     /// models).
     fn no_ai() -> std::sync::Arc<crate::ai_compute::AiCompute> {
         let db = oxplow_db::Database::in_memory();
+        let dir = tempfile::tempdir().unwrap();
+        let service = crate::ai_service::AiService::for_tests(
+            crate::ai_service::test_providers(),
+            std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
+            dir.path(),
+        );
+        // The settings folders must outlive the service.
+        std::mem::forget(dir);
         std::sync::Arc::new(crate::ai_compute::AiCompute::new(
-            std::sync::Arc::new(crate::ai_service::AiService::new(
-                crate::ai_service::test_providers(),
-                std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-                std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-                None,
-            )),
+            std::sync::Arc::new(service),
             oxplow_db::SqliteAiResultStore::new(db),
         ))
     }
@@ -3709,11 +3712,10 @@ pub(crate) mod tests {
         let activation =
             std::sync::Arc::new(crate::extension::extension_activation::ExtensionActivation::new());
         let ai = std::sync::Arc::new(
-            crate::ai_service::AiService::new(
+            crate::ai_service::AiService::for_tests(
                 crate::ai_service::test_providers(),
-                std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
                 std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-                Some(state.join("global-config")),
+                &state.join("global-config"),
             )
             .with_activation(activation.clone()),
         );
@@ -3731,11 +3733,6 @@ pub(crate) mod tests {
             Some(RoleBinding::new("openai_compatible", "x")),
         )
         .unwrap();
-        ai.set_role(
-            &Role::parse("work/sort").unwrap(),
-            Some(RoleBinding::new("openai_compatible", "y")),
-        )
-        .unwrap();
         ai.set_profiles(std::sync::Arc::new(|| {
             vec![oxplow_ai::config::AiProfile {
                 namespace: "work".into(),
@@ -3745,6 +3742,11 @@ pub(crate) mod tests {
                 features: vec![],
             }]
         }));
+        ai.set_role(
+            &Role::parse("work/sort").unwrap(),
+            Some(RoleBinding::new("openai_compatible", "y")),
+        )
+        .unwrap();
         let store = SqliteCollectorStore::new(db.clone());
         let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
