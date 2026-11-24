@@ -1,5 +1,5 @@
 import { parse, stringify } from "yaml";
-import type { PageRun, SqlCell, SqlQueryResult, VizChart, VizRun } from "../tauri-bridge/generated/bindings.js";
+import type { PageColumn, PageRun, SqlCell, SqlQueryResult, VizChart, VizRun } from "../tauri-bridge/generated/bindings.js";
 
 export const TABLE_PRESENTATIONS = ["table", "list", "number", "bar", "line", "treemap"] as const;
 export type TablePresentation = typeof TABLE_PRESENTATIONS[number];
@@ -75,30 +75,52 @@ export function displayTable(run: VizRun, display: TableDisplay): VizRun {
   };
 }
 
-/** A saved view reads the original page loader with the inputs on screen.
- *  Inline views carry their source loaders because their page ids are temporary. */
-export function tablePageYaml(run: PageRun, loader: string, display: TableDisplay, title: string, inlineYaml?: string): string {
+/** What a table is saved from: the run it shows, its loader, how it is
+ *  shown, the params the person set (`given`: not what the page resolved,
+ *  so a default like the newest commit stays a default) and its columns. */
+export interface SavedTable {
+  run: PageRun;
+  loader: string;
+  display: TableDisplay;
+  title: string;
+  given: Record<string, SqlCell>;
+  columns: readonly PageColumn[];
+  /** An inline view's YAML: its page id is temporary, so its loaders are
+   *  copied. */
+  inlineYaml?: string;
+}
+
+/** A column as a page's YAML writes it: only what it says. */
+function writtenColumn(column: PageColumn): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(column).filter(([, value]) => value !== null && value !== undefined));
+}
+
+/** A saved view reads the original page loader with the inputs the person
+ *  set, and keeps the table's columns (labels, formats, links). */
+export function tablePageYaml({ run, loader, display, title, given, columns, inlineYaml }: SavedTable): string {
   const source: { loaders?: Record<string, unknown>; params?: { name: string; default?: SqlCell }[] } | null =
     inlineYaml === undefined ? null : parse(inlineYaml);
   const loaders: Record<string, unknown> = source === null
-    ? { rows: { page: run.page.id, loader, params: run.params } }
+    ? { rows: { page: run.page.id, loader, params: given } }
     : { ...source.loaders };
   let from = source === null ? "rows" : loader;
+  let written = columns.map(writtenColumn);
   if (display.viz === "number" && display.fields.value !== undefined) {
     const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
     let projection = "number_value";
     while (Object.hasOwn(loaders, projection)) projection += "_";
     loaders[projection] = { sql: `SELECT source.${quote(display.fields.value)} FROM ${quote(from)} AS source` };
     from = projection;
+    written = written.filter((column) => column.key === display.fields.value);
   }
   const chart = chartOf(display);
   return stringify({
     title,
     ...(source?.params ? {
-      params: source.params.map((param) => Object.hasOwn(run.params, param.name) ? { ...param, default: run.params[param.name] } : param),
+      params: source.params.map((param) => Object.hasOwn(given, param.name) ? { ...param, default: given[param.name] } : param),
     } : {}),
     ...(run.page.refresh ? { refresh: true } : {}),
     loaders,
-    view: { viz: display.viz, from, ...(chart ? { chart } : {}) },
+    view: { viz: display.viz, from, ...(chart ? { chart } : {}), ...(written.length ? { columns: written } : {}) },
   });
 }

@@ -134,8 +134,10 @@ export interface PageTreeProps {
   /** Its vizes' whole-viz actions as buttons above them; default: unless
    *  compact (an expanded row's page is compact and keeps them). */
   partButtons?: boolean;
-  /** The full page shell offers a different presentation of any table. */
-  showAs?: { onSaved?: (uri: string) => void; inlineYaml?: string };
+  /** The full page shell offers a different presentation of any of the
+   *  page's own tables (an embedded page's are its own page's to offer):
+   *  `given` is the params the person set. */
+  showAs?: { onSaved?: (uri: string) => void; inlineYaml?: string; given: Record<string, SqlCell> };
 }
 
 /** How a node sits in its parent: on its own, a stack's section, a
@@ -170,7 +172,7 @@ function NodeView(props: NodeViewProps) {
         fallback={<NodeBody {...props} def={def} id={id} />}
         streamId={props.streamId ?? null}
       >
-        {at.embed ? <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} /> : null}
+        {at.embed ? <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} showAs={undefined} /> : null}
       </Replaced>
     ) : (
       own
@@ -295,7 +297,7 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
       return at.embed ? (
         <>
           {props.compact ? null : <EmbeddedActions embed={at.embed} node={id} runId={props.runId} streamId={props.streamId ?? null} />}
-          <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} />
+          <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} showAs={undefined} />
         </>
       ) : null;
     case "viz":
@@ -400,7 +402,8 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
           loader={def.from}
           title={def.title ? `${run.page.title} · ${def.title}` : run.page.title}
           streamId={streamId}
-          inlineYaml={props.prefix === undefined ? showAs.inlineYaml : undefined}
+          inlineYaml={showAs.inlineYaml}
+          given={showAs.given}
           onSaved={showAs.onSaved}
         >
           {draw}

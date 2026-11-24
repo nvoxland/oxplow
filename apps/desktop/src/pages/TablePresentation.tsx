@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { PageRun, VizRun } from "../tauri-bridge/generated/bindings.js";
+import type { PageRun, SqlCell, VizRun } from "../tauri-bridge/generated/bindings.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import { SaveTempViewForm, SaveViewForm } from "./SaveViewForm.js";
 import {
@@ -16,13 +16,15 @@ interface Props {
   title: string;
   streamId: string | null;
   inlineYaml?: string;
+  /** The params the person set on the page (not those it resolved). */
+  given: Record<string, SqlCell>;
   onSaved?: (uri: string) => void;
   children: (view: VizRun) => ReactNode;
 }
 
 const labelOf = (viz: Presentation) => viz.charAt(0).toUpperCase() + viz.slice(1);
 
-export function TablePresentation({ id, run, table, loader, title, streamId, inlineYaml, onSaved, children }: Props) {
+export function TablePresentation({ id, run, table, loader, title, streamId, inlineYaml, given, onSaved, children }: Props) {
   const [choice, choose] = useHistoryState(`show-as:${run.page.id}:${id}`, TABLE_DISPLAY);
   const display = useMemo(() => resolveTableDisplay(choice, table.result), [choice, table.result]);
   const [saving, setSaving] = useState<TableDisplay | null>(null);
@@ -30,7 +32,10 @@ export function TablePresentation({ id, run, table, loader, title, streamId, inl
   const canSave = Boolean(onSaved && columns.length);
   const temp = inlineYaml === undefined && run.page.origin.extension === TEMP_EXTENSION;
   const form = saving && onSaved ? { kind: "page" as const, initialTitle: `${title} · ${labelOf(saving.viz)}`, onClose: () => setSaving(null), onSaved } : null;
-  const spec = (yaml?: string) => tablePageYaml(run, loader, saving ?? display, title, yaml);
+  const spec = (yaml?: string) => tablePageYaml({
+    run, loader, display: saving ?? display, title, given, columns: table.config.columns,
+    ...(yaml === undefined ? {} : { inlineYaml: yaml }),
+  });
   return (
     <>
       <div className="ox-toolbar" data-testid={`show-as-${id}`} style={{ flexWrap: "wrap", gap: 8, marginBottom: 8 }}>

@@ -24,7 +24,7 @@ loaders:
   items: { sql: 'SELECT :scope AS label, 8 AS "total ""net"""' }
 view: { viz: table, from: items }
 `;
-  expect(parse(tablePageYaml(run, "items", display, "Total", temp))).toEqual({
+  expect(parse(tablePageYaml({ run, loader: "items", display, title: "Total", given: { scope: "open" }, columns: [], inlineYaml: temp }))).toEqual({
     title: "Total",
     params: [{ name: "scope", default: "open" }],
     loaders: {
@@ -32,5 +32,27 @@ view: { viz: table, from: items }
       number_value: { sql: 'SELECT source."total ""net""" FROM "items" AS source' },
     },
     view: { viz: "number", from: "number_value" },
+  });
+});
+
+test("a saved table keeps its columns' labels, formats and links, and only the params the person set", () => {
+  // `head` is resolved by the page (the newest commit): saved, the page
+  // would stay on that commit.
+  const run = { ...tablePage(), params: { head: "abc123", author: "Ann" } };
+  const columns = [
+    { key: "sha", label: "Commit", link: { kind: "page" as const, from: "uri" }, format: null, unit: null },
+    { key: "at", format: "relative" as const },
+  ];
+  expect(parse(tablePageYaml({ run, loader: "items", display: { viz: "table", fields: {} }, title: "Mine", given: { author: "Ann" }, columns }))).toEqual({
+    title: "Mine",
+    loaders: { rows: { page: run.page.id, loader: "items", params: { author: "Ann" } } },
+    view: {
+      viz: "table",
+      from: "rows",
+      columns: [
+        { key: "sha", label: "Commit", link: { kind: "page", from: "uri" } },
+        { key: "at", format: "relative" },
+      ],
+    },
   });
 });

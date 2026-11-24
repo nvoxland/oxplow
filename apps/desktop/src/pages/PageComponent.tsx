@@ -282,7 +282,7 @@ export function ShownView({
         // Its nodes are its own page's: nothing in the host lands on them.
         <NodeRegistryContext.Provider value={null}>
           <PageTree run={state.run} runId={state.runId} streamId={streamId} onOpenPage={onOpenPage}
-            showAs={{ inlineYaml: specYaml, onSaved: onOpenPage ? (uri) => onOpenPage({ id: uri }) : undefined }} />
+            showAs={{ inlineYaml: specYaml, given: {}, onSaved: onOpenPage ? (uri) => onOpenPage({ id: uri }) : undefined }} />
         </NodeRegistryContext.Provider>
       ) : null}
     </div>
