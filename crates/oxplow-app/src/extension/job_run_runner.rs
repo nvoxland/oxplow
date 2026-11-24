@@ -37,9 +37,11 @@ const FLUSH_BYTES: usize = 4096;
 const MAX_TEXT_ROW: usize = 65_536;
 
 /// What tool calls run on: the command bus (bound once it exists: the bus
-/// is built after the jobs) and the SQL gateway.
+/// is built after the jobs) and the SQL gateway. The bus is held weakly:
+/// it holds the job commands, which hold the jobs and so this, and a strong
+/// hold would keep the services' parts (their database) alive for ever.
 pub(crate) struct ToolHost {
-    commands: OnceLock<Arc<crate::commands::CommandBus>>,
+    commands: OnceLock<std::sync::Weak<crate::commands::CommandBus>>,
     sql: crate::sql_gateway::SqlGateway,
 }
 
@@ -51,8 +53,8 @@ impl ToolHost {
         }
     }
 
-    pub(crate) fn bind(&self, commands: Arc<crate::commands::CommandBus>) {
-        let _ = self.commands.set(commands);
+    pub(crate) fn bind(&self, commands: &Arc<crate::commands::CommandBus>) {
+        let _ = self.commands.set(Arc::downgrade(commands));
     }
 }
 
@@ -263,7 +265,9 @@ impl AiJob {
             .tools
             .commands
             .get()
-            .ok_or_else(|| "tools aren't available yet".to_string())?;
+            .ok_or_else(|| "tools aren't available yet".to_string())?
+            .upgrade()
+            .ok_or_else(|| "oxplow is shutting down".to_string())?;
         let outcome = commands
             .run_in(work.run(), &tool.command, arguments, false)
             .await

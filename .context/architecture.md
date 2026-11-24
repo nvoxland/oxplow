@@ -253,9 +253,20 @@ leaving one running by accident.
 
 **A background loop is a `Services::spawn_every`.** It holds the
 services weakly (only while a tick runs) and stops on
-`Services::shutdown`, which the daemon's exit calls: it cancels the
-loops, stops the job scheduler, and gives provider processes 2 s to
-exit. A new periodic loop uses it rather than a bare `tokio::spawn`.
+`Services::shutdown`, which the daemon's exit calls: it runs
+`Services::stop` (cancels the loops, ends the assets' recomputes, stops
+the job scheduler) and gives provider processes 2 s to exit. A new
+periodic loop uses it rather than a bare `tokio::spawn`. **A loop that
+must hold part of the services** (the change loop holds the database, an
+asset's recompute too) ends on `Services::stopping()` — never on their
+being dropped, which can't happen while it holds them. **No part of the
+services holds another strongly in a cycle**: a part that needs one built
+after it (the job tools need the command bus, which holds the job
+commands) holds it weakly, as `ServicesSlot` holds the services. Either
+mistake keeps every part, and the database, alive after the services are
+gone: a test's throwaway oxplow (`Host`, dropped after its example, runs
+`Services::stop`) leaked one per fixture until both were fixed
+(`a_dropped_fork_frees_its_database`).
 
 **Opening a project** (`ShellWindows::open_project`) is: focus the
 window that already has it, else sweep any orphaned daemon, start a

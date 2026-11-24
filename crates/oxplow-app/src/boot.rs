@@ -386,6 +386,7 @@ pub async fn run_boot_orchestration(
         state.assets.clone(),
         state.event_pump.clone(),
         state.page_runs.clone(),
+        state.stopping(),
     );
     state.page_runs.start(state);
     state.spawn_every(

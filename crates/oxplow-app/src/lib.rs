@@ -749,6 +749,29 @@ impl Services {
         })
     }
 
+    /// Where `root`'s folder is on this machine (a test's: under its own
+    /// folder): what a `files:` folder with that root is relative to.
+    pub fn folder_base(&self, root: &oxplow_domain::folder_root::FolderRoot) -> Option<PathBuf> {
+        oxplow_domain::folder_root::FolderBases::base(&*self.folder_roots, root)
+    }
+
+    /// What every background loop stops on: cancelled by [`Self::stop`]. A
+    /// loop that holds part of the services (the change loop holds the
+    /// database) ends only on this, never by their being dropped.
+    pub fn stopping(&self) -> tokio_util::sync::CancellationToken {
+        self.stopping.clone()
+    }
+
+    /// Stop the loops, the assets' recomputes and the job scheduler (a
+    /// running job is cancelled),
+    /// at once: what an oxplow that ends without its processes to wait for
+    /// (a test's throwaway) runs, and the first part of [`Self::shutdown`].
+    pub fn stop(&self) {
+        self.stopping.cancel();
+        self.jobs.shutdown();
+        self.assets.stop();
+    }
+
     /// Stop what runs in the background: the loops, the job scheduler (a
     /// running job is cancelled; recovery decides its end next time), and
     /// every process the daemon started outside its own process group —
@@ -756,15 +779,8 @@ impl Services {
     /// group of its own) and the LSP servers — which get two seconds,
     /// together. The daemon's `process::exit` runs no destructors, so
     /// what isn't ended here outlives it.
-    /// Where `root`'s folder is on this machine (a test's: under its own
-    /// folder): what a `files:` folder with that root is relative to.
-    pub fn folder_base(&self, root: &oxplow_domain::folder_root::FolderRoot) -> Option<PathBuf> {
-        oxplow_domain::folder_root::FolderBases::base(&*self.folder_roots, root)
-    }
-
     pub async fn shutdown(&self) {
-        self.stopping.cancel();
-        self.jobs.shutdown();
+        self.stop();
         if tokio::time::timeout(std::time::Duration::from_secs(2), async {
             tokio::join!(
                 self.providers.shutdown_all(),

@@ -296,6 +296,9 @@ pub struct Assets {
     /// ([`Assets::sync_search_kinds`], `kind_search`), by kind.
     pub(crate) search_kinds:
         Arc<tokio::sync::Mutex<BTreeMap<String, crate::kind_search::SearchableKind>>>,
+    /// Cancelled by [`Assets::stop`]: every recompute loop ends on it, and
+    /// none starts after. A loop holds the database, so only this frees it.
+    stopping: tokio_util::sync::CancellationToken,
 }
 
 impl Assets {
@@ -307,7 +310,14 @@ impl Assets {
             entries: Arc::default(),
             datasets: Arc::default(),
             search_kinds: Arc::default(),
+            stopping: tokio_util::sync::CancellationToken::new(),
         }
+    }
+
+    /// End every recompute loop, and start none after (the services
+    /// stopping, [`crate::Services::stop`]).
+    pub fn stop(&self) {
+        self.stopping.cancel();
     }
 
     /// The database its assets are computed in.
@@ -324,6 +334,9 @@ impl Assets {
     /// Add `materializer` and start its recompute loop: once now (its
     /// first build), then after each quiet burst of changes to its inputs.
     pub fn register(&self, materializer: Arc<dyn Materializer>) {
+        if self.stopping.is_cancelled() {
+            return;
+        }
         let entry = Arc::new(Entry {
             inputs: materializer.inputs().into_iter().collect(),
             materializer,
@@ -346,7 +359,8 @@ impl Assets {
             entry.clone(),
             self.entries.clone(),
         );
-        let task = tokio::spawn(async move {
+        let stopping = self.stopping.clone();
+        let recompute = async move {
             let entry = looping;
             if let Some(every) = entry.materializer.every() {
                 let mut wait = until_due(
@@ -385,6 +399,12 @@ impl Assets {
                 if entry.pending() {
                     run_once(&db, &entries, &entry, &now).await;
                 }
+            }
+        };
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                _ = stopping.cancelled() => {}
+                _ = recompute => {}
             }
         });
         *entry.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
