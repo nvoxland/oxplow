@@ -2307,6 +2307,7 @@ mod tests {
                 "oxplow.config.unset",
                 "oxplow.config.update",
                 // A provider's process restarts (P7.C1; was provider.enable).
+                "oxplow.contribution.disable",
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",
                 // A consumer's handler runs again (the event pump owns the
