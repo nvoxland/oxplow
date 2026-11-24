@@ -366,4 +366,75 @@ mod tests {
         );
         assert_eq!(handle.editor_language("Makefile"), None);
     }
+
+    /// A person turns one language off with the command: it leaves the set
+    /// at the next publication, `v_language` says it is off while its
+    /// extension is on, and undoing the command turns it back on.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_person_turns_one_language_off_and_undoing_turns_it_on() {
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let off = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.contribution.disable",
+                serde_json::json!({ "namespace": "oxplow", "kind": "language", "contribution": "rust" }),
+                false,
+            )
+            .await
+            .unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
+        assert!(
+            svc.languages.current().by_name("rust").is_none(),
+            "rust is off"
+        );
+        assert!(
+            svc.languages.current().by_name("python").is_some(),
+            "the rest stay"
+        );
+        let enabled = |name: &'static str| async move {
+            svc.sql
+                .query_sql(
+                    &format!("SELECT enabled FROM v_language WHERE id = '{name}' AND extension = 'oxplow-{name}'"),
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        let rows = serde_json::to_value(enabled("rust").await).unwrap();
+        assert_eq!(
+            rows,
+            serde_json::json!([[0]]),
+            "off, its extension still on"
+        );
+        assert_eq!(
+            serde_json::to_value(enabled("python").await).unwrap(),
+            serde_json::json!([[1]])
+        );
+        svc.commands
+            .undo(&Actor::Human, off.command_run_id.unwrap(), false)
+            .await
+            .unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
+        assert!(svc.languages.current().by_name("rust").is_some(), "back on");
+        assert_eq!(
+            serde_json::to_value(enabled("rust").await).unwrap(),
+            serde_json::json!([[1]])
+        );
+        // A provider instance is turned off in Settings.
+        let refused = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.contribution.disable",
+                serde_json::json!({ "namespace": "x", "kind": "provider", "contribution": "y" }),
+                false,
+            )
+            .await;
+        assert!(refused.is_err());
+    }
 }

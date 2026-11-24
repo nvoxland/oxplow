@@ -1365,11 +1365,17 @@ commands:
     example: {"name": "my-extension"}
   # extensions.enable
   - name: contribution.enable
-    summary: "Enable a disabled extension provider, collector or effect on this machine again, clearing an automatic disable (a provider's process restarts, a system the bus doesn't own)."
+    summary: "Enable a disabled extension provider, collector, effect or language on this machine again, clearing an automatic disable or a `contribution.disable` (a provider's process restarts, a system the bus doesn't own)."
     scope: extensions.enable
     op: enable
     lifecycle: experimental
     example: {"namespace": "review", "kind": "effect", "contribution": "notify"}
+  - name: contribution.disable
+    summary: "Turn one extension contribution off on this machine without turning its extension off: a language (`kind: language`: it leaves the language set at the next publication, so its files parse no more, and `v_language.enabled` says 0), a collector or an effect. A provider instance is turned off in Settings. `oxplow.contribution.enable` turns it back on and is its undo."
+    scope: extensions.enable
+    op: disable
+    lifecycle: experimental
+    example: {"namespace": "oxplow", "kind": "language", "contribution": "rust"}
   - name: contribution.enable_all
     summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one namespace's (`namespace`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
     scope: extensions.enable

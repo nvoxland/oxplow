@@ -58,6 +58,17 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   contribution }`. It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or
   a provider instance the registry knows).
+- **Turning one off by hand.** `oxplow.contribution.disable { namespace, kind,
+  contribution }` (a collector, an effect or a **language**; a provider
+  instance is turned off in Settings; person only, undoable: its inverse is
+  `enable`) writes the same `disabled` health row an automatic disable does,
+  with the reason "turned off by <who>". A language turned off leaves the
+  language set at the next publication (`language_set::of_without`; the
+  command asks for one), its files parse no more, and `v_language.enabled`
+  says 0 while its extension is on. A disabled language still holds its
+  id, aliases and file extensions in the conflict check
+  (`hold_language_conflicts` reads declarations): turn off its extension to
+  free them.
 - **In the app (C3).** the Extensions page shows one health line per
   contribution under its extension (`contributionHealth.ts`, live over
   `v_contribution_health`): `OK` with its average time, a missed schedule and

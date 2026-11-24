@@ -332,6 +332,71 @@ pub fn enable_op(
     )
 }
 
+/// `oxplow.contribution.disable { namespace, kind, contribution }`: a person
+/// turns one contribution off on this machine without turning its extension
+/// off: a language (it leaves the language set at the next publication, its
+/// files parse no more and `v_language.enabled` says 0), a collector (it
+/// doesn't run) or an effect (it doesn't react). A provider instance is
+/// turned off in Settings, not here. The inverse is `oxplow.contribution.enable`.
+/// Human only; logs `contribution.disabled@1`.
+pub fn disable_op(
+    health: ContributionHealth,
+    activation: Weak<crate::extension::extension_activation::ExtensionActivation>,
+) -> crate::commands::ops::Op {
+    crate::commands::ops::Op::new(
+        "extensions.enable",
+        "disable",
+        serde_json::to_value(schemars::schema_for!(EnableInput)).expect("schema serializes"),
+        true,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let actor = invocation.actor().clone();
+            let (health, activation) = (health.clone(), activation.clone());
+            Box::pin(async move {
+                let again = input.clone();
+                let EnableInput {
+                    namespace,
+                    kind,
+                    contribution,
+                } = serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+                    field: None,
+                    message: e.to_string(),
+                })?;
+                if kind == Kind::Provider {
+                    return Err(CommandError::Invalid {
+                        field: Some("/kind".into()),
+                        message: "a provider instance is turned off in Settings → Integrations; \
+                                  this turns off a collector, an effect or a language"
+                            .into(),
+                    });
+                }
+                let key = ContributionKey {
+                    namespace,
+                    contribution,
+                    kind: kind.as_str(),
+                };
+                let was = health.disabled_reason(&key).await?;
+                health
+                    .disable(&key, &format!("turned off by {}", actor.source()))
+                    .await?;
+                republish_for(kind, &activation);
+                Ok(HandlerOutput {
+                    result: serde_json::json!({
+                        "namespace": key.namespace,
+                        "kind": kind.as_str(),
+                        "contribution": key.contribution,
+                        "disabled": true,
+                    }),
+                    inverse: was.is_none().then(|| oxplow_domain::CommandCall {
+                        name: "oxplow.contribution.enable".into(),
+                        input: again,
+                    }),
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EnableAllInput {
