@@ -547,7 +547,10 @@ a `KINDS` entry and a `dispatch` arm. The forms:
     it — `Database::copy_in_memory` of a snapshot taken before anything
     ran — so the fork boots what was deployed and nothing is built or
     deployed again; ~0.8 s, most of it that boot's activation), so no
-    example sees another's data. Being independent, they run side by side
+    example sees another's data. A fork ends with its example: dropping
+    a `Host` runs `Services::stop`, so its database copy and its pool's
+    threads are freed (`.context/architecture.md` "A background loop";
+    kept, a run of every fixture held gigabytes). Being independent, they run side by side
     (spawned tasks, `side_by_side()`: half the cores, at most four), and
     their findings join the report in the examples' order after the
     shared host's; the CLI's runtime has threads for it. The rest — `check`, the other examples, the answers — share one.

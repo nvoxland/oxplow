@@ -113,6 +113,15 @@ fn shipped_requires(shipped: &oxplow_app::bundled_extensions::BundledExtension) 
         .requires
 }
 
+/// A throwaway ends with the example it ran: what its runtime started stops,
+/// so its services — its database copy, its connection pool's threads — are
+/// freed. A run of every fixture forks hundreds.
+impl Drop for Host {
+    fn drop(&mut self) {
+        self.svc.stop();
+    }
+}
+
 impl Host {
     /// The namespace extension `name` names its contributions in here (its
     /// own name's, `-` read as `_`, when it isn't loaded).
@@ -422,6 +431,7 @@ impl Host {
             self.svc.assets.clone(),
             self.svc.event_pump.clone(),
             self.svc.page_runs.clone(),
+            self.svc.stopping(),
         );
         self.svc.jobs.spawn(
             self.svc.extension_activation.clone(),
@@ -715,6 +725,42 @@ mod tests {
             assert!(d.join("extension.yaml").is_file(), "{d:?}");
         }
         assert!(fork.problems.is_empty(), "{:?}", fork.problems);
+    }
+
+    /// A fork ends with the example it ran: dropping it stops what its
+    /// runtime started, so its database — an in-memory copy of the
+    /// deployed one, with its connection pool's threads — is freed. A run
+    /// of every fixture forks hundreds; kept, they held gigabytes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_fork_frees_its_database() {
+        let project = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider::default()
+            .init_repository(project.path())
+            .await
+            .unwrap();
+        write(
+            project.path(),
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        let base = Host::start(project.path(), "acme", &[], Arc::new(|_: &str| None), true)
+            .await
+            .unwrap();
+        base.start_runtime().unwrap();
+        let fork = base.fork().await.unwrap();
+        fork.settle().await;
+        let mut changes = fork.svc.db.subscribe_changes();
+        drop(fork);
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                match changes.recv().await {
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "the dropped fork's database is still held");
     }
 
     /// Shared read-only examples rebind their fixture model while data-making
