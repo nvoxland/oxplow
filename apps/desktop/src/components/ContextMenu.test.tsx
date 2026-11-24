@@ -92,3 +92,23 @@ test("a menu item that fails is recorded, and the menu closes", async () => {
   await waitFor(() => expect(closed).toBe(1));
   expect(reports).toEqual(["Push: rejected: non-fast-forward"]);
 });
+
+/** An item lights up under the pointer, as menus do: its background is the
+ *  stylesheet's (`.oxplow-menu-item:hover`), never an inline one that would
+ *  override it, and an item whose submenu is open stays lit. */
+test("an item's highlight is the stylesheet's, and an open submenu's item stays lit", () => {
+  const { getByTestId } = render(
+    <MenuList
+      items={[
+        { id: "plain", label: "Plain", enabled: true },
+        { id: "more", label: "More", enabled: true, submenu: [{ id: "more.x", label: "X", enabled: true }] },
+      ]}
+    />,
+  );
+  const plain = getByTestId("menu-item-plain");
+  expect(plain.className).toContain("oxplow-menu-item");
+  expect(plain.style.background).toBe("");
+  fireEvent.click(getByTestId("menu-item-more"));
+  expect(getByTestId("menu-item-more").getAttribute("data-open")).toBe("true");
+  expect(plain.getAttribute("data-open")).toBeNull();
+});
