@@ -2038,26 +2038,20 @@ impl Services {
             return Ok(());
         }
         self.snapshot_captures.set_generated(&fresh.generated);
-        let kinds_moved = {
-            let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
-            let moved = guard.files.kinds != fresh.files.kinds;
-            *guard = fresh;
-            moved
-        };
-        // No command wrote the file, so no `config.changed` restates the
-        // project's file kinds (`v_file_kind_rule`, what a corpus leaves
-        // out): the reload does, as it re-applies the snapshot filter.
-        if kinds_moved {
-            if let (Ok(svc), Ok(runtime)) = (
-                self.services_slot.get(),
-                tokio::runtime::Handle::try_current(),
-            ) {
-                runtime.spawn(async move {
-                    if let Err(error) = config_reactors::restate_file_kinds(&svc).await {
-                        tracing::warn!(%error, "restating the project's file kinds failed");
-                    }
-                });
-            }
+        config_reactors::apply_script_limits(&fresh);
+        *self.config.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+        // No command wrote the file, so no `config.changed` reached the
+        // reactors that apply a key as it moves (the file kinds restated, the
+        // extension catalog and the provider instances re-read, the metrics
+        // reseeded): the reload runs them, as it re-applies the snapshot
+        // filter and the script limits above.
+        if let (Ok(svc), Ok(runtime)) = (
+            self.services_slot.get(),
+            tokio::runtime::Handle::try_current(),
+        ) {
+            runtime.spawn(async move {
+                config_reactors::reapply(&svc).await;
+            });
         }
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())

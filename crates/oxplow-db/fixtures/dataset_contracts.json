@@ -39253,5 +39253,30 @@
         "name"
       ]
     }
+  },
+  "context_next": {
+    "1": {
+      "columns": [
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread whose next prompt it is (v_thread.id)."
+        },
+        {
+          "name": "item_id",
+          "type": "INTEGER",
+          "doc": "The item it carries (v_context_item.id)."
+        },
+        {
+          "name": "basket",
+          "type": "TEXT",
+          "doc": "The named basket the item is in; NULL for the thread's own."
+        }
+      ],
+      "key": [
+        "thread_id",
+        "item_id"
+      ]
+    }
   }
 }

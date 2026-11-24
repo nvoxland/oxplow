@@ -612,6 +612,19 @@ datasets:
     - { unique: id }
     - { relationships: { column: thread_id, to: thread, field: id } }
     - { relationships: { column: basket_id, to: context_basket, field: id } }
+- name: context_next
+  version: 1
+  key: [thread_id, item_id]
+  description: "The items each thread's next prompt carries (`oxplow.context.send_next`): the items of the named basket set next for the thread while it holds something, else the thread's own that are not held. The one statement of that rule: the prompt, the Context panel and its badge, and the Context page read it."
+  fields:
+    - { name: "thread_id", type: "INTEGER", doc: "The thread whose next prompt it is (v_thread.id)." }
+    - { name: "item_id", type: "INTEGER", doc: "The item it carries (v_context_item.id)." }
+    - { name: "basket", type: "TEXT", doc: "The named basket the item is in; NULL for the thread's own." }
+  tests:
+    - { not_null: thread_id }
+    - { not_null: item_id }
+    - { relationships: { column: thread_id, to: thread, field: id } }
+    - { relationships: { column: item_id, to: context_item, field: id } }
 - name: context_basket
   version: 2
   description: "The person's named context baskets: collections of pages and text (v_context_item) for agents, kept across every stream of the project. One can be set to go with a thread's next prompt instead of the thread's own (`oxplow.context.send_next`); that prompt carries its items, empties it and sets the thread back to its own. The basket stays until the person deletes it. A thread's own basket (\"This Thread\") is not a row here."

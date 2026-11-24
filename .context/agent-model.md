@@ -953,7 +953,10 @@ the named basket set to go next for it (**Send Next**,
 a time; a basket set next but empty sends the thread's own instead). The
 next prompt of *any* agent in the thread carries it as a `<context-basket>`
 block after the session context (`agent_context::basket_block` over
-`context_store::waiting_for_thread_tx`), a named basket's items under a line
+`context_store::waiting_for_thread_tx`; **`v_context_next` is the one
+statement of which items that is** — the prompt, the Context panel and its
+badge (`nextPrompt`, `sendingNext`) and the Context page's `next` loader all
+read it), a named basket's items under a line
 `From your "<name>" basket:`, numbered. Each page is
 `[oxplow uri …]` with its label; each piece of text is quoted (up to
 `BASKET_TEXT_IN_CONTEXT` characters) with where it came from; a text whose

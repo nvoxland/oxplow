@@ -26,7 +26,12 @@ const baskets = basketsFrom(
       [2, "Release", null],
     ],
   ),
+  null,
+  // What `v_context_next` says thread 7's next prompt carries.
+  result(["item_id", "basket"], [[2, "Auth"]]),
 );
+// ...and thread 8's: its own.
+const ownNext = { ...baskets, next: [{ id: 1, basket: null }] };
 
 test("the thread's own items and each named basket's are apart", () => {
   expect(baskets.own.map((i) => i.id)).toEqual([1]);
@@ -40,13 +45,12 @@ test("the thread's own items and each named basket's are apart", () => {
 test("a thread's next prompt carries one basket: the one sent next, else its own", () => {
   expect(sendingNext(baskets, "thr7")).toBe("Auth");
   expect(nextPrompt(baskets, "thr7").map((i) => i.id)).toEqual([2]);
-  expect(sendingNext(baskets, "thr8")).toBe("@thread");
-  expect(nextPrompt(baskets, "thr8").map((i) => i.id)).toEqual([1]);
+  expect(sendingNext(ownNext, "thr8")).toBe("@thread");
+  expect(nextPrompt(ownNext, "thr8").map((i) => i.id)).toEqual([1]);
   expect(sendingNext(baskets, null)).toBeNull();
   expect(nextPrompt(baskets, null)).toEqual([]);
-  // An empty basket sent next: the thread's own goes.
-  const empty = { ...baskets, named: baskets.named.map((b) => (b.name === "Auth" ? { ...b, items: [] } : b)) };
-  expect(sendingNext(empty, "thr7")).toBe("@thread");
+  // An empty basket sent next: the dataset names the thread's own.
+  expect(sendingNext(ownNext, "thr7")).toBe("@thread");
 });
 
 test("a held item (put back) waits out the next prompt", () => {
@@ -60,7 +64,8 @@ test("a held item (put back) waits out the next prompt", () => {
     ),
   );
   expect(own.map((i) => i.held)).toEqual([true, false]);
-  const b = basketsFrom(own, result(["id", "name", "next_thread_id"], []));
+  // The dataset leaves the held one out; the panel shows what it names.
+  const b = basketsFrom(own, result(["id", "name", "next_thread_id"], []), null, result(["item_id", "basket"], [[2, null]]));
   expect(nextPrompt(b, "thr7").map((i) => i.id)).toEqual([2]);
 });
 

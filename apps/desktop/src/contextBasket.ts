@@ -92,9 +92,19 @@ export interface Baskets {
   named: NamedBasket[];
   /** The selected thread's last send, or null. */
   lastSend: LastSend | null;
+  /** What the selected thread's next prompt carries (`v_context_next`, the
+   *  one statement of the rule): each item, and the named basket it is in
+   *  (null: the thread's own). */
+  next: { id: number; basket: string | null }[];
 }
 
-export const NO_BASKETS: Baskets = { own: [], named: [], lastSend: null };
+export const NO_BASKETS: Baskets = { own: [], named: [], lastSend: null, next: [] };
+
+/** `v_context_next` for a thread: what its next prompt carries. */
+export const NEXT_SQL = `
+  SELECT item_id, basket
+  FROM v_context_next
+  WHERE thread_id = ?1`;
 
 export const SENT_SQL = `
   SELECT basket, items
@@ -140,10 +150,17 @@ export function itemsFromResult(result: SqlQueryResult): BasketItem[] {
 }
 
 /** The baskets, from what `ITEMS_SQL` and `BASKETS_SQL` read. */
-export function basketsFrom(items: readonly BasketItem[], baskets: SqlQueryResult, lastSend: LastSend | null = null): Baskets {
+export function basketsFrom(
+  items: readonly BasketItem[],
+  baskets: SqlQueryResult,
+  lastSend: LastSend | null = null,
+  next: SqlQueryResult | null = null,
+): Baskets {
   const { at, str } = cells(baskets);
+  const nextCells = next ? cells(next) : null;
   return {
     lastSend,
+    next: next && nextCells ? next.rows.map((row) => ({ id: Number(nextCells.at(row, "item_id")), basket: nextCells.str(nextCells.at(row, "basket")) })) : [],
     own: items.filter((i) => i.basket == null),
     named: baskets.rows.map((row) => {
       const name = String(at(row, "name"));
@@ -158,22 +175,21 @@ export function basketsFrom(items: readonly BasketItem[], baskets: SqlQueryResul
   };
 }
 
-/** The basket `thread`'s next prompt sends: the named basket sent next
- *  for it while it holds something, else This Thread (`THREAD_MARK`); null
- *  with no thread. As `context_store::waiting_for_thread_tx` decides. */
+/** The basket `thread`'s next prompt sends: the named basket its next prompt
+ *  carries, else This Thread (`THREAD_MARK`); null with no thread. As
+ *  `v_context_next` decides (`baskets.next`, read for the selected thread). */
 export function sendingNext(baskets: Baskets, thread: string | null): string | null {
   if (!thread) return null;
-  const chosen = baskets.named.find((b) => b.nextFor === thread && b.items.length > 0);
-  return chosen ? chosen.name : THREAD_MARK;
+  return baskets.next.find((n) => n.basket != null)?.basket ?? THREAD_MARK;
 }
 
-/** What `thread`'s next prompt will carry: the items of the basket it
- *  sends, This Thread's without the held ones (put back). */
+/** What `thread`'s next prompt will carry: the items `v_context_next` names
+ *  (the rule is that dataset's, not repeated here). */
 export function nextPrompt(baskets: Baskets, thread: string | null): BasketItem[] {
-  const sending = sendingNext(baskets, thread);
-  if (sending == null) return [];
-  if (sending === THREAD_MARK) return baskets.own.filter((i) => !i.held);
-  return baskets.named.find((b) => b.name === sending)?.items ?? [];
+  if (!thread) return [];
+  const ids = new Set(baskets.next.map((n) => n.id));
+  const all = [...baskets.own, ...baskets.named.flatMap((b) => b.items)];
+  return all.filter((i) => ids.has(i.id));
 }
 
 /** One thread's baskets, read once however many components show them (the
@@ -191,11 +207,11 @@ class BasketsStore {
   private load() {
     const mine = ++this.serial;
     const thread = this.threadId ? threadRowId(this.threadId) : 0;
-    void Promise.all([querySql(ITEMS_SQL, [thread], 2_000), querySql(BASKETS_SQL, [], 500), querySql(SENT_SQL, [thread], 1)]).then(
-      ([items, named, sent]) => {
+    void Promise.all([querySql(ITEMS_SQL, [thread], 2_000), querySql(BASKETS_SQL, [], 500), querySql(SENT_SQL, [thread], 1), querySql(NEXT_SQL, [thread], 2_000)]).then(
+      ([items, named, sent, next]) => {
         if (mine !== this.serial) return;
-        this.baskets = basketsFrom(itemsFromResult(items), named, lastSendFrom(sent));
-        this.reads = unionReads([items.reads, named.reads, sent.reads]);
+        this.baskets = basketsFrom(itemsFromResult(items), named, lastSendFrom(sent), next);
+        this.reads = unionReads([items.reads, named.reads, sent.reads, next.reads]);
         for (const l of this.listeners) l();
       },
       (e: unknown) => recordOpError({ label: "Read the context baskets", message: e instanceof Error ? e.message : String(e) }),

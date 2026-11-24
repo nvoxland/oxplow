@@ -520,7 +520,8 @@ pub fn set_next_tx(
 
 /// What `thread`'s next prompt would carry, oldest first: the items of the
 /// named basket set next for it, or — with none set, or that one empty — its
-/// own that are not held (put back: [`put_back_tx`]).
+/// own that are not held (put back: [`put_back_tx`]). The rule is
+/// `v_context_next`'s, the one statement of it.
 pub fn waiting_for_thread_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -531,11 +532,7 @@ pub fn waiting_for_thread_tx(
            FROM context_item c
            LEFT JOIN context_basket b ON b.id = c.basket_id
            LEFT JOIN streams s ON s.id = c.stream_id
-          WHERE CASE WHEN EXISTS (SELECT 1 FROM context_item n
-                                     JOIN context_basket nb ON nb.id = n.basket_id
-                                    WHERE nb.next_thread_id = ?1)
-                     THEN b.next_thread_id = ?1
-                     ELSE c.thread_id = ?1 AND c.held_at IS NULL END
+          WHERE c.id IN (SELECT item_id FROM v_context_next WHERE thread_id = ?1)
           ORDER BY c.added_at, c.id",
     )
     .and_then(|mut stmt| {

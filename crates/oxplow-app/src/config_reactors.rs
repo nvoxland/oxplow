@@ -105,6 +105,18 @@ pub fn apply_script_limits(config: &oxplow_config::OxplowConfig) {
     });
 }
 
+/// What every `config.changed` reactor does, once: for a config the files
+/// changed without a command (a reload from disk), where no event said which
+/// key moved. Each is idempotent.
+pub async fn reapply(svc: &Arc<crate::Services>) {
+    svc.extension_catalog.changed();
+    svc.extension_activation.request();
+    if let Err(error) = restate_file_kinds(svc).await {
+        tracing::warn!(%error, "restating the project's file kinds failed");
+    }
+    svc.metrics.reseed().await;
+}
+
 /// Register the reactors that need the whole of `Services`.
 pub fn register(state: &Arc<crate::Services>) {
     let svc = Arc::downgrade(state);
@@ -244,6 +256,30 @@ mod tests {
             .unwrap()
             .workspace_filter()
             .ignore(Path::new(path), false)
+    }
+
+    /// The script limits edited on disk (a `git pull` of the project file)
+    /// are applied by the reload, as `config.changed` applies them: no
+    /// command logged one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reload_from_disk_applies_the_script_limits() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        register(svc);
+        let before = oxplow_script::workers::shared().limits().max_concurrent;
+        let wanted = if before == 3 { 4 } else { 3 };
+        let path = oxplow_config::config_path(&svc.layout.project_dir);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("oxplow.scripts.maxConcurrent: {wanted}\n")).unwrap();
+        svc.reload_config_from_disk().unwrap();
+        assert_eq!(
+            oxplow_script::workers::shared().limits().max_concurrent,
+            wanted
+        );
+        oxplow_script::workers::shared().set_limits(oxplow_script::workers::Limits {
+            max_concurrent: before,
+            ..oxplow_script::workers::shared().limits()
+        });
     }
 
     /// `oxplow.files.kinds` edited on disk (a `git pull` of the project

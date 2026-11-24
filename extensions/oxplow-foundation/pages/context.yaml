@@ -13,9 +13,7 @@ loaders:
              c.source_uri, substr(c.text, 1, 200) AS preview, c.note,
              coalesce(c.basket, 'This Thread') AS basket, c.added_at
       FROM v_context_item c
-      WHERE CASE WHEN EXISTS (SELECT 1 FROM v_context_basket n WHERE n.next_thread_id = :thread_id AND n.items > 0)
-                 THEN c.basket_id = (SELECT n.id FROM v_context_basket n WHERE n.next_thread_id = :thread_id)
-                 ELSE c.thread_id = :thread_id AND c.held_at IS NULL END
+      WHERE c.id IN (SELECT item_id FROM v_context_next WHERE thread_id = :thread_id)
       ORDER BY c.added_at, c.id
   held:
     sql: |
