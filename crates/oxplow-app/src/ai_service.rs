@@ -606,12 +606,6 @@ impl AiService {
         })
     }
 
-    /// Whether provider and role bindings are settings (the one settings
-    /// service writes them); without it they are the service's own file.
-    pub fn uses_settings(&self) -> bool {
-        self.settings_store.is_some()
-    }
-
     /// The settings writes that save `provider`: checked here (its id is its
     /// kind, a kind with no default URL has one), written by the caller through
     /// the one settings write path (`settings_commands::write_changes`).

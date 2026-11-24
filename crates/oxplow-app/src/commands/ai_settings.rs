@@ -5,9 +5,9 @@
 //! Anyone runs them: a person, their agent, Settings → AI as a form page.
 //! `set_provider`'s `key` is a secret (`writeOnly`): never in a record,
 //! only that one was given is.
-//! `External`: the settings are the user-global `ai.yaml` and the OS
-//! keychain, outside oxplow's database. Reading them is
-//! `v_ai_provider` / `v_ai_role`.
+//! Each is a settings write through the one write path (`oxplow.ai.<provider>.*`,
+//! `oxplow.ai.roles.<role>`; undoable) and the keychain, outside oxplow's
+//! database. Reading them is `v_ai_provider` / `v_ai_role`.
 
 use std::sync::Arc;
 
@@ -22,7 +22,6 @@ use super::ops::Op;
 use super::util::{failed, invalid, parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::ai_service::AiServiceError;
-use crate::events::OxplowEvent;
 
 pub const SET_PROVIDER: &str = "oxplow.ai.set_provider";
 pub const REMOVE_PROVIDER: &str = "oxplow.ai.remove_provider";
@@ -116,19 +115,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         kind: input.kind,
                         base_url: input.base_url.filter(|u| !u.trim().is_empty()),
                     };
-                    if !svc.ai.uses_settings() {
-                        svc.ai
-                            .save_provider(provider, input.key)
-                            .map_err(|e| refused("/id", e))?;
-                        let events = svc.events.clone();
-                        return Ok(HandlerOutput {
-                            result: json!({ "id": id, "key_given": key_set }),
-                            after_commit: Some(Box::new(move || {
-                                events.emit(OxplowEvent::ConfigChanged)
-                            })),
-                            ..HandlerOutput::default()
-                        });
-                    }
                     // A provider is its settings (`oxplow.ai.<id>.*`), written by
                     // the one settings write path: checked, logged, undoable; its
                     // key is the keychain's and is not undone.
@@ -165,19 +151,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 Box::pin(async move {
                     let input: ProviderInput = parse(input)?;
                     let svc = services.get()?;
-                    if !svc.ai.uses_settings() {
-                        svc.ai
-                            .remove_provider(&input.id)
-                            .map_err(|e| refused("/id", e))?;
-                        let events = svc.events.clone();
-                        return Ok(HandlerOutput {
-                            result: json!({ "id": input.id }),
-                            after_commit: Some(Box::new(move || {
-                                events.emit(OxplowEvent::ConfigChanged)
-                            })),
-                            ..HandlerOutput::default()
-                        });
-                    }
                     let changes = svc
                         .ai
                         .removal_changes(&input.id)
@@ -225,19 +198,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                             )),
                         };
                     let bound = binding.is_some();
-                    if !svc.ai.uses_settings() {
-                        svc.ai
-                            .set_role(&role, binding)
-                            .map_err(|e| refused("/role", e))?;
-                        let events = svc.events.clone();
-                        return Ok(HandlerOutput {
-                            result: json!({ "role": input.role, "bound": bound }),
-                            after_commit: Some(Box::new(move || {
-                                events.emit(OxplowEvent::ConfigChanged)
-                            })),
-                            ..HandlerOutput::default()
-                        });
-                    }
                     // A role's binding is a setting (`oxplow.ai.roles.<role>`),
                     // written by the one settings write path.
                     let change = svc
