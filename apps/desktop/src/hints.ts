@@ -19,6 +19,8 @@ export interface PersonHint {
   message: string;
   /** The thread it was raised on, by title. */
   threadTitle: string | null;
+  /** When it was raised (ISO). */
+  createdAt: string | null;
 }
 
 export function hintsFromResult(result: SqlQueryResult): PersonHint[] {
@@ -28,13 +30,14 @@ export function hintsFromResult(result: SqlQueryResult): PersonHint[] {
     kind: String(at(row, "kind")),
     message: String(at(row, "message") ?? ""),
     threadTitle: at(row, "thread_title") == null ? null : String(at(row, "thread_title")),
+    createdAt: at(row, "created_at") == null ? null : String(at(row, "created_at")),
   }));
 }
 
 /** The hints waiting for the person, newest first, and what was read. */
 export async function readPersonHints(): Promise<{ hints: PersonHint[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT n.id, n.kind, n.message, (SELECT title FROM v_thread th WHERE th.id = n.thread_id) AS thread_title
+    `SELECT n.id, n.kind, n.message, n.created_at, (SELECT title FROM v_thread th WHERE th.id = n.thread_id) AS thread_title
        FROM v_agent_nudge n
       WHERE n.audience = 'person' AND n.delivered_at IS NULL
       ORDER BY n.id DESC`,

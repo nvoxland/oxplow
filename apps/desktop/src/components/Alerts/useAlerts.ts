@@ -32,5 +32,5 @@ export function useAlerts() {
     }),
     [proposals, opErrors, undelivered, failedReactions, extensionProblems, badges, hints],
   );
-  return { items, proposals, opErrors, badges, hints };
+  return { items, proposals, opErrors, undelivered, failedReactions, extensionProblems, badges, hints };
 }

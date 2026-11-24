@@ -21,6 +21,7 @@ import { decide, type Proposal } from "../../proposals.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { personCommands } from "../../personCommands.js";
 import { dockStore } from "../Dock/dockStore.js";
+import { extensionProblemLine } from "../../extensionProblems.js";
 import { refFromTabId } from "../../tabs/pageRefs.js";
 import { InlineConfirm } from "../InlineConfirm.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
@@ -55,9 +56,9 @@ export function AlertsDockBody({ onOpenPage }: DockBodyProps) {
   const rows = alertRows({
     proposals: alerts.proposals,
     opErrors: alerts.opErrors,
-    undelivered: items.undelivered,
-    failedReactions: items.failedReactions,
-    extensionProblems: items.extensionProblems,
+    undelivered: alerts.undelivered,
+    failedReactions: alerts.failedReactions,
+    extensionProblems: alerts.extensionProblems.map((x) => ({ name: x.name, message: extensionProblemLine(x), at: x.at })),
     badges: alerts.badges,
     hints: alerts.hints,
   });

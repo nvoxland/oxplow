@@ -67,12 +67,12 @@ test("an extension with problems counts red and toasts once", () => {
   expect(newAlerts(alertKeys({ ...none, extensionProblems: [ext] }), { ...none, extensionProblems: [ext] })).toEqual([]);
 });
 
-const noSources: AlertSources = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
+const noSources: AlertSources = { proposals: [], opErrors: [], undelivered: [], failedReactions: [], extensionProblems: [], badges: [], hints: [] };
 
 test("the panel's rows: decisions, failures, notices, newest first, repeats merged", () => {
   const rows = alertRows({
     ...noSources,
-    hints: [{ id: 4, message: "Still in progress", threadTitle: "Main" }],
+    hints: [{ id: 4, message: "Still in progress", threadTitle: "Main", createdAt: null }],
     opErrors: [
       { id: "a", at: 1_000, label: "Close codex", command: "oxplow.agent_session.close", message: "payload invalid" },
       { id: "b", at: 3_000, label: "Close codex", command: "oxplow.agent_session.close", message: "payload invalid" },
@@ -88,6 +88,30 @@ test("the panel's rows: decisions, failures, notices, newest first, repeats merg
   ]);
   expect(rows[1]).toMatchObject({ at: 3_000, detail: "payload invalid", opErrorIds: ["a", "b"] });
   expect(alertCounts(rows)).toEqual({ decision: 1, failure: 3, notice: 1 });
+});
+
+// Every alert that has a time says when it happened: the newest of what it
+// stands for.
+test("each row is at when it happened", () => {
+  const rows = alertRows({
+    ...noSources,
+    undelivered: [{ lastFailedAt: "1970-01-01T00:00:01Z" }, { lastFailedAt: "1970-01-01T00:00:04Z" }],
+    failedReactions: [{ failedAt: "1970-01-01T00:00:02Z" }, { failedAt: null }],
+    extensionProblems: [
+      { name: "a", message: "a broke", at: "1970-01-01T00:00:03Z" },
+      { name: "b", message: "b needs approval", at: null },
+    ],
+    hints: [{ id: 4, message: "Still in progress", threadTitle: null, createdAt: "1970-01-01T00:00:05Z" }],
+  });
+  expect(rows.map((r) => [r.key, r.at])).toEqual([
+    ["delivery", 4_000],
+    ["ext-problem:a", 3_000],
+    ["reactions", 2_000],
+    ["ext-problem:b", null],
+    ["hint:4", 5_000],
+  ]);
+  expect(rows[0]!.title).toBe("2 events couldn't be delivered");
+  expect(rows[2]!.title).toBe("2 effects failed to react");
 });
 
 test("an age is short", () => {

@@ -92,6 +92,8 @@ export interface FailedReaction {
   eventType: string;
   /** When it is sent again by itself (P10); null when it waits for a person. */
   retryAt: string | null;
+  /** When the latest attempt failed (ISO). */
+  failedAt: string | null;
 }
 
 export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
@@ -106,6 +108,7 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
       reason: String(at("reason") ?? ""),
       eventType: String(at("event_type") ?? "an event"),
       retryAt: at("retry_at") === null ? null : String(at("retry_at")),
+      failedAt: at("finished_at") === null ? null : String(at("finished_at")),
     };
   });
 }
@@ -113,7 +116,7 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
 /** The retryable reactions, newest attempt first, and what was read. */
 export async function readFailedReactions(): Promise<{ reactions: FailedReaction[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.outcome, r.error AS reason, e.type AS event_type, r.retry_at
+    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.outcome, r.error AS reason, e.type AS event_type, r.retry_at, r.finished_at
        FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
       WHERE r.latest = 1 AND r.retryable = 1 ORDER BY r.id DESC`,
     [],

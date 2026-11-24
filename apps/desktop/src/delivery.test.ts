@@ -35,10 +35,10 @@ test("the Alerts row counts the undelivered events, or isn't there", () => {
 
 test("readFailedReactions reads the latest retryable attempts and keeps their outcomes", async () => {
   const result = {
-    columns: ["effect", "event_id", "event_seq", "attempt", "outcome", "reason", "event_type", "retry_at"],
+    columns: ["effect", "event_id", "event_seq", "attempt", "outcome", "reason", "event_type", "retry_at", "finished_at"],
     rows: [
-      ["acme/mark-done", "e2", 42, 2, "interrupted", "A step outside oxplow may have run", "task.state_changed", null],
-      ["acme/assign", "e1", 41, 1, "denied", "Missing grant", "task.state_changed", null],
+      ["acme/mark-done", "e2", 42, 2, "interrupted", "A step outside oxplow may have run", "task.state_changed", null, "2026-11-24T10:00:00Z"],
+      ["acme/assign", "e1", 41, 1, "denied", "Missing grant", "task.state_changed", null, null],
     ],
     truncated: false,
     reads: { datasets: ["v_effect_run", "v_event"], tables: [], measures: [] },
@@ -58,6 +58,7 @@ test("readFailedReactions reads the latest retryable attempts and keeps their ou
         reason: "A step outside oxplow may have run",
         eventType: "task.state_changed",
         retryAt: null,
+        failedAt: "2026-11-24T10:00:00Z",
       },
       {
         effect: "acme/assign",
@@ -68,6 +69,7 @@ test("readFailedReactions reads the latest retryable attempts and keeps their ou
         reason: "Missing grant",
         eventType: "task.state_changed",
         retryAt: null,
+        failedAt: null,
       },
     ]);
     expect(reads).toEqual(result.reads);

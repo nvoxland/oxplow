@@ -93,11 +93,24 @@ export type AlertKind = "decision" | "failure" | "notice";
 export interface AlertSources {
   proposals: { uri: string; createdAt: string; command: string; threadTitle: string | null; preview: { summary: string; details?: string[]; destructive: boolean } }[];
   opErrors: { id: string; at: number; label: string; command: string | null; message: string | null }[];
-  undelivered: number;
-  failedReactions: number;
-  extensionProblems: { name: string; message: string }[];
+  undelivered: { lastFailedAt: string }[];
+  failedReactions: { failedAt: string | null }[];
+  extensionProblems: { name: string; message: string; at: string | null }[];
   badges: { id: string; title: string; message: string; open: string }[];
-  hints: { id: number; message: string; threadTitle: string | null }[];
+  hints: { id: number; message: string; threadTitle: string | null; createdAt: string | null }[];
+}
+
+/** An ISO time as epoch ms; null when there is none. */
+function epoch(iso: string | null | undefined): number | null {
+  return iso ? Date.parse(iso) || null : null;
+}
+
+/** The newest of some times; null when none has one. */
+function newest(times: readonly (string | null)[]): number | null {
+  return times.reduce<number | null>((best, t) => {
+    const at = epoch(t);
+    return at != null && (best == null || at > best) ? at : best;
+  }, null);
 }
 
 /** One row of the Alerts dock panel. Failed operations that say the same
@@ -140,7 +153,7 @@ export function alertRows(src: AlertSources): AlertRow[] {
       source: "proposal",
       title: proposalTitle(p),
       detail: [p.preview.summary, ...(p.preview.details ?? [])].filter(Boolean).join("\n") || null,
-      at: Date.parse(p.createdAt) || null,
+      at: epoch(p.createdAt),
       count: 1,
       command: p.command,
       open: p.uri,
@@ -160,17 +173,19 @@ export function alertRows(src: AlertSources): AlertRow[] {
     }
   }
   rows.push(...failed.values());
-  if (src.undelivered > 0) {
-    rows.push({ key: "delivery", kind: "failure", source: "delivery", title: src.undelivered === 1 ? "1 event couldn't be delivered" : `${src.undelivered} events couldn't be delivered`, detail: "A consumer couldn't take them. Retry them once the cause is fixed, or discard them.", at: null, count: 1, command: null });
+  const undelivered = src.undelivered.length;
+  if (undelivered > 0) {
+    rows.push({ key: "delivery", kind: "failure", source: "delivery", title: undelivered === 1 ? "1 event couldn't be delivered" : `${undelivered} events couldn't be delivered`, detail: "A consumer couldn't take them. Retry them once the cause is fixed, or discard them.", at: newest(src.undelivered.map((l) => l.lastFailedAt)), count: 1, command: null });
   }
-  if (src.failedReactions > 0) {
-    rows.push({ key: "reactions", kind: "failure", source: "reactions", title: src.failedReactions === 1 ? "An effect failed to react" : `${src.failedReactions} effects failed to react`, detail: "An extension's effect failed to react to an event. Retry runs it again now.", at: null, count: 1, command: null });
+  const reactions = src.failedReactions.length;
+  if (reactions > 0) {
+    rows.push({ key: "reactions", kind: "failure", source: "reactions", title: reactions === 1 ? "An effect failed to react" : `${reactions} effects failed to react`, detail: "An extension's effect failed to react to an event. Retry runs it again now.", at: newest(src.failedReactions.map((r) => r.failedAt)), count: 1, command: null });
   }
   for (const x of src.extensionProblems) {
-    rows.push({ key: `ext-problem:${x.name}`, kind: "failure", source: "extension", extension: x.name, title: `${x.name} isn't running as it should`, detail: x.message, at: null, count: 1, command: null });
+    rows.push({ key: `ext-problem:${x.name}`, kind: "failure", source: "extension", extension: x.name, title: `${x.name} isn't running as it should`, detail: x.message, at: epoch(x.at), count: 1, command: null });
   }
   for (const h of src.hints) {
-    rows.push({ key: `hint:${h.id}`, kind: "notice", source: "hint", title: h.message, detail: h.threadTitle ? `From “${h.threadTitle}”` : null, at: null, count: 1, command: null, hintId: h.id });
+    rows.push({ key: `hint:${h.id}`, kind: "notice", source: "hint", title: h.message, detail: h.threadTitle ? `From “${h.threadTitle}”` : null, at: epoch(h.createdAt), count: 1, command: null, hintId: h.id });
   }
   for (const b of src.badges) {
     rows.push({ key: `badge:${b.id}`, kind: "notice", source: "badge", title: b.title, detail: b.message, at: null, count: 1, command: null, open: b.open });
