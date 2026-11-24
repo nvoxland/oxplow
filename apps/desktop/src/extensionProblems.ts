@@ -45,7 +45,9 @@ export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {
 
 /** The problems, one row each, as the Extension problems page reads them.
  *  Health is the namespace's: a row is listed under the extension that
- *  declares the contribution now. */
+ *  declares the contribution now. A failing effect whose reaction can be
+ *  retried is left out: Alerts lists it as a failed reaction, whose Retry
+ *  fixes both. A disabled one stays (a retry doesn't run it). */
 export const PROBLEMS_SQL = `SELECT name, problem, at FROM (
   SELECT COALESCE((SELECT c.extension FROM v_contribution c WHERE c.uri = h.uri),
                   (SELECT x.name FROM v_extension x WHERE x.namespace = h.namespace ORDER BY x.name LIMIT 1)) AS name,
@@ -54,6 +56,8 @@ export const PROBLEMS_SQL = `SELECT name, problem, at FROM (
                       ELSE 'is failing, ' || h.consecutive_failures || ' in a row' END AS problem,
          h.updated_at AS at
   FROM v_contribution_health h WHERE h.state <> 'ok'
+    AND NOT (h.kind = 'effect' AND h.state = 'failing' AND EXISTS (
+      SELECT 1 FROM v_effect_run r WHERE r.contribution = h.uri AND r.latest = 1 AND r.retryable = 1))
   UNION ALL
   SELECT e.name, 2, json_extract(j.value, '$.shown'), NULL FROM v_extension e, json_each(e.errors) j
   UNION ALL
