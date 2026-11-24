@@ -1400,7 +1400,7 @@ datasets:
     - { name: "time_ms", type: "", doc: "Its duration, when the report gave one." }
     - { name: "message", type: "", doc: "What a failed case's report said went wrong: its failure message, then its body (the assertion and where it happened). NULL for a case that didn't fail, one whose report said nothing, and a failure past the per-run cap (64 KB of messages per run, 4 KB each, a cut one ending in `…`)." }
 - name: test_run
-  version: 5
+  version: 6
   description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts."
   fields:
     - { name: "id", type: "INTEGER", doc: "Run id; `oxplow:oxplow/run?id=<id>` is how a run is cited." }
@@ -1412,7 +1412,7 @@ datasets:
     - { name: "failed", type: "", doc: "Tests failed (NULL when not reported)." }
     - { name: "skipped", type: "", doc: "Tests skipped (NULL when not reported)." }
     - { name: "total", type: "", doc: "Tests run in total (NULL when not reported)." }
-    - { name: "duration_ms", type: "", doc: "Wall-clock duration, if known." }
+    - { name: "duration_ms", type: "", doc: "How long the run took, in milliseconds: the shell call's time as its harness measured it; NULL when the harness gave none. A command moved to the background has only the time until it moved. (v6: recorded)" }
     - { name: "provenance", type: "TEXT", doc: "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)." }
     - { name: "source", type: "TEXT", doc: "What recorded it (`hook`, `mcp`, …)." }
     - { name: "branch", type: "TEXT", doc: "Branch checked out when it ran." }
