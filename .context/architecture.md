@@ -72,7 +72,7 @@ which is that oxplow steers and never drives a doing-agent.
   thread's prompt box. oxplow's context (session context, advisories,
   post-tool nudges) rides **only** on that human prompt, as a
   visible block. Two source-scan tests pin this: the
-  Rust `chat/guard_tests.rs` (the prompt type is built only on the human
+  Rust `agent_observer/guard_tests.rs` (the prompt type is built only on the human
   submit path) and the TS `no-agent-input-automation.test.ts` (only the
   prompt box calls `chatPrompt`). See [agent-model.md](./agent-model.md) →
   "Chat sessions".

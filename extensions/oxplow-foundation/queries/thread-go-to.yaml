@@ -1,5 +1,5 @@
 title: Thread Go To
-description: "The pages a thread goes to, of one kind (`mode`): its bookmarks (`bookmarks`, as `thread-bookmarks` has them), the pages it opened last (`recent`), or the ones it opens most over 30 days (`top`) — `limit` at most for the last two (20 unless given: the panel's body, which grows to show them all; its collapsed icons ask for 6). Each row's `grp` names the kind, `at` when it was last opened (recent), `times` how often (top)."
+description: "The pages a thread goes to, of one kind (`mode`): its bookmarks (`bookmarks`, as `thread-bookmarks` has them), the pages it opened last (`recent`), or the ones it opens most over 30 days (`top`) — `limit` at most for the last two (20 unless given: the panel's body, which grows to show them all; its collapsed icons ask for 6). A row whose page, file or record no longer exists is left out. Each row's `grp` names the kind, `at` when it was last opened (recent), `times` how often (top)."
 params:
 - name: thread_id
 - name: mode
@@ -12,6 +12,8 @@ loaders:
     loader: bookmarks
     params: { thread_id: { param: thread_id } }
   pages:
+    # A page, file or record that no longer exists isn't a place to go.
+    live: uri
     sql: |
       WITH
       visit AS (

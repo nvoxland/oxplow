@@ -411,11 +411,18 @@ pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, Do
         .collect();
     let health =
         crate::contribution_health::ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
+    // A live claim past the consumer's checkpoint is redelivered; one at or
+    // below it never will be (the consumer moved on: `on:`/`where:` changed
+    // after the crash, or `react` swallowed an error and the checkpoint
+    // went past), so it would stay open forever.
+    let checkpoint = svc.event_log_store.checkpoint(NAME.to_string()).await?;
     let mut recovered = 0;
     for key in started {
         if key.origin == ReactionOrigin::Live {
             if let Some(contribution) = declared.get(&key.effect) {
-                if health.disabled_reason(contribution).await?.is_none() {
+                if key.event_seq > checkpoint
+                    && health.disabled_reason(contribution).await?.is_none()
+                {
                     continue;
                 }
             }
@@ -1274,6 +1281,61 @@ mod tests {
         .await;
         assert_eq!(run[0][0], json!("interrupted"));
         assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
+    }
+
+    /// A live claim at or below the consumer's checkpoint is never
+    /// redelivered (its `on:`/`where:` changed after the crash, or the
+    /// checkpoint moved on past a swallowed error), so starting up cuts it off;
+    /// one past the checkpoint is the pump's to find.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_claim_behind_the_checkpoint_is_cut_off_at_start() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
+        start(svc).await;
+        let ev = log(svc, settled(&fx, "taken")).await;
+        let key = EffectRunKey::first(
+            "acme/mark-done",
+            ev.envelope.id.to_string(),
+            ev.seq,
+            ReactionOrigin::Live,
+        );
+        svc.db
+            .transaction({
+                let key = key.clone();
+                move |tx| {
+                    oxplow_db::effect_run_store::claim_tx(
+                        tx,
+                        &key,
+                        &crate::effects::tests::context(&key),
+                        None,
+                    )
+                }
+            })
+            .await
+            .unwrap();
+        svc.event_log_store
+            .set_checkpoint(NAME.to_string(), ev.seq - 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            recover_interrupted(svc).await.unwrap(),
+            0,
+            "ahead of the checkpoint"
+        );
+        svc.event_log_store
+            .set_checkpoint(NAME.to_string(), ev.seq)
+            .await
+            .unwrap();
+        assert_eq!(recover_interrupted(svc).await.unwrap(), 1, "behind it");
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT outcome FROM v_effect_run WHERE effect = 'acme/mark-done'"
+            )
+            .await,
+            json!([["interrupted"]])
+        );
     }
 
     /// a person's retry or backfill claimed `started` and then cut

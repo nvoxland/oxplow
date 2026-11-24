@@ -252,7 +252,12 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
 Named loaders, run in order; a loader reads only the ones before it
 (naming a later one is an error). A loader has exactly one of `sql`,
 `command`, `page`, `rows` or `parse`, plus optional `columns` (keys, labels and
-formats its nodes default to) and `empty`. Its name is lowercase letters,
+formats its nodes default to), `empty` and `live: <column>` (the column holds
+URIs, and a row stays only while what its URI names still exists: a deleted
+file or folder in the stream's worktree, a page no enabled extension has, a
+record whose resource's `resolve` view has no row for it. A URI nothing
+resolves, and a web URL, stay. `pages/live.rs`; foundation's `thread-go-to`
+uses it, so Go To and the Go menu never offer a place that is gone). Its name is lowercase letters,
 digits and `_`, never a dataset's (`v_*`, `m_*`).
 
 - `sql`: one read-only statement over the `v_*` datasets and the extension's

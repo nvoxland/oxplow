@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
+use oxplow_app::agent_observer::codex::CodexOpen;
+use oxplow_app::agent_observer::host::ServicesObserverHost;
+use oxplow_app::agent_observer::session::SessionSpec;
 use oxplow_app::agent_prompt::assemble_system_prompt;
-use oxplow_app::chat::codex::CodexOpen;
-use oxplow_app::chat::host::ServicesChatHost;
-use oxplow_app::chat::session::SessionSpec;
 use oxplow_app::config_service::read_config;
 use oxplow_app::terminal_sessions::{agent_pane_key, terminal_key, AttachResult, SpawnRequest};
 use oxplow_app::Services;
@@ -308,9 +308,9 @@ async fn open_agent_terminal(
             attach,
         } => {
             let thread_id = ctx
-                .chat
+                .observer
                 .open_codex(
-                    Arc::new(ServicesChatHost::new(
+                    Arc::new(ServicesObserverHost::new(
                         &ctx.services,
                         Some(stream.id),
                         session.id,

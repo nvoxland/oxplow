@@ -125,6 +125,9 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
 /// file of a parseable language from each live stream's latest snapshot.
 /// Boot runs it, and so does each publication that changes the set.
 pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
+    // One at a time; the set is read after the wait, so a restate that queued
+    // behind another starts from the set as it stands then.
+    let _one_at_a_time = svc.symbol_backfill.lock().await;
     let languages = svc.languages.current();
     let fingerprint = format!("{:016x}", languages.fingerprint());
     let empty = svc.symbol_store.is_empty().await?;
@@ -463,5 +466,23 @@ mod tests {
                 .as_deref(),
             Some(fingerprint.as_str())
         );
+    }
+
+    /// One restate at a time: a second waits for the first, then reads the
+    /// set as it stands.
+    #[tokio::test]
+    async fn backfills_run_one_at_a_time() {
+        let (svc, _dir, stream) = fixture().await;
+        snapshot(&svc, stream, &[("a.py", Some(WIDGET))]).await;
+        let held = svc.symbol_backfill.lock().await;
+        let svc2 = svc.clone();
+        let waiting = tokio::spawn(async move { backfill(&svc2).await });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !waiting.is_finished(),
+            "it waits while another restate runs"
+        );
+        drop(held);
+        waiting.await.unwrap().unwrap();
     }
 }

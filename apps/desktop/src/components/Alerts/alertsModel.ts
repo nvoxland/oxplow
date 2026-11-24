@@ -23,13 +23,18 @@ export interface AlertItems {
 
 export type AlertTone = "none" | "accent" | "danger";
 
+/** What a proposal's alert says, for its toast and its row alike. */
+export function proposalTitle(p: { threadTitle: string | null; command: string }): string {
+  return `${p.threadTitle ? `“${p.threadTitle}”` : "An agent"} wants to run ${p.command}`;
+}
+
 /** The bell: how many things need the person, red while something failed
  *  (a problem), the accent while only decisions and notices wait. */
 export function alertsSummary(items: AlertItems): { count: number; tone: AlertTone } {
   const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
-  // A panel's badges are its own (its panel, and a toast that opens its
-  // page); the Alerts page doesn't list them, so the bell doesn't count them.
-  const count = items.proposals.length + items.hints.length + problems;
+  // A panel's badge that fires is a notice: the Alerts panel lists it, so the
+  // icon counts it (the icon and the panel's rows say the same number).
+  const count = items.proposals.length + items.hints.length + items.badges.length + problems;
   return { count, tone: problems > 0 ? "danger" : count > 0 ? "accent" : "none" };
 }
 
@@ -133,7 +138,7 @@ export function alertRows(src: AlertSources): AlertRow[] {
       key: p.uri,
       kind: "decision",
       source: "proposal",
-      title: `${p.threadTitle ? `“${p.threadTitle}”` : "An agent"} wants to run ${p.command}`,
+      title: proposalTitle(p),
       detail: [p.preview.summary, ...(p.preview.details ?? [])].filter(Boolean).join("\n") || null,
       at: Date.parse(p.createdAt) || null,
       count: 1,

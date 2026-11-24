@@ -69,6 +69,10 @@ pub struct AddInput {
     /// an item; undo uses it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held: Option<bool>,
+    /// When it was first added (RFC 3339): what an undo of a removal sends
+    /// so the item keeps its time and its place in the order. Default: now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -262,6 +266,7 @@ fn re_add(conn: &Connection, item: &ContextItem) -> Result<CommandCall, CommandE
     if item.held_at.is_some() {
         input["held"] = json!(true);
     }
+    input["added_at"] = json!(item.added_at);
     Ok(CommandCall {
         name: ADD.into(),
         input,
@@ -316,18 +321,18 @@ pub fn add_op() -> Op {
                 (None, Basket::Named(_)) => None,
             };
             let held = held_needs_thread(input.held, basket)?;
-            let id = store::add_tx(
-                ctx.conn,
-                basket,
-                &NewItem {
-                    stream_id,
-                    source_uri: input.uri.filter(|u| !u.trim().is_empty()),
-                    label: input.label.filter(|l| !l.trim().is_empty()),
-                    text: input.text.filter(|t| !t.trim().is_empty()),
-                    around: input.around.filter(|a| !a.trim().is_empty()),
-                    note: note_of(input.note),
-                },
-            )
+            let new_item = NewItem {
+                stream_id,
+                source_uri: input.uri.filter(|u| !u.trim().is_empty()),
+                label: input.label.filter(|l| !l.trim().is_empty()),
+                text: input.text.filter(|t| !t.trim().is_empty()),
+                around: input.around.filter(|a| !a.trim().is_empty()),
+                note: note_of(input.note),
+            };
+            let id = match input.added_at.as_deref().filter(|a| !a.is_empty()) {
+                Some(at_time) => store::add_at_tx(ctx.conn, basket, &new_item, at_time),
+                None => store::add_tx(ctx.conn, basket, &new_item),
+            }
             .map_err(at("/"))?;
             if held {
                 store::hold_tx(ctx.conn, &[id])?;
@@ -422,9 +427,13 @@ pub fn move_op() -> Op {
             }
             Ok(HandlerOutput {
                 result: json!({ "item": input.item }),
-                inverse: (before.basket() != to).then(|| CommandCall {
-                    name: MOVE.into(),
-                    input: back,
+                // Same basket: a move still changes the hold (it drops one, or
+                // holds), so it has an inverse when the hold differed.
+                inverse: (before.basket() != to || before.held_at.is_some() != held).then(|| {
+                    CommandCall {
+                        name: MOVE.into(),
+                        input: back,
+                    }
                 }),
                 ..HandlerOutput::default()
             })
@@ -505,7 +514,7 @@ pub fn send_next_op() -> Op {
             let before = store::set_next_tx(ctx.conn, thread, basket.as_ref().map(|b| b.id))?;
             let released = match (&input.hold, &basket) {
                 (Some(ids), _) => {
-                    store::hold_tx(ctx.conn, ids)?;
+                    store::hold_for_thread_tx(ctx.conn, thread, ids)?;
                     Vec::new()
                 }
                 (None, None) => store::release_held_tx(ctx.conn, thread)?,
@@ -1201,5 +1210,73 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("the person collects"), "{err}");
+    }
+
+    /// Undoing a removal puts the item back with the time it was first added,
+    /// so it keeps its place in the order.
+    #[tokio::test]
+    async fn undoing_a_removal_keeps_the_added_at() {
+        let fx = services_with_thread().await;
+        let thread = fx.thread.to_string();
+        for n in 0..2 {
+            run(
+                &fx,
+                ADD,
+                json!({ "thread": thread, "uri": format!("oxplow:oxplow/commit?sha={n}") }),
+            )
+            .await;
+        }
+        let own = items(&fx, None).await;
+        let (first, second) = (own[0].clone(), own[1].clone());
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE context_item SET added_at = '2026-01-02T00:00:00Z' WHERE id = ?1",
+                    [first.id],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let removed = run(&fx, REMOVE, json!({ "item": own[0].id })).await;
+        undo(&fx, &removed).await;
+        let back = items(&fx, None).await;
+        let restored = back
+            .iter()
+            .find(|i| i.source_uri == own[0].source_uri)
+            .unwrap();
+        assert_eq!(restored.added_at, "2026-01-02T00:00:00Z");
+        assert_eq!(
+            back[0].source_uri, own[0].source_uri,
+            "first in the order again"
+        );
+        assert_eq!(back[1].id, second.id);
+    }
+
+    /// A move into the basket the item is already in still changes its hold
+    /// (it drops one), so it has an inverse.
+    #[tokio::test]
+    async fn a_move_within_a_basket_that_changes_the_hold_undoes() {
+        let fx = services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let added = run(
+            &fx,
+            ADD,
+            json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=a", "held": true }),
+        )
+        .await;
+        let item = added.result["item"].as_i64().unwrap();
+        assert!(items(&fx, None).await[0].held_at.is_some());
+        let moved = run(&fx, MOVE, json!({ "item": item, "thread": thread })).await;
+        assert!(
+            items(&fx, None).await[0].held_at.is_none(),
+            "a move drops the hold"
+        );
+        undo(&fx, &moved).await;
+        assert!(
+            items(&fx, None).await[0].held_at.is_some(),
+            "undo holds it again"
+        );
     }
 }

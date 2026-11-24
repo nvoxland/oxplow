@@ -668,6 +668,14 @@ impl<'a> PageRunner<'a> {
         };
         // Bound each memo entry too, before it is cloned into the cache.
         // The shared run budget separately charges every retained copy.
+        let outcome = match (outcome, decl.live.as_deref()) {
+            (Ok(mut result), Some(column)) => {
+                super::live::keep_live(self.svc, stream, &mut result, column)
+                    .await
+                    .map(|()| result)
+            }
+            (outcome, _) => outcome,
+        };
         let outcome = outcome.and_then(|mut result| {
             ResultBudget::new(MAX_RESULT_BYTES)
                 .admit(&mut result)

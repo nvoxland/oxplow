@@ -9,6 +9,7 @@
 
 pub mod advisories;
 pub mod agent_context;
+pub mod agent_observer;
 mod agent_overhead;
 pub mod agent_path;
 pub mod agent_policy;
@@ -34,7 +35,6 @@ mod catalog_datasets_tests;
 pub mod change_analysis;
 pub(crate) mod change_diff;
 pub mod change_reactor;
-pub mod chat;
 pub mod churn;
 pub mod client_host;
 pub mod client_reports;
@@ -622,6 +622,10 @@ pub struct Services {
     pub diagnostic_store: Arc<oxplow_db::SqliteDiagnosticStore>,
     /// The symbol index (`v_symbol`), written by the symbol collector.
     pub symbol_store: oxplow_db::SqliteSymbolStore,
+    /// One symbol-index restate at a time ([`symbol_collector::backfill`]):
+    /// two pack toggles close together would otherwise interleave, and the
+    /// first to finish mark the index current for a set that has moved on.
+    pub symbol_backfill: Arc<tokio::sync::Mutex<()>>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
     /// Recorded AI computations over `ai` (`ai_result`).
@@ -669,8 +673,8 @@ pub struct Services {
     /// context on it.
     pub context_changes: tokio::sync::watch::Sender<u64>,
     /// Open Codex observer sessions. Sessions get a
-    /// `chat::host::ServicesChatHost` holding `Services` weakly.
-    pub chat: Arc<chat::manager::ChatManager>,
+    /// `agent_observer::host::ServicesObserverHost` holding `Services` weakly.
+    pub observer: Arc<agent_observer::manager::ObserverManager>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -1466,10 +1470,10 @@ impl Services {
         }) {
             commands.add_op(command).expect("vcs ops register");
         }
-        let chat = Arc::new(chat::manager::ChatManager::new());
+        let observer = Arc::new(agent_observer::manager::ObserverManager::new());
         let session_auth = Arc::new(session_auth::SessionAuth::new());
         let session_processes = agent_sessions::SessionProcesses::new(
-            chat.clone(),
+            observer.clone(),
             terminal_sessions.clone(),
             session_auth.clone(),
         );
@@ -1479,7 +1483,7 @@ impl Services {
                 config_target.clone(),
                 harnesses.clone(),
                 session_processes.clone(),
-                chat.clone(),
+                observer.clone(),
                 capabilities.clone(),
             ))
             .chain(commands::hint::ops())
@@ -1853,6 +1857,7 @@ impl Services {
             git_store,
             diagnostic_store,
             symbol_store,
+            symbol_backfill: Arc::default(),
             ai,
             ai_compute,
             secrets: machine.secrets,
@@ -1876,7 +1881,7 @@ impl Services {
             agent_policy,
             agent_context: Arc::new(agent_context::AgentContext::default()),
             context_changes,
-            chat,
+            observer,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,

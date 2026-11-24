@@ -534,7 +534,10 @@ once**, keyed by `(effect, event_id)` in `effect_run`:
    transaction (`effect_triggers::fail`), here and for a failure
    that may pass. At startup, `effect_triggers::recover_interrupted`
    finishes open attempts from a retry, backfill or automatic attempt
-   the same way. It logs the attempt's origin in `effect.result` and
+   the same way, and a live one that redelivery can't recover: one of a
+   removed or disabled effect, or one at or below the consumer's checkpoint
+   (its `on:`/`where:` changed after the crash, or the checkpoint moved
+   past a swallowed error), which would otherwise stay open forever. It logs the attempt's origin in `effect.result` and
    counts the interruption toward the effect's health. A person can
    retry the interrupted reaction.
 2. `effects::gate` isn't `Runs` (a live reaction only): nothing;

@@ -1104,11 +1104,17 @@ impl Languages {
     /// computed with the set is keyed by, so turning a pack on, off or
     /// editing one is new input.
     pub fn fingerprint(&self) -> u64 {
-        self.all.iter().fold(0xcbf2_9ce4_8422_2325_u64, |acc, l| {
-            l.fingerprint().to_le_bytes().iter().fold(acc, |a, b| {
-                (a ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+        // Only a language with a grammar changes what parsing computes (the
+        // symbols, metrics and review signals of its files): one known only
+        // by its server (Lua, Ruby, Bash) turned on or off is not new input.
+        self.all
+            .iter()
+            .filter(|l| l.analyzable())
+            .fold(0xcbf2_9ce4_8422_2325_u64, |acc, l| {
+                l.fingerprint().to_le_bytes().iter().fold(acc, |a, b| {
+                    (a ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+                })
             })
-        })
     }
 
     /// What the set was built from: [`Languages::build`] of these is the same
@@ -1255,5 +1261,31 @@ mod lazy_grammar_tests {
             "{e}"
         );
         assert!(lang.parser().is_none(), "such a grammar isn't used");
+    }
+
+    /// A language with no grammar changes nothing that is parsed, so the set's
+    /// fingerprint (what every stored analysis and the symbol index are keyed
+    /// by) doesn't move when one is turned on.
+    #[test]
+    fn a_language_without_a_grammar_is_not_new_input() {
+        let rust = crate::for_tests::shipped();
+        let server_only: LanguageDecl = serde_yaml::from_str(
+            "{ id: lua2, title: Lua2, extensions: [lua2], lsp: { package: x } }",
+        )
+        .unwrap();
+        let mut sources = rust.sources().to_vec();
+        sources.push(LanguageSource {
+            extension: "lua2-pack".into(),
+            shipped: false,
+            decl: server_only,
+            analysis: None,
+            symbols: None,
+            symbols_yaml: None,
+            wasm: None,
+        });
+        let (with, problems) = Languages::build(&sources);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert!(with.by_name("lua2").is_some());
+        assert_eq!(with.fingerprint(), rust.fingerprint());
     }
 }

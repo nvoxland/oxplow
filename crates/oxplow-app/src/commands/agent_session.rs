@@ -231,7 +231,7 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
 /// the rename commits (checked first: a harness that can't, or one not
 /// observing the conversation now, refuses the whole rename).
 pub fn rename_op(
-    chat: Arc<crate::chat::manager::ChatManager>,
+    chat: Arc<crate::agent_observer::manager::ObserverManager>,
     capabilities: Arc<crate::capabilities::CapabilityRegistry>,
 ) -> Op {
     Op::new(
@@ -535,7 +535,7 @@ pub fn ops(
     config: super::config_commands::ConfigTarget,
     harnesses: HarnessRegistry,
     processes: crate::agent_sessions::SessionProcesses,
-    chat: Arc<crate::chat::manager::ChatManager>,
+    chat: Arc<crate::agent_observer::manager::ObserverManager>,
     capabilities: Arc<crate::capabilities::CapabilityRegistry>,
 ) -> Vec<Op> {
     vec![
