@@ -197,8 +197,8 @@ are UI RPCs (`ui` in surface parity).
 at `componentBundleUrl(base, version)` (the daemon's
 `/components/v/<version>/`, once `load_component` answered; a bundle that
 cannot be loaded shows the table and why; with no daemon base —
-`remoteBaseUrl()` null — the page shows its table), under a **custom**
-badge. On the frame's first `load` the host posts `init { protocol, run,
+`remoteBaseUrl()` null — the page shows its table), with no badge (whose
+it is shows in the page's About). On the frame's first `load` the host posts `init { protocol, run,
 data, params, props, page, view, tokens }` (`initMessage`, the one
 builder) with one end of a `MessageChannel` (to `"*"`: the frame's origin
 is opaque; the port goes to that frame alone) and listens on the other

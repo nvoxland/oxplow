@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import type { Stream } from "../api.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { SaveViewForm } from "./SaveViewForm.js";
-import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../viz/ComponentFrame.js";
+import { ComponentFrame, noteStyle, useComponentBundle, type BridgeHost } from "../viz/ComponentFrame.js";
 import { pageData, type FrameAction, type PageInit, type ShownRows } from "../viz/componentBridge.js";
 import { useFrameForms } from "../viz/frameForms.js";
 import { useHostedView } from "../viz/hostedView.js";
@@ -76,7 +76,6 @@ export function ComponentNode({
   const src = bundle.src!;
   return (
     <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <CustomBadge extension={run.page.extension} bundled={run.page.origin?.bundled === true} />
       <ComponentFrame
         key={src}
         src={src}
@@ -167,7 +166,6 @@ export function ComponentPage({
   const src = bundle.src!;
   return (
     <div data-testid="custom-component" style={{ ...pageStyle, overflowY: inline.shown ? "auto" : undefined }}>
-      <CustomBadge extension={run.page.extension} bundled={run.page.origin?.bundled === true} />
       {/* Keyed by its URL: another version mounts a new frame. */}
       <ComponentFrame
         key={src}

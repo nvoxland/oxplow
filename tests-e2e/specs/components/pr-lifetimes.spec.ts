@@ -75,12 +75,12 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
 });
 
 // What it draws, its filters and its Sync call are the github example's `ui`
-// fixture's. The app's part: the "custom" badge, the sync running under the
+// fixture's. The app's part: no chip naming whose it is, the sync running under the
 // permissions the extension was deployed with, and opening the page a bar
 // names.
-test("PR lifetimes is badged custom, syncs under its permissions and opens a bar's page", async ({ page, daemon }) => {
+test("PR lifetimes has no whose-it-is chip, syncs under its permissions and opens a bar's page", async ({ page, daemon }) => {
   const frame = await openLifetimes(page, daemon);
-  await expect(page.getByTestId("custom-component-badge")).toHaveText(/^by /);
+  await expect(page.getByTestId("custom-component-badge")).toHaveCount(0);
 
   await frame.locator("#sync").click();
   await expect(frame.locator("#status")).toHaveText("Synced.");

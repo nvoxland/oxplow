@@ -106,18 +106,6 @@ export function useComponentBundle(componentKey: string | null, base: string | n
   return { loadKey, version, src, error: current?.error ?? null };
 }
 
-/** Whose a component is, in plain words ("by github"): marked only for
- *  an extension that isn't oxplow's own (`bundled`), since an
- *  oxplow-shipped page needs no chip. */
-export function CustomBadge({ extension, bundled = false }: { extension: string; bundled?: boolean }) {
-  if (bundled) return null;
-  return (
-    <span data-testid="custom-component-badge" style={badgeStyle} title={`${extension}'s own component, sandboxed`}>
-      by {extension}
-    </span>
-  );
-}
-
 /** One frame at one bundle URL and its bridge, fed `data` (`vizData`
  *  for a viz's component, `pageData` for a page's). A page's own
  *  component passes `page` (and `pageDeps`). A host that
@@ -401,14 +389,6 @@ export function ComponentFrame({
   );
 }
 
-export const badgeStyle: CSSProperties = {
-  alignSelf: "flex-start",
-  fontSize: 10,
-  padding: "0 6px",
-  borderRadius: 999,
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-};
 // It grows to fill a page that gives it room (a replaced history), and is
 // never shorter than a card's worth.
 const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };

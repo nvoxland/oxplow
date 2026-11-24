@@ -486,15 +486,15 @@ markdown itself, nor edits it in a `<textarea>`.
   level) or a row menu `menu-item-ref-command-<command id>`. A menu opens
   once the daemon has said which commands apply (`ref_commands`).
 
-## A custom component is marked
+## A custom component
 
 - A `component` node (an extension's own web component, sandboxed)
-  renders under a small **custom** badge, so the person knows the view
-  isn't oxplow's. Its confirmations appear in oxplow (`CommandConfirm`
+  carries no chip naming whose it is: no page shows where it comes from
+  in its body; the page's About (☰) says. Its confirmations appear in oxplow (`CommandConfirm`
   below the frame), never inside the frame. When it can't start, a muted
   line says so and the page's table shows.
 - A **custom page** (a page whose `view:` is one `component` node, `pages/PageComponent.tsx` `ComponentPage`)
-  keeps oxplow's nav bar and the **custom** badge; the frame fills only
+  keeps oxplow's nav bar; the frame fills only
   the page body. Its title and actions are data the frame sends
   (`setTitle`, `setActions`) and core draws in the bar — never buttons of
   oxplow's look inside the frame for page-level actions. A form it asks
@@ -1467,7 +1467,8 @@ or opening a page from it hides it; widening the window resets it (`NarrowRail`)
   dataset list, Settings → Data’s entities) says a thing's first sentence; the whole description is on the
   thing's own page (or in its expansion).
 
-- **A list, table, tree or custom component that is all of its page fills the page's height** (`PageTree`
-  `FILLS_ALONE`, `isWholePage`: the page's view, or the only node of a stack), as a file or a diff does
-  (`Viz::fills`). One among other nodes keeps its own height. Git History is the case: its commits fill
-  the page, replaced by the graph or not.
+- **A list, table, tree or custom component that is all of its page fills the page's height** (`railHas.ts`
+  `vizFills`, `isWholePage`: the page's view, or the only node of a stack), as a file or a diff does
+  (`Viz::fills`). One among other nodes keeps its own height. `PageTree` fills the node and `PageHost`
+  the page body around it (`aloneFills`) by that one rule; the page keeps its width and rail. Git
+  History is the case: its commits fill the page, replaced by the graph or not.

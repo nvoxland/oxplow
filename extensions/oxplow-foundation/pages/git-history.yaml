@@ -55,7 +55,9 @@ loaders:
 view:
   stack:
   - id: history
+    # The page's one section: the nav bar's "Git History" says what it is.
     title: Commits
+    hide_title: true
     replaceable: vcs.history.graph
     from: history
     viz: table

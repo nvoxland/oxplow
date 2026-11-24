@@ -296,6 +296,18 @@ test("a grid page takes the full width; a table reads as a document, with a rail
   expect(table.container.querySelector(".oxplow-reading-column")).not.toBeNull();
 });
 
+// PageTree's lone table, list, tree or custom viz fills its node; the page
+// body around it fills too, or the viz has no height to take (a component's
+// frame sat at its 240 px minimum on Git History).
+test("a table that is the whole page fills the page body, still a document's width", async () => {
+  const view = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} />);
+  await view.findByText("Items: Alpha");
+  const body = view.getByTestId("page-file");
+  expect(body.style.flex === "1" || body.style.flex === "1 1 0%").toBe(true);
+  expect(view.getByTestId("page-rail-body").style.alignItems).toBe("stretch");
+  expect(view.container.querySelector(".oxplow-reading-column")).not.toBeNull();
+});
+
 test("`focus` lands on its node once the run draws it", async () => {
   const view = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} focus="items" />);
   await waitFor(() => expect(view.container.querySelector('[data-node="items"]')?.getAttribute("data-focused")).toBe("true"));

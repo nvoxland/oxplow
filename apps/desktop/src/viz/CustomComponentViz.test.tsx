@@ -43,9 +43,9 @@ const run = (custom: VizRun["viz"]["custom"]) =>
 const fallback = <div data-testid="the-table">table</div>;
 
 // P6b.D4: the frame is sandboxed to scripts and forms, at its loaded
-// bundle's URL, marked custom; with no component, or no daemon, the table
+// bundle's URL, with no chip naming whose it is (About says); with no component, or no daemon, the table
 // shows.
-test("the component's frame is sandboxed to scripts and forms, at its loaded bundle, marked custom", async () => {
+test("the component's frame is sandboxed to scripts and forms, at its loaded bundle, with no chip", async () => {
   const view = render(
     <CustomComponentViz run={run({ component: "burndown", props: null })} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
   );
@@ -54,8 +54,8 @@ test("the component's frame is sandboxed to scripts and forms, at its loaded bun
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
   expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-1/");
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
-  // A third party's component says whose it is, in plain words.
-  expect(view.getByTestId("custom-component-badge").textContent).toBe("by x");
+  // Whose it is shows in the page's About, not as a chip on the page.
+  expect(view.queryByTestId("custom-component-badge")).toBeNull();
   expect(view.queryByTestId("the-table")).toBeNull();
 });
 
