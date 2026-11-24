@@ -364,8 +364,9 @@ non-bundled extension may use an `exec` program.
 collectors:
   - id: acme.clippy_report
     records: analysis          # tests | coverage | analysis
-    entry: "oxplow:clippy"     # a parser that ships with oxplow, or a script file
-    report: { path: { setting: /rust/clippyReport, default: target/clippy.json } }
+    entry: collectors/clippy.jq   # a script file of the extension (`runtime: jaq`), or a parser that ships with oxplow (`oxplow:junit`, `lcov`, `cobertura`, `jacoco`)
+    runtime: jaq
+    report: { path: { setting: /rust/clippyReport, default: target/clippy.json }, format: lines }
     on: { run: analysis }      # test | analysis, or leave out to run by hand
 ```
 

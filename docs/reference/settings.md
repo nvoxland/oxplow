@@ -288,8 +288,10 @@ collectors:
 ```
 
 `records` is `tests`, `coverage` or `analysis`. The bundled parsers are
-`oxplow:junit`, `oxplow:lcov`, `oxplow:cobertura`, `oxplow:jacoco`,
-`oxplow:clippy` and `oxplow:eslint`. Coverage numbers come only from
+`oxplow:junit`, `oxplow:lcov`, `oxplow:cobertura` and `oxplow:jacoco`: the
+formats of the test and coverage tools. A parser for a tool's own output
+(clippy's, ESLint's) is its language pack's: a jaq file in the pack, named by
+`runtime: jaq` and `entry:`. Coverage numbers come only from
 oxplow parsing the report, never from the agent, so they stay
 trustworthy. Settings → Data shows each collector's last outcome. Open
 a collector's data page to see its recent runs and parse errors. Three

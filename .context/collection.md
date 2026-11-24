@@ -76,7 +76,7 @@ section for the column.
   ```yaml
   collectors:
     - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, on: { run: test } }
-    - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, on: { run: analysis } }
+    - { id: lint.clippy, records: analysis, runtime: jaq, entry: clippy.jq, report: { path: target/clippy.json, format: lines }, on: { run: analysis } }
   ```
   **Listed in Settings → Data → Collectors** beside the extensions' (owner
   `project`, the project's own extension, as `v_collector_state` lists every
@@ -109,8 +109,9 @@ section for the column.
   `TestReport { suites → cases }`; analysis = `AnalysisReport { findings }`,
   each finding `{ path, line?, column?, severity, rule?, message }`). The
   typed shapes live in `oxplow-coverage`. `entry: "oxplow:<name>"` names a
-  **bundled** parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`,
-  `eslint`. **One table** holds them (`oxplow_config::collectors::
+  **bundled** parser: `junit`, `lcov`, `cobertura`, `jacoco` (the formats of
+  the test and coverage tools; clippy's and ESLint's parsers are the Rust and
+  TypeScript packs' own jaq files). **One table** holds them (`oxplow_config::collectors::
   BUNDLED_PARSERS`): each one's name, what it records, how its
   report is pre-parsed and its jq program (`oxplow-config/src/parsers/
   *.jq`). The config check and the runtime (`Collector::bundled`, which
@@ -499,7 +500,7 @@ collector + a small script, never a Rust change (`crates/oxplow-script/`):
    over typed kinds, so a future kind (perf, structure-map, …) is a new
    `CollectorKind` plus parsers that target it — not a new subsystem.
    (`analysis` was added exactly this way: a new `CollectorKind`, the
-   `AnalysisReport` typed output, and bundled clippy/eslint jaq parsers — no
+   `AnalysisReport` typed output, and clippy/eslint jaq parsers (now the packs') — no
    new store, IPC, or subsystem.) The metric substrate's author-able
    producers are not a `CollectorKind`: they are **fact collectors** (a
    `collectors:` entry with `facts:`, P7.B3 — they were a `gauge` kind
@@ -663,7 +664,10 @@ it):
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
 - fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "severity"?, "detail"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate: each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `severity` (`error | warning | info | note`; another word fails the run) is a lint-like fact's `severity` column, what the change review ranks a finding on a changed line by (error → high, warning → medium, info/note → info, none → medium). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation: the run **fails**, naming the measure, and writes nothing (it used to drop the fact behind a run reported "ok"). A measure not yet in the catalog makes the run reseed it once first, so an extension added while oxplow runs is never failed by its collector winning the race with the catalog's reseed.
 
-The two bundled analysis parsers are the canonical templates: `clippy.jq`
+The two analysis parsers of the Rust and TypeScript packs are the canonical
+templates (`extensions/oxplow-rust/collectors/rust/clippy.jq`,
+`extensions/oxplow-typescript/collectors/ts/eslint.jq`: the packs' own jaq
+collectors, `runtime: jaq`): `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
 `reason=="compiler-message"`, picks the primary span, maps `level` →
 severity) and `eslint.jq` (`input: json`; severity `2`→error / `1`→warning,

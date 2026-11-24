@@ -559,6 +559,28 @@ mod tests {
             .run(content)
     }
 
+    /// A tool's parser is its pack's jaq file (`extensions/oxplow-rust`,
+    /// `oxplow-typescript`), run as a collector of that pack would: `lines` or
+    /// `json` pre-parsed input, analysis findings out.
+    fn pack_parser(
+        program: &str,
+        format: &str,
+        content: &str,
+    ) -> Result<CollectorOutput, CollectError> {
+        Collector::jaq(
+            "pack",
+            CollectorKind::Analysis,
+            CollectorInput::named(format).expect("a format oxplow reads"),
+            program,
+        )
+        .run(content)
+    }
+
+    const CLIPPY_JQ: &str =
+        include_str!("../../../extensions/oxplow-rust/collectors/rust/clippy.jq");
+    const ESLINT_JQ: &str =
+        include_str!("../../../extensions/oxplow-typescript/collectors/ts/eslint.jq");
+
     /// every bundled parser is a jaq program of what it records,
     /// reading a format oxplow pre-parses; an unknown name is none.
     #[test]
@@ -1519,7 +1541,7 @@ some plain text rustc emitted to the stream"#;
 
     #[test]
     fn builtin_clippy_parser_produces_expected_findings() {
-        let out = bundled("clippy", GOLD_CLIPPY).expect("parser runs");
+        let out = pack_parser(CLIPPY_JQ, "lines", GOLD_CLIPPY).expect("parser runs");
         let expected = AnalysisReport {
             findings: vec![
                 finding(
@@ -1566,7 +1588,7 @@ some plain text rustc emitted to the stream"#;
 
     #[test]
     fn builtin_eslint_parser_produces_expected_findings() {
-        let out = bundled("eslint", GOLD_ESLINT).expect("parser runs");
+        let out = pack_parser(ESLINT_JQ, "json", GOLD_ESLINT).expect("parser runs");
         let expected = AnalysisReport {
             findings: vec![
                 finding(

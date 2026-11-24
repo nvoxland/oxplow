@@ -6213,9 +6213,9 @@ columns: [{ key: title }]
             "def transform(x):\n    return {\"findings\": []}\n",
         );
         let collector = |entry: &str, permissions: &str| {
-            format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{permissions}collectors:\n  - id: lint\n    records: analysis\n    on: {{ run: analysis }}\n{entry}\n")
+            format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{permissions}collectors:\n  - id: lint\n    records: tests\n    on: {{ run: test }}\n{entry}\n")
         };
-        let bundled = "    report: { path: out/lint.json }\n    entry: oxplow:clippy";
+        let bundled = "    report: { path: out/lint.json }\n    entry: oxplow:junit";
         let own = "    report: { path: out/lint.json, format: json }\n    entry: parse.star\n    runtime: starlark";
         let errors = permission_errors(dir.path(), &collector(bundled, ""));
         assert!(errors.is_empty(), "{errors:?}");
@@ -10570,7 +10570,7 @@ commands:
     /// a load error.
     #[test]
     fn a_report_path_setting_names_a_string_key_of_the_configuration() {
-        let collectors = "collectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: { setting: /reports/clippy, default: c.json } }, on: { run: analysis } }\n";
+        let collectors = "collectors:\n  - { id: lint, records: tests, entry: \"oxplow:junit\", report: { path: { setting: /reports/clippy, default: c.json } }, on: { run: test } }\n";
         let schema = |ty: &str| {
             format!(
                 "configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      reports:\n        type: object\n        properties:\n          clippy: {{ type: {ty} }}\n"

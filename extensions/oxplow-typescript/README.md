@@ -6,6 +6,6 @@ What oxplow knows about TypeScript and JavaScript, as a language pack that ships
 - `languages/<id>/analysis.yaml` is what code analysis reads: function and decision node kinds, the parameter list, how visibility and doc comments are told, and the import, merge and duplication facets.
 - `languages/<id>/symbols.scm` (and `symbols.yaml`) say what a file defines.
 - `file_kinds:` names the files that are a dependency manifest, a lockfile, lint config or a test harness (including golden snapshots).
-- `collectors:` holds the idiom metrics (`any`, non-null assertions, `console.*`, `@ts-ignore`), on while the pack is on, and a report collector for ESLint (`oxplow:eslint`, path in the `typescript.eslintReport` setting, default `target/eslint.json`).
+- `collectors:` holds the idiom metrics (`any`, non-null assertions, `console.*`, `@ts-ignore`), on while the pack is on, and a report collector for ESLint (its own jaq parser, `collectors/ts/eslint.jq`, path in the `typescript.eslintReport` setting, default `target/eslint.json`).
 - `skills/typescript-setup` tells the agent how to make the stack write the JUnit, lcov and ESLint reports oxplow reads.
 - `run_patterns:` marks the pack's test and analysis commands as runs.

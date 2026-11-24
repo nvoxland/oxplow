@@ -296,18 +296,6 @@ pub const BUNDLED_PARSERS: &[BundledParser] = &[
         format: "xml",
         program: include_str!("parsers/jacoco.jq"),
     },
-    BundledParser {
-        name: "clippy",
-        records: Records::Analysis,
-        format: "lines",
-        program: include_str!("parsers/clippy.jq"),
-    },
-    BundledParser {
-        name: "eslint",
-        records: Records::Analysis,
-        format: "json",
-        program: include_str!("parsers/eslint.jq"),
-    },
 ];
 
 /// The bundled parser `name`, if oxplow ships one.
@@ -2559,7 +2547,7 @@ mod tests {
     fn a_report_path_may_name_a_setting() {
         let ok = |report: &str| {
             let v: serde_yaml::Value = serde_yaml::from_str(&format!(
-                "- id: r\n  records: analysis\n  entry: oxplow:clippy\n  on: {{ run: analysis }}\n  report: {report}\n"
+                "- id: r\n  records: tests\n  entry: oxplow:junit\n  on: {{ run: test }}\n  report: {report}\n"
             ))
             .unwrap();
             parse_collectors(&Declarer::shared("acme-lint", "acme_lint"), &v, &knows)

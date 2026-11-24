@@ -3897,8 +3897,21 @@ pub(crate) mod test_support {
         path: &str,
         run: &str,
     ) -> String {
+        // The tool parsers are their packs' (`extensions/oxplow-rust`,
+        // `oxplow-typescript`), jaq files; a test names one as `oxplow:clippy`
+        // or `oxplow:eslint` and gets the same collector as a project's own
+        // (`write_project_extension` writes the file beside the manifest).
+        let (entry, runtime) = match entry {
+            "oxplow:clippy" => ("clippy.jq", ", runtime: jaq, report_format: lines"),
+            "oxplow:eslint" => ("eslint.jq", ", runtime: jaq, report_format: json"),
+            other => (other, ""),
+        };
+        let (runtime, format) = match runtime.split_once(", report_format: ") {
+            Some((rt, f)) => (rt.to_string(), format!(", format: {f}")),
+            None => (String::new(), String::new()),
+        };
         let yaml = format!(
-            "- {{ id: {id}, records: {records}, entry: \"{entry}\", report: {{ path: \"{path}\" }}, on: {{ run: {run} }} }}"
+            "- {{ id: {id}, records: {records}, entry: \"{entry}\"{runtime}, report: {{ path: \"{path}\"{format} }}, on: {{ run: {run} }} }}"
         );
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
@@ -3925,6 +3938,22 @@ pub(crate) mod test_support {
             manifest.push('\n');
         }
         std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
+        write_tool_parsers(&dir);
+    }
+
+    /// The pack-owned jaq parsers a test names `oxplow:clippy` and
+    /// `oxplow:eslint`, written into `dir` (an extension's folder).
+    pub(crate) fn write_tool_parsers(dir: &std::path::Path) {
+        std::fs::write(
+            dir.join("clippy.jq"),
+            include_str!("../../../extensions/oxplow-rust/collectors/rust/clippy.jq"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("eslint.jq"),
+            include_str!("../../../extensions/oxplow-typescript/collectors/ts/eslint.jq"),
+        )
+        .unwrap();
     }
 }
 
@@ -4984,7 +5013,7 @@ mod tests {
                 .await
                 .unwrap();
             let producers: Vec<&str> = by_producer.iter().map(|(p, _)| p.as_str()).collect();
-            for wanted in ["coverage", "eslint", "nudges", "test-run"] {
+            for wanted in ["coverage", "lint.eslint", "nudges", "test-run"] {
                 assert!(producers.contains(&wanted), "{wanted}: {by_producer:?}");
             }
             assert!(
@@ -7016,6 +7045,7 @@ mod tests {
                 format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\n{body}"),
             )
             .unwrap();
+            super::super::test_support::write_tool_parsers(&dir);
         }
 
         /// The `collector_run` rows of `owner`'s collector `id`.
@@ -7033,7 +7063,7 @@ mod tests {
             .unwrap()
         }
 
-        const SHELF: &str = "collectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: clippy.json }, on: { run: analysis } }\n";
+        const SHELF: &str = "permissions: [files.read]\ncollectors:\n  - { id: lint, records: analysis, runtime: jaq, entry: clippy.jq, report: { path: clippy.json, format: lines }, on: { run: analysis } }\n";
 
         /// An extension that isn't the project's reads reports with a
         /// bundled parser, and its read is recorded as its own run.
@@ -7056,7 +7086,7 @@ mod tests {
             write_extension(
                 &h,
                 "shelf",
-                "configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      reports:\n        type: object\n        properties:\n          clippy: { type: string, default: \"\" }\ncollectors:\n  - { id: lint, records: analysis, entry: \"oxplow:clippy\", report: { path: { setting: /reports/clippy, default: default.json } }, on: { run: analysis } }\n",
+                "configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      reports:\n        type: object\n        properties:\n          clippy: { type: string, default: \"\" }\npermissions: [files.read]\ncollectors:\n  - { id: lint, records: analysis, runtime: jaq, entry: clippy.jq, report: { path: { setting: /reports/clippy, default: default.json }, format: lines }, on: { run: analysis } }\n",
             );
             let reads = run_reads(&h, RunKind::Analysis).await;
             assert!(
@@ -8104,7 +8134,7 @@ mod tests {
             let (merged, source) = reads.analysis().expect("fresh clippy report merged");
             assert_eq!(merged.findings.len(), 2);
             assert_eq!(source, "analysis-report");
-            assert_eq!(reads.analyzers, vec!["clippy".to_string()]);
+            assert_eq!(reads.analyzers, vec!["r0".to_string()]);
         }
 
         // `eslint -f json`: errors (severity 2) + a warning (severity 1)
@@ -8182,7 +8212,7 @@ mod tests {
                 serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
             assert_eq!(payload["errorCount"], 2);
             assert_eq!(payload["warningCount"], 1);
-            assert_eq!(payload["analyzer"], "eslint");
+            assert_eq!(payload["analyzer"], "lint.eslint");
             let findings = payload["findings"].as_array().unwrap();
             assert_eq!(findings.len(), 3);
             assert_eq!(findings[0]["path"], "src/a.ts");

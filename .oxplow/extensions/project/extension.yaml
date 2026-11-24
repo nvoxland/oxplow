@@ -425,13 +425,6 @@ collectors:
   report:
     path: tests-e2e/.output/junit.xml
   on: { run: test }
-- id: lint.clippy
-  doc: Clippy findings (lint:collect).
-  records: analysis
-  entry: oxplow:clippy
-  report:
-    path: target/clippy.json
-  on: { run: analysis }
 - id: repo.scan_clone
   doc: Rust .clone() scan
   runtime: starlark
