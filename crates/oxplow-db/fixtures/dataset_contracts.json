@@ -31848,6 +31848,128 @@
       "key": [
         "key"
       ]
+    },
+    "8": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The registered fully qualified setting key."
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "doc": "Effective value as JSON; NULL for secrets or absent values."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "Effective origin: local, project, global, or default; NULL when unavailable or absent."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "Setting description."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "Value validation schema as JSON."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display title."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "Display category, independent of namespace ownership."
+        },
+        {
+          "name": "secret",
+          "type": "INT",
+          "doc": "1 when the value is stored securely."
+        },
+        {
+          "name": "is_set",
+          "type": "INT",
+          "doc": "1 when an effective value is present, including secrets."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "Registry owner: `core`, or `extension/<name>` for a setting an extension declares."
+        },
+        {
+          "name": "ui",
+          "type": "TEXT",
+          "doc": "Display hints as JSON."
+        },
+        {
+          "name": "local_value",
+          "type": "TEXT",
+          "doc": "Explicit local override as JSON; SQL NULL when absent or secret. JSON null remains the text null."
+        },
+        {
+          "name": "project_value",
+          "type": "TEXT",
+          "doc": "Explicit shared project override as JSON; SQL NULL when absent or secret."
+        },
+        {
+          "name": "global_value",
+          "type": "TEXT",
+          "doc": "Explicit machine-global override as JSON; SQL NULL when absent or secret."
+        },
+        {
+          "name": "unavailable",
+          "type": "INT",
+          "doc": "1 when resolution failed safely. Value, origin and presence are unavailable; no backend error or secret bytes are exposed."
+        },
+        {
+          "name": "default_value",
+          "type": "TEXT",
+          "doc": "Registered default as JSON, NULL when absent; secrets have no defaults."
+        },
+        {
+          "name": "setting_order",
+          "type": "INT",
+          "doc": "Display order within the category, then title and key."
+        },
+        {
+          "name": "local_status",
+          "type": "TEXT",
+          "doc": "Local override presence: set, unset or unavailable. Never contains secret bytes."
+        },
+        {
+          "name": "project_status",
+          "type": "TEXT",
+          "doc": "Project override presence: set, unset or unavailable."
+        },
+        {
+          "name": "global_status",
+          "type": "TEXT",
+          "doc": "Global override presence: set, unset or unavailable."
+        },
+        {
+          "name": "category_title",
+          "type": "TEXT",
+          "doc": "The category's title, as core or the extension declares it (`configuration: categories:`); one from its id when nobody does."
+        },
+        {
+          "name": "category_description",
+          "type": "TEXT",
+          "doc": "What the category is for; empty when not declared."
+        },
+        {
+          "name": "category_order",
+          "type": "INT",
+          "doc": "Where the category sits, lower first (core's run 0 to 110; an undeclared one is 1000), then its title."
+        }
+      ],
+      "key": [
+        "key"
+      ]
     }
   },
   "agent_conversation": {

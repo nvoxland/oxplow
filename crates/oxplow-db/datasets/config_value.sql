@@ -1,5 +1,5 @@
 SELECT CAST(NULL AS TEXT) AS key, CAST(NULL AS TEXT) AS value, CAST(NULL AS TEXT) AS origin,
-       CAST(NULL AS TEXT) AS extension, CAST(NULL AS TEXT) AS doc,
+       CAST(NULL AS TEXT) AS doc,
        CAST(NULL AS TEXT) AS schema,
        CAST(NULL AS TEXT) AS title,
        CAST(NULL AS TEXT) AS category,
