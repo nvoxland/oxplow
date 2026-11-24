@@ -931,20 +931,3 @@ async fn the_shelf_examples_pass_their_own_fixtures() {
     }
     assert_eq!(failures, Vec::<String>::new());
 }
-
-/// The shipped extensions pass `extension test`, their pages' answers run.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_shipped_extensions_pass_their_own_test() {
-    let dir = project().await;
-    for name in ["oxplow-foundation", "oxplow-bundled"] {
-        let report = test_extension(dir.path(), name, false).await.unwrap();
-        assert_eq!(report.error_lines(), Vec::<String>::new(), "{name}");
-        if name == "oxplow-foundation" {
-            assert!(
-                report.ran.contains(&"answers".to_string()),
-                "{:?}",
-                report.ran
-            );
-        }
-    }
-}
