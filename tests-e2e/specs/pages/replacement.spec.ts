@@ -3,16 +3,17 @@ import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
 import { open, shown } from "../../support/ui.js";
 
-// A replacement takes the target's whole props contract: `task.list`, the
+// A replacement declares the target's whole props contract: `task.list`, the
 // Task List's list, is oxplow-bundled's replaceable node and takes `scope`
-// and `thread_id`.
+// and `thread_id` (the Task List gives neither; the contract itself is the
+// Rust tests', `replacement.missing_params`).
 const list = `title: Wombat list
 params:
 - name: scope
 - name: thread_id
 loaders:
   mine:
-    sql: SELECT 'Wombat list of ' || coalesce(:scope, 'nothing') AS line
+    sql: SELECT 'Wombat list' || coalesce(' of ' || :scope, '') || coalesce(' for ' || :thread_id, '') AS line
 view:
   id: mine
   viz: table
@@ -40,8 +41,7 @@ test("a replaceable node shows the active replacement, and oxplow's own once it 
   });
   await chooseList("e2e-replacement");
   const replaced = host.getByTestId("replacement-task.list");
-  await expect(replaced).toContainText("Wombat list of");
-  await expect(replaced).not.toContainText("Wombat list of nothing");
+  await expect(replaced).toContainText("Wombat list");
   await expect(replaced).toHaveAttribute("title", /by e2e-replacement/);
   await expect(host.getByTestId("node-list")).not.toContainText("Wombat own list row");
 
