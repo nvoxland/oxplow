@@ -84,6 +84,40 @@ impl ChangeDiffReader {
             })
             .await
             .map_err(|e| e.to_string())?;
+        // The ranges the analysis already stored (`change_hunk`): a file past
+        // its limit of files was never diffed, so only that one is diffed here.
+        let stored: std::collections::HashMap<String, Vec<crate::churn::Hunk>> = self
+            .db
+            .read(move |c| {
+                let mut st = c
+                    .prepare(
+                        "SELECT path, head_start, head_end, base_start, base_end, head_after
+                           FROM change_hunk WHERE change_id = ?1 ORDER BY rowid",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([change_id], |r| {
+                        let pair = |a: Option<u32>, b: Option<u32>| a.zip(b);
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            crate::churn::Hunk {
+                                head: pair(r.get(1)?, r.get(2)?),
+                                base: pair(r.get(3)?, r.get(4)?),
+                                head_after: r.get(5)?,
+                            },
+                        ))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?;
+                let mut by_path: std::collections::HashMap<String, Vec<crate::churn::Hunk>> =
+                    Default::default();
+                for row in rows {
+                    let (path, hunk) = row.map_err(oxplow_db::map_sql_err)?;
+                    by_path.entry(path).or_default().push(hunk);
+                }
+                Ok(by_path)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
         if let Some(paths) = paths {
             let wanted: std::collections::HashSet<&String> = paths.iter().collect();
             files.retain(|(path, _)| wanted.contains(path));
@@ -105,7 +139,7 @@ impl ChangeDiffReader {
                 Some(rev) => self.side(&root, Some(rev), &path).await?,
                 None => String::new(),
             };
-            let (hunks, size) = hunks(&base, &head);
+            let (hunks, size) = hunks(&base, &head, stored.get(&path).map(Vec::as_slice));
             if size > MAX_BYTES {
                 too_large.push(path);
             } else if bytes + size > MAX_BYTES {
@@ -139,8 +173,9 @@ impl ChangeDiffReader {
 }
 
 /// `base` → `head`'s hunks with the lines each added and removed, and
-/// the bytes of those lines' text: what a call's limit counts.
-fn hunks(base: &str, head: &str) -> (Vec<Value>, usize) {
+/// the bytes of those lines' text: what a call's limit counts. The ranges
+/// are `stored` (the analysis's own) when it has them, else diffed here.
+fn hunks(base: &str, head: &str, stored: Option<&[crate::churn::Hunk]>) -> (Vec<Value>, usize) {
     let base_lines: Vec<&str> = base.lines().collect();
     let head_lines: Vec<&str> = head.lines().collect();
     let mut size = 0usize;
@@ -157,7 +192,11 @@ fn hunks(base: &str, head: &str) -> (Vec<Value>, usize) {
             })
             .collect()
     };
-    let hunks = crate::churn::diff_hunks(base, head)
+    let found = match stored {
+        Some(stored) => stored.to_vec(),
+        None => crate::churn::diff_hunks(base, head),
+    };
+    let hunks = found
         .into_iter()
         .map(|h| {
             json!({
@@ -209,13 +248,35 @@ impl oxplow_script::ChangeDiffSource for Bounded {
 
 #[cfg(test)]
 mod tests {
+    /// The ranges the analysis stored are the ones used, not diffed again:
+    /// a stored range that differs from a fresh diff's is what comes out.
+    #[test]
+    fn stored_ranges_are_used_instead_of_a_new_diff() {
+        let stored = [crate::churn::Hunk {
+            head: Some((1, 1)),
+            base: None,
+            head_after: None,
+        }];
+        let (hunks, _) = super::hunks("a\nb\n", "a\nc\n", Some(&stored));
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(
+            hunks[0]["added"][0]["text"], "a",
+            "line 1 of the head, as stored"
+        );
+        let (fresh, _) = super::hunks("a\nb\n", "a\nc\n", None);
+        assert_eq!(
+            fresh[0]["added"][0]["text"], "c",
+            "a fresh diff finds line 2"
+        );
+    }
+
     /// The size a call counts is the text plus a fixed cost per line, so
     /// thousands of one-character lines can't slip a far larger answer
     /// under the byte limit.
     #[test]
     fn short_lines_cost_their_json() {
         let head: String = "a\n".repeat(1000);
-        let (hunks, size) = super::hunks("", &head);
+        let (hunks, size) = super::hunks("", &head, None);
         assert!(!hunks.is_empty());
         assert_eq!(size, 1000 * (1 + LINE_OVERHEAD));
     }

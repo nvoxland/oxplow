@@ -245,7 +245,7 @@ uses):
 |---|---|---|---|
 | `config.read` | `scope("config.read", {key, level?})` | no; current owner and secret ownership checked | any |
 | `sql.read` | `scope("sql.read", …)` | no | any |
-| `tree.read` | `files`, `grep_tree`, `source_files`, `duplicate_blocks`, `change_diff` (a change's changed lines, not the tree) | no | any |
+| `tree.read` | `files`, `grep_tree`, `grep_tree_many`, `source_files`, `duplicate_blocks`, `change_diff` (a change's changed lines, not the tree) | no | any |
 | `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | `ai` | external only |
 | `ai.discover` | `ai_capabilities`, `ai_models`; `scope("ai.discover", { role })` | no | any, when the host supplies AI metadata |
 

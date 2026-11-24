@@ -111,7 +111,7 @@ pub fn every_pack_on_yaml() -> String {
         .collect()
 }
 
-/// Read the enabled `generated` and `vendored` file kinds' globs
+/// Read the enabled `generated`, `vendored` and `lockfile` file kinds' globs
 /// (`v_file_kind_rule`: the foundation's, each enabled extension's, the
 /// project's own `oxplow.files.kinds`) and give them to the language set.
 pub async fn refresh_excluded(svc: &crate::Services) {
@@ -120,7 +120,7 @@ pub async fn refresh_excluded(svc: &crate::Services) {
         .read(|c| {
             let mut st = c
                 .prepare(
-                    "SELECT glob FROM v_file_kind_rule WHERE kind IN ('generated', 'vendored') ORDER BY glob",
+                    "SELECT glob FROM v_file_kind_rule WHERE kind IN ('generated', 'vendored', 'lockfile') ORDER BY glob",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(oxplow_db::map_sql_err)?;

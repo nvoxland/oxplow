@@ -107,7 +107,7 @@ const toastStyle: CSSProperties = {
   fontSize: "var(--text-xs)",
   minWidth: 240,
   maxWidth: 380,
-  boxShadow: "0 6px 20px rgba(0, 0, 0, 0.45)",
+  boxShadow: "var(--shadow-raised)",
 };
 
 const messageStyle: CSSProperties = {

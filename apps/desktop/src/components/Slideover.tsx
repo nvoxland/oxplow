@@ -134,7 +134,7 @@ export function Slideover({
 const backdropStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0, 0, 0, 0.35)",
+  background: "var(--surface-scrim)",
   display: "flex",
   justifyContent: "flex-end",
   alignItems: "stretch",
@@ -147,7 +147,7 @@ const panelStyle: CSSProperties = {
   borderLeft: "1px solid var(--border-subtle, var(--border))",
   display: "flex",
   flexDirection: "column",
-  boxShadow: "-8px 0 24px rgba(0, 0, 0, 0.18)",
+  boxShadow: "var(--shadow-drawer-right)",
   outline: "none",
   height: "100%",
   minWidth: 320,

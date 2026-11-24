@@ -34,5 +34,5 @@ const hostStyle: CSSProperties = {
   maxWidth: 520,
   background: "var(--surface-elevated)",
   borderRadius: 6,
-  boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+  boxShadow: "var(--shadow-pop)",
 };

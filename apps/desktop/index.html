@@ -68,6 +68,33 @@
         --surface-tab-inactive: transparent;
         --surface-elevated: #20242c;
         --surface-overlay: rgba(0, 0, 0, 0.55);
+        /* Dimmed backdrops: a drawer or tab dialog's (scrim), a media
+           lightbox's (strong). */
+        --surface-scrim: rgba(0, 0, 0, 0.35);
+        --surface-scrim-strong: rgba(0, 0, 0, 0.82);
+        /* A hover label over the editor. */
+        --surface-hint: rgba(23, 23, 23, 0.92);
+        /* Shadows: popovers and menus (pop), toasts and small floats
+           (raised), centred dialogs with their edge (modal), a drawer from the
+           left or right edge, a tab's dialog, the dock, a lightbox's media. */
+        --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.35);
+        --shadow-raised: 0 6px 20px rgba(0, 0, 0, 0.4);
+        --shadow-modal: 0 0 0 1px var(--border-strong), 0 16px 40px rgba(0, 0, 0, 0.5);
+        --shadow-drawer-left: 8px 0 24px rgba(0, 0, 0, 0.45);
+        --shadow-drawer-right: -8px 0 24px rgba(0, 0, 0, 0.18);
+        --shadow-tab-modal: -8px 8px 24px rgba(0, 0, 0, 0.28);
+        --shadow-dock: 0 -1px 0 var(--border-subtle), 0 -10px 32px rgba(0, 0, 0, 0.6);
+        --shadow-lightbox: 0 8px 32px rgba(0, 0, 0, 0.5);
+        /* The agent status dot's ring: waiting, stalled, awaiting. */
+        --ring-idle: rgba(148, 163, 184, 0.25);
+        --ring-stalled: rgba(239, 68, 68, 0.35);
+        --ring-awaiting: rgba(56, 189, 248, 0.35);
+        /* A control on a coloured banner; a control over a lightbox's media. */
+        --banner-control-bg: rgba(0, 0, 0, 0.25);
+        --banner-control-border: rgba(255, 255, 255, 0.4);
+        --lightbox-control-bg: rgba(255, 255, 255, 0.12);
+        --lightbox-control-border: rgba(255, 255, 255, 0.2);
+        --blame-uncommitted: rgba(70, 70, 70, 0.35);
 
         --border-subtle: #232831;
         --border-strong: #333944;
@@ -261,8 +288,8 @@
       /* A tab dialog kept open by a click outside it (something in it was
          changed): its edge flashes the accent twice. */
       @keyframes oxplow-kept {
-        0%, 50%, 100% { box-shadow: -8px 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 0 var(--accent); }
-        25%, 75% { box-shadow: -8px 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 3px var(--accent); }
+        0%, 50%, 100% { box-shadow: var(--shadow-tab-modal), 0 0 0 0 var(--accent); }
+        25%, 75% { box-shadow: var(--shadow-tab-modal), 0 0 0 3px var(--accent); }
       }
       /* Indeterminate progress: a slim accent bar slides across the track. */
       @keyframes oxplow-progress-indeterminate {

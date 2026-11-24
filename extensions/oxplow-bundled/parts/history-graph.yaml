@@ -75,8 +75,27 @@ loaders:
         AND (:author = '' OR c.author = :author)
         AND (:q IS NULL OR :q = '' OR c.sha LIKE :q || '%' OR instr(lower(c.subject), lower(:q)) > 0
              OR instr(lower(c.author), lower(:q)) > 0 OR instr(lower(c.email), lower(:q)) > 0)
-      ORDER BY c.committed_at DESC, c.sha
-      LIMIT :limit
+      -- The revealed commit first, so one older than the limit is in the List
+      -- too; and no rows when nothing filters (the List shows `history_graph`'s
+      -- then): the walk is only for a search.
+      ORDER BY (c.sha = :reveal_sha) DESC, c.committed_at DESC, c.sha
+      LIMIT CASE WHEN (:q IS NULL OR :q = '') AND :author = '' AND (:branch IS NULL OR :branch = '')
+                 THEN 0 ELSE :limit END
+  # The Author choices: everyone who committed to the history, not only those
+  # of the loaded rows. It reads the head alone, so a search doesn't run it again.
+  authors:
+    sql: |
+      WITH RECURSIVE reach(sha) AS (
+        SELECT :head_sha
+        UNION
+        SELECT p.value FROM reach
+          JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+      )
+      SELECT DISTINCT c.author FROM v_commit c JOIN reach USING (sha) WHERE c.author <> ''
+      ORDER BY lower(c.author)
+  # The Branch choices: the local branches.
+  branch_names:
+    sql: "SELECT name FROM v_branch WHERE kind = 'local' ORDER BY lower(name)"
 view:
   from: history_graph
   viz: custom

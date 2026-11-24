@@ -14,7 +14,7 @@
 # produces are tombstoned.
 
 KINDS = ["function", "method", "constructor", "macro"]
-MOST_NAMES = 50
+MOST_NAMES = 200
 
 def call_names(text):
     """The names called on a line: an identifier right before `(`."""
@@ -40,10 +40,12 @@ def transform(input):
     paths = [
         r["path"]
         for r in scope("sql.read", {
-            "sql": "SELECT f.path FROM v_change_file f WHERE f.change_id = :c AND f.deletions > 0 AND NOT EXISTS (SELECT 1 FROM v_file_kind_rule k WHERE k.kind IN ('generated', 'vendored', 'lockfile') AND glob_match(k.glob, f.path)) ORDER BY f.path",
+            "sql": "SELECT f.path FROM v_change_file f WHERE f.change_id = :c AND f.deletions > 0 ORDER BY f.path",
             "params": {"c": change_id},
         })
-        if language_of(r["path"]) != None
+        # Generated, vendored and lockfile paths are the enabled file kinds',
+        # the one rule the set carries (`excluded_path`).
+        if language_of(r["path"]) != None and not excluded_path(r["path"])
     ]
     diffs = []
     too_large = []
@@ -77,11 +79,13 @@ def transform(input):
                     removed[n] = "%s:%d" % (f["path"], l["line"])
 
     rows = []
-    for name in sorted(removed.keys())[:MOST_NAMES]:
-        # The change's head tree decides, whatever the worktree holds now:
-        # every whole-word mention of the name there, and which of them is
-        # the start of a function with that name.
-        hits = grep_tree(name, max = 50)
+    names = sorted(removed.keys())[:MOST_NAMES]
+    # The change's head tree decides, whatever the worktree holds now:
+    # every whole-word mention of each name there (one pass over the tree for
+    # all of them), and which of them is the start of a function with that name.
+    mentioned = grep_tree_many(names, max = 50)
+    for name in names:
+        hits = mentioned[name]
         parsed = {}
         definitions = {}
         mentions = 0

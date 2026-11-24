@@ -87,8 +87,9 @@ pub struct ScaffoldInput {
     /// The extension's name: lowercase letters, digits and single dashes
     /// (`complex-fns`); its keys are namespaced under it (`complex_fns.*`).
     pub name: String,
-    /// The language whose functions it counts (default `rust`; with a
-    /// sample: rust, typescript, javascript, python, go, c, cpp).
+    /// The language whose functions it counts (default `rust`; a language an
+    /// enabled extension declares, `v_language`; those with a `starter:` have a
+    /// sample).
     #[serde(default)]
     pub language: Option<String>,
     /// Glob of the files it reads, `*` and `**` only (default: the

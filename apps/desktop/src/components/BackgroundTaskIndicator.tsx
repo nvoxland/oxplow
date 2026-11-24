@@ -148,7 +148,7 @@ export function BackgroundTaskIndicator() {
             background: "var(--bg-elevated, #1e1e1e)",
             border: "1px solid var(--border)",
             borderRadius: 6,
-            boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
+            boxShadow: "var(--shadow-raised)",
             padding: 8,
             zIndex: 1000,
             maxHeight: 400,
@@ -218,7 +218,7 @@ function ProgressBar({ task, width }: { task: BackgroundTask; width: number }) {
   const isFailed = task.status === "failed";
   const indeterminate = task.status === "running" && task.progress === null;
   const filled = isDone ? 1 : (task.progress ?? 0);
-  const trackColor = "rgba(255,255,255,0.08)";
+  const trackColor = "var(--border-subtle)";
   const fillColor = isFailed
     ? "#f87171"
     : isDone

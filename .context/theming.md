@@ -42,6 +42,16 @@ sinks.
 | `--surface-tab-inactive`| `transparent` | Inactive tabs (let the header tint show through) |
 | `--surface-elevated`    | `#20242c`     | Popovers, slideovers, context menus        |
 | `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
+| `--surface-scrim`, `--surface-scrim-strong` | rgba dim | A drawer's or tab dialog's backdrop; a media lightbox's |
+| `--surface-hint`        | rgba          | A hover label over the editor              |
+| `--shadow-pop`, `--shadow-raised`, `--shadow-modal`, `--shadow-drawer-left`, `--shadow-drawer-right`, `--shadow-tab-modal`, `--shadow-dock`, `--shadow-lightbox` | box-shadow | Elevation: menus and popovers, toasts, centred dialogs (with their edge), the drawers, a tab's dialog, the dock, a lightbox's media. Never an inline `rgba()` shadow. |
+| `--ring-idle`, `--ring-stalled`, `--ring-awaiting` | rgba | The agent status dot's ring |
+| `--banner-control-*`, `--lightbox-control-*` | rgba | A control drawn on a coloured banner, or over a lightbox's media |
+| `--surface-scrim`, `--surface-scrim-strong` | rgba dim | A drawer's or tab dialog's backdrop; a media lightbox's |
+| `--surface-hint`        | rgba          | A hover label over the editor              |
+| `--shadow-pop`, `--shadow-raised`, `--shadow-modal`, `--shadow-drawer-left`, `--shadow-drawer-right`, `--shadow-tab-modal`, `--shadow-dock`, `--shadow-lightbox` | box-shadow | Elevation: menus and popovers, toasts, centred dialogs (with their edge), the drawers, a tab's dialog, the dock, a lightbox's media. Never an inline `rgba()` shadow. |
+| `--ring-idle`, `--ring-stalled`, `--ring-awaiting` | rgba | The agent status dot's ring |
+| `--banner-control-*`, `--lightbox-control-*` | rgba | A control drawn on a coloured banner, or over a lightbox's media |
 | `--surface-stream-tile` | `#c9d0dc`     | The Navigator's stream glyph: an inverted (light) tile heading its threads, with `--text-on-stream-tile` (`#12161c`) letters |
 | `--surface-thread-tab`  | 4% white      | A Navigator thread's tab, indented off its stream's guide line (a marked thread shows a `--thread-mark-<colour>` corner fold) |
 

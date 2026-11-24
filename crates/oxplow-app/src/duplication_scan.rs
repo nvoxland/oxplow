@@ -80,7 +80,11 @@ impl DuplicationRecorder {
         // Read only what the detector can parse: the rest (binaries,
         // assets, docs) would be read whole and then dropped.
         let languages = svc.languages.current();
-        let parseable = |p: &str| languages.is_supported_path(std::path::Path::new(p));
+        // Generated, vendored and lockfile paths (the enabled file kinds) are
+        // no part of the corpus a copy is found in.
+        let parseable = |p: &str| {
+            languages.is_supported_path(std::path::Path::new(p)) && !languages.is_excluded(p)
+        };
         let started = std::time::Instant::now();
         let scanned_corpus = match svc.trees.cached_corpus(&ws, &revision, parseable).await {
             Ok(files) => {

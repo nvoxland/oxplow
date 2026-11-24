@@ -137,9 +137,9 @@ const restoredStyle: React.CSSProperties = {
 
 const buttonStyle: React.CSSProperties = {
   padding: "2px 10px",
-  background: "rgba(0,0,0,0.25)",
+  background: "var(--banner-control-bg)",
   color: "inherit",
-  border: "1px solid rgba(255,255,255,0.4)",
+  border: "1px solid var(--banner-control-border)",
   borderRadius: 4,
   cursor: "pointer",
   fontSize: "var(--text-xs)",

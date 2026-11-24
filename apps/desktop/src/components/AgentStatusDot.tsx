@@ -51,11 +51,11 @@ export function AgentStatusDot({
     animation: status !== "waiting" ? "oxplow-pulse 1.4s ease-in-out infinite" : undefined,
     boxShadow:
       status === "waiting"
-        ? `0 0 0 2px rgba(148, 163, 184, 0.25)`
+        ? "0 0 0 2px var(--ring-idle)"
         : status === "stalled"
-          ? `0 0 0 2px rgba(239, 68, 68, 0.35)`
+          ? "0 0 0 2px var(--ring-stalled)"
           : status === "awaiting"
-            ? `0 0 0 2px rgba(56, 189, 248, 0.35)`
+            ? "0 0 0 2px var(--ring-awaiting)"
             : undefined,
   };
   const tooltip =

@@ -424,7 +424,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     onClick={() => confirm(result)}
                     style={{
                       ...categoryRowStyle,
-                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                      background: active ? "var(--accent-soft-bg)" : "transparent",
                     }}
                   >
                     <span style={{ width: 22, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 16, lineHeight: 1 }}>
@@ -448,7 +448,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     style={{
                       ...resultStyle,
                       paddingLeft: launcherMode ? 28 : 10,
-                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                      background: active ? "var(--accent-soft-bg)" : "transparent",
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
@@ -474,7 +474,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
-                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                      background: active ? "var(--accent-soft-bg)" : "transparent",
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 11 }}>
@@ -502,7 +502,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
-                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                      background: active ? "var(--accent-soft-bg)" : "transparent",
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
@@ -534,7 +534,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                   onClick={() => confirm(result)}
                   style={{
                     ...resultStyle,
-                    background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    background: active ? "var(--accent-soft-bg)" : "transparent",
                     color: result.file.path === selectedFilePath ? "var(--accent)" : "var(--fg)",
                   }}
                 >
@@ -604,7 +604,7 @@ const panelStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 8,
   background: "var(--bg)",
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 16px 40px rgba(0, 0, 0, 0.45)",
+  boxShadow: "var(--shadow-modal)",
 };
 
 const inputStyle: CSSProperties = {

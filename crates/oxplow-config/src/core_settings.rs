@@ -430,7 +430,7 @@ pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
             keys::TESTING_RUN_PATTERNS,
             "Test run patterns",
             "testing",
-            "Extra command substrings that count as a test run, on top of the built-in ones (pytest, cargo test, jest, …).",
+            "Extra command substrings that count as a test run, on top of the ones the enabled extensions declare (`run_patterns:` of kind `test`).",
             nullable_list(),
             Some(json!([])),
             |c, v| {
@@ -442,7 +442,7 @@ pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
             keys::TESTING_ANALYSIS_PATTERNS,
             "Analysis run patterns",
             "testing",
-            "Extra command substrings that count as a static-analysis run, on top of the built-in ones (cargo clippy, eslint, ruff, …).",
+            "Extra command substrings that count as a static-analysis run, on top of the ones the enabled extensions declare (`run_patterns:` of kind `analysis`).",
             nullable_list(),
             Some(json!([])),
             |c, v| {

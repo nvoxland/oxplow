@@ -697,7 +697,7 @@ function BlameOverlay({
               key={entry.line}
               title="Uncommitted"
               style={{
-                ...rowStyle(lineHeight, "var(--blame-uncommitted, rgba(70,70,70,0.35))"),
+                ...rowStyle(lineHeight, "var(--blame-uncommitted)"),
                 borderLeft: "2px solid transparent",
                 cursor: "default",
               }}
@@ -726,10 +726,10 @@ function rowStyle(lineHeight: number, background: string): CSSProperties {
 
 
 function blameGitColor(ageDays: number): string {
-  if (ageDays < 7) return "var(--blame-git-fresh, rgba(96,165,250,0.55))";
-  if (ageDays < 30) return "var(--blame-git-recent, rgba(96,165,250,0.40))";
-  if (ageDays < 180) return "var(--blame-git-stale, rgba(96,165,250,0.28))";
-  return "var(--blame-git-old, rgba(120,140,170,0.14))";
+  if (ageDays < 7) return "var(--blame-git-fresh)";
+  if (ageDays < 30) return "var(--blame-git-recent)";
+  if (ageDays < 180) return "var(--blame-git-stale)";
+  return "var(--blame-git-old)";
 }
 
 function formatBlameDate(epochSec: number): string {
@@ -756,7 +756,7 @@ const lspStatusStyle: CSSProperties = {
   padding: "4px 8px",
   borderRadius: 4,
   border: "1px solid var(--border)",
-  background: "rgba(23, 23, 23, 0.92)",
+  background: "var(--surface-hint)",
   color: "var(--muted)",
   fontSize: 12,
   zIndex: 5,

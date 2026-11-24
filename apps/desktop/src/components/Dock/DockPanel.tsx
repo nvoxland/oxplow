@@ -98,7 +98,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         flexDirection: "column",
         background: "var(--surface-elevated)",
         borderTop: "1px solid var(--border-strong)",
-        boxShadow: "0 -1px 0 rgba(255, 255, 255, 0.06), 0 -10px 32px rgba(0, 0, 0, 0.6)",
+        boxShadow: "var(--shadow-dock)",
         outline: "none",
         zIndex: 50,
       }}

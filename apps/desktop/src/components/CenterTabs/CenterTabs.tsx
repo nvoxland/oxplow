@@ -312,7 +312,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 background: isActive
                   ? "var(--accent-soft-bg)"
                   : isHover
-                    ? "rgba(255, 255, 255, 0.04)"
+                    ? "var(--surface-thread-tab)"
                     : "transparent",
                 color: isActive ? "var(--accent)" : "var(--text-secondary)",
                 borderRight: "1px solid var(--border-strong)",
@@ -538,7 +538,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
         zIndex: 1000,
         background: "var(--surface-card)",
         border: "1px solid var(--border-strong)",
-        boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+        boxShadow: "var(--shadow-raised)",
         minWidth: 240,
         maxWidth: 360,
         maxHeight: "60vh",

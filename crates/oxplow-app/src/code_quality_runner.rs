@@ -89,7 +89,7 @@ pub async fn scan_duplicates(
     let task = tokio::task::spawn_blocking(move || {
         let inputs: Vec<(String, String)> = corpus
             .into_iter()
-            .filter(|(p, _)| languages.is_supported_path(Path::new(p)))
+            .filter(|(p, _)| languages.is_supported_path(Path::new(p)) && !languages.is_excluded(p))
             .collect();
         blocks_to_findings(detect_duplicates_scoped(
             &languages, inputs, &scope, dup_opts,
@@ -119,7 +119,9 @@ pub async fn scan_duplicates_cached(
     let task = tokio::task::spawn_blocking(move || {
         let files: Vec<_> = files
             .into_iter()
-            .filter(|f| languages.is_supported_path(Path::new(&f.path)))
+            .filter(|f| {
+                languages.is_supported_path(Path::new(&f.path)) && !languages.is_excluded(&f.path)
+            })
             .collect();
         let (blocks, stats) = oxplow_code_dup::detect_duplicates_scoped_cached(
             &languages, files, &scope, dup_opts, &cache,
@@ -213,6 +215,42 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     /// flat `peerPath` / `peerStartLine` / `peerEndLine` keys (the
     /// panel reads them straight off `extra`). An unsupported file never
     /// takes part.
+    #[tokio::test]
+    async fn generated_and_vendored_paths_take_no_part_in_the_corpus() {
+        let languages = Arc::new(
+            oxplow_code_metrics::for_tests::shipped()
+                .with_excluded(vec!["**/generated/**".into(), "vendor/**".into()]),
+        );
+        let found = scan_duplicates(
+            languages.clone(),
+            corpus(&[
+                ("a.rs", BODY),
+                ("generated/b.rs", BODY),
+                ("vendor/c.rs", BODY),
+            ]),
+            ["a.rs", "generated/b.rs"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            RunOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            found.is_empty(),
+            "a copy in a generated or vendored file isn't one: {found:?}"
+        );
+        let with_real_copy = scan_duplicates(
+            languages,
+            corpus(&[("a.rs", BODY), ("b.rs", BODY)]),
+            ["a.rs"].into_iter().map(String::from).collect(),
+            RunOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(!with_real_copy.is_empty());
+    }
+
     #[tokio::test]
     async fn duplicates_are_paired_with_their_peers() {
         let findings = scan_duplicates(

@@ -892,6 +892,42 @@ def transform(input):
         assert_eq!(dims["acme.container"], serde_json::json!("Parser"));
     }
 
+    /// `grep_tree_many(names)` is `grep_tree` for each name in one pass over
+    /// the tree: the same hits per name, in path then line order, each name
+    /// limited by `max`, a name with none an empty list.
+    #[test]
+    fn grep_tree_many_searches_each_name_in_one_pass() {
+        let map: std::collections::HashMap<String, String> = [
+            ("src/a.rs", "fn foo() {}\nlet food = 1;\nfoo(); bar();\n"),
+            ("src/b.rs", "  call(foo)  \n"),
+        ]
+        .into_iter()
+        .map(|(p, t)| (p.to_string(), t.to_string()))
+        .collect();
+        let hosts = runtime::Hosts {
+            tree: Some(TreeHost::new(map)),
+            ..runtime::Hosts::default()
+        };
+        let run = |script: &str| {
+            runtime::run_starlark_hosted(script, &serde_json::json!({}), &hosts).unwrap()
+        };
+        let each = "def transform(x):\n    got = grep_tree_many([\"foo\", \"bar\", \"none\"])\n    return {n: [\"%s:%d\" % (h[\"path\"], h[\"line\"]) for h in got[n]] for n in got}\n";
+        assert_eq!(
+            run(each),
+            serde_json::json!({
+                "foo": ["src/a.rs:1", "src/a.rs:3", "src/b.rs:1"],
+                "bar": ["src/a.rs:3"],
+                "none": []
+            })
+        );
+        let one_by_one =
+            "def transform(x):\n    return [len(grep_tree(n)) for n in [\"foo\", \"bar\"]]\n";
+        assert_eq!(run(one_by_one), serde_json::json!([3, 1]));
+        let limited =
+            "def transform(x):\n    return len(grep_tree_many([\"foo\"], max = 2)[\"foo\"])\n";
+        assert_eq!(run(limited), serde_json::json!(2));
+    }
+
     /// `grep_tree` finds whole words (or a regex) in the run's tree, in
     /// path then line order, limited by `paths` and `max`, and needs the tree.
     #[test]

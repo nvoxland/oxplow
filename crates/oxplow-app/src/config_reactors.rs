@@ -329,7 +329,7 @@ mod tests {
             .run(
                 &agent,
                 "oxplow.config.set",
-                json!({ "key": "oxplow.files.kinds", "value": [{"kind": "generated", "glob": "gen/**"}], "level": "project" }),
+                json!({ "key": "oxplow.files.kinds", "value": [{"kind": "generated", "glob": "gen/**"}, {"kind": "lockfile", "glob": "locks/**"}], "level": "project" }),
                 false,
             )
             .await
@@ -341,7 +341,10 @@ mod tests {
         );
         assert_eq!(
             rules("extension = 'project-settings'").await,
-            json!([["generated", "gen/**", null, "project-settings"]])
+            json!([
+                ["generated", "gen/**", null, "project-settings"],
+                ["lockfile", "locks/**", null, "project-settings"]
+            ])
         );
         // The corpus leaves out what the file kinds say is generated or
         // vendored: the foundation's rules and the project's own.
@@ -352,6 +355,10 @@ mod tests {
             "the foundation's"
         );
         assert!(languages.is_excluded("vendor/lib/a.go"));
+        assert!(
+            languages.is_excluded("locks/pins.rs"),
+            "a lockfile rule leaves a file out too"
+        );
         assert!(!languages.is_excluded("src/main.rs"));
 
         svc.commands
@@ -369,7 +376,7 @@ mod tests {
                 .await
                 .as_array()
                 .map(Vec::len),
-            Some(1),
+            Some(2),
             "a publication leaves the project's own rows"
         );
     }

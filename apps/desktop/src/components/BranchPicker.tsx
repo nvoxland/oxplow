@@ -663,7 +663,7 @@ const popoverStyle: CSSProperties = {
   background: "var(--bg)",
   border: "1px solid var(--border-strong)",
   borderRadius: 6,
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 12px 32px rgba(0,0,0,0.5)",
+  boxShadow: "var(--shadow-modal)",
   display: "flex",
   flexDirection: "column",
   zIndex: 1200,

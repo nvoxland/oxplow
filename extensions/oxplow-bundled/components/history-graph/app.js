@@ -69,8 +69,8 @@
       draw();
     });
     const refill = (author = authorEl.value, branch = branchEl.value) => {
-      fill(authorEl, "All authors", unique(history.commits.map((c) => c.author)), author);
-      fill(branchEl, "All branches", unique(history.branchHeads.map((b) => b.name)), branch);
+      fill(authorEl, "All authors", history.authors || unique(history.commits.map((c) => c.author)), author);
+      fill(branchEl, "All branches", history.branches || unique(history.branchHeads.map((b) => b.name)), branch);
     };
     // The page's view, as the filters show it.
     const showView = (params) => {
@@ -125,7 +125,11 @@
    *  the commit to reveal. */
   function read(run, data) {
     const loaded = commitsOf(run.result);
-    const searched = data && data.history_matches ? commitsOf(data.history_matches) : null;
+    // The List's search runs in SQL only while a filter is set; with none the
+    // loaded rows are the List's.
+    const p = run.params || {};
+    const filtering = Boolean(p.q || p.author || p.branch);
+    const searched = filtering && data && data.history_matches ? commitsOf(data.history_matches) : null;
     const commits = loaded.commits;
     const reveal = run.params && run.params.reveal_sha ? String(run.params.reveal_sha) : null;
     const ranBranch = searched && run.params && run.params.branch ? String(run.params.branch) : "";
@@ -138,6 +142,9 @@
       graphCommits: topoOrder(commits),
       listCommits: listed,
       searched: searched !== null,
+      // The whole history's authors and the local branches, when the page gives them.
+      authors: data && data.authors ? column(data.authors, "author") : null,
+      branches: data && data.branch_names ? column(data.branch_names, "name") : null,
       ranBranch,
       branchHeads: loaded.branchHeads,
       tagsBySha: loaded.tagsBySha,
@@ -171,6 +178,12 @@
       if (tags.length > 0) tagsBySha.set(sha, tags.map(String));
     }
     return { commits, branchHeads, tagsBySha };
+  }
+
+  /** One column of a loader's rows, as strings. */
+  function column(result, name) {
+    const at = result.columns.indexOf(name);
+    return at < 0 ? [] : result.rows.map((row) => String(row[at]));
   }
 
   /** A JSON array column (`parents`, `branches`, `tags`) as a list. */
@@ -310,7 +323,9 @@
     const commits = onBranch ? source.filter((c) => onBranch.has(c.sha)) : source;
     const matches = new Set(commits.filter((c) =>
       (!f.author || c.author === f.author) &&
-      (!f.query || [c.sha, c.subject, c.author, c.email].some((value) => value.toLowerCase().includes(f.query)))
+      // A sha matches by its start, as the page's search in SQL does.
+      (!f.query || c.sha.toLowerCase().startsWith(f.query) ||
+        [c.subject, c.author, c.email].some((value) => value.toLowerCase().includes(f.query)))
     ).map((c) => c.sha));
     const { rows, width } = mode === "graph"
       ? layout(commits)

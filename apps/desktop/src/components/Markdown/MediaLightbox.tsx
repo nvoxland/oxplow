@@ -78,7 +78,7 @@ export function MediaLightbox({ content, onClose }: { content: LightboxContent |
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0, 0, 0, 0.82)",
+        background: "var(--surface-scrim-strong)",
         zIndex: 9999,
         display: "flex",
         alignItems: "center",
@@ -97,8 +97,8 @@ export function MediaLightbox({ content, onClose }: { content: LightboxContent |
           width: 36,
           height: 36,
           borderRadius: 18,
-          background: "rgba(255, 255, 255, 0.12)",
-          border: "1px solid rgba(255, 255, 255, 0.2)",
+          background: "var(--lightbox-control-bg)",
+          border: "1px solid var(--lightbox-control-border)",
           color: "#fff",
           fontSize: 18,
           lineHeight: 1,
@@ -116,7 +116,7 @@ export function MediaLightbox({ content, onClose }: { content: LightboxContent |
             maxWidth: "100%",
             maxHeight: "100%",
             objectFit: "contain",
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+            boxShadow: "var(--shadow-lightbox)",
             borderRadius: 6,
           }}
         />

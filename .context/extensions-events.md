@@ -622,6 +622,17 @@ The flag is the one rule: Retry all reads it (`failed_latest_tx`), and
 reaction: one that can be retried is retried, one that can't isn't listed.
 The list shows each outcome and reason, with **Retry** and **Retry all**.
 
+**Why this machinery stays unused today.** `safe_to_resend` has
+returned `false` for every step since core stopped calling any provider's
+write (a task tracker provider only fills the model), so no reaction
+schedules an automatic retry and the loop below finds nothing. The
+machinery stays on purpose: `retry_at`, `resend_json`, `Auto` and the
+timer loop are tested whole, the provider contract's `idempotent_writes`
+promise is what turns it on again (a core command that calls a provider's
+write, answered by `safe_to_resend`), and removing them would mean a
+migration and a rebuilt design to bring them back. Delete them only with a
+decision that no provider write returns.
+
 **Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An
 attempt that failed in a way that may pass (`CommandError::Unavailable`:
 a step's provider erred, timed out, lost its reply, or asked to

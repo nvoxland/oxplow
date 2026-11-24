@@ -301,6 +301,20 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         Ok(eval.heap().alloc(serde_json::json!(id)))
     }
 
+    /// Whether `path` is one a corpus leaves out: a file of the enabled
+    /// `generated`, `vendored` or `lockfile` file kinds (foundation's, each
+    /// pack's, the project's own `oxplow.files.kinds`). The rule
+    /// `source_files` filters by, for a script that reads paths of its own.
+    fn excluded_path<'v>(
+        path: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let languages = Hosts::languages(eval);
+        Ok(eval
+            .heap()
+            .alloc(serde_json::json!(languages.is_excluded(path))))
+    }
+
     /// The words that look like a call in `language` and aren't (`if`,
     /// `match`, `Some`), as its pack declares them (`keywords:`): a check that
     /// reads calls out of text skips them. Empty for a language that isn't
@@ -399,6 +413,61 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             }
         }
         Ok(eval.heap().alloc(serde_json::Value::Array(hits)))
+    }
+
+    /// [`grep_tree`] for several names in one pass over the tree:
+    /// `{name: [{path, line, text}]}`, each name's whole-word hits in path then
+    /// line order, at most `max` for each (an empty list for a name with
+    /// none). A check that asks about dozens of names reads every file once,
+    /// not once per name. Needs `tree.read`.
+    fn grep_tree_many<'v>(
+        names: starlark::values::list_or_tuple::UnpackListOrTuple<String>,
+        #[starlark(default = 200)] max: i32,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let host = Hosts::tree(eval, "grep_tree_many")?;
+        let names: Vec<String> = names.items;
+        let max = max.clamp(1, 1000) as usize;
+        let mut hits: std::collections::BTreeMap<&str, Vec<serde_json::Value>> =
+            names.iter().map(|n| (n.as_str(), Vec::new())).collect();
+        if !names.is_empty() {
+            let alternation = names
+                .iter()
+                .map(|n| regex::escape(n))
+                .collect::<Vec<_>>()
+                .join("|");
+            let any = regex::Regex::new(&format!(r"\b(?:{alternation})\b"))
+                .map_err(|e| anyhow::anyhow!("bad names: {e}"))?;
+            let mut files: Vec<(&String, &String)> = host.files.iter().collect();
+            files.sort_by(|a, b| a.0.cmp(b.0));
+            for (path, text) in files {
+                for (i, line) in text.lines().enumerate() {
+                    if !any.is_match(line) {
+                        continue;
+                    }
+                    let shown: String = line.trim().chars().take(300).collect();
+                    // Each name once per line, as a search for it alone finds the line.
+                    for m in any.find_iter(line) {
+                        let name = m.as_str();
+                        if let Some(list) = hits.get_mut(name) {
+                            let seen = list
+                                .last()
+                                .is_some_and(|h| h["path"] == path.as_str() && h["line"] == i + 1);
+                            if !seen && list.len() < max {
+                                list.push(
+                                    serde_json::json!({ "path": path, "line": i + 1, "text": shown }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let out: serde_json::Map<String, serde_json::Value> = hits
+            .into_iter()
+            .map(|(name, list)| (name.to_string(), serde_json::Value::Array(list)))
+            .collect();
+        Ok(eval.heap().alloc(serde_json::Value::Object(out)))
     }
 
     /// The language-agnostic **reader**: every *recognized* source file from the

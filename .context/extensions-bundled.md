@@ -181,7 +181,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `rest`, and it asks again for those), takes the call-shaped names (`name(`) that aren't also
       called on an added line of the same file, keeps those the head tree
       defines (a `grep_tree` hit that starts a function of that name by `code_metrics`;
-      a library call has none) and finds no other mention of with `grep_tree`
+      a library call has none) and finds no other mention of with `grep_tree_many` (one pass over the tree for every name, up to 200)
       (a text search of the change's head tree, `anchors.revision`, not the worktree's,
       so it says "possibly"), and writes one row per function:
       `code`, `medium`, `possibly-unused`, at the definition. A file whose

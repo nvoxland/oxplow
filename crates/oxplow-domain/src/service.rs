@@ -126,7 +126,7 @@ pub const SERVICES: &[ServiceSpec] = &[
         summary: "The files of the snapshot the run is anchored to, with their syntax, \
                   metrics and duplicate blocks, and `grep_tree(pattern)` to search them; `change_diff(change_id, paths?)` gives an \
                   analysed change's hunks with their added and removed lines.",
-        builtins: &["files", "grep_tree", "source_files", "duplicate_blocks", "change_diff"],
+        builtins: &["files", "grep_tree", "grep_tree_many", "source_files", "duplicate_blocks", "change_diff"],
         modes: ALL,
     },
     ServiceSpec {

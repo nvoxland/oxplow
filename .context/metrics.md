@@ -2169,7 +2169,13 @@ metrics:                              # the read SPEC (the chartable metric)
       path rule can't see). Otherwise a 3k-line tauri-specta bindings file reads as one giant
       "function" and dominates every fn_length/complexity tail metric. The
       `files(glob)` reader does NOT filter — collectors choose their own
-      corpus.
+      corpus. The duplicate scan and the review's unused check leave the same
+      files out (`Languages::is_excluded`; `excluded_path(path)` for a script).
+      Two settings say "generated" and are different things: `oxplow.generated.exclude`
+      (and `include`) is the **workspace filter** — files kept out of every
+      snapshot and tree, so nothing sees them; the `generated`, `vendored` and
+      `lockfile` **file kinds** only keep a file out of analysis corpora (it is
+      still listed in a change, with its lines counted).
     - **Language-idiom metrics** (`oxplow.<lang>.*`) — concepts specific to one
       language: **Rust** (`unsafe_blocks`, `unwrap_expect_calls`,
       `panic_macros`), **TypeScript** (`any_usage`, `non_null_assertions`,

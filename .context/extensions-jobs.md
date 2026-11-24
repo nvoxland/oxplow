@@ -346,7 +346,8 @@ declares (`profile_warnings`, a person's `restrict:`).
 lines of an analysed change: `{files: [{path, status, hunks: [{head_start,
 head_end, base_start, base_end, head_after, added: [{line, text}], removed:
 [{line, text}]}]}], rest: [path], too_large: [path]}`, the ranges of
-`v_change_hunk` with the text of their lines. The files are the change's stored
+`v_change_hunk` (the stored ranges, not diffed again; a file past the
+analysis's 200 is diffed here) with the text of their lines. The files are the change's stored
 ones (`v_change_file`, so a request's own files), limited to `paths`; each side
 is read through `Trees` as the analyzer reads it (`change_diff.rs`). A call
 returns at most 200 files and 2 MB of line text (the `added` and `removed`
@@ -365,7 +366,8 @@ scoped replace: `sync: upsert`, its script reads its entity's current keys
 with `scope("sql.read", …)` (`needs: [sql.read]`) and returns the ones it no
 longer produces in `deleted`.
 
-`language_of(path)` says which language a path is in (`rust`), `None` when no
+`excluded_path(path)` says whether a path is one the enabled `generated`,
+`vendored` or `lockfile` file kinds leave out of a corpus. `language_of(path)` says which language a path is in (`rust`), `None` when no
 enabled pack parses it: what `code_metrics(text, language, path)` takes.
 
 `grep_tree(pattern, paths=None, max=200, regex=False)` (`tree.read`) searches

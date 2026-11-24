@@ -187,7 +187,7 @@ datasets:
   for `code_metrics`.
 - The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)["files"]`
   gives the hunks with their added and removed lines (loop on its `rest`), `grep_tree(pattern)` the
-  tree, `scope("sql.read", …)` the semantic layer (`v_symbol` of the stream in
+  tree (`grep_tree_many(names)` asks for several names in one pass: `{name: hits}`), `scope("sql.read", …)` the semantic layer (`v_symbol` of the stream in
   `input["rows"][0]["stream_id"]`).
 - Key the rows by change, so one rerun replaces the change's rows: read its
   earlier keys with `scope("sql.read", { "sql": "SELECT id FROM v_<ns>_<entity>

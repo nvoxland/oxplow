@@ -525,7 +525,7 @@
   {
     "key": "oxplow.testing.analysisPatterns",
     "title": "Analysis run patterns",
-    "description": "Extra command substrings that count as a static-analysis run, on top of the built-in ones (cargo clippy, eslint, ruff, …).",
+    "description": "Extra command substrings that count as a static-analysis run, on top of the ones the enabled extensions declare (`run_patterns:` of kind `analysis`).",
     "category": "testing",
     "default": [],
     "secret": false,
@@ -585,7 +585,7 @@
   {
     "key": "oxplow.testing.runPatterns",
     "title": "Test run patterns",
-    "description": "Extra command substrings that count as a test run, on top of the built-in ones (pytest, cargo test, jest, …).",
+    "description": "Extra command substrings that count as a test run, on top of the ones the enabled extensions declare (`run_patterns:` of kind `test`).",
     "category": "testing",
     "default": [],
     "secret": false,

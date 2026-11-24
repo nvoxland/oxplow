@@ -451,7 +451,7 @@ export function Navigator({
             // The strip's dark, so the gaps between its tabs look the same.
             background: "var(--surface-app)",
             borderRight: "1px solid var(--border-strong)",
-            boxShadow: "8px 0 24px rgba(0, 0, 0, 0.45)",
+            boxShadow: "var(--shadow-drawer-left)",
             display: "flex",
             flexDirection: "column",
             zIndex: 30,
