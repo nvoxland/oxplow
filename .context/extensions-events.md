@@ -593,12 +593,13 @@ declared in `oxplow-foundation`, its services filled when the consumer
 registers at boot — `ServicesSlot`) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
 attempt:
-- the reaction's latest attempt must have ended with a retryable outcome,
-  which includes `failed` and `interrupted`. An attempt with a proposal
-  awaits the person's decision;
-- the effect must be enabled and in the running catalog — a retry runs
-  today's script, composing afresh from the event, not what the failed
-  attempt composed;
+- the reaction's latest attempt must have `v_effect_run.retryable = 1`
+  (below): it ended failed without a proposal (an attempt with a proposal
+  awaits the person's decision), and the effect is declared and enabled.
+  When it is 0, the refusal says why: no enabled extension declares the
+  effect, the effect is disabled, or the reaction didn't fail or never was;
+- a retry runs today's script from the running catalog, composing afresh
+  from the event, not what the failed attempt composed;
 - when the event was logged doesn't matter (`start_after_seq` is the live
   consumer's rule; the person named the event);
 - it counts toward the effect's health like any attempt, and is recorded
@@ -615,10 +616,14 @@ an effect an enabled extension declares (`contribution`) and that isn't
 disabled (`contribution_health`): exactly what a Retry would run. A
 reaction of an extension turned off, or of a disabled effect, leaves the
 list and the bell's count; it is retryable again once its effect is back.
-The flag is the one rule: Retry all reads it (`failed_latest_tx`), and
-`RunState::retryable` is its attempt's part
-(`a_failed_attempt_of_an_undeclared_or_disabled_effect_is_not_retryable`,
-`alerts-reactions-leave-out-what-cannot-be-retried`). Nothing dismisses a
+The flag is the one rule: Retry all lists what it marks
+(`failed_latest_tx`), and Retry and the automatic resend read it from the
+latest attempt (`latest_tx`'s `retryable`;
+`a_failed_attempt_of_an_undeclared_or_disabled_effect_is_not_retryable`,
+`a_retry_needs_an_enabled_effect`,
+`alerts-reactions-leave-out-what-cannot-be-retried`). No Rust copy of it
+is kept; a backfill's own check that the effect is ready
+(`commands::effect::ready`) is not a retry's. Nothing dismisses a
 reaction: one that can be retried is retried, one that can't isn't listed.
 The list shows each outcome and reason, with **Retry** and **Retry all**.
 

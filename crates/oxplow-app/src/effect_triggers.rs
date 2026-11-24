@@ -464,7 +464,8 @@ pub(crate) const NOT_REACTED: &str = "hasn't reacted";
 ///   `started` is recorded `failed`: interrupted) — and only for an event
 ///   logged after the effect started;
 /// - `Retry` (a person's `oxplow.effect.retry`): the next attempt at a reaction
-///   whose latest **failed**; `Invalid` otherwise. The person named the
+///   whose latest can be retried (`v_effect_run.retryable`, the one rule);
+///   `Invalid` otherwise. The person named the
 ///   event, so when it was logged doesn't matter;
 /// - `Backfill`: the first attempt at an event the effect never reacted
 ///   to, whenever it was logged;
@@ -491,12 +492,15 @@ pub(crate) async fn run_reaction(
     };
     let scheduled = latest.as_ref().is_some_and(|l| l.retry_at.is_some());
     let resend = latest.as_ref().and_then(|l| l.resend.clone());
-    let attempt = match (origin, latest.map(|l| (l.attempt, l.state, l.origin))) {
+    let attempt = match (
+        origin,
+        latest.map(|l| (l.attempt, l.state, l.origin, l.retryable)),
+    ) {
         (ReactionOrigin::Live | ReactionOrigin::Backfill, None) => 1,
         // A live attempt left `started`: the run that claimed it was cut
         // off. A person's (a retry, a backfill) under way is theirs to
         // record — or the next start's, when it was cut off.
-        (ReactionOrigin::Live, Some((attempt, state, ReactionOrigin::Live)))
+        (ReactionOrigin::Live, Some((attempt, state, ReactionOrigin::Live, _)))
             if state.outcome.is_none() =>
         {
             let key = EffectRunKey {
@@ -509,14 +513,12 @@ pub(crate) async fn run_reaction(
             return cut_off(svc, &key).await;
         }
         (ReactionOrigin::Live | ReactionOrigin::Backfill, Some(_)) => return Ok(Reacted::Nothing),
-        (ReactionOrigin::Retry, Some((attempt, state, _))) if state.retryable() => attempt + 1,
+        (ReactionOrigin::Retry, Some((attempt, _, _, true))) => attempt + 1,
         // Sent again by itself: only the failed attempt it was scheduled
         // for (a person's retry since is the latest, and isn't).
-        (ReactionOrigin::Auto, Some((attempt, state, _))) if scheduled && state.retryable() => {
-            attempt + 1
-        }
+        (ReactionOrigin::Auto, Some((attempt, _, _, true))) if scheduled => attempt + 1,
         (ReactionOrigin::Auto, _) => return Ok(Reacted::Nothing),
-        (ReactionOrigin::Retry, Some((_, state, _))) => {
+        (ReactionOrigin::Retry, Some((_, state, _, false))) => {
             return Err(DomainError::Invalid(format!(
                 "effect `{effect}`'s reaction to event {event_id} {NOT_FAILED} (it is `{}`): \
                  only a failed reaction is retried",
@@ -1754,7 +1756,8 @@ mod tests {
     }
 
     /// P9.D4: a retry runs the effect as it is now, so it needs what a
-    /// live reaction needs — the effect enabled.
+    /// live reaction needs — the effect enabled. Retry and Retry all both
+    /// ask `v_effect_run.retryable`.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_retry_needs_an_enabled_effect() {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -1778,10 +1781,25 @@ mod tests {
             .unwrap();
         let refused = retry(svc, &human, &ev, true).await.unwrap_err();
         assert!(refused.to_string().contains("is disabled"), "{refused}");
+        // Retry all leaves it out: `v_effect_run.retryable` is 0.
+        let all = || async {
+            svc.commands
+                .run(&human, crate::commands::effect::RETRY_ALL, json!({}), true)
+                .await
+                .unwrap()
+                .result
+        };
+        assert_eq!(all().await["retried"], json!(0));
         health
             .enable(&contribution_key(&decl), "human")
             .await
             .unwrap();
+        let out = all().await;
+        assert_eq!(
+            (out["retried"].clone(), out["ok"].clone()),
+            (json!(1), json!(1)),
+            "{out}"
+        );
 
         // No such effect, no such event.
         let unknown = svc

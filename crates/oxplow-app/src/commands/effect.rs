@@ -139,20 +139,25 @@ fn outcome(effect: &str, event: &str, attempt: i64, reacted: &Reacted) -> serde_
     out
 }
 
-/// The enabled effect `name`, ready to run for a person: not disabled.
-async fn ready(
-    svc: &Arc<Services>,
-    name: &str,
-) -> Result<(Extension, EffectDecl, ContributionHealth), CommandError> {
-    let (ext, decl) = effect_triggers::find_effect(svc, name).ok_or_else(|| {
+/// The effect `name` as an enabled extension declares it.
+fn declared(svc: &Arc<Services>, name: &str) -> Result<(Extension, EffectDecl), CommandError> {
+    effect_triggers::find_effect(svc, name).ok_or_else(|| {
         invalid(
             "/effect",
             format!("no enabled extension declares an effect `{name}`"),
         )
-    })?;
+    })
+}
+
+/// Refused when the effect is disabled, with why.
+async fn refuse_disabled(
+    svc: &Arc<Services>,
+    name: &str,
+    decl: &EffectDecl,
+) -> Result<ContributionHealth, CommandError> {
     let health = ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     if let Some(why) = health
-        .disabled_reason(&effect_triggers::contribution_key(&decl))
+        .disabled_reason(&effect_triggers::contribution_key(decl))
         .await?
     {
         return Err(invalid(
@@ -163,6 +168,17 @@ async fn ready(
             ),
         ));
     }
+    Ok(health)
+}
+
+/// The enabled effect `name`, ready for a backfill: declared and not
+/// disabled. (A retry asks `v_effect_run.retryable` instead.)
+async fn ready(
+    svc: &Arc<Services>,
+    name: &str,
+) -> Result<(Extension, EffectDecl, ContributionHealth), CommandError> {
+    let (ext, decl) = declared(svc, name)?;
+    let health = refuse_disabled(svc, name, &decl).await?;
     Ok((ext, decl, health))
 }
 
@@ -446,7 +462,20 @@ async fn retry_one(
     effect: &str,
     event: &str,
 ) -> Result<serde_json::Value, CommandError> {
-    let (ext, decl, _) = ready(svc, effect).await?;
+    // `v_effect_run.retryable` decides. When it says no, the effect's
+    // state says why (not declared, disabled); else `run_reaction` does
+    // (the reaction didn't fail, or never was).
+    let retryable = {
+        let (effect, id) = (effect.to_string(), event.to_string());
+        svc.db
+            .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &id))
+            .await?
+            .is_some_and(|latest| latest.retryable)
+    };
+    let (ext, decl) = declared(svc, effect)?;
+    if !retryable {
+        refuse_disabled(svc, effect, &decl).await?;
+    }
     let stored = svc
         .event_log_store
         .get(oxplow_domain::EventId(event.to_string()))

@@ -90,25 +90,6 @@ pub struct RunState {
 }
 
 impl RunState {
-    /// Whether this attempt ended so that a retry may follow it: failed,
-    /// without asking anyone. The attempt's part of `v_effect_run.retryable`
-    /// (`the_dataset_and_retry_store_agree_on_which_attempts_can_retry`);
-    /// the effect's part (declared and enabled now) is checked before a
-    /// retry runs (`commands::effect::ready`).
-    pub fn retryable(self) -> bool {
-        self.proposal_id.is_none()
-            && matches!(
-                self.outcome,
-                Some(
-                    Outcome::Failed
-                        | Outcome::Denied
-                        | Outcome::Cancelled
-                        | Outcome::Invalid
-                        | Outcome::Interrupted
-                )
-            )
-    }
-
     pub fn display(self) -> &'static str {
         if self.proposal_id.is_some() {
             "proposed"
@@ -141,6 +122,10 @@ const MAX_ASKED_WAIT: Duration = Duration::from_secs(15 * 60);
 pub struct Latest {
     pub attempt: u32,
     pub state: RunState,
+    /// Whether a person's Retry may run it again now:
+    /// `v_effect_run.retryable`, the one rule (the attempt failed without
+    /// asking anyone, and the effect is declared and enabled).
+    pub retryable: bool,
     /// What started it.
     pub origin: ReactionOrigin,
     /// A failed one sent again by itself at this time (RFC 3339).
@@ -159,7 +144,8 @@ pub fn latest_tx(
 ) -> Result<Option<Latest>, DomainError> {
     let latest = conn
         .query_row(
-            "SELECT a.attempt, r.outcome, a.proposal_id, a.origin, a.retry_at, a.resend_json
+            "SELECT a.attempt, r.outcome, a.proposal_id, a.origin, a.retry_at, a.resend_json,
+                    (SELECT v.retryable FROM v_effect_run v WHERE v.id = a.id)
                FROM effect_run a JOIN contribution_run r USING (run_id)
               WHERE a.effect = ?1 AND a.event_id = ?2 ORDER BY a.attempt DESC LIMIT 1",
             params![effect, event_id],
@@ -171,6 +157,7 @@ pub fn latest_tx(
                     r.get::<_, String>(3)?,
                     r.get(4)?,
                     r.get(5)?,
+                    r.get::<_, bool>(6)?,
                 ))
             },
         )
@@ -178,13 +165,14 @@ pub fn latest_tx(
         .map_err(map_sql_err)?;
     latest
         .map(
-            |(attempt, outcome, proposal_id, origin, retry_at, resend)| {
+            |(attempt, outcome, proposal_id, origin, retry_at, resend, retryable)| {
                 Ok(Latest {
                     attempt,
                     state: RunState {
                         outcome: outcome.as_deref().map(str::parse).transpose()?,
                         proposal_id,
                     },
+                    retryable,
                     origin: ReactionOrigin::parse(&origin)?,
                     retry_at,
                     resend,
@@ -918,17 +906,27 @@ mod tests {
                 failed_latest_tx(tx)?,
                 vec![("acme/notify".to_string(), "e1".to_string())]
             );
+            for (effect, retryable) in [
+                ("acme/notify", true),
+                ("acme/off", false),
+                ("gone/notify", false),
+            ] {
+                assert_eq!(
+                    latest_tx(tx, effect, "e1")?.unwrap().retryable,
+                    retryable,
+                    "{effect}"
+                );
+            }
             Ok(())
         })
         .await
         .unwrap();
     }
 
-    /// P9.D4: a reaction's state is its latest attempt's. A retry is the
-    /// next attempt — claimed and finished like the first — and an
-    /// attempt is made once.
+    /// A Retry may follow an attempt that failed without asking anyone
+    /// (`latest_tx` reads `v_effect_run.retryable`).
     #[tokio::test]
-    async fn the_dataset_and_retry_store_agree_on_which_attempts_can_retry() {
+    async fn a_reactions_latest_attempt_can_retry_when_it_failed_without_asking() {
         let db = Database::in_memory();
         db.transaction(|tx| {
             declare(tx, "acme", "notify")?;
@@ -949,7 +947,6 @@ mod tests {
                         ..key()
                     };
                     let run = context(&key);
-                    let state = RunState { outcome, proposal_id };
                     if let Some(outcome) = outcome {
                         finish_tx(
                             tx,
@@ -966,35 +963,35 @@ mod tests {
                     } else {
                         claim_tx(tx, &key, &run, None)?;
                     }
-                    let retryable: bool = tx
-                        .query_row(
-                            "SELECT retryable FROM v_effect_run WHERE event_id = ?1",
-                            [&key.event_id],
-                            |row| row.get(0),
-                        )
-                        .map_err(map_sql_err)?;
-                    assert_eq!(retryable, state.retryable(), "{state:?}");
+                    let expected = proposal_id.is_none()
+                        && matches!(
+                            outcome,
+                            Some(
+                                Outcome::Failed
+                                    | Outcome::Denied
+                                    | Outcome::Cancelled
+                                    | Outcome::Invalid
+                                    | Outcome::Interrupted
+                            )
+                        );
+                    let latest = latest_tx(tx, &key.effect, &key.event_id)?.unwrap();
+                    assert_eq!(latest.retryable, expected, "{outcome:?} {proposal_id:?}");
                 }
             }
-            let listed = tx
-                .prepare("SELECT effect, event_id FROM v_effect_run WHERE latest = 1 AND retryable = 1 ORDER BY id")
-                .and_then(|mut statement| {
-                    statement
-                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .map_err(map_sql_err)?;
-            assert_eq!(listed, failed_latest_tx(tx)?);
             Ok(())
         })
         .await
         .unwrap();
     }
 
+    /// P9.D4: a reaction's state is its latest attempt's. A retry is the
+    /// next attempt — claimed and finished like the first — and an
+    /// attempt is made once.
     #[tokio::test]
     async fn the_latest_attempt_is_the_reactions_state() {
         let db = Database::in_memory();
         db.transaction(|tx| {
+            declare(tx, "acme", "notify")?;
             assert_eq!(latest_tx(tx, "acme/notify", "e1")?, None);
             let failed = Finished {
                 outcome: Outcome::Failed,
@@ -1008,6 +1005,7 @@ mod tests {
                 Some(Latest {
                     attempt: 1,
                     state: state(Some(Outcome::Failed)),
+                    retryable: true,
                     origin: ReactionOrigin::Live,
                     retry_at: None,
                     resend: None,
@@ -1025,6 +1023,7 @@ mod tests {
                 Some(Latest {
                     attempt: 2,
                     state: state(None),
+                    retryable: false,
                     origin: ReactionOrigin::Retry,
                     retry_at: None,
                     resend: None,
