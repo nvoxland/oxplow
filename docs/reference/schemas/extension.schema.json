@@ -3330,9 +3330,13 @@
           ],
           "default": null
         },
-        "after_collection": {
-          "type": "boolean",
-          "default": true
+        "after": {
+          "description": "A post-tool-use advisory's targets on the tool call's event: a core\nconsumer (`collection` to read the run's test results), or an\neffect or collector (`effect:<namespace>/<id>`). None: it runs as\nsoon as the call is projected.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false,

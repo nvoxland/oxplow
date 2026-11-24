@@ -31,6 +31,9 @@ use crate::event_pump::AsyncEventConsumer;
 pub const COLLECTION: &str = "collection";
 pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";
 pub const IMMEDIATE_ADVISORIES: &str = "advisories.post_tool.immediate";
+/// The two consumers that run post-tool advisories: not an advisory's
+/// `after:` target.
+pub const ADVISORY_CONSUMERS: &[&str] = &[POST_TOOL_ADVISORIES, IMMEDIATE_ADVISORIES];
 pub const RUN_REPORTS: &str = "collection.run_reports";
 
 /// The run `event` finished, with when it started: its cause, the tool
@@ -115,31 +118,36 @@ impl AsyncEventConsumer for RunReportsConsumer {
     }
 }
 
+/// Post-tool advisories: `ordered` runs those that name an `after:`, the
+/// other those that name none, as soon as the call is projected.
 pub struct PostToolAdvisories {
     pub deps: AdvisoryDeps,
-    pub after_collection: bool,
+    pub ordered: bool,
 }
 
 #[async_trait]
 impl AsyncEventConsumer for PostToolAdvisories {
     fn name(&self) -> &'static str {
-        if self.after_collection {
+        if self.ordered {
             POST_TOOL_ADVISORIES
         } else {
             IMMEDIATE_ADVISORIES
         }
     }
 
-    /// An advisory reads what collection recorded for the same run
-    /// (`v_test_run`), so it sees the run only after collection.
+    /// The ordered advisories wait on what their targets run in (and on
+    /// the immediate ones, so a call's hints keep their order).
     fn after(&self) -> Vec<String> {
-        if self.after_collection {
-            // Keep the existing consumer's checkpoint as a barrier for all
-            // post-tool advisories for extensions that depend on it.
-            vec![COLLECTION.to_string(), IMMEDIATE_ADVISORIES.to_string()]
-        } else {
-            Vec::new()
+        if !self.ordered {
+            return Vec::new();
         }
+        let catalog = self.deps.extension_catalog.unpinned(
+            self.deps.worktrees.project_dir(),
+            "a delivery gate: the declared targets of the running advisories, nothing else",
+        );
+        let mut gates = vec![IMMEDIATE_ADVISORIES.to_string()];
+        gates.extend(crate::advisories::ordered_gates(&catalog));
+        gates
     }
 
     fn handles(&self, event_type: &str) -> bool {
@@ -148,8 +156,7 @@ impl AsyncEventConsumer for PostToolAdvisories {
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         if let Some(thread) = event.envelope.anchors.thread_id {
-            crate::advisories::for_tool_event(&self.deps, &thread, event, self.after_collection)
-                .await?;
+            crate::advisories::for_tool_event(&self.deps, &thread, event, self.ordered).await?;
         }
         Ok(())
     }
@@ -366,11 +373,11 @@ permissions: [agent.write, sql.read]
 advisories:
   - id: immediate
     on: post-tool-use
-    after_collection: false
     once_per: turn
     query: SELECT 'Immediate' AS message
   - id: collected
     on: post-tool-use
+    after: [collection]
     once_per: turn
     query: SELECT 'Saw test results' AS message FROM v_test_run WHERE turn_id = :turn_id
 "#,

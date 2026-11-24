@@ -1774,11 +1774,11 @@ impl Services {
         };
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisory_deps.clone(),
-            after_collection: false,
+            ordered: false,
         }));
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisory_deps.clone(),
-            after_collection: true,
+            ordered: true,
         }));
         // Hints a turn's end raises, for the agent's next prompt.
         event_pump.register_async(Arc::new(advisories::TurnEndAdvisories {

@@ -543,10 +543,13 @@ advisories:
   dock panel's Clear).
 - **Eligibility and ordering.** `when: { config: /tasks/workflow, in: [agent_tracks] }`
   uses the extension's effective settings to decide whether an advisory runs.
-  Post-tool advisories keep collection-before-advisory ordering by default.
-  An advisory that reads no results from the current tool run can declare
-  `after_collection: false` and run after tool-call projection. Oxtask uses
-  both declarations for `untracked-work`.
+  A post-tool advisory's `after:` names what it runs after on the tool
+  call's event, with the targets of an effect's `after:`
+  (`.context/extensions-events.md` "Ordering"): a core consumer
+  (`after: [collection]` to read the run's test results) or an effect or
+  collector. With none it runs as soon as the call is projected (oxtask's
+  `untracked-work`). An unknown target, one of the two advisory consumers,
+  or `after:` on an advisory of another moment is a load error.
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<namespace>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call

@@ -354,18 +354,47 @@ enum AdvisoryOrigin<'a> {
     Tool(&'a StoredEvent),
 }
 
+/// The consumers the ordered post-tool advisories wait on, across the
+/// running extensions: a core consumer by name, the effect or collector
+/// consumer for an effect or collector target.
+pub(crate) fn ordered_gates(catalog: &[Extension]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for ext in catalog.iter().filter(|e| e.enabled) {
+        for a in ext
+            .advisories
+            .iter()
+            .filter(|a| a.on == AdvisoryOn::PostToolUse)
+        {
+            let after: Vec<_> = a
+                .after
+                .iter()
+                .filter_map(|t| oxplow_domain::ordering::After::parse(t).ok())
+                .collect();
+            for gate in crate::extension::extensions::descriptors::gates(
+                oxplow_domain::contribution::ContributionKind::Advisory,
+                &after,
+            ) {
+                if !out.contains(&gate) {
+                    out.push(gate);
+                }
+            }
+        }
+    }
+    out
+}
+
 pub(crate) async fn for_tool_event(
     svc: &AdvisoryDeps,
     thread: &oxplow_domain::ThreadId,
     event: &StoredEvent,
-    after_collection: bool,
+    ordered: bool,
 ) -> Result<(), DomainError> {
     for_thread_matching(
         svc,
         thread,
         AdvisoryOn::PostToolUse,
         AdvisoryOrigin::Tool(event),
-        |a| a.after_collection == after_collection,
+        |a| a.after.is_empty() != ordered,
     )
     .await
     .map(|_| ())
@@ -569,7 +598,7 @@ mod tests {
             audience: crate::extension::extensions::AdvisoryAudience::Agent,
             needs: Vec::new(),
             when: None,
-            after_collection: true,
+            after: Vec::new(),
         }
     }
 

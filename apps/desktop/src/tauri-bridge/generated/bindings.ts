@@ -854,8 +854,13 @@ export type Advisory = {
 	 */
 	needs: string[],
 	when?: ConfigCondition | null,
-	/**  Post-tool advisories read collection results unless they opt out. */
-	afterCollection?: boolean,
+	/**
+	 *  What a post-tool advisory runs after on the tool call's event, as
+	 *  resolved refs (`.context/extensions-events.md` "Ordering"): a core
+	 *  consumer such as `collection`, or an effect or a collector. None runs
+	 *  it as soon as the call is projected.
+	 */
+	after?: string[],
 };
 
 /**  Who a hint is for. */

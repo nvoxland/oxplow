@@ -214,6 +214,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         let mut d = new(ContributionKind::Advisory, &a.id, RunsOn::Agent);
         d.source = entry("advisories", "id", &a.id);
         d.needs = a.needs.clone();
+        d.after = a.after.clone();
         out.push(d);
     }
     // A skill's name is what an agent's runtime files it under: one per
@@ -507,6 +508,14 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
                 }))
         })
         .collect();
+    // What the running extensions declare: an advisory's target must be
+    // one (an effect's or collector's is checked when the order compiles).
+    let running: std::collections::BTreeSet<oxplow_domain::contribution::ContributionRef> = exts
+        .iter()
+        .filter(|e| live(e))
+        .flat_map(|e| e.contributions.iter().filter(|d| ordered(d)))
+        .map(|d| d.id.reference())
+        .collect();
     // Resolve each entry as its extension wrote it.
     for ext in exts.iter_mut().filter(|e| live(e)) {
         let own_effects: Vec<String> = ext.effects.iter().map(|e| e.id.clone()).collect();
@@ -518,10 +527,38 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
         };
         let mut refused = Vec::new();
         let mut warnings = Vec::new();
-        for d in ext.contributions.iter_mut().filter(|d| ordered(d)) {
+        for d in ext
+            .contributions
+            .iter_mut()
+            .filter(|d| ordered(d) || d.id.kind == ContributionKind::Advisory)
+        {
+            let advisory = d.id.kind == ContributionKind::Advisory;
             let mut resolved = Vec::new();
             for entry in &d.after {
+                let refuse = |message: String| {
+                    (
+                        d.id.clone(),
+                        Diagnostic::error("descriptor.unresolved_after", message)
+                            .at("extension.yaml", None)
+                            .contribution(d.id.reference().to_string()),
+                    )
+                };
                 match resolve(&ext.namespace, entry, &own, consumers) {
+                    Ok(After::Consumer(name))
+                        if advisory
+                            && crate::post_tool_reactors::ADVISORY_CONSUMERS
+                                .contains(&name.as_str()) =>
+                    {
+                        refused.push(refuse(format!(
+                            "`after`: `{name}` is the consumer that runs post-tool advisories: \
+                             an advisory can't wait on it"
+                        )))
+                    }
+                    Ok(After::Contribution(target))
+                        if advisory && !running.contains(&target) && !idle.contains(&target) =>
+                    {
+                        refused.push(refuse(format!("`after`: nothing declares {target}")))
+                    }
                     Ok(After::Contribution(target)) if idle.contains(&target) => warnings.push(
                         Diagnostic::warning(
                             "descriptor.after_disabled",
@@ -534,15 +571,20 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
                         .contribution(d.id.to_string()),
                     ),
                     Ok(after) => resolved.push(after.to_ref()),
-                    Err(e) => refused.push((
-                        d.id.clone(),
-                        Diagnostic::error("descriptor.unresolved_after", format!("`after`: {e}"))
-                            .at("extension.yaml", None)
-                            .contribution(d.id.reference().to_string()),
-                    )),
+                    Err(e) => refused.push(refuse(format!("`after`: {e}"))),
                 }
             }
             d.after = resolved;
+        }
+        // The advisory runs on what its descriptor resolved.
+        for a in ext.advisories.iter_mut() {
+            if let Some(d) = ext
+                .contributions
+                .iter()
+                .find(|d| d.id.kind == ContributionKind::Advisory && d.id.local == a.id)
+            {
+                a.after = d.after.clone();
+            }
         }
         ext.warnings.extend(warnings);
         for (id, diagnostic) in refused {
@@ -659,11 +701,12 @@ fn crossings(
         .collect()
 }
 
-/// Take contribution `id` (an effect or a collector) out of `ext`.
+/// Take contribution `id` (an effect, a collector or an advisory) out of `ext`.
 fn remove_id(ext: &mut Extension, id: &ContributionId) {
     match id.kind {
         ContributionKind::Effect => ext.effects.retain(|e| e.id != id.local),
         ContributionKind::Collector => ext.collectors.retain(|c| c.id != id.local),
+        ContributionKind::Advisory => ext.advisories.retain(|a| a.id != id.local),
         _ => {}
     }
     ext.contributions.retain(|d| &d.id != id);
@@ -1423,5 +1466,72 @@ mod ordering_tests {
         );
         let exts = load_extensions(dir.path());
         assert_eq!(named(&exts, "acme").errors, Vec::<Diagnostic>::new());
+    }
+
+    /// A post-tool advisory's `after:` names what it runs after the way an
+    /// effect's does: a core consumer, or any extension's effect or
+    /// collector. A target nothing declares, an advisory consumer itself, or
+    /// an `after:` on an advisory of another moment is a load error that
+    /// takes the advisory out. The ordered advisories' consumer waits on
+    /// what their targets run in.
+    #[test]
+    fn an_advisory_after_resolves_like_an_effects_and_gates_its_consumer() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "first", &[("seed", "")], &[]);
+        let guide = dir.path().join(".oxplow/extensions/guide");
+        std::fs::create_dir_all(&guide).unwrap();
+        let q = "query: \"SELECT 'x' AS message\"";
+        std::fs::write(
+            guide.join("extension.yaml"),
+            format!(
+                "manifest: 2\nname: guide\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
+                 permissions: [agent.write, sql.read]\nadvisories:\n\
+                 \x20 - {{ id: now, on: post-tool-use, {q} }}\n\
+                 \x20 - {{ id: collected, on: post-tool-use, after: [collection], {q} }}\n\
+                 \x20 - {{ id: seeded, on: post-tool-use, after: [\"effect:first/seed\"], {q} }}\n\
+                 \x20 - {{ id: lost, on: post-tool-use, after: [no.such.thing], {q} }}\n\
+                 \x20 - {{ id: nobody, on: post-tool-use, after: [\"effect:nobody/home\"], {q} }}\n\
+                 \x20 - {{ id: itself, on: post-tool-use, after: [advisories.post_tool], {q} }}\n\
+                 \x20 - {{ id: prompted, on: prompt, after: [collection], {q} }}\n"
+            ),
+        )
+        .unwrap();
+        let exts = load_extensions(dir.path());
+        let guide = named(&exts, "guide");
+        let after = |id: &str| {
+            guide
+                .advisories
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.after.clone())
+        };
+        assert_eq!(after("now"), Some(vec![]));
+        assert_eq!(
+            after("collected"),
+            Some(vec!["oxplow:oxplow/consumer?name=collection".to_string()])
+        );
+        assert_eq!(
+            after("seeded"),
+            Some(vec!["oxplow:oxplow/effect?effect=first/seed".to_string()])
+        );
+        for gone in ["lost", "nobody", "itself", "prompted"] {
+            assert_eq!(after(gone), None, "{gone} should be taken out");
+            assert!(
+                guide.errors.iter().any(|e| e
+                    .contribution
+                    .as_deref()
+                    .is_some_and(|c| c.ends_with(&format!("guide/{gone}")))
+                    || e.message.contains(&format!("advisory {gone}"))),
+                "{gone}: {:#?}",
+                guide.errors
+            );
+        }
+        assert_eq!(
+            crate::advisories::ordered_gates(&exts),
+            vec![
+                "collection".to_string(),
+                crate::effect_triggers::NAME.to_string()
+            ]
+        );
     }
 }

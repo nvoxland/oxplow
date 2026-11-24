@@ -374,7 +374,6 @@ advisories:
     once_per: request
     needs: [model:oxplow/task_record]
     when: { config: /tasks/workflow, in: [agent_tracks] }
-    after_collection: false
     query: |
       SELECT 'This request changed files, and no task is in progress on this thread. If it is '
              || 'work the person will want to see on the Work panel, take or file its task and '

@@ -422,7 +422,10 @@ would be an unproven contract.
 
 When one event reaches several effects or collectors, their `after:`
 says which run first (`oxplow_domain::ordering`, compiled by
-`extensions::descriptors::check_catalog`).
+`extensions::descriptors::check_catalog`). A post-tool advisory's
+`after:` takes the same targets; advisories get no level: their consumer
+gates on what the targets run in (`.context/extensions-commands.md`
+"Advisories").
 
 - **Targets are URIs.** `effect:<namespace>/<id>`, `collector:<namespace>/<id>` (any
   enabled extension's) or `consumer:<name>` — short forms of

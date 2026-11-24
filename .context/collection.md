@@ -259,9 +259,9 @@ hook + MCP wiring):
   events aren't caused by the run's `command.executed`). Collection runs
   in the background. A hook waits up to 2.5 seconds for an eligible
   agent-facing advisory's consumer to checkpoint the current tool event.
-  Post-tool advisories follow collection by default, so they can read
-  the current run. An advisory with `after_collection: false` reads the
-  tool projection independently. A nudge that lands later can be delivered
+  A post-tool advisory that reads the current run declares
+  `after: [collection]`; one with no `after:` reads the tool projection as
+  soon as the call is projected. A nudge that lands later can be delivered
   by the next tool or prompt hook.
   **The legs are isolated and coverage retries:** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
