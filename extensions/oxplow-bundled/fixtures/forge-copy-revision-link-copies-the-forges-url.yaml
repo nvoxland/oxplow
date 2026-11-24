@@ -1,0 +1,12 @@
+# Copy Revision Link: the same URL as Open In ▸ <forge>, on the clipboard.
+# A GitLab remote's link has `-/blob/` and `#L10-20`; one line is `#L7`.
+when:
+  command: oxplow.forge.copy_link
+  input: { uri: "oxplow:oxplow/file?path=lib/a%20b.rb#lines=7-7", stream: str1, copy: true }
+  answers:
+    sql.read:
+      - [{ name: origin, url: "https://gitlab.com/acme/app" }]
+      - [{ head_sha: def5678 }]
+expect:
+  commands: [oxplow.window.copy_text]
+  result: { url: "https://gitlab.com/acme/app/-/blob/def5678/lib/a%20b.rb#L7" }

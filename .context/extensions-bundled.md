@@ -611,6 +611,27 @@ pages:
 **Done when** core boots and is usable with `oxplow-bundled` disabled,
 and enabling it restores the review and analysis pages.
 
+## Forge links (Open In ▸ GitHub, GitLab, Bitbucket; Copy Revision Link)
+
+Bundled's `oxplow.forge.github`, `.gitlab`, `.bitbucket` and `.copy_link`
+(`handlers/forge.star`) are the example of the link-command mechanism
+(`.context/extensions-slots.md` "Links"). Each is a command about
+`oxplow/file` in the `Open In` group, with an `about_if` (`on_github`, …,
+`on_forge`) that reads `v_vcs_remote`, so it is offered only when the
+repository has a remote on that forge. `origin` is used first. SSH
+(`git@host:owner/repo.git`, `ssh://…`) and https (`https://[user@]host/owner/repo(.git)`)
+remotes parse, and a host containing `github`, `gitlab` or `bitbucket` names
+its forge, so a self-hosted one works too.
+
+`transform` builds the file's URL at the stream's head commit (`v_stream.head_sha`),
+with the lines its URI names: GitHub `blob/<sha>/<path>#L10-L20`, GitLab
+`-/blob/<sha>/<path>#L10-20`, Bitbucket `src/<sha>/<path>#lines-10:20`, one
+line `#L7` / `#lines-7`. It composes `oxplow.window.open_url`, or
+`oxplow.window.copy_text` for Copy Revision Link (`copy: true`). Each
+command's `ui.input` fixes its `forge`. An unpushed head links to a commit
+the forge doesn't have yet. The fixtures (`forge-*.yaml`) run dry, with the
+remote and head answered.
+
 ## Task readers moved out of foundation (flip-order step 6, in part)
 
 Foundation must load and work with bundled off, and only

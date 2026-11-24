@@ -1,0 +1,13 @@
+# Open In ▸ GitHub: the file on the repository's GitHub, at the stream's
+# head commit, with the lines the link names. An SSH remote names the host
+# and repository too; origin is the one used when there are several.
+when:
+  command: oxplow.forge.github
+  input: { uri: "oxplow:oxplow/file?path=src/main.rs#lines=10-20", stream: str1, forge: github }
+  answers:
+    sql.read:
+      - [{ name: backup, url: "https://gitlab.com/acme/app.git" }, { name: origin, url: "git@github.com:acme/app.git" }]
+      - [{ head_sha: abc1234 }]
+expect:
+  commands: [oxplow.window.open_url]
+  result: { url: "https://github.com/acme/app/blob/abc1234/src/main.rs#L10-L20" }

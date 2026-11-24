@@ -4,7 +4,7 @@ namespace: oxplow
 description: Oxplow's optional built-in features, including change review, code metrics, the Work board, Knowledge, Dashboards, Usage, Job Runs and Agent Interface.
 engine: ">=0.7"
 # Its `tasks` skill (reading the task model) is written to the agent's runtime.
-permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields', 'commands:oxplow.tasks.assign']
+permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields', 'commands:oxplow.tasks.assign', 'commands:oxplow.window.open_url', 'commands:oxplow.window.copy_text']
 # Its Work board is a custom component in TypeScript (src/board/), built
 # into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
 build: { run: "bun run build", output: dist, exclude: [node_modules] }
@@ -805,6 +805,70 @@ commands:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
   # Who works on a task and its place in their queue, over the shared task
   # model's two oxplow fields.
+  - name: forge.github
+    summary: "Open a file of the stream on GitHub, at the stream's head commit, with the lines its URI names (Open In ▸ GitHub). Offered when the repository has a GitHub remote."
+    input_schema:
+      type: object
+      required: [uri, stream]
+      properties:
+        uri: { type: string, description: "The file's URI (oxplow:oxplow/file?path=src/main.rs, `#lines=10-20` for its lines)." }
+        stream: { type: string, description: "The stream (str1) whose head commit the link is at." }
+        forge: { type: string, enum: [github, gitlab, bitbucket], description: "The forge; left out, the repository's first (origin first)." }
+        copy: { type: boolean, description: "Copy the link instead of opening it." }
+      additionalProperties: false
+    entry: handlers/forge.star
+    needs: [sql.read]
+    access: read
+    example: {"uri": "oxplow:oxplow/file?path=src/main.rs#lines=10-20", "stream": "str1", "forge": "github"}
+    ui: { label: GitHub, group: Open In, about: oxplow/file, about_if: on_github, input: { uri: "{{uri}}", stream: "{{stream}}", forge: github } }
+  - name: forge.gitlab
+    summary: "Open a file of the stream on GitLab, at the stream's head commit, with the lines its URI names (Open In ▸ GitLab). Offered when the repository has a GitLab remote."
+    input_schema:
+      type: object
+      required: [uri, stream]
+      properties:
+        uri: { type: string, description: "The file's URI (oxplow:oxplow/file?path=src/main.rs, `#lines=10-20` for its lines)." }
+        stream: { type: string, description: "The stream (str1) whose head commit the link is at." }
+        forge: { type: string, enum: [github, gitlab, bitbucket], description: "The forge; left out, the repository's first (origin first)." }
+        copy: { type: boolean, description: "Copy the link instead of opening it." }
+      additionalProperties: false
+    entry: handlers/forge.star
+    needs: [sql.read]
+    access: read
+    example: {"uri": "oxplow:oxplow/file?path=src/main.rs#lines=10-20", "stream": "str1", "forge": "gitlab"}
+    ui: { label: GitLab, group: Open In, about: oxplow/file, about_if: on_gitlab, input: { uri: "{{uri}}", stream: "{{stream}}", forge: gitlab } }
+  - name: forge.bitbucket
+    summary: "Open a file of the stream on Bitbucket, at the stream's head commit, with the lines its URI names (Open In ▸ Bitbucket). Offered when the repository has a Bitbucket remote."
+    input_schema:
+      type: object
+      required: [uri, stream]
+      properties:
+        uri: { type: string, description: "The file's URI (oxplow:oxplow/file?path=src/main.rs, `#lines=10-20` for its lines)." }
+        stream: { type: string, description: "The stream (str1) whose head commit the link is at." }
+        forge: { type: string, enum: [github, gitlab, bitbucket], description: "The forge; left out, the repository's first (origin first)." }
+        copy: { type: boolean, description: "Copy the link instead of opening it." }
+      additionalProperties: false
+    entry: handlers/forge.star
+    needs: [sql.read]
+    access: read
+    example: {"uri": "oxplow:oxplow/file?path=src/main.rs#lines=10-20", "stream": "str1", "forge": "bitbucket"}
+    ui: { label: Bitbucket, group: Open In, about: oxplow/file, about_if: on_bitbucket, input: { uri: "{{uri}}", stream: "{{stream}}", forge: bitbucket } }
+  - name: forge.copy_link
+    summary: "Copy the link to a file of the stream on its forge (GitHub, GitLab, Bitbucket), at the stream's head commit, with the lines its URI names (Copy Revision Link)."
+    input_schema:
+      type: object
+      required: [uri, stream]
+      properties:
+        uri: { type: string, description: "The file's URI (oxplow:oxplow/file?path=src/main.rs, `#lines=10-20` for its lines)." }
+        stream: { type: string, description: "The stream (str1) whose head commit the link is at." }
+        forge: { type: string, enum: [github, gitlab, bitbucket], description: "The forge; left out, the repository's first (origin first)." }
+        copy: { type: boolean, description: "Copy the link instead of opening it." }
+      additionalProperties: false
+    entry: handlers/forge.star
+    needs: [sql.read]
+    access: read
+    example: {"uri": "oxplow:oxplow/file?path=src/main.rs", "stream": "str1", "copy": true}
+    ui: { label: Copy Revision Link, group: Open In, about: oxplow/file, about_if: on_forge, input: { uri: "{{uri}}", stream: "{{stream}}", copy: true } }
   - name: tasks.assign
     summary: "Assign a task to a thread, the person, or nobody, at the end of that queue. Undoable."
     input_schema:

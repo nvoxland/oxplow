@@ -1,0 +1,9 @@
+# Run with no GitHub remote (only a GitLab one), Open In ▸ GitHub refuses.
+when:
+  command: oxplow.forge.github
+  input: { uri: "oxplow:oxplow/file?path=src/main.rs", stream: str1, forge: github }
+  answers:
+    sql.read:
+      - [{ name: origin, url: "https://gitlab.com/acme/app" }]
+expect:
+  refused: no GitHub remote

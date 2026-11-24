@@ -1,0 +1,4 @@
+# With no remote on a forge (the fixture's project has none), no forge
+# command is offered on a file.
+when: { item_commands: "oxplow:oxplow/file?path=src/main.rs" }
+expect: { commands: [] }
