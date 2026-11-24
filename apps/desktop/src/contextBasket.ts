@@ -7,11 +7,11 @@
  * carries one basket: its own, or the named basket sent next (Send Next).
  * `.context/agent-model.md` → "The context basket".
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
-import { querySql } from "./api.js";
+import { onRemoteReconnect, querySql, subscribeOxplowEvents } from "./api.js";
 import { recordOpError } from "./opErrors.js";
-import { NO_READS, unionReads, useRerunOnChange } from "./viz/rerun.js";
+import { coalesce, NO_READS, readsChanged, unionReads } from "./viz/rerun.js";
 import { threadRowId } from "./modelIds.js";
 import { personCommands } from "./personCommands.js";
 import { dockStore } from "./components/Dock/dockStore.js";
@@ -176,28 +176,77 @@ export function nextPrompt(baskets: Baskets, thread: string | null): BasketItem[
   return baskets.named.find((b) => b.name === sending)?.items ?? [];
 }
 
-/** The thread's own basket and every named basket, re-read as they change. */
-export function useBaskets(threadId: string | null): Baskets {
-  const [baskets, setBaskets] = useState<Baskets>(NO_BASKETS);
-  const [reads, setReads] = useState<Reads>(NO_READS);
-  const load = useCallback(() => {
-    let cancelled = false;
-    const thread = threadId ? threadRowId(threadId) : 0;
+/** One thread's baskets, read once however many components show them (the
+ *  dock badge and the dock panel both do): the first reader starts the read
+ *  and the watch for a change, the last one stops them. */
+class BasketsStore {
+  baskets: Baskets = NO_BASKETS;
+  private reads: Reads = NO_READS;
+  private listeners = new Set<() => void>();
+  private stop: (() => void) | null = null;
+  private serial = 0;
+
+  constructor(private readonly threadId: string | null) {}
+
+  private load() {
+    const mine = ++this.serial;
+    const thread = this.threadId ? threadRowId(this.threadId) : 0;
     void Promise.all([querySql(ITEMS_SQL, [thread], 2_000), querySql(BASKETS_SQL, [], 500), querySql(SENT_SQL, [thread], 1)]).then(
       ([items, named, sent]) => {
-        if (cancelled) return;
-        setBaskets(basketsFrom(itemsFromResult(items), named, lastSendFrom(sent)));
-        setReads(unionReads([items.reads, named.reads, sent.reads]));
+        if (mine !== this.serial) return;
+        this.baskets = basketsFrom(itemsFromResult(items), named, lastSendFrom(sent));
+        this.reads = unionReads([items.reads, named.reads, sent.reads]);
+        for (const l of this.listeners) l();
       },
       (e: unknown) => recordOpError({ label: "Read the context baskets", message: e instanceof Error ? e.message : String(e) }),
     );
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    if (this.listeners.size === 1) this.start();
     return () => {
-      cancelled = true;
+      this.listeners.delete(listener);
+      if (this.listeners.size === 0) {
+        this.stop?.();
+        this.stop = null;
+        this.serial++;
+        this.baskets = NO_BASKETS;
+        this.reads = NO_READS;
+        stores.delete(this.threadId ?? "");
+      }
     };
-  }, [threadId]);
-  useEffect(() => load(), [load]);
-  useRerunOnChange(reads, () => void load());
-  return baskets;
+  };
+
+  getSnapshot = (): Baskets => this.baskets;
+
+  private start() {
+    const again = coalesce(() => this.load());
+    const off = subscribeOxplowEvents((event) => {
+      if (readsChanged(event as Record<string, unknown>, this.reads)) again.schedule();
+    });
+    const offReconnect = onRemoteReconnect(() => again.schedule());
+    this.stop = () => {
+      off();
+      offReconnect();
+      again.cancel();
+    };
+    this.load();
+  }
+}
+
+const stores = new Map<string, BasketsStore>();
+
+/** The thread's own basket and every named basket, re-read as they change;
+ *  one read shared by every component that shows them. */
+export function useBaskets(threadId: string | null): Baskets {
+  const key = threadId ?? "";
+  let store = stores.get(key);
+  if (!store) {
+    store = new BasketsStore(threadId);
+    stores.set(key, store);
+  }
+  return useSyncExternalStore(store.subscribe, store.getSnapshot);
 }
 
 // ---- where an add goes ------------------------------------------------------

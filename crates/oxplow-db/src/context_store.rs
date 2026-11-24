@@ -188,6 +188,17 @@ pub fn add_tx(conn: &Connection, basket: Basket, item: &NewItem) -> Result<i64, 
     insert_tx(conn, basket, item, &ts_to_string(Timestamp::now()))
 }
 
+/// [`add_tx`] at `added_at`: what an undo of a removal uses, so the item
+/// keeps the time it was first added (and its place in the order).
+pub fn add_at_tx(
+    conn: &Connection,
+    basket: Basket,
+    item: &NewItem,
+    added_at: &str,
+) -> Result<i64, DomainError> {
+    insert_tx(conn, basket, item, added_at)
+}
+
 /// [`add_tx`] with the time it was added (Put Back keeps the first one).
 fn insert_tx(
     conn: &Connection,
@@ -273,6 +284,12 @@ pub fn move_tx(
         return Ok(None);
     };
     if before.basket() == basket {
+        // Where it is already: still a move, which drops the hold.
+        conn.execute(
+            "UPDATE context_item SET held_at = NULL WHERE id = ?1",
+            params![id],
+        )
+        .map_err(map_sql_err)?;
         return Ok(Some(before));
     }
     let (thread_id, basket_id) = basket.columns();
@@ -719,6 +736,25 @@ pub fn release_held_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<i64>, 
     )
     .map_err(map_sql_err)?;
     Ok(held)
+}
+
+/// [`hold_tx`] for the items of `thread`'s own basket only: an id in another
+/// thread's basket (or a named one, or gone) is left alone.
+pub fn hold_for_thread_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    ids: &[i64],
+) -> Result<(), DomainError> {
+    let now = ts_to_string(Timestamp::now());
+    for id in ids {
+        conn.execute(
+            "UPDATE context_item SET held_at = ?3
+              WHERE id = ?1 AND thread_id = ?2 AND held_at IS NULL",
+            params![id, thread.value(), now],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
 }
 
 /// Hold the thread-basket items `ids` (what undoing a release does): the
@@ -1297,6 +1333,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sends(&db).await, [fresh]);
+    }
+
+    /// Holding by id is about the thread's own basket: another thread's item,
+    /// or one in a named basket, is left alone.
+    #[tokio::test]
+    async fn hold_for_thread_leaves_other_baskets_items_alone() {
+        let (db, thread, other) = with_threads().await;
+        let (mine, theirs, named) = db
+            .transaction(move |tx| {
+                let basket = create_basket_tx(tx, "Auth")?.id;
+                let mine = add_tx(
+                    tx,
+                    Basket::Thread(thread),
+                    &page("oxplow:oxplow/commit?sha=a"),
+                )?;
+                let theirs = add_tx(
+                    tx,
+                    Basket::Thread(other),
+                    &page("oxplow:oxplow/commit?sha=b"),
+                )?;
+                let named = add_tx(
+                    tx,
+                    Basket::Named(basket),
+                    &page("oxplow:oxplow/commit?sha=c"),
+                )?;
+                hold_for_thread_tx(tx, thread, &[mine, theirs, named])?;
+                Ok((mine, theirs, named))
+            })
+            .await
+            .unwrap();
+        let held = |id| {
+            let db = db.clone();
+            async move {
+                db.read(move |c| get_tx(c, id))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .held_at
+                    .is_some()
+            }
+        };
+        assert!(held(mine).await);
+        assert!(
+            !held(theirs).await,
+            "another thread's item isn't held by this one"
+        );
+        assert!(!held(named).await, "a named basket's item isn't held");
     }
 
     /// A move to another basket drops the hold: it is only about the

@@ -3,6 +3,7 @@
 # opened) or its most visited (how often), 20 at most, so the panel can grow
 # to show them all. Collapsed, the first six of them, as icons.
 given:
+  - { files: { "a.rs": "x\n", "DEV.md": "x\n", "f0.rs": "x\n", "f1.rs": "x\n", "f2.rs": "x\n", "f3.rs": "x\n", "f4.rs": "x\n", "f5.rs": "x\n", "f6.rs": "x\n", "f7.rs": "x\n", "f8.rs": "x\n", "f9.rs": "x\n", "f10.rs": "x\n", "f11.rs": "x\n", "f12.rs": "x\n", "f13.rs": "x\n", "f14.rs": "x\n", "f15.rs": "x\n", "f16.rs": "x\n", "f17.rs": "x\n", "f18.rs": "x\n", "f19.rs": "x\n" } }
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, visibility_scope: thread, thread: thr1 } }
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=a.rs", page_kind: file, label: a.rs, visibility_scope: project, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }

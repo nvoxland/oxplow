@@ -22,7 +22,7 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 
 use super::conn::{Connection, Incoming, TurnEnd};
-use super::host::ChatHost;
+use super::host::ObserverHost;
 use super::mapping;
 use super::model::{ChatUpdate, ToolCall, ToolStatus};
 
@@ -80,7 +80,7 @@ pub(super) struct Actor {
     /// False once a newer session replaced this one: its teardown then
     /// records nothing (the new session owns the thread's status).
     current: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    host: Arc<dyn ChatHost>,
+    host: Arc<dyn ObserverHost>,
     view: Arc<Mutex<SessionView>>,
     session_id: String,
     /// A turn is in flight (the person's prompt opened it).
@@ -110,7 +110,7 @@ pub(super) struct Actor {
 impl Actor {
     pub(super) fn new(
         spec: SessionSpec,
-        host: Arc<dyn ChatHost>,
+        host: Arc<dyn ObserverHost>,
         view: Arc<Mutex<SessionView>>,
         current: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
@@ -471,7 +471,7 @@ impl Actor {
 pub(super) struct Teardown {
     thread: ThreadId,
     view: Arc<Mutex<SessionView>>,
-    host: Arc<dyn ChatHost>,
+    host: Arc<dyn ObserverHost>,
     current: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 

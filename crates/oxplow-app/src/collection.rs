@@ -130,11 +130,37 @@ fn matched_segments(
         .split('\n')
         .filter(|sub| {
             let lower = sub.to_ascii_lowercase();
-            pats.iter().any(|p| lower.contains(p.as_str())) && !subcommand_is_read_only(sub)
+            pats.iter().any(|p| contains_command(&lower, p)) && !subcommand_is_read_only(sub)
         })
         .map(|sub| sub.trim().to_string())
         .collect::<Vec<_>>()
         .into_iter()
+}
+
+/// A report path as two collectors compare it: `./x.json` is `x.json`, a
+/// doubled or trailing `/` is dropped, `a/./b` is `a/b`, and `\` is `/`.
+/// (`..` is left alone: resolving it needs the filesystem.)
+fn normalized_report_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Whether `pattern` occurs in `command` as a command and not inside a
+/// longer word: `go vet` is in `go vet ./...` and `sudo go vet`, not in
+/// `cargo vet`, and `go test` is not in `go testing`. A boundary is the start
+/// or end of the text, or a character that can't continue a name
+/// (a letter, digit, `_` or `-`): a path separator or a `:` does not continue
+/// one (`./gradlew test`, `npm run test:unit`).
+fn contains_command(command: &str, pattern: &str) -> bool {
+    let name = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    command.match_indices(pattern).any(|(at, found)| {
+        let before = command[..at].chars().next_back();
+        let after = command[at + found.len()..].chars().next();
+        !before.is_some_and(name) && !after.is_some_and(name)
+    })
 }
 
 /// `command` with each heredoc's body removed, the line that opens it kept.
@@ -765,11 +791,17 @@ impl CollectionService {
             collector.dir,
             spec.entry.as_deref().unwrap_or_default()
         );
-        let abs = Self::in_checkout(root, &entry)
+        // The extension's files are the project's (one set for every stream),
+        // so its entry is read from the project's checkout, not from the
+        // stream's worktree that holds the report: a worktree has no copy
+        // (or a link out of itself), and a parser that "resolves outside the
+        // checkout" there failed three times and was disabled.
+        let project = self.extensions.project_of(root);
+        let abs = Self::in_checkout(project, &entry)
             .map_err(|e| ParserProblem::Broken(format!("entry {e}")))?
-            .unwrap_or_else(|| root.join(&entry));
+            .unwrap_or_else(|| project.join(&entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            let ext_dir = root.join(&collector.dir);
+            let ext_dir = project.join(&collector.dir);
             // A program, run from its extension's deployment (which declares
             // `process`: it doesn't load otherwise).
             let location = oxplow_script::runtime::ExecLocation {
@@ -990,7 +1022,7 @@ impl CollectionService {
         let mut taken: std::collections::HashMap<String, (String, String)> = Default::default();
         let mut winners = Vec::new();
         for collector in all {
-            let path = self.report_path(&collector, root);
+            let path = normalized_report_path(&self.report_path(&collector, root));
             if self.is_disabled(&collector).await {
                 winners.push(collector);
                 continue;
@@ -3924,6 +3956,33 @@ mod tests {
             );
         }
         out
+    }
+
+    /// Two collectors that name one report differently (`./x.json`, `x.json`,
+    /// `a//b.json`) read the same file.
+    #[test]
+    fn report_paths_are_compared_normalised() {
+        assert_eq!(normalized_report_path("./target/x.json"), "target/x.json");
+        assert_eq!(normalized_report_path("target//x.json"), "target/x.json");
+        assert_eq!(normalized_report_path("a/./b.json"), "a/b.json");
+        assert_eq!(normalized_report_path("target\\x.json"), "target/x.json");
+        assert_eq!(normalized_report_path("/abs/x.json"), "abs/x.json");
+    }
+
+    /// A pattern is a command, not a piece of a longer name: `go vet` is
+    /// no `cargo vet`, and `go test` is no `go testing`; a path or a `:` can
+    /// precede or follow it.
+    #[test]
+    fn a_pattern_matches_on_word_boundaries() {
+        let go = vec!["go vet".to_string(), "go test".to_string()];
+        assert!(detect_analysis_run("go vet ./...", &go));
+        assert!(detect_analysis_run("cd x && sudo go vet", &go));
+        assert!(!detect_analysis_run("cargo vet", &go));
+        assert!(!detect_analysis_run("go testing --list", &go));
+        assert!(!detect_test_run("mygo test ./...", &go));
+        let others = vec!["gradlew test".to_string(), "npm run test".to_string()];
+        assert!(detect_test_run("./gradlew test --info", &others));
+        assert!(detect_test_run("npm run test:unit", &others));
     }
 
     fn with(kind: RunKind, extra: &[String]) -> Vec<String> {

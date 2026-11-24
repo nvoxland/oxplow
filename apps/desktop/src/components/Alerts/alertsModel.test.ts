@@ -8,8 +8,8 @@ const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedRe
 test("the bell counts what the Alerts page lists, red for a problem, accent for a decision", () => {
   expect(alertsSummary(none)).toEqual({ count: 0, tone: "none" });
   expect(alertsSummary({ ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });
-  // A panel's badge is shown by its panel and toasted; the page doesn't list it, so the bell doesn't count it.
-  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2", open: "oxplow:oxplow/page?page=x/b" }] })).toEqual({ count: 0, tone: "none" });
+  // A panel's badge that fires is a notice in the Alerts panel, so the icon counts it too.
+  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2", open: "oxplow:oxplow/page?page=x/b" }] })).toEqual({ count: 1, tone: "accent" });
   expect(
     alertsSummary({
       ...none,

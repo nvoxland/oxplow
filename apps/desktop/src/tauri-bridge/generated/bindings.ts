@@ -3751,6 +3751,12 @@ export type LoaderDecl = {
 	refresh: LoaderRefresh | null,
 	empty: string | null,
 	/**
+	 *  A column of URIs whose rows are kept only while what they name still
+	 *  exists (`live: uri`): a deleted file, a removed page or a gone record
+	 *  is left out. The pages that list places a person went to say it.
+	 */
+	live: string | null,
+	/**
 	 *  The earlier loaders it reads: as tables (`sql`) or through an
 	 *  arg's `from` (`command`, `page`).
 	 */

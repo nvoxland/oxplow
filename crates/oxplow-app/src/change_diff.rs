@@ -6,7 +6,8 @@
 //! it, and the ranges are [`crate::churn::diff_hunks`]'s.
 //!
 //! One call returns at most [`MAX_FILES`] files and [`MAX_BYTES`] of line
-//! text (the `added` and `removed` lines it returns, not the files' sizes):
+//! text (the `added` and `removed` lines it returns plus [`LINE_OVERHEAD`]
+//! bytes per line for the JSON around each, not the files' sizes):
 //! `{ files, rest, too_large }`. The files past either limit are `rest`,
 //! in order, for the script to ask again with `paths = rest`; a file whose
 //! own lines are past [`MAX_BYTES`] is `too_large` and never returned. A
@@ -27,6 +28,11 @@ pub const MAX_FILES: usize = 200;
 /// The most line text (in bytes, the `added` and `removed` lines of every
 /// file) one call returns.
 pub const MAX_BYTES: usize = 2 * 1024 * 1024;
+
+/// What each returned line costs beyond its text, in the JSON it goes out as
+/// (`{"line":12345,"text":""}`): counted, so many short lines don't pass the
+/// limit with a far larger answer.
+const LINE_OVERHEAD: usize = 24;
 
 /// Answers `change_diff` from the stores, on the runtime it was made on.
 pub struct ChangeDiffReader {
@@ -79,7 +85,8 @@ impl ChangeDiffReader {
             .await
             .map_err(|e| e.to_string())?;
         if let Some(paths) = paths {
-            files.retain(|(path, _)| paths.contains(path));
+            let wanted: std::collections::HashSet<&String> = paths.iter().collect();
+            files.retain(|(path, _)| wanted.contains(path));
         }
         let root = crate::change_analysis::stream_root(&self.worktrees, row.stream_id).await;
         let mut bytes = 0usize;
@@ -144,7 +151,7 @@ fn hunks(base: &str, head: &str) -> (Vec<Value>, usize) {
         (start..=end)
             .filter_map(|n| {
                 all.get(n as usize - 1).map(|text| {
-                    size += text.len();
+                    size += text.len() + LINE_OVERHEAD;
                     json!({ "line": n, "text": text })
                 })
             })
@@ -202,6 +209,17 @@ impl oxplow_script::ChangeDiffSource for Bounded {
 
 #[cfg(test)]
 mod tests {
+    /// The size a call counts is the text plus a fixed cost per line, so
+    /// thousands of one-character lines can't slip a far larger answer
+    /// under the byte limit.
+    #[test]
+    fn short_lines_cost_their_json() {
+        let head: String = "a\n".repeat(1000);
+        let (hunks, size) = super::hunks("", &head);
+        assert!(!hunks.is_empty());
+        assert_eq!(size, 1000 * (1 + LINE_OVERHEAD));
+    }
+
     use super::*;
     use crate::change_analysis::{ensure_change, ChangeTarget};
 

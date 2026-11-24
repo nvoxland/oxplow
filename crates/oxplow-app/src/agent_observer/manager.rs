@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::codex::{CodexConnection, CodexOpen};
 use super::conn::{Connection, Incoming};
-use super::host::ChatHost;
+use super::host::ObserverHost;
 use super::session::{Actor, ChatError, Command, SessionSpec, SessionView};
 
 struct Handle {
@@ -33,7 +33,7 @@ impl Handle {
 }
 
 /// An agent session's slot, claimed before anything is spawned (see
-/// [`ChatManager::reserve`]).
+/// [`ObserverManager::reserve`]).
 struct Reservation {
     session: AgentSessionId,
     generation: u64,
@@ -42,19 +42,19 @@ struct Reservation {
     current: Arc<AtomicBool>,
 }
 
-pub struct ChatManager {
+pub struct ObserverManager {
     sessions: Mutex<HashMap<AgentSessionId, Handle>>,
     /// Hands out session generations; one per open.
     next_generation: std::sync::atomic::AtomicU64,
 }
 
-impl Default for ChatManager {
+impl Default for ObserverManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ChatManager {
+impl ObserverManager {
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
@@ -118,7 +118,7 @@ impl ChatManager {
     /// is kept, and its thread's id answered.
     pub async fn open_codex(
         &self,
-        host: Arc<dyn ChatHost>,
+        host: Arc<dyn ObserverHost>,
         spec: SessionSpec,
         open: CodexOpen,
     ) -> Result<String, ChatError> {
@@ -150,7 +150,7 @@ impl ChatManager {
     #[cfg(test)]
     pub(super) async fn open_connection(
         &self,
-        host: Arc<dyn ChatHost>,
+        host: Arc<dyn ObserverHost>,
         spec: SessionSpec,
         conn: Arc<dyn Connection>,
         incoming: mpsc::UnboundedReceiver<Incoming>,
@@ -164,7 +164,7 @@ impl ChatManager {
     /// Run the session's actor on an open connection.
     async fn start(
         &self,
-        host: Arc<dyn ChatHost>,
+        host: Arc<dyn ObserverHost>,
         spec: SessionSpec,
         reservation: Reservation,
         conn: Arc<dyn Connection>,

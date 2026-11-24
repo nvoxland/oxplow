@@ -415,7 +415,8 @@ screens and Bundled's add review and analysis:
 - **Rail panels.** A panel lives in the extension that has its page:
   foundation's `panels:` has Go To (`go-to-panel`, collapsed `go-to-icons`;
   its header opens the `go-to` page beside them). Both parts read
-  foundation's `thread-go-to` query (recent and most visited: `limit`
+  foundation's `thread-go-to` query (it leaves out places that no longer
+  exist, `live: uri`; recent and most visited: `limit`
   rows, 20 for the body, 6 for the icons), which reads the `thread-bookmarks`
   query, the one statement of which bookmarks a thread sees; the Go To page
   reads it too. Git (`git`, collapsed `git-line`, count `git-count`) is

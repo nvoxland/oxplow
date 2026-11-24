@@ -345,6 +345,10 @@ pub struct LoaderDecl {
     pub reads: Vec<String>,
     pub refresh: Option<LoaderRefresh>,
     pub empty: Option<String>,
+    /// A column of URIs whose rows are kept only while what they name still
+    /// exists (`live: uri`): a deleted file, a removed page or a gone record
+    /// is left out. The pages that list places a person went to say it.
+    pub live: Option<String>,
     /// The earlier loaders it reads: as tables (`sql`) or through an
     /// arg's `from` (`command`, `page`).
     pub reads_loaders: Vec<String>,
@@ -649,6 +653,8 @@ struct LoaderFile {
     refresh: Option<LoaderRefresh>,
     #[serde(default)]
     empty: Option<String>,
+    #[serde(default)]
+    live: Option<String>,
 }
 
 /// A viz node's own keys, beside `id`, `title`, `replaceable`, `size`
@@ -1304,6 +1310,7 @@ fn content_decl(loader: Loader) -> LoaderDecl {
         reads: Vec::new(),
         refresh: None,
         empty: None,
+        live: None,
         reads_loaders: Vec::new(),
         reads_params: vec!["uri".to_string()],
     }
@@ -1528,6 +1535,7 @@ fn parse_loaders(
             reads: file.reads,
             refresh: file.refresh,
             empty: file.empty,
+            live: file.live,
             reads_loaders,
             reads_params,
         });

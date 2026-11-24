@@ -1,0 +1,28 @@
+# The Go To panel lists places a person can still go: a bookmark or a visit of a
+# file that was deleted, or of a page no extension has any more, is left out
+# (it would open on nothing), while a file and a page that are there stay.
+given:
+  - { files: { "kept.rs": "fn a() {}\n" } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=kept.rs", page_kind: file, label: kept.rs, visibility_scope: thread, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=deleted.rs", page_kind: file, label: deleted.rs, visibility_scope: thread, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=gone-ext/gone-page", page_kind: gone-page, label: Gone page, visibility_scope: thread, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, visibility_scope: thread, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=kept.rs", kind: file, label: kept.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=deleted.rs", kind: file, label: deleted.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=gone-ext/gone-page", kind: gone-page, label: Gone page, thread: thr1 } }
+when: { panel: go-to, thread: thr1 }
+expect:
+  body:
+    loaders:
+      go_to:
+        rows:
+          - { grp: Bookmarks, title: Git, uri: "oxplow:oxplow/page?page=git-dashboard" }
+          - { title: kept.rs, uri: "oxplow:oxplow/file?path=kept.rs" }
+steps:
+  - when: { choices: { mode: recent } }
+    expect:
+      body:
+        loaders:
+          go_to:
+            rows:
+              - { grp: Recent, title: kept.rs }

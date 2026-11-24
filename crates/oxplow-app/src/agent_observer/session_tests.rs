@@ -16,8 +16,8 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, Notify};
 
 use super::conn::{Connection, Incoming, TurnEnd, TurnTokens};
-use super::host::ChatHost;
-use super::manager::ChatManager;
+use super::host::ObserverHost;
+use super::manager::ObserverManager;
 use super::model::{ChatUpdate, ToolCall, ToolCallPatch, ToolKind, ToolStatus};
 use super::session::{ChatError, SessionSpec};
 use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
@@ -42,7 +42,7 @@ impl Host {
 }
 
 #[async_trait]
-impl ChatHost for Host {
+impl ObserverHost for Host {
     async fn check_tool(
         &self,
         _t: &ThreadId,
@@ -116,14 +116,14 @@ impl ChatHost for Host {
         &self,
         _t: &ThreadId,
         _s: &str,
-        change: &crate::chat::conn::SubagentChange,
+        change: &crate::agent_observer::conn::SubagentChange,
         id: &str,
         _kind: Option<&str>,
         _spawned_in: Option<&str>,
     ) {
         let what = match change {
-            crate::chat::conn::SubagentChange::Started => "started",
-            crate::chat::conn::SubagentChange::Finished(_) => "finished",
+            crate::agent_observer::conn::SubagentChange::Started => "started",
+            crate::agent_observer::conn::SubagentChange::Finished(_) => "finished",
         };
         self.log.lock().push(format!("subagent {what} {id}"));
     }
@@ -264,14 +264,14 @@ impl Connection for Script {
 }
 
 struct Rig {
-    mgr: ChatManager,
+    mgr: ObserverManager,
     agent: Arc<Script>,
     host: Arc<Host>,
     dir: tempfile::TempDir,
 }
 
 async fn open_with(host: Host, agent: Script) -> (Rig, Result<(), ChatError>) {
-    let mgr = ChatManager::new();
+    let mgr = ObserverManager::new();
     let host = Arc::new(host);
     let agent = Arc::new(agent);
     let dir = tempfile::tempdir().unwrap();
@@ -497,7 +497,7 @@ async fn an_agent_that_refuses_to_open_is_reported() {
 
 #[tokio::test]
 async fn concurrent_opens_start_one_agent() {
-    let mgr = ChatManager::new();
+    let mgr = ObserverManager::new();
     let host = Arc::new(Host::default());
     let dir = tempfile::tempdir().unwrap();
     let agent = Arc::new(Script::default());
@@ -553,7 +553,7 @@ async fn a_wait_in_the_agents_ui_is_said_and_cleared() {
 
 mod codex {
     use super::*;
-    use crate::chat::codex::CodexOpen;
+    use crate::agent_observer::codex::CodexOpen;
     use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
     use serde_json::json;
 
@@ -594,7 +594,7 @@ mod codex {
         // Short: a unix socket's path has a length limit.
         let dir = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
         let fake = daemon_failing(dir.path(), fails);
-        let mgr = ChatManager::new();
+        let mgr = ObserverManager::new();
         let host = Arc::new(host);
         let thread = mgr
             .open_codex(

@@ -6,6 +6,7 @@ pub mod actions;
 pub mod checks;
 pub mod content;
 pub mod label;
+pub(crate) mod live;
 pub mod open_runs;
 pub mod options;
 pub mod panels;

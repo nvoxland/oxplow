@@ -1,7 +1,7 @@
 //! What an observed session asks of the rest of oxplow: the policy, the
 //! context to inject, and the same recording a terminal agent's hooks get.
-//! [`ChatHost`] is the seam (tests use a recording double);
-//! [`ServicesChatHost`] is the real one, routing through `AgentPolicy`,
+//! [`ObserverHost`] is the seam (tests use a recording double);
+//! [`ServicesObserverHost`] is the real one, routing through `AgentPolicy`,
 //! `AgentContext` and hook ingest so an observed turn lands in the same
 //! tables as a hooked one.
 
@@ -22,7 +22,7 @@ use crate::hook_ingest::HookEnvelope;
 use crate::Services;
 
 #[async_trait]
-pub trait ChatHost: Send + Sync + 'static {
+pub trait ObserverHost: Send + Sync + 'static {
     /// May the thread run this tool call? Logged as the call's PreToolUse;
     /// `content` is its input as the agent sent it (`mapping::content`).
     async fn check_tool(
@@ -105,7 +105,7 @@ pub trait ChatHost: Send + Sync + 'static {
 
 /// The real host. Holds `Services` weakly: sessions live inside
 /// `Services.chat`, so a strong reference would be a cycle.
-pub struct ServicesChatHost {
+pub struct ServicesObserverHost {
     svc: Weak<Services>,
     stream_id: Option<StreamId>,
     /// The agent session it hosts.
@@ -116,7 +116,7 @@ pub struct ServicesChatHost {
     before_card: parking_lot::Mutex<Option<(AgentStatusState, Option<String>)>>,
 }
 
-impl ServicesChatHost {
+impl ServicesObserverHost {
     /// The host of agent session `session` (in stream `stream_id`): every
     /// envelope and status it records names that session.
     pub fn new(
@@ -177,7 +177,7 @@ impl ServicesChatHost {
 }
 
 #[async_trait]
-impl ChatHost for ServicesChatHost {
+impl ObserverHost for ServicesObserverHost {
     async fn check_tool(
         &self,
         thread: &ThreadId,

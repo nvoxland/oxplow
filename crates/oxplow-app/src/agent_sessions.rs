@@ -8,26 +8,26 @@ use std::sync::Arc;
 
 use oxplow_domain::AgentSessionId;
 
-use crate::chat::manager::ChatManager;
+use crate::agent_observer::manager::ObserverManager;
 use crate::session_auth::SessionAuth;
 use crate::terminal_sessions::{agent_pane_key, TerminalSessionRegistry};
 
 /// Stops what runs in an agent session, whichever kind it is.
 #[derive(Clone)]
 pub struct SessionProcesses {
-    chat: Arc<ChatManager>,
+    observer: Arc<ObserverManager>,
     terminals: TerminalSessionRegistry,
     auth: Arc<SessionAuth>,
 }
 
 impl SessionProcesses {
     pub fn new(
-        chat: Arc<ChatManager>,
+        observer: Arc<ObserverManager>,
         terminals: TerminalSessionRegistry,
         auth: Arc<SessionAuth>,
     ) -> Self {
         Self {
-            chat,
+            observer,
             terminals,
             auth,
         }
@@ -54,6 +54,6 @@ impl SessionProcesses {
 
     fn invalidate(&self, session: AgentSessionId) {
         self.auth.revoke(session);
-        let _ = self.chat.close(&session);
+        let _ = self.observer.close(&session);
     }
 }

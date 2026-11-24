@@ -42,6 +42,15 @@ import changes, co-change history from `git log`, and a duplicate-block
 scan. Commits and finished requests are computed once. The working tree
 and running requests recompute when files change.
 
+A change of more than **200 files** is only partly analysed: oxplow reads
+the 200 it can parse first (source files before the rest), so a change
+that touches 1,000 files shows its signals for 200 of them. The Review
+page's **Files analysed** row says how many it read ("200 of 1,000 files
+analysed (source files first)"); the file list itself always shows every
+changed file. A script that reads a change's lines (`change_diff`) gets at
+most 200 files and about 2 MB of line text per call, and asks again for the
+rest.
+
 The results live in the `v_change*` views, so you and your agent can
 query them directly (`oxplow_ensure_change`, then `oxplow_query_sql`), or build your
 own page on them.

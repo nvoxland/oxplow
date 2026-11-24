@@ -291,17 +291,14 @@ impl LspSessionManager {
     /// The Mason package suggested for a language's server, from the
     /// extension that declares the language.
     pub fn mason_suggestion(&self, language: &str) -> Option<String> {
-        self.languages
-            .current()
-            .mason_suggestion(language)
-            .or_else(|| {
-                // A shipped pack that is off still names its server.
-                crate::extension::language_set::shipped_once()
-                    .mason_suggestion(language)
-                    .map(str::to_string)
-                    .map(|s| Box::leak(s.into_boxed_str()) as &str)
-            })
-            .map(str::to_string)
+        let current = self.languages.current();
+        match current.mason_suggestion(language) {
+            Some(package) => Some(package.to_string()),
+            // A shipped pack that is off still names its server.
+            None => crate::extension::language_set::shipped_once()
+                .mason_suggestion(language)
+                .map(str::to_string),
+        }
     }
 
     /// The languages the enabled extensions declare.

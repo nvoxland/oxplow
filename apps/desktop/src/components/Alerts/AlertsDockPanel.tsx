@@ -125,7 +125,9 @@ function AlertRowView({
   onOpenPage: DockBodyProps["onOpenPage"];
 }) {
   const [hover, setHover] = useState(false);
-  const [output, setOutput] = useState<string | null>(null);
+  // The captured output of the newest failure the row stands for, by its id:
+  // a newer failure of the same kind reads its own, not the first's.
+  const [read, setRead] = useState<{ id: string; text: string } | null>(null);
   const { Icon, color, label } = KIND_ICON[row.kind];
   const dismiss = row.opErrorIds ? () => Promise.all(row.opErrorIds!.map(dismissOpError)) : row.hintId != null ? () => dismissHint(row.hintId!) : null;
   const openRef = row.open ? refFromTabId(row.open) : null;
@@ -133,15 +135,16 @@ function AlertRowView({
   // A failed operation's captured output, read when its row first opens.
   const outputId = expanded && opError?.outputSize ? opError.id : null;
   useEffect(() => {
-    if (!outputId || output != null) return;
+    if (!outputId) return;
     let live = true;
     void readOpErrorOutput(outputId).then((out) => {
-      if (live) setOutput([out?.stderr, out?.stdout].filter(Boolean).join("\n") || "");
+      if (live) setRead({ id: outputId, text: [out?.stderr, out?.stdout].filter(Boolean).join("\n") || "" });
     });
     return () => {
       live = false;
     };
-  }, [outputId, output]);
+  }, [outputId]);
+  const output = read && read.id === outputId ? read.text : null;
 
   const keys = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return;

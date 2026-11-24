@@ -10,7 +10,7 @@ import { usePersonHints } from "../../hints.js";
 import { useProposals } from "../../proposals.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useOpErrors } from "../../opErrors.js";
-import type { AlertItems } from "./alertsModel.js";
+import { proposalTitle, type AlertItems } from "./alertsModel.js";
 
 export function useAlerts() {
   const proposals = useProposals();
@@ -22,10 +22,7 @@ export function useAlerts() {
   const hints = usePersonHints();
   const items: AlertItems = useMemo(
     () => ({
-      proposals: proposals.map((p) => ({
-        id: p.uri,
-        title: `${p.threadTitle ? `“${p.threadTitle}”` : "An agent"} wants to run ${p.command}`,
-      })),
+      proposals: proposals.map((p) => ({ id: p.uri, title: proposalTitle(p) })),
       opErrors: opErrors.map((e) => ({ id: e.id, label: e.label })),
       undelivered: undelivered.length,
       failedReactions: failedReactions.length,

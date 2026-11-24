@@ -94,6 +94,6 @@ fn only_the_codex_connection_injects_context() {
     let lines = source_lines();
     assert_eq!(
         files_containing(&lines, "\"thread/inject_items\""),
-        vec!["crates/oxplow-app/src/chat/codex.rs"]
+        vec!["crates/oxplow-app/src/agent_observer/codex.rs"]
     );
 }

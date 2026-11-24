@@ -171,20 +171,22 @@ impl LanguagesHandle {
     }
 
     pub fn swap(&self, languages: Languages) {
+        // The set's lock first, then the globs': `set_excluded` takes them in
+        // the same order, so neither overwrites the other's half.
+        let mut current = self.0.write().unwrap_or_else(|e| e.into_inner());
         let excluded = self.2.read().unwrap_or_else(|e| e.into_inner()).clone();
-        *self.0.write().unwrap_or_else(|e| e.into_inner()) =
-            Arc::new(languages.with_excluded(excluded));
+        *current = Arc::new(languages.with_excluded(excluded));
     }
 
     /// The files a corpus leaves out (the `generated` and `vendored` file
     /// kinds' globs): carried by the set, so a script worker is told them with it.
     pub fn set_excluded(&self, globs: Vec<String>) {
-        let current = self.current();
+        let mut current = self.0.write().unwrap_or_else(|e| e.into_inner());
         if current.excluded_globs() == globs.as_slice() {
             return;
         }
         *self.2.write().unwrap_or_else(|e| e.into_inner()) = globs.clone();
-        *self.0.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(current.with_excluded(globs));
+        *current = Arc::new(current.with_excluded(globs));
     }
 
     /// [`swap`](Self::swap), saying whether what is indexed by the set needs
