@@ -427,6 +427,13 @@ link, a page row that names a file, a tab, the page ☰, the terminal's
 path or URL. Its other groups stay their own submenus. A fixture tests it
 with `when: { item_commands: <url or file URI> }`.
 
+**Custom logic: `about_if`.** What a pattern or glob can't say, the
+command's own script decides: `ui.about_if: <function>` names a function of
+its `entry:` script, called with `{ uri, kind, url?, path? }` for each link
+that passes `accepts`; the command is offered where it returns `True`
+([commands.md](./commands.md) `about_if`). Keep the filters too: each call
+is a script run (about 35 ms), and the filters decide first.
+
 **Tests.** A fixture `when: { action_point: <id | name>, context? }` has
 `expect: { draws: none | button | menu, commands?: [ids] }`; `when: {
 item_commands: <uri> }` has `expect: { commands: [ids] }`

@@ -1704,6 +1704,15 @@ export type CommandUi = {
 	 */
 	about_when?: string | null,
 	/**
+	 *  A function of the command's `entry:` script that decides, for each
+	 *  link of `about`'s kind that passes `about.accepts`, whether the
+	 *  command is offered on it: called with `{ uri, kind, url?, path? }`,
+	 *  offered when it returns `True`. The logic a pattern can't say (a
+	 *  URL of a host the extension's settings name). Needs `about`; the
+	 *  function is checked against the script when the extension loads.
+	 */
+	about_if?: string | null,
+	/**
 	 *  The named action point it joins (`<namespace>/<name>`, declared
 	 *  by an extension's `action_points:`): the point's page places it,
 	 *  and it runs with the point's context as its input. Excludes

@@ -627,6 +627,21 @@ fn command_of(
             )
         }
     };
+    // `about_if` is a function of the command's own script.
+    if let Some(func) = f.ui.as_ref().and_then(|ui| ui.about_if.as_deref()) {
+        let CommandHandler::Script { entry, script } = &handler else {
+            return Err(at_name(format!(
+                "`/ui/about_if`: `{func}` is a function of the command's script: give it `entry:`"
+            )));
+        };
+        let defs = oxplow_script::runtime::top_level_defs(entry, script)
+            .map_err(|e| at_name(format!("entry `{entry}` {e}")))?;
+        if !defs.iter().any(|d| d == func) {
+            return Err(at_name(format!(
+                "`/ui/about_if`: entry `{entry}` defines no `{func}`"
+            )));
+        }
+    }
     if f.examples.len() > MAX_EXAMPLES {
         return Err(at_name(format!(
             "declares {} examples; a command has at most {MAX_EXAMPLES} examples",

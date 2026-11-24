@@ -246,8 +246,145 @@ pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, Stri
         })
         .map(|s| s.id.clone())
         .collect();
+    // `about_if`: the command's own script decides on this link, all of
+    // the menu's at once.
+    let deciding: Vec<(String, String)> = about_ifs(&all, &ids);
+    if !deciding.is_empty() {
+        let input = about_if_input(uri, &resource, &params);
+        let decided = futures::future::join_all(deciding.iter().map(|(id, func)| {
+            about_if_holds(
+                svc,
+                id.clone(),
+                func.clone(),
+                uri.to_string(),
+                input.clone(),
+            )
+        }))
+        .await;
+        let refused: Vec<&String> = deciding
+            .iter()
+            .zip(decided)
+            .filter(|(_, holds)| !holds)
+            .map(|((id, _), _)| id)
+            .collect();
+        ids.retain(|id| !refused.contains(&id));
+    }
     ids.sort();
     Ok(ids)
+}
+
+/// The ids among `ids` whose command has a `ui.about_if`, with its function.
+fn about_ifs(all: &[CommandSpec], ids: &[String]) -> Vec<(String, String)> {
+    all.iter()
+        .filter(|s| ids.contains(&s.id))
+        .filter_map(|s| {
+            let func = s.ui.as_ref()?.about_if.clone()?;
+            Some((s.id.clone(), func))
+        })
+        .collect()
+}
+
+/// What an `about_if` function is called with: the link, its kind, and
+/// the URL (a web link) or the worktree path (a file or directory).
+pub fn about_if_input(
+    uri: &str,
+    resource: &str,
+    params: &BTreeMap<String, String>,
+) -> serde_json::Value {
+    let mut input = serde_json::json!({ "uri": uri.trim(), "kind": resource });
+    if oxplow_domain::commands::is_web_resource(resource) {
+        input["url"] = serde_json::Value::String(uri.trim().to_string());
+    } else if let Some(path) = params.get("path") {
+        input["path"] = serde_json::Value::String(path.clone());
+    }
+    input
+}
+
+/// How long one `about_if` call may run: a menu waits on it.
+const ABOUT_IF_BUDGET: oxplow_domain::run::Budget =
+    oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(1));
+
+/// How long an `about_if` answer is kept for the same command, link and
+/// script: a menu opened again soon asks no script.
+const ABOUT_IF_KEPT: std::time::Duration = std::time::Duration::from_secs(30);
+
+type AboutIfKey = (String, String, u64);
+
+fn about_if_answers(
+) -> &'static std::sync::Mutex<std::collections::HashMap<AboutIfKey, (std::time::Instant, bool)>> {
+    static ANSWERS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<AboutIfKey, (std::time::Instant, bool)>>,
+    > = std::sync::OnceLock::new();
+    ANSWERS.get_or_init(Default::default)
+}
+
+/// The script of command `id` (an enabled extension's `entry:`).
+fn command_script(svc: &Services, id: &str) -> Option<String> {
+    svc.extension_catalog
+        .get(&svc.layout.project_dir)
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.commands.iter())
+        .find(|c| c.name == id)
+        .and_then(|c| match &c.handler {
+            crate::extension::extension_commands::CommandHandler::Script { script, .. } => {
+                Some(script.clone())
+            }
+            _ => None,
+        })
+}
+
+/// Whether command `id`'s `func` returns `True` for the link: one script
+/// run (`ABOUT_IF_BUDGET`). A run that fails, runs too long or answers
+/// anything else is no, and is logged.
+async fn about_if_holds(
+    svc: &Services,
+    id: String,
+    func: String,
+    uri: String,
+    input: serde_json::Value,
+) -> bool {
+    use std::hash::{Hash, Hasher};
+    let Some(script) = command_script(svc, &id) else {
+        return false;
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    script.hash(&mut hasher);
+    let key = (id.clone(), uri, hasher.finish());
+    if let Some((at, holds)) = about_if_answers()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&key).copied())
+    {
+        if at.elapsed() < ABOUT_IF_KEPT {
+            return holds;
+        }
+    }
+    let ran = tokio::task::spawn_blocking(move || {
+        use oxplow_script::workers::{shared, ScriptRun};
+        shared().run(
+            &ABOUT_IF_BUDGET,
+            ScriptRun::starlark_fn(&script, &func, input),
+            None,
+        )
+    })
+    .await;
+    let holds = match ran {
+        Ok(Ok(ran)) => ran.value == serde_json::Value::Bool(true),
+        Ok(Err(e)) => {
+            tracing::warn!(command = %id, error = %e, "a command's about_if failed: not offered");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(command = %id, error = %e, "a command's about_if didn't finish: not offered");
+            false
+        }
+    };
+    if let Ok(mut answers) = about_if_answers().lock() {
+        answers.retain(|_, (at, _)| at.elapsed() < ABOUT_IF_KEPT);
+        answers.insert(key, (std::time::Instant::now(), holds));
+    }
+    holds
 }
 
 #[cfg(test)]

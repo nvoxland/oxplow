@@ -2868,6 +2868,65 @@ commands:
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
+/// A command's `about_if` is a function of its script that decides per
+/// link: called with `{ uri, kind, url }`, offered where it returns True.
+/// One its script doesn't define is refused where the command loads.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_a_commands_about_if_which_links_it_takes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let manifest = |func: &str| {
+        format!(
+            "manifest: 2
+name: acme
+intent:
+  purpose: Opens our own links elsewhere.
+  examples:
+    - {{ name: mine, input: {{ item_commands: \"https://mine.example/a\" }}, expect: the command }}
+commands:
+  - name: mine.open
+    summary: Open one of our links in our tool.
+    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
+    entry: handlers/mine.star
+    examples:
+      - {{ name: happy, input: {{ uri: \"https://mine.example/a\" }}, expect_commands: [] }}
+    ui: {{ label: Our Tool, group: Open In, about: https, about_if: {func} }}
+"
+        )
+    };
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest("is_mine"),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/mine.star",
+        "def transform(x):\n    return {\"commands\": []}\n\ndef is_mine(link):\n    return link[\"kind\"] == \"https\" and link[\"url\"].startswith(\"https://mine.example/\")\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/mine.yaml",
+        "when: { item_commands: \"https://mine.example/a\" }\nexpect: { commands: [acme.mine.open] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/other.yaml",
+        "when: { item_commands: \"https://other.example/a\" }\nexpect: { commands: [] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest("is_theirs"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    let errors = report.error_lines().join("\n");
+    assert!(errors.contains("defines no `is_theirs`"), "{errors}");
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,

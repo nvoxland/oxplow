@@ -523,6 +523,10 @@ markdown link, a page row, a tab.
       about: { resource: https, accepts: { url: "^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$" } }
 ```
 
+When a pattern is not enough, `about_if: <function>` names a function of
+the command's script. It gets the link (`uri`, `kind`, and `url` or `path`)
+and returns `True` where the command is offered.
+
 `v_command_run` lists command history, including reads and refusals. Filter
 on `command` and order by `started_at` and `id` for the latest runs.
 `changed = 1` selects successful runs that recorded their input. The row's URI opens

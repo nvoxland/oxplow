@@ -24,6 +24,12 @@
   stops at `/`). It gets `{ uri }`: the URL, or the file's URI. Test it
   with a fixture `when: { item_commands: "https://…" }` →
   `expect: { commands: [<ids>] }`.
+- **Deciding with your own logic:** `ui.about_if: <function>` names a
+  function of the command's `entry:` script. It gets `{ uri, kind, url?,
+  path? }` for each link that passes `accepts` and returns `True` where
+  the command is offered (`def is_mine(link): return
+  link["url"].startswith("https://mine.example/")`). Each call is a script
+  run, so keep a `url` or `path` filter in front of it.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional

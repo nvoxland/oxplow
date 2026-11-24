@@ -256,6 +256,14 @@ pub struct CommandUi {
     /// extensions load. Absent, every ref of the kind is offered it.
     #[serde(default)]
     pub about_when: Option<String>,
+    /// A function of the command's `entry:` script that decides, for each
+    /// link of `about`'s kind that passes `about.accepts`, whether the
+    /// command is offered on it: called with `{ uri, kind, url?, path? }`,
+    /// offered when it returns `True`. The logic a pattern can't say (a
+    /// URL of a host the extension's settings name). Needs `about`; the
+    /// function is checked against the script when the extension loads.
+    #[serde(default)]
+    pub about_if: Option<String>,
     /// The named action point it joins (`<namespace>/<name>`, declared
     /// by an extension's `action_points:`): the point's page places it,
     /// and it runs with the point's context as its input. Excludes
@@ -535,6 +543,27 @@ impl CommandUi {
                     format!(
                         "`{column}` isn't a column name: name one column of the dataset that is \
                          truthy where the command is offered (no `!`, no expression)"
+                    ),
+                );
+            }
+        }
+        if let Some(func) = &self.about_if {
+            if self.about.is_none() {
+                return bad(
+                    "about_if",
+                    "`about_if` decides on what the command is about: give it an `about`".into(),
+                );
+            }
+            let mut chars = func.chars();
+            let name = chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !name {
+                return bad(
+                    "about_if",
+                    format!(
+                        "`{func}` isn't a function name: name a function of the command's script"
                     ),
                 );
             }
@@ -1472,6 +1501,25 @@ mod tests {
             assert_eq!(f, field, "{bad}");
             assert!(message.contains(says), "{bad}: {message}");
         }
+    }
+
+    /// `about_if` names a function of the command's script that decides,
+    /// per link, whether it is offered: it needs an `about`, and is a name.
+    #[test]
+    fn about_if_is_a_function_name_with_an_about() {
+        assert_eq!(
+            ui(json!({ "label": "PR", "about": "https", "about_if": "is_pr" })).problem(),
+            None
+        );
+        let (field, message) = ui(json!({ "label": "PR", "about_if": "is_pr" }))
+            .problem()
+            .expect("no about");
+        assert_eq!(field, "/ui/about_if");
+        assert!(message.contains("`about`"), "{message}");
+        let (field, _) = ui(json!({ "label": "PR", "about": "https", "about_if": "is pr()" }))
+            .problem()
+            .expect("not a name");
+        assert_eq!(field, "/ui/about_if");
     }
 
     /// What a window would meet only by its not working is refused when

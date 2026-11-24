@@ -2249,6 +2249,14 @@
           ],
           "default": null
         },
+        "about_if": {
+          "description": "A function of the command's `entry:` script that decides, for each\nlink of `about`'s kind that passes `about.accepts`, whether the\ncommand is offered on it: called with `{ uri, kind, url?, path? }`,\noffered when it returns `True`. The logic a pattern can't say (a\nURL of a host the extension's settings name). Needs `about`; the\nfunction is checked against the script when the extension loads.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "at": {
           "description": "The named action point it joins (`<namespace>/<name>`, declared\nby an extension's `action_points:`): the point's page places it,\nand it runs with the point's context as its input. Excludes\n`about` (an item command). Its `input` binds the context's keys\n(`{ parent: \"{{context.parent}}\" }`, a key the page left out stays\nunset); without one the input is the whole context.",
           "type": [
