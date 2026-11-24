@@ -1,8 +1,8 @@
-# Extensions: Custom components and Explore Data
+# Extensions: Custom components
 
-Custom components (the sandboxed frame, protocol, testing a component) and the Explore Data app. Part of the extensions docs; the terms and the index of docs are in [extensions.md](./extensions.md).
+Custom components (the sandboxed frame, protocol, and testing a component). Part of the extensions docs; the terms and the index of docs are in [extensions.md](./extensions.md).
 
-## What works today: Explore Data
+## Shipped components
 
 - **The Work board: oxplow-bundled's built component** (`pages/work.yaml`,
   `custom_components: board`, source `extensions/oxplow-bundled/src/board/`,
@@ -26,63 +26,13 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
   context menu (it draws `.ox-menu`).
 - **Foundation's only custom component** is the hand-written
   `integrations`.
-- **Explore Data: oxplow-bundled's data app.** Deliberately simple,
-  and the proof that an extension ships a data app: a **page with a
-  component node** (`pages/explore-data.yaml`: `view: { component: { id:
-  explore-data } }`, the component declared under `custom_components:`,
-  its source in `.oxplow/extensions/oxplow-bundled-todo/src/explore-data/`, built
-  into `dist/` by bundled's `package.json` with `bun build`, no
-  dependencies; the manifest's `build:` runs it). It is person-facing UI,
-  so it is bundled's: foundation's dataset, measure, dimension and
-  collector pages do not link to it, and with bundled off there is no
-  Explore Data. Core draws what the
-  kit draws; the component holds only the editor and the pickers.
-  - **The catalog** is the page's **rail**: a `rail:` node in the same
-    page file (a `list` over `v_dataset`, oxplow's own first, its `view`
-    column selecting the `dataset` param, the picked row emphasized). A
-    pick pushes `#dataset=` (Back un-picks) and the component hears it.
-  - **The component** (`main.ts`, its pure half `dataset.ts`, tested from
-    the desktop as `viz/exploreDataset.test.ts`): the picked dataset's
-    documented columns (`v_field`) and lineage (`v_dataset_lineage`:
-    the datasets it reads, links that pick them, the tables it reads, the
-    datasets that read it); the SQL box (a pick writes `SELECT * … LIMIT
-    50`; any read-only query, metrics included — `SELECT bucket,
-    MEASURE('<key>') FROM metric_grid('week')` — Cmd/Ctrl+Enter runs
-    it); **Show as** (`table`, `list`, `number`, `markdown`, `bar`,
-    `line`, `treemap`), a chart's columns picked from the result
-    (`chartDefaults`, then a select per role); **Chart a metric** seeds
-    the explorer's metric query (`metricTemplate`: `metricSeriesSql` as a
-    line) and, while the SQL is still it, **Slice By** regenerates it with
-    a dimension (`v_dimension`, `sliceTemplate`); edited SQL is never
-    rewritten. Its view is the tab's `#` (`dataset`, `sql`, `viz`, `chart`,
-    `template`), the unrun draft its history state; it ignores the echoes
-    of its own writes, so only a real move (Back) redraws. "Ask your agent
-    to build one…" invokes `oxplow.page.draft_with_agent`, the one command
-    it declares.
-  - **The result** is core's: the component hands the page an inline
-    page (`showView`, protocol 12: its query as one `sql` loader, its viz
-    over it — `specOf` in `src/explore-data/dataset.ts`), the page opens it
-    (`open_page { specYaml }`) and draws it under the frame with
-    `PageTree` (`pages/PageComponent.tsx`), live, with **Save
-    as Page** (`pages/SaveViewForm.tsx`: `oxplow.extension.write_page {
-    extension, page, spec, deploy: true }`, then opens the page; a saved
-    page pins to a dashboard as an embed). A refused spec answers the
-    component `INVALID` with its field, and it shows the reason under the
-    SQL box.
-  - **No raw tables.** The React page's Raw tables switch read physical
-    tables over IPC; a component reads datasets only, as every page does.
-    Raw reads stay the agent's `oxplow_query_sql`.
-  - **What an agent shows.** An agent answers with a page rather than
-    pasting rows: MCP **`oxplow_show_page { page | spec, params? }`** runs
-    `oxplow.page.show`. A `spec` is an inline page of the agent's own
-    (read-only, no actions or forms). It opens beside the conversation
-    as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) and the call returns the page's
-    text. The person saves it with **Save as knowledge page** or **Save as Page**
-    (`oxplow.extension.write_page`). Nothing else is stored: there are no
-    thread answers and no Keep This. See pages-and-tabs.md "Showing a
-    page".
-  - The launcher's **Data** category holds Explore Data, Metrics
-    and Dashboards.
+- **Git History** includes Bundled's graph component as an alternate view
+  of the commit results. The same page supplies the history filters and data.
+
+A component can send an inline page to core with `showView`. Core draws
+its loaders and nodes below the frame, and **Save as Page** writes that
+specification to an extension. This is the same page kit used for views
+opened from an agent answer (see [Showing a page](./pages-and-tabs.md#showing-a-page)).
 
 ## Custom components
 
@@ -234,7 +184,7 @@ component's `commands` at that version, as **`Actor::Component {
 component: id, on_behalf_of: Human }`** — the component acting for the
 person, so every policy applies as if they ran it. It is audited as kind
 `component` with the component's contribution ref as source
-(`command.executed@5`). The input is literal (no placeholders). A command
+(`command.executed@6`). The input is literal (no placeholders). A command
 that asks comes back `NEEDS_CONFIRMATION` and the **host** asks, never
 the frame. A component acts for a person, so it never proposes.
 `run_component_sql` and `component_form` are the same kind of call. All

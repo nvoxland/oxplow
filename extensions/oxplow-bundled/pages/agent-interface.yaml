@@ -1,0 +1,102 @@
+title: Agent Interface
+description: See which Oxplow tools and commands agents use, where calls fail, and whether advisories reach their audience.
+icon: activity
+category: Activity
+keywords: MCP harness Codex Claude OpenCode command errors denied hints advisories
+params:
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+- name: harness
+  type: choice
+  role: filter
+  label: Harness
+  default: all
+  options_from: interface-harnesses
+see_also:
+- { page: oxplow/usage, params: { range: { param: range } } }
+loaders:
+  interface_tool_calls:
+    sql: |
+      SELECT substr(t.tool, length('mcp__oxplow__') + 1) AS tool,
+             COALESCE(s.harness, 'unknown') AS harness,
+             count(*) AS calls,
+             count(*) FILTER (WHERE t.state = 'finished' AND t.ok = 0) AS failed,
+             count(*) FILTER (WHERE t.state = 'denied') AS denied,
+             uri_view(uri('oxplow/page', 'page', 'oxplow/interface-tool-calls',
+                          'tool', substr(t.tool, length('mcp__oxplow__') + 1)),
+                      'range', :range, 'harness', COALESCE(s.harness, 'unknown')) AS calls_uri
+      FROM v_tool_call t LEFT JOIN v_agent_session s ON s.id = t.agent_session_id
+      WHERE t.kind = 'mcp' AND t.tool GLOB 'mcp__oxplow__*'
+        AND (:range_from IS NULL OR t.at >= :range_from)
+        AND (:range_to IS NULL OR t.at <= :range_to)
+        AND (:harness = 'all' OR COALESCE(s.harness, 'unknown') = :harness)
+      GROUP BY t.tool, COALESCE(s.harness, 'unknown')
+      ORDER BY calls DESC, tool, harness
+  interface_commands:
+    sql: |
+      SELECT r.command,
+             uri_view(uri('oxplow/page', 'page', 'oxplow/interface-command-errors', 'command', r.command),
+                      'range', :range, 'harness', :harness) AS errors_uri,
+             count(*) AS runs,
+             count(*) FILTER (WHERE r.outcome = 'invalid') AS invalid,
+             count(*) FILTER (WHERE r.outcome = 'denied') AS denied,
+             count(*) FILTER (WHERE r.outcome = 'failed') AS failed,
+             count(*) FILTER (WHERE r.outcome <> 'ok') AS not_ok,
+             1.0 * count(*) FILTER (WHERE r.outcome <> 'ok') / count(*) AS non_success_rate
+      FROM v_command_run r LEFT JOIN v_agent_session s ON s.id = r.session_id
+      WHERE r.actor_kind = 'agent' AND r.outcome IS NOT NULL
+        AND (:range_from IS NULL OR r.started_at >= :range_from)
+        AND (:range_to IS NULL OR r.started_at <= :range_to)
+        AND (:harness = 'all' OR COALESCE(s.harness, 'unknown') = :harness)
+      GROUP BY r.command
+      ORDER BY not_ok DESC, runs DESC, r.command
+  interface_hints:
+    sql: |
+      SELECT hint, sum(evaluated) AS evaluated, sum(fired) AS fired,
+             sum(delivered) AS delivered, sum(held) AS held, sum(muted) AS muted,
+             max(last_evaluated_at) AS last_evaluated_at
+      FROM v_hint_stat
+      GROUP BY hint
+      ORDER BY fired = 0 DESC, evaluated DESC, hint
+view:
+  stack:
+  - id: interface-tool-calls
+    title: Oxplow MCP Tool Calls
+    from: interface_tool_calls
+    viz: table
+    columns:
+    - { key: tool, label: Tool, link: { kind: page, from: calls_uri } }
+    - { key: harness, label: Harness }
+    - { key: calls, label: Calls, format: integer }
+    - { key: failed, label: Failed, format: integer }
+    - { key: denied, label: Denied, format: integer }
+    empty: No Oxplow MCP calls match these filters.
+  - id: interface-commands
+    title: Agent Command Runs
+    from: interface_commands
+    viz: table
+    columns:
+    - { key: command, label: Command, link: { kind: page, from: errors_uri } }
+    - { key: runs, label: Completed, format: integer }
+    - { key: invalid, label: Invalid, format: integer }
+    - { key: denied, label: Denied, format: integer }
+    - { key: failed, label: Failed, format: integer }
+    - { key: non_success_rate, label: Not OK, format: percent }
+    empty: No completed agent command runs match these filters.
+  - id: interface-hints
+    title: All-time Hints
+    from: interface_hints
+    viz: table
+    columns:
+    - { key: hint, label: Hint }
+    - { key: evaluated, label: Evaluated, format: integer }
+    - { key: fired, label: Fired, format: integer }
+    - { key: delivered, label: Delivered, format: integer }
+    - { key: held, label: Waiting, format: integer }
+    - { key: muted, label: Muted scopes, format: integer }
+    - { key: last_evaluated_at, label: Last evaluated, format: datetime }
+    empty: No hints have been evaluated.

@@ -134,7 +134,7 @@ export function parseRemoteInput(input: string): { base: string; token: string |
   return { base, token };
 }
 
-function readRemoteEndpoint(): { base: string | null; token: string | null } {
+function readRemoteEndpoint(): { base: string | null; token: string | null; storedBase: string | null } {
   let stored: Endpoint = {};
   let fragment: string | null = null;
   try {
@@ -157,7 +157,24 @@ function readRemoteEndpoint(): { base: string | null; token: string | null } {
   return {
     base: resolveBase({ stored: stored.base, injected: sources.injected.base, env: sources.env.base }),
     token: resolveToken(sources),
+    storedBase: stored.base ?? null,
   };
+}
+
+/// Whether this window's files are on this machine: the shell starts
+/// its daemons here, so a project window on the daemon its shell injected
+/// (no manual connect over it) has them, and so do the launcher's
+/// projects. A plain browser, or a manual connect, may drive a daemon
+/// elsewhere. Pure; exported for tests.
+export function filesLocalFrom(sources: {
+  shell: boolean;
+  kind: string | null;
+  stored: string | null;
+  injected: string | null;
+}): boolean {
+  if (!sources.shell) return false;
+  if (sources.kind === "launcher") return true;
+  return sources.kind === "project" && cleanBase(sources.stored) === null && cleanBase(sources.injected) !== null;
 }
 
 const endpoint = readRemoteEndpoint();
@@ -537,6 +554,19 @@ export function shellAvailable(): boolean {
     return false;
   }
 }
+
+/// Whether this window's files are on this machine (`filesLocalFrom`):
+/// Open In ▸ Reveal and Default App need them.
+/// Read once, as the base is (`endpoint`): another window's connect or
+/// disconnect changes the storage, not the daemon this one drives.
+export function filesAreLocal(): boolean {
+  if (localFilesAtLoad === null) {
+    const ctx = readWindowContext();
+    localFilesAtLoad = filesLocalFrom({ shell: shellAvailable(), kind: ctx?.kind ?? null, stored: endpoint.storedBase, injected: ctx?.base ?? null });
+  }
+  return localFilesAtLoad;
+}
+let localFilesAtLoad: boolean | null = null;
 
 /// Tauri-listen-compatible entry point. In remote mode the three
 /// daemon-multiplexed channels read from the shared WebSocket; any

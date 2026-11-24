@@ -395,6 +395,17 @@
       },
       "default": null
     },
+    "links": {
+      "description": "Text that is a link: a pattern and the URI a match links to, which\nthe terminal and markdown draw as a link.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/LinkRuleFile"
+      },
+      "default": null
+    },
     "test_conventions": {
       "description": "What makes a file, container or function a test, and what counts as\nan assertion or a skip.",
       "type": [
@@ -2249,6 +2260,14 @@
           ],
           "default": null
         },
+        "about_if": {
+          "description": "A function of the command's `entry:` script that decides, for each\nlink of `about`'s kind that passes `about.accepts`, whether the\ncommand is offered on it: called with `{ uri, kind, url?, path? }`,\noffered when it returns `True`. The logic a pattern can't say (a\nURL of a host the extension's settings name). Needs `about`; the\nfunction is checked against the script when the extension loads.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "at": {
           "description": "The named action point it joins (`<namespace>/<name>`, declared\nby an extension's `action_points:`): the point's page places it,\nand it runs with the point's context as its input. Excludes\n`about` (an item command). Its `input` binds the context's keys\n(`{ parent: \"{{context.parent}}\" }`, a key the page left out stays\nunset); without one the input is the whole context.",
           "type": [
@@ -2382,12 +2401,32 @@
             }
           ],
           "default": null
+        },
+        "url": {
+          "description": "About a web link (`about: https` / `http`): the URLs it is offered\non, a pattern over the whole URL in the param-pattern dialect\n(anchored `^…$`; Rust and the desktop read it alike).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "path": {
+          "description": "About a file or a directory (`oxplow/file`, `oxplow/dir`): the\nworktree paths it is offered on, a glob or a list of them\n(`**/*.ipynb`; `*` stops at `/`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StoreFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
     },
     "StoreFilter": {
-      "description": "One store id or a list of them.",
+      "description": "One store id or a list of them (and one glob or a list, for `path`).",
       "anyOf": [
         {
           "type": "string"
@@ -2998,8 +3037,8 @@
           ],
           "default": null
         },
-        "scope": {
-          "$ref": "#/definitions/PanelScope"
+        "data_scope": {
+          "$ref": "#/definitions/PanelDataScope"
         },
         "body": {
           "type": "string"
@@ -3042,12 +3081,12 @@
       "required": [
         "id",
         "title",
-        "scope",
+        "data_scope",
         "body"
       ]
     },
-    "PanelScope": {
-      "description": "What a left-nav panel is bound to: the project, the current stream, or\nthe current thread — which of `stream_id` / `thread_id` its viz nodes get.",
+    "PanelDataScope": {
+      "description": "Which data a left-nav panel shows (`data_scope`): the project's, the\ncurrent stream's, or the current thread's — which of `stream_id` /\n`thread_id` its pages get. Not where it shows: that is the person's\nlayout (`VisibilityScope`).",
       "type": "string",
       "enum": [
         "project",
@@ -3279,6 +3318,21 @@
             "type": "string"
           },
           "default": []
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "after_collection": {
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false,
@@ -3356,6 +3410,26 @@
           "type": "string",
           "const": "person"
         }
+      ]
+    },
+    "ConfigCondition": {
+      "description": "`when: { config: <pointer>, in: [<values>] }`: a contribution that is\nthere only while a setting of its extension's own configuration is one\nof `in`. The one condition type every contribution kind that is offered\nby a setting shares.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "A JSON pointer into the extension's own configuration, naming a\nscalar key of `configuration.schema` (`/tasks/workflow`).",
+          "type": "string"
+        },
+        "in": {
+          "description": "The values for which it holds: of the key's type, and of its `enum`\nwhen it has one.",
+          "type": "array",
+          "items": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "config",
+        "in"
       ]
     },
     "EventTypesFile": {
@@ -3641,26 +3715,6 @@
       "required": [
         "capability",
         "id"
-      ]
-    },
-    "ConfigCondition": {
-      "description": "`when: { config: <pointer>, in: [<values>] }`: a contribution that is\nthere only while a setting of its extension's own configuration is one\nof `in`. The one condition type every contribution kind that is offered\nby a setting shares.",
-      "type": "object",
-      "properties": {
-        "config": {
-          "description": "A JSON pointer into the extension's own configuration, naming a\nscalar key of `configuration.schema` (`/tasks/workflow`).",
-          "type": "string"
-        },
-        "in": {
-          "description": "The values for which it holds: of the key's type, and of its `enum`\nwhen it has one.",
-          "type": "array",
-          "items": true
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "config",
-        "in"
       ]
     },
     "SkillFile": {
@@ -4135,6 +4189,30 @@
       "required": [
         "kind",
         "globs"
+      ]
+    },
+    "LinkRuleFile": {
+      "description": "A `links:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Its id within the extension (lowercase letters, digits, dashes).",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "What text is a link: a param pattern without `^…$` (characters,\nclasses, `\\d`, `\\w`, escaped punctuation, each with one quantifier;\nno `.`, groups or `|`), matched as a whole word.",
+          "type": "string"
+        },
+        "uri": {
+          "description": "The URI a match links to: `https://…` or an oxplow URI, with\n`{{match}}` where the matched text goes (percent-encoded).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pattern",
+        "uri"
       ]
     },
     "TestConventionFile": {

@@ -9,6 +9,7 @@
 
 pub mod advisories;
 pub mod agent_context;
+mod agent_overhead;
 pub mod agent_path;
 pub mod agent_policy;
 pub mod agent_prompt;
@@ -219,6 +220,8 @@ pub enum AppInitError {
     Config(#[from] oxplow_config::ConfigError),
     #[error("db: {0}")]
     Db(#[from] oxplow_db::DbInitError),
+    #[error("contribution run recovery: {0}")]
+    ContributionRunRecovery(oxplow_domain::DomainError),
     #[error("session: {0}")]
     Session(#[from] oxplow_session::SessionError),
     #[error("io: {0}")]
@@ -514,7 +517,7 @@ pub struct Services {
     /// Loaded extensions per worktree root, reloaded when a file under
     /// `.oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension::extension_catalog::ExtensionCatalog>,
-    pub jobs: Arc<extension::extension_jobs::ExtensionJobs>,
+    pub jobs: Arc<extension::job_runs::JobRuns>,
     pub extension_secrets: Arc<extension::extension_secrets::ExtensionSecrets>,
     /// Shared publication and reader boundary. Every service that reads a
     /// generation holds it; boot activates the first one (a repairable
@@ -884,6 +887,7 @@ impl Services {
             collection: self.collection.clone(),
             capabilities: self.capabilities.clone(),
             config: self.config.clone(),
+            global_config_dir: self.global_config_dir.clone(),
         }
     }
 
@@ -917,6 +921,8 @@ impl Services {
         info!(project = %layout.project_dir.display(), "config loaded");
 
         let db = Database::open(&layout.state_db_path)?;
+        db.transaction_now(|tx| oxplow_db::contribution_run_store::interrupt_unfinished_tx(tx))
+            .map_err(AppInitError::ContributionRunRecovery)?;
         let machine = MachineEnv {
             secrets,
             config_dir: oxplow_config::global_config_dir(),
@@ -1266,8 +1272,8 @@ impl Services {
             machine.secrets.clone(),
             sql.clone(),
         ));
-        let jobs = Arc::new(extension::extension_jobs::ExtensionJobs::new(
-            extension::extension_jobs::JobsDependencies {
+        let jobs = Arc::new(extension::job_runs::JobRuns::new(
+            extension::job_runs::JobsDependencies {
                 db: db.clone(),
                 catalog: extension_catalog.clone(),
                 root: layout.project_dir.clone(),
@@ -1675,7 +1681,7 @@ impl Services {
         for op in commands::bookmark::ops()
             .into_iter()
             .chain(commands::context_basket::ops())
-            .chain(commands::extension_jobs::ops(jobs.clone()))
+            .chain(commands::job_runs::ops(jobs.clone()))
             .chain(commands::extension_services::ops(
                 extension_services.clone(),
                 collector_runner.clone(),
@@ -1764,9 +1770,18 @@ impl Services {
             collection: collection.clone(),
             capabilities: capabilities.clone(),
             config: config_arc.clone(),
+            global_config_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
         };
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisory_deps.clone(),
+            after_collection: false,
+        }));
+        event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
+            deps: advisory_deps.clone(),
+            after_collection: true,
         }));
         // Hints a turn's end raises, for the agent's next prompt.
         event_pump.register_async(Arc::new(advisories::TurnEndAdvisories {
@@ -1998,7 +2013,8 @@ impl Services {
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
     /// derived state (the snapshot workspace filter, mirroring
-    /// `set_generated`), and emit `ConfigChanged`. Called by the config
+    /// `set_generated`; the project's file kinds when `oxplow.files.kinds`
+    /// moved), and emit `ConfigChanged`. Called by the config
     /// fs-watcher when the file changes out-of-band — e.g. the agent
     /// running `/oxplow:configure` writes a `testing:` block — so the
     /// edit goes live without a process restart. A full reload from disk
@@ -2017,9 +2033,26 @@ impl Services {
             return Ok(());
         }
         self.snapshot_captures.set_generated(&fresh.generated);
-        {
+        let kinds_moved = {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
+            let moved = guard.files.kinds != fresh.files.kinds;
             *guard = fresh;
+            moved
+        };
+        // No command wrote the file, so no `config.changed` restates the
+        // project's file kinds (`v_file_kind_rule`, what a corpus leaves
+        // out): the reload does, as it re-applies the snapshot filter.
+        if kinds_moved {
+            if let (Ok(svc), Ok(runtime)) = (
+                self.services_slot.get(),
+                tokio::runtime::Handle::try_current(),
+            ) {
+                runtime.spawn(async move {
+                    if let Err(error) = config_reactors::restate_file_kinds(&svc).await {
+                        tracing::warn!(%error, "restating the project's file kinds failed");
+                    }
+                });
+            }
         }
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
@@ -2091,6 +2124,49 @@ mod tests {
         .unwrap();
         assert!(services.layout.state_dir.exists());
         assert!(services.layout.state_db_path.exists());
+    }
+
+    #[tokio::test]
+    async fn boot_interrupts_an_unfinished_contribution_run() {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        use oxplow_domain::run::{ContributionRef, Mode, RunContext};
+
+        let project = tempdir().unwrap();
+        init_git(project.path());
+        let layout = AppLayout::for_project(project.path());
+        ensure_state_dir(&layout.state_dir).unwrap();
+        {
+            let db = Database::open(&layout.state_db_path).unwrap();
+            let run = RunContext::contribution(
+                ContributionRef {
+                    id: ContributionId::new("example", ContributionKind::Implementation, "check"),
+                    extension: "example".into(),
+                    version: None,
+                    generation: None,
+                    deployment: None,
+                },
+                oxplow_domain::Actor::System,
+                Mode::External,
+            );
+            db.transaction_now(|tx| {
+                oxplow_db::contribution_run_store::record_unlogged_tx(tx, &run, None, None)
+            })
+            .unwrap();
+        }
+        let services = Services::boot(
+            layout,
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+        .unwrap();
+        let outcome: String = services
+            .db
+            .read(|conn| {
+                conn.query_row("SELECT outcome FROM contribution_run", [], |row| row.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(outcome, "interrupted");
     }
 
     #[tokio::test]

@@ -31,7 +31,7 @@
   (`page-format.md` "Renderers"). A page has no launcher entry unless it has
   a `category`; its id carries its params, `label` names its tab.
 
-- **Panels** put a page in the left nav (`panels: [{ id, title, icon?, scope,
+- **Panels** put a page in the left nav (`panels: [{ id, title, icon?, data_scope,
   body, badge?, open?, collapsed?, count?, dock? }]`): `body` is a part (or a page) drawn
   compact; `badge` is a part (or a page) with an `alert` (or `badge:`), giving the
   panel's count and listing in the Alerts panel while it fires; `collapsed`

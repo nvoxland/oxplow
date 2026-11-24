@@ -8,7 +8,8 @@
 /// the terminal can't read: with nothing selected the menu says how to make
 /// the terminal's own (Option+drag on macOS, `macOptionClickForcesSelection`;
 /// Shift+drag elsewhere, xterm's own) and holds only Paste: Copy and Add
-/// Selection to Context come with that selection.
+/// Selection to Context come with that selection. Over a link (a path or a
+/// web URL) the link's own items come first: Open In ▸ and its Copy.
 import type { MenuItem } from "../menu.js";
 
 export interface TerminalMenuSources {
@@ -22,12 +23,20 @@ export interface TerminalMenuSources {
   mac?: boolean;
   /** The terminal's URI: what Add to Context names without a selection. */
   uri: string;
+  /** The items of the link under the pointer (Open In ▸, Copy): first. */
+  link?: MenuItem[];
   copy(text: string): void;
   paste(): void;
   add(what: { uri: string; text?: string; around?: string }): void;
 }
 
-export function terminalMenuItems({ selection, around, mouseCaptured, mac, uri, copy, paste, add }: TerminalMenuSources): MenuItem[] {
+export function terminalMenuItems(sources: TerminalMenuSources): MenuItem[] {
+  const own = ownItems(sources);
+  const link = sources.link ?? [];
+  return link.length > 0 ? [...link, { id: "link-separator", label: "", enabled: false, separator: true }, ...own] : own;
+}
+
+function ownItems({ selection, around, mouseCaptured, mac, uri, copy, paste, add }: TerminalMenuSources): MenuItem[] {
   const selected = selection.length > 0;
   if (mouseCaptured && !selected) {
     return [

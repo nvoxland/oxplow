@@ -66,9 +66,9 @@ pages are THE shell.
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. **`useTabEditing({ dirty, save })`** tells the tab its page holds unsaved edits and how to save them (`setEditing`, on the current page only): `App.tsx` keeps one setter per tab (`editingSetterFor`) and draws `CenterTab.dirty` as a ● before the label, publishes `pageDirty` (the File → Save `when`), runs the shown tab's `save` from `oxplow.editor.save` when the page isn't a file, and keeps a dirty tab from the cap's `evictions`. The editor (`FilePage`) and the `markdown` viz's editor call it. |
 | `apps/desktop/src/viz/EditorViz.tsx` | The `editor` viz that draws the working tree's file (foundation's `editor` page): its buffer from `editor/openFiles.ts`, `EditorPane` over it, `useTabEditing` for its ● / Save / Find. A renderer's page (`PageHost` with `renders`) shows the resource's backlinks and outbound links in the nav bar (`useBacklinks`), so knowledge pages, tasks and commits that reference the file are listed there. `.context/editor-and-monaco.md` "The editor viz". |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it; `ref` / `to` is a `TabRef` or a ref string (opened through `openRef`). Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
-| `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (every one an extension's — Go To from `oxplow-foundation`, the rest from the holder `oxplow-bundled-todo` until each moves). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the dock's Alerts panel, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** (MIME `application/x-oxplow-rail-section`, the layout — order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` page (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "Nothing waiting", …) when it has no content. Passive — never auto-opens tabs. **A window narrower than 800 px hides the rail** (`useNarrowWindow` in `windowWidth.ts`) so the page keeps the room; it returns when the window grows. While narrow, `NarrowRail` (`RailHud/NarrowRail.tsx`) puts a small "Show the rail" button at the page's left edge; it shows the rail as an overlay above the page (the page keeps its width). Escape, a click outside, or opening a page from the rail hides it; widening the window resets it. There is no manual rail collapse otherwise. Go To is the `oxplow-foundation` panel `go-to` (bookmarks, then the five most recent or most visited pages — one line each, a most-visited page's count after its title; every row has an icon: a declared page that names none, or a kind nothing knows, draws the generic page's, `DEFAULT_PAGE_ICON`). |
+| `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (every one an extension's — for example, Go To from Foundation and Work from Bundled). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the dock's Alerts panel, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** and between the groups (this thread's, this stream's, the project's; MIME `application/x-oxplow-rail-section`, the layout — group, order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` page (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "Nothing waiting", …) when it has no content. Passive — never auto-opens tabs. **A window narrower than 800 px hides the rail** (`useNarrowWindow` in `windowWidth.ts`) so the page keeps the room; it returns when the window grows. While narrow, `NarrowRail` (`RailHud/NarrowRail.tsx`) puts a small "Show the rail" button at the page's left edge; it shows the rail as an overlay above the page (the page keeps its width). Escape, a click outside, or opening a page from the rail hides it; widening the window resets it. There is no manual rail collapse otherwise. Go To is the `oxplow-foundation` panel `go-to` (bookmarks, then the five most recent or most visited pages — one line each, a most-visited page's count after its title; every row has an icon: a declared page that names none draws the generic page's, `DEFAULT_PAGE_ICON` (a window); a kind nothing knows draws `MISSING_PAGE_ICON` (a dashed square)). |
 | `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator** (each stream's open threads — `get_thread_state` leaves closed ones out; they're on the Closed Threads page): a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`) — a stream is a tab in the guide line's grey (`--text-muted`) with dark text (`--text-on-stream-tile`), coming out of the window's left edge and rounded on the right only, with its threads as tabs under it, all flush with the left edge and butted up against each other, each filling its shorter row and stopping short of the right (in the centre tab strip's header tint, `--panel-header-bg` over `--surface-card`, like a regular tab; the selected thread's accent bar is 3px, as thick as a selected centre tab's underline and in the same `--accent`, in the dark gap against its tab's right; a marked thread shows its mark as a corner fold on its top-left in `var(--thread-mark-<colour>)` (`navigator-thread-mark`, title "Marked <colour>"), not an outline; stacked tabs are set apart by a 1px divider along each one's bottom but the last's, in the guide line's grey (`--text-muted`), so none falls under the stream's tab, and the strip's column is `--surface-app`); a grey guide line runs down the column's right, flush with the stream tab's right edge, from under the stream's tab, with a tick from each thread's tab into it, ending at the last, each thread's agent status dot a node where the tick meets the tab; a stack's corners are rounded only where no tab sits next to it (the stream's top, the last tab's bottom), the rest flat; the strip draws no line against the HUD rail; in the expanded panel, on the strip's same dark (`--surface-app`), a thread's row keeps the strip's tab for its abbreviation, squared off, then the same 5px gap (`navigator-tab-gap`, `TAB_GAP`, which the line between stacked tabs runs through), then a second tab of the same shape for the title (`navigator-tab-title`; `IconColumn wide`, `IconCell label`), so a selected thread has a bar after each and the row's end looks like the strip's; a stream's row stays one tab, curved only at the row's end, with a thin dark line in the middle of the thread rows' gap; the panel's rows draw the same icon column (`IconColumn`) so the two line up; clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else.** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`), a stream glyph (which also switches to that stream, then shows its threads), or the already-selected thread's glyph (selecting it again would do nothing). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it. Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) — and each strip glyph, with the same menu — opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard), headed by the stream's or thread's name (`context-menu-header`); Rename and Add thread open the panel for their inline field. **Thread menu:** **"Mark with…"** (`menu-item-thread.mark`) opens a submenu headed by the line "A colour on the thread's tab, for grouping threads your way. It changes nothing else." (`context-submenu-header`, the generic `MenuItem.submenuHeader`) and lists `amber`, `red`, `green`, `blue`, `violet` (each with a colour chip, `MenuItem.swatch`) and None as `menu-item-thread.mark.<colour|none>`, the current one checked; picking one runs `oxplow.thread.mark` (via `onMarkThread` → `App.handleMarkThread`). Then Rename / Settings / Close. A mark only groups threads the person's way; every open thread of a stream shares its worktree. |
-| `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `oxplow.bookmark.set` / `oxplow.bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To page's bookmark row actions re-scope and remove. **The native menu bar's Go menu** (macOS; after File and Edit) is what the Go To pane shows: its groups (Bookmarks, then History or Most visited, as the pane's toggle is), each under a disabled heading, a separator between, or one disabled "Nothing yet — star a page or open one". `GoMenuFeed` (`components/Panels/GoMenuFeed.tsx`, inside `PanelRunsProvider`) reads the `go-to` panel's body run (`menuBar.ts` `goRowsOf`: the loader whose rows have `grp`, `title`, `uri`) and hands the rows to `App`, which passes them to `buildNativeMenuSnapshots` (`goMenuItems`), so the menu changes as the pane does; an item's id is `go.open:<uri>`, and the `menu:command` handler opens it through `handleOpenPage`. The in-window `Menubar` (non-Mac) has no Go menu. |
+| `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest visibility scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `oxplow.bookmark.set` / `oxplow.bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To page's bookmark row actions re-scope and remove. **The native menu bar's Go menu** (macOS; after File and Edit) is what the Go To pane shows: its groups (Bookmarks, then History or Most visited, as the pane's toggle is), each under a disabled heading, a separator between, or one disabled "Nothing yet — star a page or open one". `GoMenuFeed` (`components/Panels/GoMenuFeed.tsx`, inside `PanelRunsProvider`) reads the `go-to` panel's body run (`menuBar.ts` `goRowsOf`: the loader whose rows have `grp`, `title`, `uri`) and hands the rows to `App`, which passes them to `buildNativeMenuSnapshots` (`goMenuItems`), so the menu changes as the pane does; an item's id is `go.open:<uri>`, and the `menu:command` handler opens it through `handleOpenPage`. The in-window `Menubar` (non-Mac) has no Go menu. |
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_resource` writer in the backend instead. |
 | `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) ; every launcher page is a declared page (`components/extensionLauncher.ts`). |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
@@ -92,6 +92,10 @@ browser regression checks usable terminal height before and after reload.
 
 A URI names a thing; a **page** is one **renderer** of it. A tab's id is
 the URI it shows, and nothing in the desktop keeps a list of page kinds.
+
+Foundation's `contribution-run` renderer reads the run ID from the
+`oxplow/contribution_run` URI and embeds `oxplow/run-details`. The same
+part takes a named `run_id` when embedded in a page or expanded from a row.
 
 **Which page draws a URI** (the daemon decides which pages *can*; the
 window picks among them):
@@ -438,8 +442,16 @@ then opens that page; the extension defaults to app preference
 `pages.extension`, else `my-pages`, and a successful save remembers it.
 Title edits preserve the YAML document's comments and key order.
 Refused writes keep the form and source for retry. A component's shown
-inline page (Explore Data) offers Save as Page for any valid node tree,
+inline page offers Save as Page for any valid node tree,
 including inline rows and multiple loaders.
+
+**Show as** on a page table renders the same loaded rows as Table, List,
+Number, Bar, Line, or Treemap. The shell keeps the choice and its column
+roles in the tab entry's history state. **Save as Page** takes the
+selected presentation, with a loader that borrows the original page's
+loader using the inputs on screen. A temporary shown view carries its
+original loader definitions into the saved page. Number uses the chosen
+column of the first row.
 
 **Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve in
 this order (supplied, else the viewer's context, else the default;
@@ -768,11 +780,12 @@ Back/Forward; a frame's `setViewParams` reaches the tab as
 gives a route's page id (`tasks`, `gh/open-prs`) or a URI's resource as
 its kind, which is also what visits and bookmarks record
 (`recordedPageKind`), and `PageKindIcon` / `vizIcon` (`viz/vizIcons.tsx`) / `pageKindLabel`
-resolve it to the page file's icon and title. A kind nothing knows (a
+resolve it to the page file's icon and title. A declared page that names
+no icon draws `DEFAULT_PAGE_ICON` (`AppWindow`). A kind nothing knows (a
 page an extension no longer declares, still in visits and bookmarks)
-draws `DEFAULT_PAGE_ICON`, the generic page's (`pageKindIconOrDefault`
-in `PageKindIcon`, `cellIcon` in a column that links to a page), so it
-never shows without an icon.
+draws `MISSING_PAGE_ICON` (`SquareDashed`: `pageKindIconOrDefault` in
+`PageKindIcon`, `cellIcon` in a column that links to a page), so it
+never shows without an icon and still reads as gone.
 
 oxplow's pages (`extensions/oxplow-foundation/pages/*.yaml`; a view is a
 `stack` of nodes drawn as sections unless noted; every section has a
@@ -912,7 +925,7 @@ id, so re-clicking reuses the tab.
 The rail's sections are **panels** (`components/Panels/panelLayout.ts`):
 every enabled extension's `panels:` — core has none of its own since Go
 To moved into `oxplow-bundled`; with it disabled the rail is
-the search box and + Add Panel
+the search box alone
 (`ext:<namespace>/<id>`, rendered by `ExtensionPanelSection`). Every
 panel's parts (`body`, `collapsed`, `badge`, `count`) are pages:
 `useExtensionPanelRuns` holds one open page run per part (params its
@@ -930,8 +943,8 @@ disclosure (a row's `expand`, a group's fold, a tree's branch, a hunk, a
 collapsible section's toggle) draws the one `DisclosureGlyph`
 (`kit/Disclosure.tsx`, a 16px chevron), and a cell's expand glyph leads
 its first line with the text wrapping beside it, never under it.
-The rail's panels are extensions' (`go-to` and `uncommitted` are foundation's; `waiting`,
-`work` still the holder's): pages over the existing views and commands. One owner
+The rail's panels are extensions' (`go-to`, `uncommitted` and `waiting` are foundation's;
+`work` is bundled's): pages over the existing views and commands. One owner
 holds every panel's runs — `PanelRunsProvider`
 (`components/Panels/PanelRunsContext.tsx`, around the app),
 read by the rail, the status bar's bell and the Alerts page — through
@@ -950,13 +963,51 @@ reloads on `rerun.extensionsChanged`: a deployment changed (`oxplow.extension.de
 `disable`), or the config did — enabling or disabling
 an extension is a `configChanged`, so its panel appears or leaves at once.
 
-The person's layout — order (drag the ⠿ handle), collapsed (the chevron),
-hidden (right-click a header → Hide Panel; **+ Add Panel** at the bottom
-brings one back) — is one list in the local table `panel_layout` (V126,
-never the repo), read and written through the UI RPCs `get_panel_layout`
-/ `set_panel_layout`. `resolveLayout` reconciles it with the panels
-available now: stored order first, ids that are gone dropped, new panels
-appended expanded. The old `oxplow.rail.*`
+The person's layout — order and group (drag the ⠿ handle), collapsed (the
+chevron), hidden (right-click a header → Hide Panel, or drop it on Remove;
+View ▸ Sidebar Panels brings one back) — is in the local table `panel_layout` (never the repo;
+data-model.md): three lists, the selected thread's, its stream's and the
+project's, and the rail draws them in that order, top to bottom. Each
+panel is in one of them for a viewer; a drop beside a panel puts it in
+that panel's group (`movePanelBeside`), and `movePanelToGroup` puts it at
+a group's end. A new thread or stream has no list of its own: it shows
+the project's.
+
+**The groups show only while a panel is dragged**: a divider above each
+group the viewer has ("This thread", "This stream", "This project",
+`rail-group-divider-<group>`; no thread, no thread divider), each a drop
+target that moves the panel to that group's end, and a **Remove from the
+rail** zone at the bottom (`rail-remove-zone`, `hidePanel`); both
+highlight while a drag is over them and go when it ends. A drag held near the rail's top or bottom edge (48 px, or just past it)
+scrolls the rail, faster closer to the edge (`RailHud/dragAutoScroll.ts`
+`useDragAutoScroll`), so a group or the Remove zone out of view can be
+reached. At rest a thread's
+or stream's panel says so with a small icon after its title (a speech
+bubble or layers, hover "Only in this thread" / "Only in this stream",
+`rail-section-shown-in-<id>`); a project's says nothing. A header's
+right-click menu has **Show in ▸** This thread / This stream / This
+project (the current one checked; `movePanelToGroup`), then Hide Panel.
+**View ▸ Sidebar Panels** (`menuBar.ts` `viewMenu`, the OS's menu bar and the
+in-window one) lists every rail panel: the shown ones checked in rail
+order, each group's under its heading (a disabled line, "This thread" /
+"This stream" / "This project", `view.rail.heading:<group>`; a group with
+no panels has none), then a separator and the rest by title
+(`railPanelItems`); picking one hides it, or
+shows it at the end of the project's group. `RailMenuFeed`
+(`components/Panels/RailMenuFeed.tsx`) hands the list up to `App`, and a
+right-click on the rail's own space (`rail-panels`, not a panel) opens the
+same list. A checked item is the native menu's check item
+(`CheckMenuItemBuilder` in `oxplow-tauri-ipc` `menu.rs`), and
+`menuItemById` finds an item in a submenu, so the native click runs it.
+
+`PanelLayoutProvider` (`components/Panels/PanelLayoutContext.tsx`,
+inside `PanelRunsProvider`) owns the viewer's layout for the rail; it reads
+and writes it through the UI RPCs `get_panel_layout` / `set_panel_layout`
+with the selected stream and thread, and a new viewer is a new
+`layoutSync`. `resolveLayout` reconciles it with the panels available
+now: each list's stored order, ids that are gone dropped, a panel no list
+names appended expanded to the project's, and a panel the project's list
+has hidden (hidden, or placed on another thread or stream) hidden. The old `oxplow.rail.*`
 localStorage order and expanded keys are gone. The stored layout loads
 after the first render: an edit made before it arrives (a chevron, a
 drag) shows at once and is queued, then replayed on the loaded layout and
@@ -969,7 +1020,8 @@ load** is reported and shows the defaults, but saves nothing over the
 layout it couldn't read — the next edit loads again and is replayed on
 what it finds; saves go **one at a time, the latest last**; and an edit
 **keeps the placement of a panel not available yet** (an extension's,
-before extensions load) right after the entry it followed.
+before extensions load) where it is: every edit changes the stored lists
+in place.
 
 ## Page archetypes and the kit
 
@@ -1663,7 +1715,7 @@ for every page, with no table: the `?` is identity, the `#` is view.
 `BUILT_IN_VIEW`, `pageIdentity` and `withView` are gone. A built-in page
 that has a filter (Tasks' scope and chips, Metrics' range, Git History's
 `q`, Files' `filter`) keeps it in the `#` — and so does a custom page
-(Explore Data's `dataset`, `sql`, `viz`); its
+(the Work board's `show`, `priority`, and `q`); its
 `?` is only what it shows (a diff's path and sides, a dashboard's id, a
 metric's key), so two diffs in a tab are two pages. A param written in
 the wrong place is not read from there. A page param's `role`

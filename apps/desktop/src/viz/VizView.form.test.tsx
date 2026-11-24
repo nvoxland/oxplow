@@ -86,13 +86,13 @@ const formSource: FormSource = {
     submits.push(input);
     if (!invalidField) storedTitle = (input as { title?: string }).title ?? storedTitle;
     if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
-    return { result: null, audit_id: 1, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: 1, event_id: null, inverse: null } as never;
   },
 };
 const press: VizActionRunner = async (_id, action, _params, row, _streamId, confirmed, input) => {
   runs.push({ action, row, input, confirmed });
   if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
-  return { result: null, audit_id: 1, event_id: null, inverse: null };
+  return { result: null, command_run_id: 1, event_id: null, inverse: null };
 };
 const wrapper = ({ children }: { children: ReactNode }) => (
   <VizActionRunnerContext.Provider value={press}>

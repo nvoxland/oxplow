@@ -30,7 +30,7 @@ import { NO_READS, useRerunOnChange } from "./rerun.js";
 import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
 import { useListNav } from "../kit/useListNav.js";
-import { parseUri } from "../uri/uri.js";
+import { parseUri, typeOf } from "../uri/uri.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -59,6 +59,7 @@ import {
   rowGroups,
   capGroups,
   rowRef,
+  rowOpenInRef,
   sparklineValues,
   stepItems,
   timelineEntries,
@@ -82,6 +83,7 @@ import { addToContext } from "../contextBasket.js";
 import { useContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 import { refCommandMenuItems, useRefOffers } from "../components/refCommands.js";
+import { openInForRef, withLinkOffers } from "../openIn.js";
 import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
@@ -417,7 +419,7 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
     toast: (message: string, undo?: () => void, open?: () => void) =>
       showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
     // The person's click on Undo is their confirmation of it.
-    undo: (auditId: number) => undoCommand(auditId, true),
+    undo: (commandRunId: number) => undoCommand(commandRunId, true),
     ...openAfter,
   };
   // The runs in order; a run that asks stops them, the rest waiting on
@@ -753,10 +755,21 @@ function RowsBody({
   const first = result.rows[0]?.[0] ?? null;
   const rowActions = viz.actions.filter(rowMenuAction);
   const rowItems = (row: SqlCell[]): MenuItems => {
-    const base = rowBase(row);
+    // The file, directory or web page the row names, outside oxplow
+    // (`openIn.ts`).
+    const named = rowOpenInRef(viz, result.columns, row);
+    const elsewhere = named ? openInForRef(named) : null;
+    const base = elsewhere ? [...rowBase(row), elsewhere] : rowBase(row);
     // The commands about what the row links to (their `ui.about`), as the
-    // daemon says they apply to it now: the menu opens once it has.
+    // daemon says they apply to it now: the menu opens once it has. A row
+    // that names a file asks about the file (its Open In group joins Open
+    // In ▸, `withLinkOffers`), and about its own ref too when that is
+    // something else (a changes row's diff).
     const ref = rowRef(viz, result.columns, row);
+    if (named) {
+      const own = ref && typeOf(ref) !== typeOf(named) ? refOffersFor(ref) : Promise.resolve([]);
+      return Promise.all([withLinkOffers(base, named, refOffersFor), own]).then(([items, entries]) => [...items, ...refCommandMenuItems(entries)]);
+    }
     if (!ref) return base;
     return refOffersFor(ref).then((entries) => [...base, ...refCommandMenuItems(entries)]);
   };

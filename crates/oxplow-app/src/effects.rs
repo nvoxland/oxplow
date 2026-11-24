@@ -425,16 +425,17 @@ pub const ALREADY_REACTED: &str = "already reacted to event";
 
 /// How a reaction whose commands ran ended: `ok`, or `failed` with the
 /// step error when a step outside the transaction failed partway.
-pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store::Finished {
-    use oxplow_db::effect_run_store::{Finished, RunState};
+pub fn ran(command_run_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store::Finished {
+    use oxplow_db::effect_run_store::Finished;
+    use oxplow_domain::run::Outcome;
     Finished {
-        state: if failed.is_some() {
-            RunState::Failed
+        outcome: if failed.is_some() {
+            Outcome::Failed
         } else {
-            RunState::Ok
+            Outcome::Ok
         },
         reason: failed,
-        audit_id: Some(audit_id),
+        command_run_id: Some(command_run_id),
         proposal_id: None,
     }
 }
@@ -450,20 +451,57 @@ pub fn finished_tx(
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
     key: &oxplow_db::effect_run_store::EffectRunKey,
     done: &oxplow_db::effect_run_store::Finished,
+    run: Option<&oxplow_domain::run::RunContext>,
     cause: Option<oxplow_domain::EventId>,
+    account_health: bool,
 ) -> Result<(), oxplow_domain::DomainError> {
+    finish_attempt_tx(
+        tx,
+        vocabulary,
+        key,
+        done,
+        run,
+        Completion {
+            cause,
+            account_health,
+            retry: None,
+        },
+    )
+    .map(|_| ())
+}
+
+pub(crate) struct Completion<'a> {
+    pub cause: Option<oxplow_domain::EventId>,
+    pub account_health: bool,
+    pub retry: Option<&'a oxplow_db::effect_run_store::AutomaticRetry>,
+}
+
+pub(crate) fn finish_attempt_tx(
+    tx: &rusqlite::Connection,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    key: &oxplow_db::effect_run_store::EffectRunKey,
+    done: &oxplow_db::effect_run_store::Finished,
+    run: Option<&oxplow_domain::run::RunContext>,
+    completion: Completion<'_>,
+) -> Result<bool, oxplow_domain::DomainError> {
     use oxplow_db::effect_run_store::ReactionOrigin;
-    use oxplow_db::effect_run_store::RunState;
     use oxplow_domain::events::schema::{
         EffectOrigin, EffectOutcome, EffectResult, EffectResultV5,
     };
-    let now = oxplow_domain::Timestamp::now().to_string();
-    oxplow_db::effect_run_store::finish_tx(tx, key, done, &now)?;
-    let outcome = match done.state {
-        RunState::Ok => EffectOutcome::Ok,
-        RunState::Skipped => EffectOutcome::Skipped,
-        RunState::Proposed => EffectOutcome::Proposed,
-        RunState::Started | RunState::Failed => EffectOutcome::Failed,
+    use oxplow_domain::run::Outcome;
+    let scheduled = oxplow_db::effect_run_store::finish_with_retry_tx(
+        tx,
+        key,
+        done,
+        run,
+        completion.account_health.then_some(vocabulary),
+        completion.retry,
+    )?;
+    let outcome = match done.outcome {
+        _ if done.proposal_id.is_some() => EffectOutcome::Proposed,
+        Outcome::Ok => EffectOutcome::Ok,
+        Outcome::Skipped => EffectOutcome::Skipped,
+        _ => EffectOutcome::Failed,
     };
     // The effect is named in its namespace: its own ref says what it is.
     let (namespace, id) = key.effect.split_once('/').unwrap_or(("", &key.effect));
@@ -493,13 +531,32 @@ pub fn finished_tx(
         },
     )
     .with_subject([event_ref, effect_ref]);
-    result.cause = cause;
+    result.cause = completion.cause;
     oxplow_db::event_log_store::append_tx(tx, vocabulary, &result)?;
-    Ok(())
+    Ok(scheduled)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    pub(crate) fn context(
+        key: &oxplow_db::effect_run_store::EffectRunKey,
+    ) -> oxplow_domain::run::RunContext {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        use oxplow_domain::run::{ContributionRef, Mode, RunContext};
+        let (namespace, id) = key.effect.split_once('/').unwrap();
+        RunContext::contribution(
+            ContributionRef {
+                id: ContributionId::new(namespace, ContributionKind::Effect, id),
+                extension: namespace.into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            },
+            oxplow_domain::Actor::System,
+            Mode::External,
+        )
+        .caused_by(oxplow_domain::EventId(key.event_id.clone()))
+    }
 
     /// What a scheduled retry would send was composed by the script as it
     /// was when it failed. Starting an effect drops its scheduled retries —
@@ -515,17 +572,19 @@ pub(crate) mod tests {
             let (key, other) = (key.clone(), other.clone());
             move |tx| {
                 for k in [&key, &other] {
-                    runs::claim_tx(tx, k, "2026-10-01T00:00:00Z", Some("{}"))?;
+                    let run = context(k);
+                    runs::claim_tx(tx, k, &run, Some("{}"))?;
                     runs::finish_tx(
                         tx,
                         k,
                         &runs::Finished {
-                            state: runs::RunState::Failed,
+                            outcome: oxplow_domain::run::Outcome::Failed,
                             reason: Some("unavailable".into()),
-                            audit_id: None,
+                            command_run_id: None,
                             proposal_id: None,
                         },
-                        "2026-10-01T00:00:01Z",
+                        Some(&run),
+                        None,
                     )?;
                     runs::schedule_retry_tx(tx, k, "2026-10-01T00:00:10Z", "{}")?;
                 }

@@ -91,8 +91,7 @@ linking to Extension problems filtered to it) and a link to its
 running `extension.yaml`; then its pages (each linking to the Definition of
 the running file, `v_page.running_uri`), the other contributions by count,
 what it may reach, its deployments (newest first, Roll Back to This) and the
-slot `oxplow/extension.runs`, which oxplow-bundled fills with
-`extension-runs` (foundation never depends on bundled). Deploy, Roll Back,
+slot `oxplow/extension.runs` for extensions to fill. Deploy, Roll Back,
 Enable, Disable, Share with the Team, Stop Sharing and Remove are the page's
 actions (the ☰ menu), each offered by a `can_*` column of its first loader;
 one that adds permissions asks inline like any deploy.
@@ -168,7 +167,7 @@ its scope trace.
   deployment, `run_context::live_owner`), so a run carries no "stale" outcome: it ends
   `cancelled`.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
-  — an `External` call's run is a child of the command's), scope calls
+  — an `External` call carries the command's run), scope calls
   (`scope_calls::Calls::new(run, needs, read)`, counted on its trace;
   `.with_host(layer, runtime)` is the one way every script host —
   commands, effects, triggers, entity and fact collectors — attaches the
@@ -190,39 +189,26 @@ its scope trace.
   the parent extension's namespace or declaration. Transactional leaves narrow
   their mode; all children inherit cancellation and live guards. Native scope
   operations capture their implicit backing scope in declared authority.
-  Routing and dispatch check run authority. This is handler attribution, not
-  a coordinated DB/catalog activation or a new per-child command audit.
-- **Every contribution's run is recorded once** (`extension_run`,
-  `v_extension_run`; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"):
-  its identity, actor, anchors, cause, outcome, cost (`cpu_ms`,
-  `peak_bytes`, from each script's `Ran`), the scopes it called and its
-  model calls — never what it read or wrote. Nested work of the same
-  contribution adds to its parent's usage (`child()` shares it); another
-  contribution's child is its own row, its `parent_run_id` the run that
-  started it. A person's `oxplow.effect.retry` / `backfill` links the
-  reaction's run to theirs (`under`) without making it theirs: the
-  effect still runs as itself.
-  **Reading it:** the bundled `runs` page (`oxplow/runs`, titled
-  "Extension runs", in the launcher under Activity) lists, per extension
-  and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
-  model calls, the ones needing attention first. The Extensions page
-  shows each extension's worst current run (`v_extension_run`, `latest =
-  1`). Opening an extension's row (the `oxplow/extension-runs`
-  page, which has no category, param `extension`) lists its runs one by one for the same week:
-  contribution, version, generation (blank for a run that holds none),
-  actor, causing event, outcome, error, wall and CPU time, model calls — the
-  small inspector, with no log or secret to read.
+  Routing and dispatch check run authority. A child command has its own run
+  and detail row. Its `parent_run_id` links to the command, effect or job
+  that sent it when the sender has a recorded run. Recording the child leaves
+  the sender's permission checks and the handler's own authority in place.
+- **Contribution runs have a shared record** (`contribution_run`,
+  `v_contribution_run`). It holds identity, actor, anchors, cause, outcome,
+  cost, scopes used and model call count. It excludes the contents a run
+  read or wrote. Nested work of the same contribution adds to its parent's
+  usage when it shares the same run accounting. A child command has its own
+  usage, and the parent's cost includes its children's cost. `parent_run_id`
+  is set when the parent has a recorded row.
+  `oxplow.effect.retry` and `backfill` still run the effect as itself.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
-  (launcher, Activity) is a dashboard of three tables over the last 30 days:
-  `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
-  `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
-  no record of reads harness `unknown`), `interface-commands` (agents' runs by
-  command from `v_command_audit`: runs, invalid, denied, failed and the share
-  not ok; opening a command shows the `interface-command-errors` page (no category),
-  its most common error texts counted together up to the "Expected one of"
-  list) and `interface-hints` (`v_hint_stat` per hint, those that never fired
-  first). The bundled `hint-never-fires` advisory tells the person, once per
-  hint, about a hint evaluated 100 or more times that never fires.
+  (launcher, Activity) shows Oxplow MCP calls by tool and harness and completed
+  agent command runs by command. The date range defaults to 30 days. The date
+  and harness filters carry into both drill-downs. MCP Tool Calls links recent
+  calls to the session transcript when available. Command Errors groups
+  messages before the `. Expected` suffix and links to individual Run details.
+  All-time Hints uses `v_hint_stat` across every thread and shows hints that
+  never fired first. Its totals are independent of the page filters.
 - **Failure, retry and freshness are the same everywhere it matters.** A run
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a
@@ -237,11 +223,12 @@ its scope trace.
   three attempts); a collector is not retried by itself, its schedule runs it
   again. A collector whose last run failed is not `fresh` in
   `v_contribution_health` — its rows are the last good run's — and a failed
-  attempt keeps its own `extension_run` row, reachable from its data effects
-  (`effect_run.run_id`, `collector_run.run_id`, `job_run.run_id`). A program's
-  words in an `error` have the credentials it was handed replaced. Runs are
-  kept 90 days (`EXTENSION_RUN_DAYS`). Pinned by `extension_run_health_tests.rs`
-  and `event_retention::tests::extension_runs_past_their_window_are_swept`.
+  attempt keeps its own `contribution_run` row, reachable from its data effects
+  (`effect_run.run_id`, `collector_run.run_id`). Program errors redact
+  credentials the run received. Finished runs have a 90-day window
+  (`CONTRIBUTION_RUN_DAYS`), with separate rules for command runs
+  ([commands.md](./commands.md) "Retention"). Pinned by `contribution_run_tests.rs`
+  and the kind-specific retention tests in `event_retention.rs`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts and report
@@ -416,7 +403,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   a provider's `host/call`s. Core's own work has none and is allowed what
   it does (core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
-  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
+  `Unenforced(why)`, recorded on the run (`v_contribution_run.decisions`).
   `grant::decide` refuses what the contribution didn't declare ("not
   declared"), then what its extension's permissions don't allow — the
   refusal names the permission: ``needs `ai.compute` in the
@@ -586,7 +573,7 @@ migrations without `storage:`, is a load error.
   script's `result` (the calls and the `inverse` are fixed at compose time). The
   rows are in the run's own result, on the write's entry in `children` (`{
   result, children: [{ name: "oxplow.extension_store.write", result: { changes,
-  rows } }] }`, recorded in the audit row), which is what a caller reads; to
+  rows } }] }`, recorded in the command run record), which is what a caller reads; to
   return a minted id in the command's `result`, mint it in the script (a
   random or derived id, passed as a parameter), not in SQL. A mutation that
   needs a minted id in its `inverse` has the same limit: the script picks the

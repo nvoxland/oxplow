@@ -13,10 +13,14 @@ export type ExitOutcome =
 
 export type SessionMessage =
   | { kind: "data"; bytes: Uint8Array }
+  | { kind: "restart" }
   | { kind: "exit"; exitCode: number | null; outcome: ExitOutcome };
 
 function readOutcome(value: unknown): ExitOutcome {
-  const o = value as { kind?: unknown; reason?: unknown; exitCode?: unknown } | null;
+  const o = value as { kind?: unknown; reason?: unknown; exitCode?: unknown; message?: unknown } | null;
+  if (o?.kind === "launch_failed" && typeof o.message === "string") {
+    return { kind: "launch_failed", message: o.message };
+  }
   if (o && o.kind === "unable_to_resume" && typeof o.exitCode === "number") {
     return {
       kind: "unable_to_resume",
@@ -51,6 +55,7 @@ export function readSessionMessage(message: string): SessionMessage | null {
       outcome: readOutcome((m as { outcome?: unknown }).outcome),
     };
   }
+  if (m.type === "restart") return { kind: "restart" };
   return null;
 }
 

@@ -9,7 +9,71 @@ use serde::{Deserialize, Serialize};
 
 use crate::database::map_sql_err;
 use crate::Database;
-use oxplow_domain::DomainError;
+use oxplow_domain::events::schema::{ContributionDisabled, ContributionDisabledV1};
+use oxplow_domain::run::Outcome;
+use oxplow_domain::vocabulary::Vocabulary;
+use oxplow_domain::{DomainError, Envelope, Timestamp};
+
+/// Consecutive failures that disable a contribution.
+pub const FAILURES_TO_DISABLE: i64 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    Backoff { failures: i64 },
+    Disabled { reason: String },
+}
+
+/// Count a failure and, at the threshold, disable the contribution and
+/// append the event in the caller's transaction.
+pub fn count_failure_tx(
+    conn: &Connection,
+    vocabulary: &Vocabulary,
+    key: &ContributionKey,
+    error: &str,
+    at: &str,
+) -> Result<Verdict, DomainError> {
+    let failures = failed_tx(conn, key, error, at)?;
+    if let Some(row) = get_tx(conn, key)?.filter(|row| row.state == "disabled") {
+        return Ok(Verdict::Disabled {
+            reason: row.reason.unwrap_or_default(),
+        });
+    }
+    if failures < FAILURES_TO_DISABLE {
+        return Ok(Verdict::Backoff { failures });
+    }
+    let reason = format!("{failures} failures in a row; the last: {error}");
+    disable_tx(conn, key, &reason, at)?;
+    let uri = key.id().to_string();
+    let event = Envelope::typed::<ContributionDisabled>(
+        "system:extensions",
+        &ContributionDisabledV1 {
+            contribution: uri.clone(),
+            reason: reason.clone(),
+        },
+    )
+    .with_subject([uri]);
+    crate::event_log_store::append_tx(conn, vocabulary, &event)?;
+    Ok(Verdict::Disabled { reason })
+}
+
+/// Count the result of a kind store's completed run while it writes that run.
+pub(crate) fn record_completion_tx(
+    conn: &Connection,
+    vocabulary: &Vocabulary,
+    key: &ContributionKey,
+    outcome: Outcome,
+    error: Option<&str>,
+    took_ms: Option<f64>,
+) -> Result<(), DomainError> {
+    let at = Timestamp::now().to_string();
+    match outcome {
+        Outcome::Ok => succeeded_tx(conn, key, took_ms, &at),
+        Outcome::Failed | Outcome::Interrupted => {
+            count_failure_tx(conn, vocabulary, key, error.unwrap_or("run failed"), &at).map(|_| ())
+        }
+        _ => Ok(()),
+    }
+}
 
 /// Which contribution: the `namespace` it is named in, its `kind`
 /// (`provider`, `collector`) and `contribution` (that provider's or

@@ -3,15 +3,45 @@
 # `ref('<dataset>')` and `source('<table>')`. `fields` is its contract: a
 # change to it needs a new `version`. See `.context/semantic-layer.md`
 # "Datasets".
+field_groups:
+  contribution_run:
+    - { name: "run_id", type: "TEXT", doc: "The run's UUIDv7, ordered by start time." }
+    - { name: "parent_run_id", type: "TEXT", doc: "The recorded run that started it, if any." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares the contribution." }
+    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (v_contribution.uri)." }
+    - { name: "kind", type: "TEXT", doc: "The contribution kind, such as collector, command, effect, job or implementation." }
+    - { name: "version", type: "TEXT", doc: "The extension's declared version when it ran, if any." }
+    - { name: "generation", type: "TEXT", doc: "The extension catalog generation it ran against, if any." }
+    - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `page`, `component`, `system`, `effect` or `job`." }
+    - { name: "actor_id", type: "TEXT", doc: "The actor's id for its kind, such as `thr3` for an agent. NULL when the actor has no id." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream it ran for (v_stream.id), if any." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread it ran for (v_thread.id), if any." }
+    - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran for (v_agent_turn.id), if any." }
+    - { name: "session_id", type: "INTEGER", doc: "The agent session it ran for (v_agent_session.id), if any." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot it ran over, if any." }
+    - { name: "cause_event_id", type: "TEXT", doc: "The event that caused it (v_event.id), if any." }
+    - { name: "mode", type: "TEXT", doc: "`pure`, `transactional` or `external`." }
+    - { name: "started_at", type: "TEXT", doc: "When it began (RFC 3339)." }
+    - { name: "finished_at", type: "TEXT", doc: "When it ended (RFC 3339). NULL while live." }
+    - { name: "outcome", type: "TEXT", doc: "`ok`, `skipped`, `failed`, `denied`, `cancelled`, `invalid` (input refused) or `interrupted` (oxplow stopped before it ended). NULL while live." }
+    - { name: "error", type: "TEXT", doc: "Why it did not end `ok`, if known." }
+    - { name: "wall_ms", type: "INTEGER", doc: "Elapsed time in milliseconds. NULL while live or when unmeasured." }
+    - { name: "cpu_ms", type: "INTEGER", doc: "Script CPU time in milliseconds, summed. NULL while live or when unmeasured." }
+    - { name: "peak_bytes", type: "INTEGER", doc: "Peak script memory in bytes. NULL while live or when unmeasured." }
+    - { name: "ai_calls", type: "INTEGER", doc: "Model calls it made. NULL while live or when unmeasured." }
+    - { name: "scopes", type: "TEXT", doc: "The scopes it used and their counts, as a JSON object." }
+    - { name: "decisions", type: "TEXT", doc: "Permission decisions as a JSON array of `{ need, decision, reason? }`." }
+
+datasets:
 - name: agent_nudge
-  version: 4
-  description: "Guidance oxplow raised — a hint (`<extension>/<id>`) or its own nudge (`report-less-run`) — for the coding agent, taken by its next prompt or tool call, or for a person, shown in Alerts until they dismiss it."
+  version: 5
+  description: "Guidance oxplow raised: a hint (`<extension>/<id>`) for the coding agent, taken by its next prompt or tool call, or oxplow's own notice (`report-less-run`, a run that wrote no report) for a person, shown in Alerts until they dismiss it."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "kind", type: "TEXT", doc: "What kind of nudge, e.g. `report-less-run` or an advisory's `<extension>/<id>`." }
-    - { name: "message", type: "TEXT", doc: "The text the agent was given." }
+    - { name: "message", type: "TEXT", doc: "The text the agent or person was given." }
     - { name: "trigger", type: "TEXT", doc: "What prompted it, if recorded." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "delivered_at", type: "TEXT", doc: "When a hook response carried it to the agent, or the person dismissed it; NULL while it waits." }
@@ -36,7 +66,7 @@
     - { not_null: hint }
 - name: agent_status
   version: 2
-  description: "Each thread's agent status: its open agent sessions' statuses (v_agent_session_status) rolled up — what the person owes ranks first: `awaiting_user` (waiting on them: a question, a plan to approve, a permission prompt, a final message ending in a question) > `running` > `error` > `stopped` > `idle`. A dead turn's `stalled` is derived live, never logged."
+  description: "Each thread's agent status: its open agent sessions' statuses (v_agent_session_status) rolled up — what the person owes ranks first: `awaiting_user` (waiting on them: a question, a plan to approve, a permission prompt) > `running` > `error` > `stopped` > `idle`. A dead turn's `stalled` is derived live, never logged."
   fields:
     - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
     - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`: the session status that ranks first." }
@@ -90,7 +120,7 @@
     - { not_null: id }
     - { unique: id }
 - name: request
-  version: 4
+  version: 5
   description: "Requests: the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when each turn opened. One row per request: who started it and when, what it holds (its turns' tool calls, tokens, jobs), and where it stands now (`state`, read live). Its turns are the v_agent_turn rows whose `request` is its `uri`; their time split sums v_turn_activity over them (heavier: read it for one request). Its files come with the turns' changes."
   relationships: [{ from: first_turn, to: agent_turn.uri }, { from: thread_id, to: thread.id }]
   fields:
@@ -109,7 +139,7 @@
     - { name: "output_tokens", type: "INT", doc: "Tokens its turns wrote. (v2)" }
     - { name: "jobs_running", type: "INT", doc: "Jobs its turns started that have not reported back, their session still alive (v_agent_job, state `running`). (v2)" }
     - { name: "matched", type: "INT", doc: "1 when one of its links is oxplow's match, not the harness's word (a cross-session message matched to its send, a job's start guessed from the Stop that listed it): best effort. (v2)" }
-    - { name: "state", type: "TEXT", doc: "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row)" }
+    - { name: "state", type: "TEXT", doc: "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a question or plan put to them, a permission prompt — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row; v5: a final message ending in a question no longer waits)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -220,7 +250,7 @@
     - { not_null: turn_id }
     - { unique: turn_id }
 - name: agent_turn
-  version: 20
+  version: 21
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. What a turn changed is `v_turn_file`."
   relationships: [{ from: request, to: request.uri }]
   fields:
@@ -246,14 +276,13 @@
     - { name: "sender", type: "TEXT", doc: "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)" }
     - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery), `unknown` (an old turn whose end left no trace). NULL while running. (v13; v14: `unknown`, no `left_running`: a Stop's running work is on its `agent.turn.ended` and in v_agent_job)" }
     - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v15)" }
-    - { name: "question", type: "TEXT", doc: "The question the turn's final message ended on (its last line, when the message ends in a question mark): what the thread waits on the person for. NULL when it ended on none, did not complete, or closed before this was recorded. (v16)" }
     - { name: "request", type: "TEXT", doc: "The request the turn belongs to (its `uri`, v_request): the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when the turn opened. The request of `cause_turn`, else one this turn started. Work recorded against a turn (tool calls, tokens, test runs, jobs) is its request's. NULL for a turn recorded before requests were. (v17; v18: a URI, not an id)" }
     - { name: "request_id", type: "INT", doc: "The request's id (`v_request.id`), to join without a URI. NULL for a turn recorded before requests were." }
   tests:
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 8
+  version: 9
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -270,7 +299,7 @@
     - { name: "input_hash", type: "TEXT", doc: "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls." }
     - { name: "request_hash", type: "TEXT", doc: "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept." }
     - { name: "response_hash", type: "TEXT", doc: "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed." }
-    - { name: "run_id", type: "TEXT", doc: "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)" }
+    - { name: "run_id", type: "TEXT", doc: "The contribution run that made the call (`v_contribution_run.run_id`); NULL for oxplow's own calls. (v3)" }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/ai_call?id=<id>`: its URI. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
   tests:
     - { not_null: id }
@@ -308,14 +337,14 @@
     - { not_null: scope }
     - { not_null: key }
 - name: bookmark
-  version: 3
-  description: "Pages the person bookmarked, each at one scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a URI is bookmarked at most once across those."
+  version: 4
+  description: "Pages the person bookmarked, each at one visibility scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a URI is bookmarked at most once across those."
   fields:
     - { name: "id", type: "INTEGER", doc: "Bookmark id." }
     - { name: "uri", type: "TEXT", doc: "The page's canonical ref (its tab id): what the bookmark opens." }
     - { name: "page_kind", type: "TEXT", doc: "Its page kind (`page`, `file`, `oxplow/knowledge`, …), for the icon." }
     - { name: "label", type: "TEXT", doc: "The page's title when it was bookmarked." }
-    - { name: "scope", type: "TEXT", doc: "`thread`, `stream` or `project`." }
+    - { name: "visibility_scope", type: "TEXT", doc: "Where it shows: `thread`, `stream` or `project`. (v4: was `scope`)" }
     - { name: "thread_id", type: "INTEGER", doc: "The owning thread, for a `thread` bookmark." }
     - { name: "stream_id", type: "INTEGER", doc: "The owning stream, for a `stream` bookmark." }
     - { name: "added_at", type: "TEXT", doc: "RFC 3339 timestamp." }
@@ -373,7 +402,7 @@
     - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
-  version: 6
+  version: 7
   description: "Analyzed changes: a commit (vs its parent), an agent turn (start → end snapshot: what the turn changed), a stream's working tree (vs HEAD) or a range (any two revisions). Created on demand by `oxplow_ensure_change`, or by a query that names one by `kind` and `target` (`kind = 'commit' AND target = <sha>`; `kind = 'working' AND target = ''` for the query's stream; `kind = 'range' AND target = :start || '..' || :end`, each side `working`, `snap:<id>` or `git:<rev>`, the start '' for the whole tree at the end), its analysis then run in the background; a working tree's, a running request's and a range's headed at the working tree are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   fields:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
@@ -393,6 +422,8 @@
     - { name: "conflicted", type: "INTEGER", doc: "For a working tree, how many files git reports conflicted; NULL for other kinds." }
     - { name: "in_progress", type: "TEXT", doc: "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds." }
     - { name: "elapsed_ms", type: "INTEGER", doc: "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)." }
+    - { name: "analyzed_files", type: "INTEGER", doc: "How many of its files its last deep analysis read: at most 200, the files the enabled languages parse first (not `generated` or `vendored` files, nor lockfiles), then the rest by path. NULL before one." }
+    - { name: "changed_files", type: "INTEGER", doc: "How many files that analysis was given: the change's files (a request's own). NULL before one." }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -559,7 +590,7 @@
     - { not_null: id }
     - { unique: id }
 - name: context_item
-  version: 2
+  version: 3
   description: "What the person collected for agents (`oxplow.context.add`): pages and pieces of text, each with an optional note of what they want done about it, in a basket — a thread's own (\"This Thread\") or a named basket (v_context_basket) collected into from any stream. The next prompt to any agent in a thread carries one basket as a `<context-basket>` block — its own, or the named basket set to go next for it (`oxplow.context.send_next`) — then deletes those items: what is here is what still waits."
   fields:
     - { name: "id", type: "INTEGER", doc: "Item id (the `item` the `oxplow.context.*` commands take)." }
@@ -574,7 +605,8 @@
     - { name: "text", type: "TEXT", doc: "The text, for a `text` item; NULL for a page." }
     - { name: "around", type: "TEXT", doc: "The lines around the text, when where it came from has no lines to read back (a terminal's scrollback); NULL otherwise." }
     - { name: "note", type: "TEXT", doc: "The person's note on it: what they want done about the page or the text; NULL when none." }
-    - { name: "added_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "added_at", type: "TEXT", doc: "When it was first added (RFC 3339); Put Back keeps it." }
+    - { name: "held_at", type: "TEXT", doc: "When Put Back returned it to the thread's own basket (RFC 3339): held, the thread's next prompt doesn't carry it until the person presses Send Next on This Thread (`oxplow.context.send_next` with no `basket`). NULL when not held. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -687,7 +719,7 @@
     - { name: "stdout", type: "TEXT", doc: "Captured stdout, if any." }
     - { name: "truncated", type: "INT", doc: "1 when only the first part was kept (bodies are capped)." }
 - name: op_error
-  version: 3
+  version: 5
   key: [event_id]
   description: "Operations that failed in front of the person in the app (a merge, a save, a query), as the app showed them: one row per `ui.op_failed` event. The captured stderr and stdout are the event's `output` body — `read_event_content(event_id, output)`. Kept 30 days, the output 14; past that the row stays with its details NULL."
   fields:
@@ -702,7 +734,7 @@
     - { name: "signal", type: "TEXT", doc: "The signal that killed the process (`SIGKILL`), if any." }
     - { name: "duration_ms", type: "INT", doc: "How long it ran, in milliseconds, if measured." }
     - { name: "output_size", type: "INT", doc: "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured." }
-    - { name: "audit_id", type: "INT", doc: "A command whose run failed: the audit row that recorded it (v_command_audit.id); NULL for anything else. (v3)" }
+    - { name: "command_run_id", type: "INT", doc: "The failed command's run (`v_command_run.id`), if any. (v4)" }
     - { name: "proposal_id", type: "INT", doc: "An approval that failed: its proposal (v_command_proposal.id); NULL otherwise. (v3)" }
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention expired its details (they read NULL); NULL while kept." }
     - { name: "seen", type: "INT", doc: "1 once the person opened its output on the Alerts page (`oxplow.op_error.mark_seen`), or dismissed it. (v2)" }
@@ -1059,87 +1091,55 @@
     - { not_null: id }
     - { unique: id }
 - name: effect_run
-  version: 2
+  version: 7
   key: [effect, event_id, attempt]
-  description: "Each attempt at an extension effect's reaction to an event: the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` — and a person's `effect.retry` of a failed one makes the next. A failed attempt whose every step was a write to a provider keeping `idempotent_writes` is sent again by itself, at most twice (`auto`; `retry_at` says when); any other waits for a person. A reaction's state is its latest attempt's (`latest = 1`)."
+  description: "Each attempt at an effect's reaction to an event, with its shared run fields. The run names the extension that declares the effect. The live consumer makes one attempt, and a person's `effect.retry` of a failed attempt makes the next. A reaction's latest attempt has `latest = 1`. A run in progress has a NULL outcome. When a command asks a person, the run has outcome `skipped` and `proposal_id` identifies the proposal."
+  groups: [contribution_run]
   fields:
     - { name: "id", type: "INTEGER", doc: "Attempt id." }
-    - { name: "effect", type: "TEXT", doc: "The effect: `<extension>/<id>`." }
-    - { name: "extension", type: "", doc: "The extension that declares it." }
+    - { name: "effect", type: "TEXT", doc: "The effect's `<namespace>/<id>`." }
     - { name: "event_id", type: "TEXT", doc: "The event it reacted to (`v_event.id`)." }
     - { name: "event_seq", type: "INTEGER", doc: "That event's log position." }
     - { name: "attempt", type: "INTEGER", doc: "Which attempt at the reaction, from 1." }
     - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)." }
-    - { name: "latest", type: "", doc: "1 when it is the reaction's latest attempt: its state is where the reaction stands." }
-    - { name: "state", type: "TEXT", doc: "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`." }
-    - { name: "reason", type: "TEXT", doc: "Why it skipped or failed." }
-    - { name: "audit_id", type: "INTEGER", doc: "Its run's `command_audit` row, when its commands ran." }
+    - { name: "latest", type: "INT", doc: "1 for the highest attempt number for this effect and event." }
+    - { name: "retryable", type: "INT", doc: "1 when the attempt ended failed, denied, cancelled, invalid or interrupted without a proposal, and an enabled extension declares the effect and it is not disabled: a person's Retry would run it. (v7: the effect's part)" }
+    - { name: "command_run_id", type: "INTEGER", doc: "The `command_run` detail row for its composed command, when recorded." }
     - { name: "proposal_id", type: "INTEGER", doc: "The proposal it left, when a command asked a person." }
-    - { name: "started_at", type: "TEXT", doc: "When it started (RFC 3339)." }
-    - { name: "finished_at", type: "TEXT", doc: "When it ended; NULL while `started`." }
-    - { name: "retry_at", type: "TEXT", doc: "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed." }
-    - { name: "run_id", type: "TEXT", doc: "The attempt's run (`v_extension_run.run_id`). (v2)" }
+    - { name: "retry_at", type: "TEXT", doc: "When an automatic retry was scheduled (RFC 3339). NULL if no automatic retry was scheduled." }
   tests:
     - { not_null: effect }
-- name: extension_run
-  version: 9
+- name: contribution_run
+  version: 1
   key: [run_id]
-  description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
+  description: "Each recorded contribution run, including live runs. It holds the contribution identity, actor, anchors, cause, outcome, cost and authority. Its input, result, prompts and credential values are private."
+  relationships: [{ from: thread_id, to: thread.id }, { from: turn_id, to: agent_turn.id }, { from: session_id, to: agent_session.id }]
+  groups: [contribution_run]
   fields:
-    - { name: "run_id", type: "TEXT", doc: "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`." }
-    - { name: "parent_run_id", type: "TEXT", doc: "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run." }
-    - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=change_review/review`." }
-    - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
-    - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
-    - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
-    - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `page`, `system` or `effect`." }
-    - { name: "actor", type: "TEXT", doc: "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`." }
-    - { name: "stream_id", type: "INTEGER", doc: "The stream it ran for; NULL when none." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it ran for; NULL when none." }
-    - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran for; NULL when none." }
-    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session it ran for; NULL when none." }
-    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot it ran over; NULL when none." }
-    - { name: "cause_event_id", type: "TEXT", doc: "The event that caused it (`v_event.id`); NULL for a run a person or schedule started." }
-    - { name: "mode", type: "TEXT", doc: "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)." }
-    - { name: "started_at", type: "TEXT", doc: "When it began (RFC 3339)." }
-    - { name: "finished_at", type: "TEXT", doc: "When it ended (RFC 3339)." }
-    - { name: "outcome", type: "TEXT", doc: "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)" }
-    - { name: "error", type: "TEXT", doc: "Why it failed, was denied or stopped." }
-    - { name: "wall_ms", type: "INTEGER", doc: "How long it ran." }
-    - { name: "cpu_ms", type: "INTEGER", doc: "Its scripts' CPU time, summed (0 for a run that ran no script)." }
-    - { name: "peak_bytes", type: "INTEGER", doc: "The most any one of its scripts held live at once." }
-    - { name: "ai_calls", type: "INTEGER", doc: "The model calls it made." }
-    - { name: "scopes", type: "TEXT", doc: "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)." }
-    - { name: "decisions", type: "TEXT", doc: "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)." }
-    - { name: "latest", type: "", doc: "1 on its contribution's most recent run." }
+    - { name: "uri", type: "TEXT", doc: "The run's URI (`oxplow:oxplow/contribution_run?id=<run_id>`)." }
   tests:
     - { not_null: run_id }
     - { unique: run_id }
 - name: job_run
-  version: 6
+  version: 8
   key: [id]
-  description: "Each job run: one execution of a job an extension declares (a `jobs:` declaration, run through its `jobs.write/enqueue` command) — which job, its state and its current attempt, and what that attempt has used so far. A job is the declaration (`oxplow:oxplow/job?job=<extension>/<id>`); a job run is one execution of it (`oxplow:oxplow/job_run?id=<id>`). What it was asked and what it answered stay private to the extension (`jobs.read/snapshot`); what it streams is in `v_job_run_output`."
+  description: "One row per job enqueued through `jobs.write/enqueue`, with its state, current attempt and live output counts. Shared run fields describe that attempt. Before the first claim, only the declaring extension and package version are available among the shared run fields. The request and result are private to `jobs.read/snapshot`. Streamed output is in `v_job_run_output`."
+  groups: [contribution_run]
   fields:
-    - { name: "id", type: "TEXT", doc: "The run's id (a UUIDv7)." }
-    - { name: "job", type: "TEXT", doc: "The job it runs: `oxplow:oxplow/job?job=<extension>/<id>` (`v_contribution.uri`)." }
-    - { name: "intent_key", type: "TEXT", doc: "What it is about: the `intentKey` it was started with, one run per key and job (`review:oxplow:oxplow/request?id=req12`). (v2)" }
-    - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it was started; NULL when it declares none." }
+    - { name: "id", type: "TEXT", doc: "The queued job's id (a UUIDv7), shared by all of its attempts." }
+    - { name: "job", type: "TEXT", doc: "The job declaration's URI (`v_contribution.uri`)." }
+    - { name: "intent_key", type: "TEXT", doc: "The intentKey supplied on enqueue. Each declaration has one job per key." }
     - { name: "contract_version", type: "INTEGER", doc: "The job declaration's own `version:`." }
     - { name: "operation", type: "TEXT", doc: "What it runs: `ai.complete_typed`." }
     - { name: "state", type: "TEXT", doc: "`queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted` (it stopped without a known end: oxplow restarted, or it lost its lease)." }
     - { name: "attempt", type: "INTEGER", doc: "Its current attempt, 0 before the first starts." }
     - { name: "cancellation_requested", type: "INT", doc: "1 once someone asked it to stop." }
-    - { name: "invoker", type: "TEXT", doc: "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …" }
-    - { name: "run_id", type: "TEXT", doc: "The run that started it (`v_extension_run.run_id`)." }
-    - { name: "created_at", type: "TEXT", doc: "When it was started (RFC 3339)." }
-    - { name: "updated_at", type: "TEXT", doc: "When its state last changed (RFC 3339)." }
-    - { name: "ai_calls", type: "INT", doc: "Model rounds its current attempt has finished." }
+    - { name: "queued_at", type: "TEXT", doc: "When the job entered the queue (RFC 3339)." }
+    - { name: "uri", type: "TEXT", doc: "The queued job's URI (`oxplow:oxplow/job_run?id=<id>`), used by snapshot and cancellation commands." }
+    - { name: "rounds", type: "INT", doc: "Model rounds its current attempt has finished, counted from its streamed usage rows." }
     - { name: "tool_calls", type: "INT", doc: "Tools the model called in its current attempt." }
     - { name: "input_tokens", type: "INT", doc: "Input tokens its current attempt's rounds reported (observed usage only)." }
     - { name: "output_tokens", type: "INT", doc: "Output tokens likewise." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/job_run?id=<id>`: its URI — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -1491,9 +1491,9 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector
-  version: 3
+  version: 5
   key: [uri]
-  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_extension_run`."
+  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<namespace>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_collector_run`."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<namespace>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (`project` for the project's own)." }
@@ -1503,8 +1503,8 @@
     - { name: "trigger", type: "TEXT", doc: "How it comes to run: `call` (manual), `schedule` (`every:`), `events` (`on:`) or `run` (after a test or analysis run)." }
     - { name: "enabled", type: "INT", doc: "1 unless failures disabled it on this machine (`disabled_reason` says why)." }
     - { name: "state", type: "TEXT", doc: "`disabled`, `failing` (its health is failing or its last run failed), `never_run` or `ok`." }
-    - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339); NULL when it never ran." }
-    - { name: "last_status", type: "TEXT", doc: "The last run's outcome: `ok`, `error` or `skipped`; NULL when it never ran." }
+    - { name: "last_run_at", type: "TEXT", doc: "When its last run finished (RFC 3339). NULL when it never ran." }
+    - { name: "last_outcome", type: "TEXT", doc: "The outcome of its last finished run, as in `v_collector_run.outcome`. NULL when it never ran." }
     - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
     - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
     - { name: "disabled_reason", type: "TEXT", doc: "Why it is disabled; NULL when it is not." }
@@ -1513,22 +1513,34 @@
   tests:
     - { not_null: uri }
 - name: collector_run
-  version: 6
-  description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
+  version: 8
+  key: [run_id]
+  description: "One row per collector run, with its outcome, costs and row counts. The latest finished run is the one held by the collector's checkpoint."
+  groups: [contribution_run]
   fields:
-    - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
-    - { name: "id", type: "TEXT", doc: "The collector's id within its owner (may be dotted: `repo.scan_clone`)." }
-    - { name: "status", type: "TEXT", doc: "`ok`, `error` (what failed, or a permission its extension lacks; v4), or `skipped` (the loop guard refused its run for an event; `error` says why)." }
-    - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339)." }
-    - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
-    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
-    - { name: "cursor_json", type: "TEXT", doc: "Its checkpoint: the opaque state its script or provider read returned last." }
-    - { name: "last_event_id", type: "INTEGER", doc: "The seq of the last trigger event it ran for." }
-    - { name: "run_id", type: "TEXT", doc: "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)" }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "owner", type: "TEXT", doc: "The collector's namespace. The declaring package is in `extension`." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its namespace (may be dotted: `repo.scan_clone`)." }
+    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after this run, as JSON. NULL for historical runs whose counts were never retained." }
+    - { name: "uri", type: "TEXT", doc: "The collector's URI (`oxplow:oxplow/collector?collector=<namespace>/<id>`)." }
+    - { name: "latest", type: "INT", doc: "1 when this run is the collector checkpoint's latest finished run, 0 otherwise." }
   tests:
+    - { not_null: run_id }
     - { not_null: owner }
     - { not_null: id }
+- name: collector_checkpoint
+  version: 1
+  key: [owner, id]
+  description: "One checkpoint per collector that has run. Holds the cursor and counts from its last successful run and the pointers to its latest handled event and latest finished run."
+  fields:
+    - { name: "owner", type: "TEXT", doc: "The collector's namespace." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its namespace." }
+    - { name: "uri", type: "TEXT", doc: "The collector's URI (`oxplow:oxplow/collector?collector=<namespace>/<id>`)." }
+    - { name: "cursor_json", type: "TEXT", doc: "The opaque cursor its script or provider returned. A failed run leaves it unchanged." }
+    - { name: "last_event_id", type: "INTEGER", doc: "The sequence of the latest trigger event the collector handled." }
+    - { name: "last_run_id", type: "TEXT", doc: "The latest finished run (`v_collector_run.run_id`)." }
+    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
+  tests:
+    - { not_null: last_run_id }
 - name: pending_run
   version: 2
   key: [owner, id]
@@ -1702,23 +1714,21 @@
   tests:
     - { not_null: capability }
     - { not_null: provider }
-- name: command_audit
-  version: 5
+- name: command_run
+  version: 2
   key: [id]
-  description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, pages and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
+  description: "Every command run on the bus, including reads and refusals. Each row names the command, who ran it, how it ended and the contribution run that holds its cost and authority."
+  groups: [contribution_run]
   fields:
-    - { name: "id", type: "INTEGER", doc: "Audit row id, in run order." }
-    - { name: "at", type: "TEXT", doc: "When it ran (RFC 3339)." }
+    - { name: "id", type: "INTEGER", doc: "The command run's integer detail id." }
     - { name: "command", type: "TEXT", doc: "The command id (`oxtask.task.create`)." }
-    - { name: "actor_kind", type: "TEXT", doc: "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`." }
-    - { name: "actor_id", type: "TEXT", doc: "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system." }
-    - { name: "outcome", type: "TEXT", doc: "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)." }
-    - { name: "error", type: "TEXT", doc: "What went wrong, for an outcome other than `ok`." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it ran on, if any (v_thread.id)." }
-    - { name: "session_id", type: "INTEGER", doc: "The agent session that ran it, if any (v_agent_session.id)." }
+    - { name: "changed", type: "INT", doc: "1 when the command completed with outcome ok and recorded its input." }
+    - { name: "undone", type: "INT", doc: "1 when another command run has undone this run." }
+    - { name: "uri", type: "TEXT", doc: "The contribution run's URI (`oxplow:oxplow/contribution_run?id=<run_id>`)." }
   tests:
-    - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
-    - { accepted_values: { column: actor_kind, values: [human, agent, page, component, system, effect, job] } }
+    - { not_null: run_id }
+    - { unique: run_id }
+    - { accepted_values: { column: outcome, values: [ok, skipped, failed, denied, cancelled, invalid, interrupted] } }
 - name: config_value
   version: 7
   key: [key]
@@ -1836,7 +1846,7 @@
     - { name: "spends", type: "INT", doc: "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)" }
     - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
-  version: 6
+  version: 8
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   fields:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
@@ -1853,7 +1863,7 @@
     - { name: "dry_run", type: "TEXT", doc: "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run." }
     - { name: "decision", type: "TEXT", doc: "`pending`, `approved`, `declined` or `superseded`." }
     - { name: "decided_at", type: "TEXT", doc: "When it was decided or superseded." }
-    - { name: "audit_id", type: "INTEGER", doc: "The approving run's command audit row." }
+    - { name: "command_run_id", type: "INTEGER", doc: "The approving run's command run row." }
     - { name: "superseded_by", type: "INTEGER", doc: "The proposal that replaced it." }
   tests:
     - { not_null: id }

@@ -62,13 +62,13 @@ pub(super) async fn event_example(
     }
 }
 
-/// `commands` as audited (name, audit id): a sequence — how an effect's
+/// `commands` as audited (name, run id): a sequence — how an effect's
 /// commands run — is replaced by its steps, in order.
 pub(super) async fn without_sequences(
     host: &Host,
     audited: Vec<(String, Option<i64>)>,
 ) -> Vec<String> {
-    let audits = oxplow_db::SqliteCommandAuditStore::new(host.svc.db.clone());
+    let audits = oxplow_db::SqliteCommandRunStore::new(host.svc.db.clone());
     let mut commands = Vec::new();
     for (name, id) in audited {
         let steps = match (id, name == "oxplow.command.sequence") {
@@ -120,7 +120,12 @@ pub(super) async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Valu
         other => format!("{other:?}"),
     };
     let effects: Vec<Value> = rows(&format!(
-        "SELECT effect, state, reason FROM v_effect_run WHERE event_seq {at} ?1 AND latest = 1 \
+        "SELECT effect, CASE
+           WHEN proposal_id IS NOT NULL THEN 'proposed'
+           WHEN outcome IS NULL THEN 'started'
+           WHEN outcome IN ('ok', 'skipped') THEN outcome
+           ELSE 'failed' END, error
+         FROM v_effect_run WHERE event_seq {at} ?1 AND latest = 1 \
          ORDER BY effect"
     ))
     .await
@@ -128,7 +133,7 @@ pub(super) async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Valu
     .map(|r| json!({ "id": text(&r[0]), "state": text(&r[1]), "reason": text(&r[2]) }))
     .collect();
     let ran = rows(
-        "SELECT json_extract(payload, '$.command'), json_extract(payload, '$.audit_id') FROM v_event \
+        "SELECT json_extract(payload, '$.command'), json_extract(payload, '$.command_run_id') FROM v_event \
          WHERE type = 'command.executed' AND seq > ?1 \
            AND json_extract(payload, '$.actor_kind') = 'effect' ORDER BY seq",
     )
@@ -427,7 +432,7 @@ pub(super) async fn job_example(
 
 /// Run `when: { undo: <command>, as?, confirmed? }` for real: the undo of
 /// that command's newest run that was not undone yet (the inverse its
-/// audit row kept, run through the bus as a run of its own), checked
+/// command run record kept, run through the bus as a run of its own), checked
 /// against `expect`: `{ ok: true }` or `{ ok: false, refused }`.
 pub(super) async fn undo_run(
     host: &Host,
@@ -449,7 +454,7 @@ pub(super) async fn undo_run(
     let rows = host
         .svc
         .commands
-        .audit_store()
+        .command_run_store()
         .list_recent(1000)
         .await
         .unwrap_or_default();
@@ -509,7 +514,7 @@ pub(super) async fn command_run(
         .svc
         .sql
         .query_sql(
-            "SELECT COALESCE(MAX(id), 0) FROM v_command_audit",
+            "SELECT COALESCE(MAX(id), 0) FROM v_command_run",
             vec![],
             None,
         )
@@ -556,11 +561,18 @@ pub(super) async fn command_run(
         }
         Err(e) => json!({ "ok": false, "refused": e.to_string() }),
     };
+    // The result already lists the composed steps. Read the other audited
+    // writes here, including sequences started by effects.
     let mut audited: Vec<(String, Option<i64>)> = host
         .svc
         .sql
         .query_sql(
-            "SELECT command, id FROM v_command_audit WHERE id > ?1 ORDER BY id",
+            "SELECT child.command, child.id
+             FROM v_command_run child
+             LEFT JOIN v_command_run parent
+               ON parent.run_id = child.parent_run_id AND parent.id > ?1
+             WHERE child.id > ?1 AND child.changed = 1 AND parent.id IS NULL
+             ORDER BY child.id",
             vec![head],
             None,
         )
@@ -807,6 +819,36 @@ pub(super) async fn action_point_example(
                 format!("action point `{id}` offered {at} at `{path}`, the example expects {want}"),
             )
             .fix("the commands' `ui.at`, or the example's `context` and `expect`")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
+/// `when: { link_text: <text> }`: the links the extension's `links:` make
+/// in `text`, as the terminal and markdown draw them —
+/// `expect: { links: [{ text, uri }] }`.
+pub(super) fn link_text_example(
+    ext: &oxplow_app::extension::extensions::Extension,
+    ex: &Example<'_>,
+    text: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let links: Vec<Value> =
+        oxplow_app::extension::extensions::link_rules::find_rule_links(text, &ext.links)
+            .into_iter()
+            .map(|l| json!({ "text": l.text, "uri": l.uri }))
+            .collect();
+    let got = json!({ "links": links });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("`{text}` made {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("the extension's `links:` patterns and URIs, or the example's `expect`")
             .mismatch(path, want, at),
         );
     }

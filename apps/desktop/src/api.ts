@@ -6,7 +6,6 @@ import type {
   HookEnvelope,
   OpOutcome,
   PointOffer,
-  OxplowConfig,
   OxplowEvent,
   Reads,
   SymbolLocation,
@@ -17,7 +16,7 @@ import { listen, onRemoteReconnect, sendSocketFrame, triggerRemoteResync } from 
 
 /** Whether this window is in the desktop shell — false in a plain browser
  *  driving a daemon, which has no native menu or recent projects. */
-export { shellAvailable } from "./tauri-bridge/transport.js";
+export { filesAreLocal, shellAvailable } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS, type EventChannelFrameKey } from "./tauri-bridge/channels.js";
@@ -26,11 +25,11 @@ import {
   metricSpecs as metricSpecRows,
   type MetricSpec,
 } from "./metricsSql.js";
-import { IpcCallError, ipcErrorCode, ipcErrorAuditId, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorCommandRunId, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   HarnessListing,
-  PanelPlacement,
+  ScopedPanelLayout,
   UiPreference,
   Extension,
   VizConfig,
@@ -75,7 +74,7 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
     ipcErrorCode(result.error),
     ipcErrorField(result.error),
     ipcErrorDetails(result.error),
-    ipcErrorAuditId(result.error),
+    ipcErrorCommandRunId(result.error),
   );
 }
 
@@ -163,6 +162,9 @@ function buildBridge() {
     /// starting one: `null` when none runs.
     lookupTerminalSession: async (uri: string): Promise<string | null> =>
       unwrap(await commands.lookupTerminalSession(uri)),
+    restartAgentTerminal: async (uri: string): Promise<void> => {
+      unwrap(await commands.restartAgentTerminal(uri));
+    },
     closeTerminalSession: async (sessionId: string): Promise<void> => {
       try {
         unwrap(await commands.closeTerminalSession(sessionId));
@@ -233,7 +235,7 @@ let cachedBridge: DesktopBridge | null = null;
 
 // The wire's own shapes, from the generated bindings: nothing converts a
 // shape at the boundary (P11).
-export type { BackgroundTask, OxplowConfig, OxplowEvent };
+export type { BackgroundTask, OxplowEvent };
 export type { OpOutcome } from "./tauri-bridge/index.js";
 
 
@@ -454,14 +456,16 @@ export async function componentForm(id: string, command: string, input: unknown,
 /** What the person can ask: every capability's questions and the enabled
  *  extensions' prompts (the catalog; contextual suggestions). */
 
-/** The person's left-nav layout: each panel's order, and whether it's
- *  hidden or collapsed (P6.G1). */
-export async function getPanelLayout(): Promise<PanelPlacement[]> {
-  return unwrap(await commands.getPanelLayout());
+/** The person's left-nav layout as a viewer sees it (P6.G1): its thread's
+ *  list, its stream's and the project's, each panel's order and whether
+ *  it's collapsed (or, in the project's, hidden). */
+export async function getPanelLayout(streamId: string | null, threadId: string | null): Promise<ScopedPanelLayout> {
+  return unwrap(await commands.getPanelLayout(streamId, threadId));
 }
 
-export async function setPanelLayout(layout: PanelPlacement[]): Promise<void> {
-  unwrap(await commands.setPanelLayout(layout));
+/** Replace the lists the viewer sees. */
+export async function setPanelLayout(streamId: string | null, threadId: string | null, layout: ScopedPanelLayout): Promise<void> {
+  unwrap(await commands.setPanelLayout(streamId, threadId, layout));
 }
 
 /** What the person's oxplow remembers outside any one tab: page memory
@@ -538,17 +542,6 @@ export async function renameCurrentStream(title: string): Promise<Stream> {
   if (!cur) throw new Error("no current stream to rename");
   return renameStream(cur.id, title);
 }
-
-export async function getConfig(): Promise<OxplowConfig> {
-  return unwrap(await commands.getConfig());
-}
-
-/// The enabled agent harnesses, by key, in priority order.
-
-
-/// Set (or clear, with null/blank) one of a harness's declared settings —
-/// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
-/// reads (the harness's listing names its settings).
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
 
@@ -985,9 +978,9 @@ async function runVcs(name: string, input: unknown, confirmed = false): Promise<
   return (await runCommand(name, input, confirmed)).result as OpOutcome;
 }
 
-/** Undo the run recorded as `auditId`, as the person. */
-export async function undoCommand(auditId: number, confirmed = false): Promise<CommandOutcome> {
-  return unwrap(await commands.undoCommand(auditId, confirmed));
+/** Undo the run recorded as `commandRunId`, as the person. */
+export async function undoCommand(commandRunId: number, confirmed = false): Promise<CommandOutcome> {
+  return unwrap(await commands.undoCommand(commandRunId, confirmed));
 }
 
 /** Approve (it runs as the person; its outcome) or decline (`null`) an
@@ -1508,6 +1501,18 @@ export async function respondLspApplyEdit(
   failureReason?: string,
 ): Promise<void> {
   unwrap(await commands.respondLspApplyEdit(token, applied, failureReason ?? null));
+}
+
+/// Show local `path` (absolute) in the OS file manager (Open In ▸ Reveal
+/// in Finder). The shell does it; only when `filesAreLocal()`.
+export async function revealPath(path: string): Promise<void> {
+  unwrap(await commands.revealPath(path));
+}
+
+/// Open local `path` (absolute) with its default app (Open In ▸ Default
+/// App). The shell refuses a program.
+export async function openPath(path: string): Promise<void> {
+  unwrap(await commands.openPath(path));
 }
 
 export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {

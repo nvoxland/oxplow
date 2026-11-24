@@ -18,10 +18,11 @@ pub mod catalog_listing_store;
 pub mod change_store;
 pub mod changes;
 pub mod collector_store;
-pub mod command_audit_store;
+pub mod command_run_store;
 pub mod commit_request_store;
 pub mod context_store;
 pub mod contribution_health_store;
+pub mod contribution_run_store;
 pub mod contribution_store;
 mod database;
 pub mod datasets;
@@ -34,13 +35,12 @@ pub mod event_retention;
 pub mod event_type_store;
 pub mod extension_config_store;
 pub mod extension_deployment_store;
-pub mod extension_job_store;
-pub mod extension_run_store;
 pub mod extension_state_store;
 pub mod extension_store;
 mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
+pub mod job_run_store;
 pub mod model_store;
 pub mod op_error_store;
 pub mod page_ref_projections;
@@ -64,6 +64,7 @@ pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod ui_preference_store;
+pub mod visibility_scope;
 
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,
@@ -84,10 +85,10 @@ pub use change_store::{
     ChangeResults, ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
 pub use collector_store::{
-    CollectorRun, EntityColumn, EntityTable, EntityWrite, PendingRun, SqliteCollectorStore,
-    StoredType,
+    CollectorObservation, CollectorRun, EntityColumn, EntityTable, EntityWrite, PendingRun,
+    SqliteCollectorStore, StoredType,
 };
-pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
+pub use command_run_store::{CommandRun, NewCommandRun, SqliteCommandRunStore};
 pub use contribution_health_store::{
     ContributionHealthRow, ContributionKey, SqliteContributionHealthStore,
 };
@@ -105,7 +106,7 @@ pub use fact_store::{
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
-pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
+pub use panel_layout_store::{PanelPlacement, ScopedPanelLayout, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
 pub use request_analysis_store::{AnalysisSpan, Observation, SqliteRequestAnalysisStore};

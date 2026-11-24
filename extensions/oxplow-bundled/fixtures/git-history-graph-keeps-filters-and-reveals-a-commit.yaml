@@ -1,0 +1,20 @@
+given:
+  - observe: { commit: { sha: aaaaaaa, at: "2026-01-01T00:00:00Z", subject: Main work } }
+  - observe: { commit: { sha: bbbbbbb, at: "2026-01-02T00:00:00Z", subject: Side work, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ccccccc, at: "2026-01-03T00:00:00Z", subject: Main again, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ddddddd, at: "2026-01-04T00:00:00Z", subject: Merge side, parents: [ccccccc, bbbbbbb] } }
+when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: ddddddd } }
+steps:
+  - ui:
+      - expect: { count: { '.row': 4, '.row svg': 0 } }
+      - fill: { "#query": side work }
+      - expect: { count: { '.row': 1 }, view_params: { q: side work } }
+      - click: '#graph-mode'
+      - expect: { count: { '.row': 4, '.row:not(.dimmed)': 1, '.row[data-sha="bbbbbbb"] circle.node-1': 1 } }
+      - click: '#list-mode'
+      - expect: { count: { '.row': 1, '.row svg': 0 }, view_params: { q: side work } }
+  - params: { reveal_sha: bbbbbbb }
+    ui:
+      - expect: { count: { '.row.revealed[data-sha="bbbbbbb"] circle': 1 } }
+      - click: '.row.revealed'
+      - expect: { navigated: ['oxplow:oxplow/commit?sha=bbbbbbb'] }

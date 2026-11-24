@@ -161,3 +161,90 @@ fn generated_marker_only_counts_in_the_header() {
 fn ordinary_source_is_not_generated() {
     assert!(!has_generated_header("//! A library.\nfn work() {}\n"));
 }
+
+/// What `strip_comments` leaves of `src` as `id`: the line count kept.
+fn stripped(id: &str, src: &str) -> String {
+    let out = strip_comments(src, &lang(id)).expect("the language has comments");
+    assert_eq!(out.lines().count(), src.lines().count(), "{id}: {out:?}");
+    out
+}
+
+#[test]
+fn strip_comments_rust_keeps_markers_inside_strings() {
+    let src = "let g = glob(\"src/**/*.rs\");\nassert!(a); // assert!(b)\nlet u = \"http://x\";\nlet r = r#\"/* x\"#;\nlet c = '\"';\nassert!(c);\n/* assert!(d)\n   assert!(e) */\nassert!(f);\n";
+    let out = stripped("rust", src);
+    for kept in [
+        "glob(\"src/**/*.rs\")",
+        "assert!(a)",
+        "\"http://x\"",
+        "r#\"/* x\"#",
+        "assert!(c)",
+        "assert!(f)",
+    ] {
+        assert!(out.contains(kept), "{kept} kept: {out:?}");
+    }
+    for gone in ["assert!(b)", "assert!(d)", "assert!(e)"] {
+        assert!(!out.contains(gone), "{gone} dropped: {out:?}");
+    }
+}
+
+#[test]
+fn strip_comments_typescript_keeps_markers_inside_strings() {
+    let src = "const g = \"src/**/*.ts\";\nconst u = 'http://x';\nconst t = `/* ${a} */`;\nexpect(a); // expect(b)\n/* expect(c) */\nexpect(d);\n";
+    let out = stripped("typescript", src);
+    for kept in [
+        "\"src/**/*.ts\"",
+        "'http://x'",
+        "`/* ${a} */`",
+        "expect(a)",
+        "expect(d)",
+    ] {
+        assert!(out.contains(kept), "{kept} kept: {out:?}");
+    }
+    for gone in ["expect(b)", "expect(c)"] {
+        assert!(!out.contains(gone), "{gone} dropped: {out:?}");
+    }
+}
+
+#[test]
+fn strip_comments_python_keeps_markers_inside_strings() {
+    let src = "x = \"# not a comment\"\nassert a  # assert b\ny = '/*'\nz = \"\"\"\n# in a docstring\n\"\"\"\nassert c\n";
+    let out = stripped("python", src);
+    for kept in [
+        "\"# not a comment\"",
+        "assert a",
+        "'/*'",
+        "# in a docstring",
+        "assert c",
+    ] {
+        assert!(out.contains(kept), "{kept} kept: {out:?}");
+    }
+    assert!(!out.contains("assert b"), "{out:?}");
+}
+
+/// A language with no grammar strips by its declared `comments:`, and
+/// still skips a quoted string.
+#[test]
+fn strip_comments_without_a_grammar_skips_quoted_strings() {
+    let lua = stripped("lua", "local s = \"-- not\"\nassert(a) -- assert(b)\n");
+    assert!(
+        lua.contains("\"-- not\"") && lua.contains("assert(a)"),
+        "{lua:?}"
+    );
+    assert!(!lua.contains("assert(b)"), "{lua:?}");
+    let ruby = stripped(
+        "ruby",
+        "s = \"#{x} # not\"\nt = 'a\\'#b'\nassert a # assert b\n",
+    );
+    assert!(
+        ruby.contains("\"#{x} # not\"") && ruby.contains("'a\\'#b'"),
+        "{ruby:?}"
+    );
+    assert!(!ruby.contains("assert b"), "{ruby:?}");
+    let bash = stripped("bash", "echo \"# not\" # gone\necho it's\n# x\n");
+    assert!(
+        bash.contains("echo \"# not\"") && !bash.contains("gone"),
+        "{bash:?}"
+    );
+    assert!(bash.contains("echo it's"), "{bash:?}");
+}

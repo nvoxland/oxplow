@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(primary(&fx).await.title, "Renamed");
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(primary(&fx).await.title, s.title);

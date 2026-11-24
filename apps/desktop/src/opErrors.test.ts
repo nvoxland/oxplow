@@ -20,7 +20,7 @@ describe("reportOpErrorWith", () => {
       signal: "SIGTERM",
     }, at);
     reportOpErrorWith(run, () => {}, { label: "Save note", threadId: null }, at);
-    reportOpErrorWith(run, () => {}, { label: "Approve", auditId: 41, proposalId: 3, threadId: null }, { thread: null, stream: null });
+    reportOpErrorWith(run, () => {}, { label: "Approve", commandRunId: 41, proposalId: 3, threadId: null }, { thread: null, stream: null });
     await Promise.resolve();
     expect(calls).toEqual([
       {
@@ -39,8 +39,8 @@ describe("reportOpErrorWith", () => {
       // From no thread, it names the stream on screen, so that stream's
       // agent can read its output.
       { name: "oxplow.ui.report_error", input: { label: "Save note", stream: "str1" } },
-      // What recorded the run: its audit row, and an approval's proposal.
-      { name: "oxplow.ui.report_error", input: { label: "Approve", audit_id: 41, proposal: 3 } },
+      // What recorded the run: its command run ID, and an approval's proposal.
+      { name: "oxplow.ui.report_error", input: { label: "Approve", command_run_id: 41, proposal: 3 } },
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("reportOpErrorWith", () => {
 
   test("a report resolves to the failure's id, the row's event id; a failed report to null", async () => {
     const at = { thread: null, stream: null };
-    const ok = async () => ({ result: { event: "01ev" }, audit_id: 1, event_id: "x", inverse: null });
+    const ok = async () => ({ result: { event: "01ev" }, command_run_id: 1, event_id: "x", inverse: null });
     expect(await reportOpErrorWith(ok, () => {}, { label: "Push" }, at)).toBe("01ev");
     const broken = async () => {
       throw new Error("down");

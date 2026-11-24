@@ -52,10 +52,10 @@ pub enum Lifecycle {
     Experimental,
 }
 
-/// Whether the handler runs inside the bus's transaction (with the audit
+/// Whether the handler runs inside the bus's transaction (with the command run
 /// row and `command.executed`), or outside it, against a system the bus
 /// doesn't own — a VCS, a provider process, a collector's script — and is
-/// audited after it returns (`External`). A `Dispatch` command decides
+/// recorded after it returns (`External`). A `Dispatch` command decides
 /// per input (the `task.*` verbs: oxplow's own items in the
 /// transaction, another provider's through its process) and then runs
 /// exactly as one or the other. A test lists the `External` and the
@@ -95,26 +95,26 @@ pub enum Access {
     View,
     /// Reads, changes nothing (`sql.read`).
     Read,
-    /// Changes oxplow's own records (filing and editing tasks): audited,
+    /// Changes oxplow's own records (filing and editing tasks): recorded,
     /// open to any thread.
     Record,
     /// Changes something outside oxplow's records — files, git, processes,
-    /// the configuration: audited, and an agent's or job's run must be
+    /// the configuration: recorded, and an agent's or job's run must be
     /// bound to an open thread (the worktree it changes).
     #[default]
     Write,
 }
 
 impl Access {
-    /// A `View` or a `Read`: runs without an audit row or a
-    /// `command.executed` event (a polling agent must not fill the log), on
-    /// a read snapshot, can't ask for a confirmation, and any thread may
-    /// run it.
+    /// A `View` or a `Read`: runs without a `command.executed` event (a
+    /// polling agent must not fill the log) and leaves a command run row
+    /// with no input or result, on a read snapshot, can't ask for a
+    /// confirmation, and any thread may run it.
     pub fn reads_only(self) -> bool {
         matches!(self, Access::View | Access::Read)
     }
 
-    /// A `Record` or a `Write`: audited, and logs `command.executed`.
+    /// A `Record` or a `Write`: recorded, and logs `command.executed`.
     pub fn records(self) -> bool {
         !self.reads_only()
     }
@@ -169,9 +169,11 @@ pub struct CommandSpec {
     pub needs: Vec<String>,
     /// How a person meets it — label, group, where it's offered and how
     /// it runs from there. `None`: it isn't offered to a person by itself
-    /// (a step other commands compose, an agent's tool).
+    /// (a step other commands compose, an agent's tool). Boxed: it is
+    /// large and most commands have none, and specs are moved and listed
+    /// by the hundred.
     #[serde(default)]
-    pub ui: Option<CommandUi>,
+    pub ui: Option<Box<CommandUi>>,
     /// The scope operation behind it, when it is one: where it runs (a
     /// window scope's runs in the window) and what it does.
     #[serde(default)]
@@ -179,7 +181,7 @@ pub struct CommandSpec {
     /// Top-level input fields its record leaves out — a file's content —
     /// kept as their size (`{ "omitted_bytes": n }`). The reserved `*`
     /// marker omits the entire input, including non-object inputs: the run is still
-    /// audited, the audit log doesn't grow by every file saved.
+    /// recorded, the command run log doesn't grow by every file saved.
     #[serde(default)]
     pub unrecorded: Vec<String>,
 }
@@ -256,6 +258,14 @@ pub struct CommandUi {
     /// extensions load. Absent, every ref of the kind is offered it.
     #[serde(default)]
     pub about_when: Option<String>,
+    /// A function of the command's `entry:` script that decides, for each
+    /// link of `about`'s kind that passes `about.accepts`, whether the
+    /// command is offered on it: called with `{ uri, kind, url?, path? }`,
+    /// offered when it returns `True`. The logic a pattern can't say (a
+    /// URL of a host the extension's settings name). Needs `about`; the
+    /// function is checked against the script when the extension loads.
+    #[serde(default)]
+    pub about_if: Option<String>,
     /// The named action point it joins (`<namespace>/<name>`, declared
     /// by an extension's `action_points:`): the point's page places it,
     /// and it runs with the point's context as its input. Excludes
@@ -351,9 +361,28 @@ pub struct ItemAccepts {
     /// rule (`present`, `absent`, an anchored id pattern).
     #[serde(default)]
     pub store: Option<StoreFilter>,
+    /// About a web link (`about: https` / `http`): the URLs it is offered
+    /// on, a pattern over the whole URL in the param-pattern dialect
+    /// (anchored `^…$`; Rust and the desktop read it alike).
+    #[serde(default)]
+    pub url: Option<String>,
+    /// About a file or a directory (`oxplow/file`, `oxplow/dir`): the
+    /// worktree paths it is offered on, a glob or a list of them
+    /// (`**/*.ipynb`; `*` stops at `/`).
+    #[serde(default)]
+    pub path: Option<StoreFilter>,
 }
 
-/// One store id or a list of them.
+/// The URL schemes a command may be about (`ui.about: https`) and a page
+/// may draw (`for: https`): a web link is named by its scheme.
+pub const WEB_SCHEMES: &[&str] = &["https", "http"];
+
+/// Whether `resource` is a web link's scheme ([`WEB_SCHEMES`]).
+pub fn is_web_resource(resource: &str) -> bool {
+    WEB_SCHEMES.contains(&resource)
+}
+
+/// One store id or a list of them (and one glob or a list, for `path`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(untagged)]
 pub enum StoreFilter {
@@ -462,11 +491,39 @@ impl CommandUi {
         }
         if let Some(about) = &self.about {
             let kind = about.resource();
-            if kind.parse::<crate::uri::ResourceName>().is_err() {
+            if !is_web_resource(kind) && kind.parse::<crate::uri::ResourceName>().is_err() {
                 return bad(
                     "about",
-                    format!("`{kind}` isn't a resource (`<extension>/<name>`)"),
+                    format!(
+                        "`{kind}` isn't a resource (`<extension>/<name>`) or a web link's scheme \
+                         (`https`, `http`)"
+                    ),
                 );
+            }
+            if let Some(accepts) = about.accepts() {
+                if accepts.url.is_some() && !is_web_resource(kind) {
+                    return bad(
+                        "about/accepts/url",
+                        format!("`url` filters a web link: give it `about: https` (not `{kind}`)"),
+                    );
+                }
+                if let Some(path) = &accepts.path {
+                    if !matches!(kind, "oxplow/file" | "oxplow/dir") {
+                        return bad(
+                            "about/accepts/path",
+                            format!(
+                                "`path` filters a file or a directory: give it `about: oxplow/file` \
+                                 or `oxplow/dir` (not `{kind}`)"
+                            ),
+                        );
+                    }
+                    if path.rules().is_empty() {
+                        return bad(
+                            "about/accepts/path",
+                            "`path` names at least one glob".into(),
+                        );
+                    }
+                }
             }
         }
         if let Some(column) = &self.about_when {
@@ -488,6 +545,27 @@ impl CommandUi {
                     format!(
                         "`{column}` isn't a column name: name one column of the dataset that is \
                          truthy where the command is offered (no `!`, no expression)"
+                    ),
+                );
+            }
+        }
+        if let Some(func) = &self.about_if {
+            if self.about.is_none() {
+                return bad(
+                    "about_if",
+                    "`about_if` decides on what the command is about: give it an `about`".into(),
+                );
+            }
+            let mut chars = func.chars();
+            let name = chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !name {
+                return bad(
+                    "about_if",
+                    format!(
+                        "`{func}` isn't a function name: name a function of the command's script"
                     ),
                 );
             }
@@ -752,7 +830,7 @@ impl Actor {
     /// Build the attribution actor for a host-owned job execution.
     /// This does not grant generic command access or confirmation authority.
     pub fn job(
-        identity: &crate::extension_job_context::JobExecutionIdentity,
+        identity: &crate::job_run_context::JobExecutionIdentity,
         thread_id: Option<ThreadId>,
         stream_id: Option<StreamId>,
     ) -> Actor {
@@ -892,7 +970,7 @@ impl Actor {
         }
     }
 
-    /// The `source` an event or audit row records: `human`, `agent:thr3`,
+    /// The `source` an event or command run row records: `human`, `agent:thr3`,
     /// `oxplow:oxplow/page?page=acme/blocked`, `system`, `effect:acme/notify`.
     pub fn source(&self) -> String {
         match self {
@@ -926,7 +1004,7 @@ impl Actor {
         }
     }
 
-    /// The id part of `source`, for the audit's `actor_id`.
+    /// The id part of `source`, for the command run's `actor_id`.
     pub fn id(&self) -> Option<String> {
         match self {
             Actor::Agent {
@@ -1053,12 +1131,12 @@ pub struct Preview {
 pub struct CommandOutcome {
     #[specta(type = crate::Json)]
     pub result: Value,
-    /// The `command_audit` row; `None` for a `Read` command.
+    /// The `command_run` row; `None` for a `Read` command.
     #[specta(type = Option<crate::JsNumber>)]
-    pub audit_id: Option<i64>,
+    pub command_run_id: Option<i64>,
     /// The `command.executed` event; `None` for a `Read` command.
     pub event_id: Option<EventId>,
-    /// Present when the command is undoable: `commands.undo(audit_id)`
+    /// Present when the command is undoable: `commands.undo(command_run_id)`
     /// runs it.
     pub inverse: Option<CommandCall>,
 }
@@ -1386,6 +1464,66 @@ mod tests {
         serde_json::from_value(v).unwrap()
     }
 
+    /// A command about web links (`about: https`) or about files and
+    /// directories narrows them by the URL (`accepts.url`, a pattern) or
+    /// the path (`accepts.path`, globs); each filter only where it can hold.
+    #[test]
+    fn a_link_command_filters_by_url_or_path_where_one_is() {
+        for good in [
+            json!({ "label": "Open PR", "about": "https" }),
+            json!({ "label": "Open PR", "about": { "resource": "https", "accepts": { "url": "^https://github[.]com/[A-Za-z0-9/_-]+$" } } }),
+            json!({ "label": "Jupyter", "about": { "resource": "oxplow/file", "accepts": { "path": "**/*.ipynb" } } }),
+            json!({ "label": "Here", "about": { "resource": "oxplow/dir", "accepts": { "path": ["src/**", "lib"] } } }),
+        ] {
+            assert_eq!(ui(good.clone()).problem(), None, "{good}");
+        }
+        for (bad, field, says) in [
+            (
+                json!({ "label": "X", "about": { "resource": "oxplow/file", "accepts": { "url": "^x$" } } }),
+                "/ui/about/accepts/url",
+                "web link",
+            ),
+            (
+                json!({ "label": "X", "about": { "resource": "https", "accepts": { "path": "*.md" } } }),
+                "/ui/about/accepts/path",
+                "file or a directory",
+            ),
+            (
+                json!({ "label": "X", "about": { "resource": "oxplow/file", "accepts": { "path": [] } } }),
+                "/ui/about/accepts/path",
+                "at least one",
+            ),
+            (
+                json!({ "label": "X", "about": "ftp" }),
+                "/ui/about",
+                "isn't a resource",
+            ),
+        ] {
+            let (f, message) = ui(bad.clone()).problem().expect("refused");
+            assert_eq!(f, field, "{bad}");
+            assert!(message.contains(says), "{bad}: {message}");
+        }
+    }
+
+    /// `about_if` names a function of the command's script that decides,
+    /// per link, whether it is offered: it needs an `about`, and is a name.
+    #[test]
+    fn about_if_is_a_function_name_with_an_about() {
+        assert_eq!(
+            ui(json!({ "label": "PR", "about": "https", "about_if": "is_pr" })).problem(),
+            None
+        );
+        let (field, message) = ui(json!({ "label": "PR", "about_if": "is_pr" }))
+            .problem()
+            .expect("no about");
+        assert_eq!(field, "/ui/about_if");
+        assert!(message.contains("`about`"), "{message}");
+        let (field, _) = ui(json!({ "label": "PR", "about": "https", "about_if": "is pr()" }))
+            .problem()
+            .expect("not a name");
+        assert_eq!(field, "/ui/about_if");
+    }
+
     /// What a window would meet only by its not working is refused when
     /// the command registers, naming the field: a binding that isn't one,
     /// a ref binding with no `about`, a placeholder inside text, a form
@@ -1615,7 +1753,7 @@ mod tests {
         );
     }
 
-    /// A view runs as a read does; a record is audited but open to any
+    /// A view runs as a read does; a record is recorded but open to any
     /// thread; only a write needs an open thread.
     #[test]
     fn what_each_access_asks_of_a_run() {

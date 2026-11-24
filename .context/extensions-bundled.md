@@ -51,8 +51,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   - `oxtask` (`oxtask`): the tasks store, oxplow's own task tracker: it fills `oxplow/task_record` (store `oxtask`) from its own SQLite file and holds the commands `oxtask.task.*`.
     It holds the opinion about how its tasks are worked, so bundled names none
     of its commands:
-    - **The task workflow**: the setting `tasks.workflow` (`off`,
-      `person_files`, `agent_tracks` the default, `custom`) with
+    - **The task workflow**: the setting `tasks.workflow` (`off` by default,
+      `person_files`, `agent_tracks`, `custom`) with
       `tasks.definitionOfDone` (free text), in oxtask's own `configuration:`
       (namespace `oxtask`, not `oxplow`'s). `oxtask.tasks.set_workflow
       { workflow?, definition_of_done? }` (a script: it merges into the
@@ -108,8 +108,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   duplicate scan found (the `oxplow.duplicate_lines` facts, each side's
   `detail` its copy) once, biggest first, with a compare link; not the
   change analyzer's scans, which are per change and never age out. The
-  holder's Findings and Review pages, which showed those per-change rows,
-  were dropped. Fixtures: the collectors' own, `the-metrics-list-*`,
+  old Findings and Review pages, which showed those per-change rows, were dropped. Fixtures: the collectors' own, `the-metrics-list-*`,
   `a-metric-with-no-recordings-*`, `duplicated-code-*`.
 - **Dashboards and Usage** (pages in `oxplow-bundled`). `dashboards` is the
   Dashboards index in the launcher's Data section: every dashboard page,
@@ -178,23 +177,40 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       rows: the collector `oxplow.review.unused` (`collectors/review/unused.star`,
       `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,
       `needs: [tree.read, sql.read]`) reads `change_diff` for the lines the
-      change removed, takes the call-shaped names (`name(`) that aren't also
+      change removed (in rounds: each call names the files past its limit in
+      `rest`, and it asks again for those), takes the call-shaped names (`name(`) that aren't also
       called on an added line of the same file, keeps those the head tree
       defines (a `grep_tree` hit that starts a function of that name by `code_metrics`;
       a library call has none) and finds no other mention of with `grep_tree`
       (a text search of the change's head tree, `anchors.revision`, not the worktree's,
       so it says "possibly"), and writes one row per function:
-      `code`, `medium`, `possibly-unused`, at the definition. Its entity
+      `code`, `medium`, `possibly-unused`, at the definition. A file whose
+      own changed lines are past `change_diff`'s 2 MB is `too_large`, never
+      read: the check writes one `too-large-to-check` row for the change
+      (`info`, no path, "N files too large to check", the files in `why`), so
+      it never skips a file in silence. Its entity
       `review_unused` (key `change_id|path|line|signal`) holds the rows; a rerun
       reads the change's earlier keys and tombstones the ones it no longer
       produces. `review_signal_unused` adds them to the list.
     - `v_oxplow_review_check` (`datasets/review_check.sql`): one row per
       analysed change and per check (a collector on `change.analyzed`):
-      `change_id, collector, collector_uri, state, last_run_at, error`.
-      `state` is `pending` until the check has run for the change's latest
-      `change.analyzed` (files) event (its `collector_run.last_event_id` is
-      older than that event's seq), `failed` when that run failed, else `ok`.
-      The Review page shows a pending check as still running.
+      `change_id, collector, collector_uri, state, last_run_at, error`
+      (version 3). The state is the check's own run for the change: the
+      `v_contribution_run` whose `cause_event_id` is the change's latest
+      `change.analyzed` (files) event (`v_event` at
+      `v_change.files_analyzed_seq`), never the collector's latest run, which
+      is one per collector and may be another change's (an index on
+      `contribution_run (cause_event_id, contribution)` finds it).
+      `pending` while that run is live, `failed` when it failed, else `ok`.
+      With no run: `off` when the collector is disabled
+      (`v_contribution_health`); `pending` while the collector hasn't handled
+      the event yet (`v_collector_checkpoint.last_event_id`, an event seq, is
+      before `files_analyzed_seq`); else `not_run`. A collector that has
+      handled a later event never runs for this one: it was disabled when the
+      change was analysed, or retention swept the run after 90 days. So a
+      change never stays pending for good. The Review page shows a pending
+      check as still running, an off one as off and a not_run one as did not
+      run.
   - **Any two points.** The page reads one change, of any kind: a commit, a
     request, a turn, the working tree, or a `range` between any two points
     (`git:<sha>`, `snap:<id>`, `working`), which the Changes page makes for
@@ -202,8 +218,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     snapshots). Verification and scope come from a request's runs and task,
     so a range has none.
   - **The About rail** also says where the change's checks stand
-    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", or "None
-    ran") and which language packs are off for the files it changed (from
+    (`v_oxplow_review_check`: "Done", "1 running", "1 failed", "1 off", "1 did
+    not run", or "None ran") and which language packs are off for the files it changed (from
     `v_language`, with a link to turn each on).
   - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),
     never the union itself: every row with the project's severity for its
@@ -240,14 +256,12 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       touched with their deltas (`v_change_function`), the
       `review_signal_api` signals and `v_change_duplicate` blocks. Linked
       from the `code` row.
-  - `file-co-change` ("Usually Changes With", `parts/file-co-change.yaml`):
-    one line above a file's diff (slot `oxplow/diff.file-header`, params
-    `path`, `left`, `right`): "Usually changes with: a.rs, b.rs (unchanged
-    here)", from `v_oxplow_change_co_change` (`usual-co-changers-absent`)
-    of the change whose base and head revisions are `left` and `right`.
-    No row, so nothing drawn, when there is nothing to say.
+  - Co-change surprises are review signals only (area `history`,
+    `review_signal_history`): the review and Signals pages show them. A
+    file's diff does not: a line above every diff repeated, one file at a
+    time, what the review already says for the whole change.
   - Fixtures: `review-signals-*`, `the-review-page-*`, `the-signals-page-*`,
-    `the-tests-*`, `the-diff-header-*`. A commit's message
+    `the-tests-*`. A commit's message
     in a fixture needs `observe: { commit: { sha, subject } }` (the
     indexer doesn't run there).
 - **The review packet**. Its pages, mounted in
@@ -341,44 +355,16 @@ Each loads clean (`documented_examples_load_without_errors`):
 
 ## The `oxplow-bundled` extension
 
-**Two shipped extensions, and a holder that doesn't ship.** oxplow ships
-`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default), both
-in the `oxplow` namespace so a contribution can move between them without a rename.
-Foundation is kept as small as it can be while still useful: the host's pages, the
-default capability implementations (snapshots, knowledge)
-and the measures core's change analysis records. `oxplow-bundled` is what has been
-reviewed and kept.
-
-`.oxplow/extensions/oxplow-bundled-todo` holds everything that used to be in
-`oxplow-bundled` and hasn't been reviewed: this repo's, off, and not part of oxplow.
-A contribution moves from it to `oxplow-bundled` one piece at a time, as it is
-accepted, and the holder goes away when it is empty. Add nothing new there.
-
-- **It's off, and can't run.** `oxplow.extensions.oxplow-bundled-todo.enabled: false` in `.oxplow/project.yaml` keeps it
-  off while it sits in `.oxplow/extensions/`, so nothing loads it or tests it. It
-  keeps `namespace: oxplow` so what moves needs no rename, and that namespace is
-  reserved for shipped extensions. Its fixtures stop running too,
-  so it may fall behind core: a piece gets its fixtures working when it moves.
-  `desktop-tests/` holds frontend tests of its components, and `e2e-specs/` the
-  browser specs of its pages. They are reference for that trip, not specs to restore:
-  what they check becomes fixtures, and only what fits "What belongs here"
-  ([working-in-this-repo.md](./working-in-this-repo.md) "The browser suite") goes back.
-- **Nothing may depend on it.** No test, example or doc names its contents. Core
-  machinery a test needs a collector or a component for has its own test data
-  (`crates/oxplow-app/testdata/`) or uses foundation's.
-- **Names don't move.** Every global name comes from the `oxplow` namespace
-  ([extensions-manifest.md](./extensions-manifest.md) "Global names come from the
-  namespace"), so a dataset is `v_oxplow_<name>` and an event type `oxplow.<…>`
-  wherever it sits. The datasets, event types and the commands that emit them moved
-  first anyway: a script emits only the event types its own extension declares, and a
-  decorator reads only its own extension's datasets.
-- **Other docs.** Where `.context/` describes a screen, an advisory or a metric as
-  `oxplow-bundled`'s (or `oxplow/...`) and `extensions/oxplow-bundled/`
-  doesn't have it, it is in the holder and doesn't run today.
+**Two shipped extensions share the `oxplow` namespace.** oxplow ships
+`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default).
+That namespace lets a contribution move between them without a rename.
+Foundation holds the host's pages, the default capability implementations
+(snapshots and knowledge), and the measures core's change analysis records.
+Bundled adds task and knowledge workflows, Git views, and analytics.
 
 What moved out of core, and what it is now. All of it is pages (files in
 `pages/`, read by `v_page`); oxplow-foundation's pages draw the app's own
-screens and the holder's add the review and analysis:
+screens and Bundled's add review and analysis:
 
 - **A page for each kind of contribution.** Every contribution kind an
   extension declares (command, skill, custom component, slot, collector,
@@ -413,20 +399,14 @@ screens and the holder's add the review and analysis:
 - **Request blocks.** Blocks for a request's tests (coverage, untested
   files, test runs, failed tests, analysis findings), its metric deltas, its
   nudges and its plan, mounted at `oxplow/diff-view.sections`.
-- **Metric nudges.** The `threshold-crossed` advisory (with
-  `metric-deltas`).
-- **Git History's commit graph.** The `history-graph` component, replacing
-  core's plain commit list (`vcs.history.graph`, a `ui.mounts`
-  entry).
+- **Git History's commit graph.** The `history-graph` component is
+  the Graph view of the Git History page, alongside its commit list.
 - **The wiki screens** have moved to `oxplow-bundled`: see "The knowledge
   pages" below.
-- **Explore Data.** The `explore-data` page and its component (source in
-  `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
-  `build:` runs it). Foundation's dataset pages do not link to it.
-- **No Timeline page.** The `timeline` page and its component (and the
-  `vis-timeline` dependency) were removed. Foundation has no build step, no
-  `package.json` and no `node_modules`; its only custom component is the
-  hand-written `integrations`.
+- **Data discovery.** Catalog shows the first sentence of each dataset's description.
+  Dataset definition shows its full description, fields, and upstream and downstream
+  lineage. Dataset data shows its rows with limit, sort, and filter controls.
+  The agent's catalog tool returns full descriptions and the metadata for querying them.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
@@ -482,7 +462,7 @@ screens and the holder's add the review and analysis:
   open tasks with `assignee = oxplow:oxplow/person` (`v_oxplow_task`) - In
   progress, then Up next (todo and blocked) in the person's queue order
   (`rank IS NULL, rank, created_at`) - each with its stage, under its
-  epic. A project-scoped panel (`scope: project`): the same in every
+  epic. A panel of project data (`data_scope: project`): the same in every
   thread, with no thread param. The header count is the open ones. It has **no Finished
   group**: a done task is unassigned and no record says who held it
   (`request_task` links threads' requests, a person's command is in no
@@ -596,10 +576,7 @@ its dataset `change_interest` (`v_oxplow_change_interest`, over
 `change-review` page reads; co-change surprises are its datasets
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
 "the last 180 days" moves with the clock) and
-`change_co_change`, which `change-review` reads — and the
-`file-co-change` page ("Usually Changes With", mounted at the diff
-page's `file-header` slot, `oxplow/diff.file-header`) reads `co_change_pair` for the file a diff
-shows. Full-tree duplicated lines read the tree, not tables, so they
+`change_co_change`, which `change-review` reads. Full-tree duplicated lines read the tree, not tables, so they
 are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
 write. What needs two revisions' trees — files, functions, imports, test
@@ -609,10 +586,9 @@ change analysis.
 **Deliberately simple.** A basic **metrics explorer** and **simple
 dashboards**. The base version lets people see what metrics exist and
 pin a few to a dashboard as a starting point, a bit like Metabase. It does
-not need to be fancy. Explore Data (oxplow-bundled's `explore-data`
-page) browses the semantic-layer catalog (entities, measures, metrics),
-shows a table or simple chart sliced by a dimension, and saves the result
-as a page. A dashboard is a page with `category: Dashboards` and a grid
+not need to be fancy. Dataset data previews any published dataset. In a
+page's table, **Show as** changes the presentation and **Save as Page**
+keeps that choice as a live view. A dashboard is a page with `category: Dashboards` and a grid
 of nodes ([dashboards.md](./dashboards.md)). Metrics is a catalog (search,
 enabled/all, range, branch, sparkline + latest value); the metric page
 shows trend, recordings, stats and Enable.

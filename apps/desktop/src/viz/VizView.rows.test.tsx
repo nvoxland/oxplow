@@ -11,17 +11,36 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 
 const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const actionRuns: { action: string; row: unknown }[] = [];
+// An extension's command about notebooks, in the Open In group.
+const notebookCommand = {
+  id: "acme.notebook.open",
+  summary: "",
+  input_schema: {},
+  job: false,
+  confirm: "never",
+  undoable: false,
+  lifecycle: "stable",
+  atomicity: "tx",
+  access: "write",
+  needs: [],
+  ui: { label: "Jupyter", group: "Open In", keywords: [], about: "oxplow/file", input: null, form: null, open_after: null, background: false, shortcut: null, while_typing: false, menu: null, when: null },
+};
 mock.module("../api.js", () => ({
   ...realApi,
+  listPersonCommands: async () => [notebookCommand],
+  refCommands: async (ref: string) => (ref.endsWith(".ipynb") ? ["acme.notebook.open"] : []),
+  subscribeOxplowEvents: () => () => {},
   listExtensions: async () => [],
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { VizView } = await import("./VizView.js");
+const { setOpenInHost } = await import("../openIn.js");
+const { setRefOfferHost } = await import("../components/refCommands.js");
 
 // A viz presses through the page that draws it: a runner stands in for it.
 const press: VizActionRunner = async (_id, action, _params, row) => {
   actionRuns.push({ action, row });
-  return { result: null, audit_id: 1, event_id: null, inverse: null };
+  return { result: null, command_run_id: 1, event_id: null, inverse: null };
 };
 const wrapper = ({ children }: { children: ReactNode }) => <VizActionRunnerContext.Provider value={press}>{children}</VizActionRunnerContext.Provider>;
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
@@ -289,6 +308,62 @@ test("a row that links somewhere isn't draggable, and offers Add to Context in i
   expect(add.textContent).toBe("Add to Context");
   // Every Add to Context entry wears the basket's @.
   expect(add.querySelector("[data-testid=menu-item-icon]")).not.toBeNull();
+});
+
+test("a row that names a file offers Open In ▸ for it", async () => {
+  const opened: string[] = [];
+  setOpenInHost({ worktree: "/w", openInApp: () => {}, openTerminalAt: (d) => opened.push(d) });
+  try {
+    const run = {
+      config: { ...base, viz: "list", columns: [{ key: "path", label: null, link: link("file"), unit: null, icon: null, tone: null }] },
+      params: {},
+      result: { columns: ["path"], rows: [["src/lib/a.ts"]], truncated: false },
+    } as unknown as VizRun;
+    const view = render(<VizView run={run} compact onOpenPage={() => {}} />);
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+    fireEvent.click(await waitFor(() => view.getByTestId("menu-item-open-in")));
+    fireEvent.click(view.getByTestId("menu-item-open-in.terminal"));
+    expect(opened).toEqual(["/w/src/lib"]);
+  } finally {
+    setOpenInHost(null);
+  }
+});
+
+test("a file row's Open In ▸ has an extension's Open In command for the file", async () => {
+  const ran: string[] = [];
+  setOpenInHost({ worktree: "/w", openInApp: () => {}, openTerminalAt: () => {} });
+  setRefOfferHost({
+    ctx: { streamId: "str1", threadId: "thr1" },
+    deps: {
+      openPage: () => {},
+      openForm: () => {},
+      run: async (_l, id, input) => {
+        ran.push(`${id} ${JSON.stringify(input)}`);
+        return null;
+      },
+      runInBackground: () => {},
+      openAfter: async () => null,
+    },
+  });
+  try {
+    const run = {
+      config: { ...base, viz: "list", columns: [{ key: "path", label: null, link: link("file"), unit: null, icon: null, tone: null }] },
+      params: {},
+      result: { columns: ["path"], rows: [["work/a.ipynb"]], truncated: false },
+    } as unknown as VizRun;
+    const view = render(<VizView run={run} compact onOpenPage={() => {}} />);
+    // The listing loads, then the row's menu asks the daemon.
+    await waitFor(async () => {
+      fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+      fireEvent.click(await waitFor(() => view.getByTestId("menu-item-open-in")));
+      expect(view.getByTestId("menu-item-ref-command-acme.notebook.open")).toBeTruthy();
+    });
+    fireEvent.click(view.getByTestId("menu-item-ref-command-acme.notebook.open"));
+    expect(ran).toEqual(['acme.notebook.open {"uri":"oxplow:oxplow/file?path=work/a.ipynb"}']);
+  } finally {
+    setOpenInHost(null);
+    setRefOfferHost(null);
+  }
 });
 
 test("a tree's labels follow their column's link", () => {

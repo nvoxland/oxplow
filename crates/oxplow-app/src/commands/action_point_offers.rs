@@ -136,7 +136,7 @@ pub fn point_offer(
     let mut commands: Vec<PointCommand> = offered(specs, &key, &Default::default(), "store")
         .into_iter()
         .filter(|s| {
-            let accepts = s.ui.as_ref().and_then(super::ref_commands::point_accepts);
+            let accepts = s.ui.as_deref().and_then(super::ref_commands::point_accepts);
             match (accepts, &item) {
                 (None, _) => true,
                 (Some(_), None) => false,

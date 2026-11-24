@@ -584,7 +584,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   value is `accent`, `success`, `warning`, `danger` or `muted`. Values
   come from the query, so the loader cannot check them: an unknown name
   draws nothing — except in a column that links to a page (`link: { kind:
-  page }`), where it draws the generic page icon (`cellIcon`), so a list
+  page }`), where it draws the missing-page icon (`cellIcon`), so a list
   of pages lines up even when one names a page no extension declares any
   more — and an unknown tone is plain.
 - `width` is pixels (a table lays out fixed; cells are cut to one line).
@@ -677,7 +677,7 @@ is gone, is the toast's (usability.md "A person's command that fails").
   `command` or `open` (`parse_actions` refuses both and neither). The column
   of the row the action is offered on (a whole-page action's first-loader
   row, a holds-one-row viz's, a row action's) holds the URI to open. Nothing
-  runs: no bus run, no audit, no `command.executed`. The press still goes
+  runs: no bus run, no command run record, no `command.executed`. The press still goes
   to the server (`viz_actions::prepare_resolved` → `Prepared::Open`), which
   checks the row and `when` as for a command, and answers `{ "opened": <uri> }`;
   the desktop then opens it (`performVizAction`, as `open_after` does) and
@@ -850,7 +850,7 @@ A page's `component` node and `viz: custom` run a web bundle from the
 extension's `custom_components`, sandboxed, fed the page's loaders. The
 reference is extensions-components.md "Custom components" below and `docs/guide/pages.md`. A page
 whose view is one `component` node fills the page under oxplow's bar
-(a custom page; bundled's Explore Data is the example).
+(a custom page; Bundled's Work board is an example).
 
 ### Agents
 

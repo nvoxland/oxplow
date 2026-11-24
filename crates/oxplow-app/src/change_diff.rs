@@ -5,8 +5,12 @@
 //! only); each side's text is read through [`Trees`] as the analyzer reads
 //! it, and the ranges are [`crate::churn::diff_hunks`]'s.
 //!
-//! One call reads at most [`MAX_FILES`] files and [`MAX_BYTES`] of text;
-//! past either it fails naming the limit, never truncating.
+//! One call returns at most [`MAX_FILES`] files and [`MAX_BYTES`] of line
+//! text (the `added` and `removed` lines it returns, not the files' sizes):
+//! `{ files, rest, too_large }`. The files past either limit are `rest`,
+//! in order, for the script to ask again with `paths = rest`; a file whose
+//! own lines are past [`MAX_BYTES`] is `too_large` and never returned. A
+//! file is never truncated.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -20,7 +24,8 @@ use crate::worktrees::WorktreeRouter;
 
 /// The most files one call returns.
 pub const MAX_FILES: usize = 200;
-/// The most text (both sides of every file, in bytes) one call reads.
+/// The most line text (in bytes, the `added` and `removed` lines of every
+/// file) one call returns.
 pub const MAX_BYTES: usize = 2 * 1024 * 1024;
 
 /// Answers `change_diff` from the stores, on the runtime it was made on.
@@ -76,30 +81,34 @@ impl ChangeDiffReader {
         if let Some(paths) = paths {
             files.retain(|(path, _)| paths.contains(path));
         }
-        if files.len() > MAX_FILES {
-            return Err(format!(
-                "change_diff reads at most {MAX_FILES} files per call; change {change_id} has {} here (pass `paths` to ask for fewer)",
-                files.len()
-            ));
-        }
         let root = crate::change_analysis::stream_root(&self.worktrees, row.stream_id).await;
         let mut bytes = 0usize;
-        let mut out = Vec::with_capacity(files.len());
+        let mut out = Vec::new();
+        let mut rest = Vec::new();
+        let mut too_large = Vec::new();
         for (path, status) in files {
+            // Once one file is left for the next call, so is every later
+            // one: a call returns the files in order.
+            if !rest.is_empty() || out.len() == MAX_FILES {
+                rest.push(path);
+                continue;
+            }
             let base = self.side(&root, row.base_revision.as_ref(), &path).await?;
             let head = match &row.head_revision {
                 Some(rev) => self.side(&root, Some(rev), &path).await?,
                 None => String::new(),
             };
-            bytes += base.len() + head.len();
-            if bytes > MAX_BYTES {
-                return Err(format!(
-                    "change_diff reads at most {MAX_BYTES} bytes of text per call; change {change_id} is past it at `{path}` (pass `paths` to ask for fewer files)"
-                ));
+            let (hunks, size) = hunks(&base, &head);
+            if size > MAX_BYTES {
+                too_large.push(path);
+            } else if bytes + size > MAX_BYTES {
+                rest.push(path);
+            } else {
+                bytes += size;
+                out.push(json!({ "path": path, "status": status, "hunks": hunks }));
             }
-            out.push(json!({ "path": path, "status": status, "hunks": hunks(&base, &head) }));
         }
-        Ok(Value::Array(out))
+        Ok(json!({ "files": out, "rest": rest, "too_large": too_large }))
     }
 
     async fn side(
@@ -122,22 +131,26 @@ impl ChangeDiffReader {
     }
 }
 
-/// `base` → `head`'s hunks with the lines each added and removed.
-fn hunks(base: &str, head: &str) -> Vec<Value> {
+/// `base` → `head`'s hunks with the lines each added and removed, and
+/// the bytes of those lines' text: what a call's limit counts.
+fn hunks(base: &str, head: &str) -> (Vec<Value>, usize) {
     let base_lines: Vec<&str> = base.lines().collect();
     let head_lines: Vec<&str> = head.lines().collect();
-    let lines = |all: &[&str], range: Option<(u32, u32)>| -> Vec<Value> {
+    let mut size = 0usize;
+    let mut lines = |all: &[&str], range: Option<(u32, u32)>| -> Vec<Value> {
         let Some((start, end)) = range else {
             return Vec::new();
         };
         (start..=end)
             .filter_map(|n| {
-                all.get(n as usize - 1)
-                    .map(|text| json!({ "line": n, "text": text }))
+                all.get(n as usize - 1).map(|text| {
+                    size += text.len();
+                    json!({ "line": n, "text": text })
+                })
             })
             .collect()
     };
-    crate::churn::diff_hunks(base, head)
+    let hunks = crate::churn::diff_hunks(base, head)
         .into_iter()
         .map(|h| {
             json!({
@@ -150,7 +163,8 @@ fn hunks(base: &str, head: &str) -> Vec<Value> {
                 "removed": lines(&base_lines, h.base),
             })
         })
-        .collect()
+        .collect();
+    (hunks, size)
 }
 
 impl oxplow_script::ChangeDiffSource for ChangeDiffReader {
@@ -170,12 +184,17 @@ pub struct Bounded {
 impl oxplow_script::ChangeDiffSource for Bounded {
     fn change_diff(&self, change_id: i64, paths: Option<Vec<String>>) -> Result<Value, String> {
         let mut out = self.inner.change_diff(change_id, paths)?;
-        if let Some(files) = out.as_array_mut() {
+        if let Some(files) = out["files"].as_array_mut() {
             files.retain(|f| {
                 f["path"]
                     .as_str()
                     .is_some_and(|path| self.run.permits_path(path))
             });
+        }
+        for named in ["rest", "too_large"] {
+            if let Some(paths) = out[named].as_array_mut() {
+                paths.retain(|p| p.as_str().is_some_and(|path| self.run.permits_path(path)));
+            }
         }
         Ok(out)
     }
@@ -222,8 +241,10 @@ mod tests {
         let (_f, reader, id) = setup().await;
         let out = reader.read(id, None).await.unwrap();
         let line = |n: u64, t: &str| json!({ "line": n, "text": t });
+        assert_eq!(out["rest"], json!([]));
+        assert_eq!(out["too_large"], json!([]));
         assert_eq!(
-            out,
+            out["files"],
             json!([
                 {
                     "path": "a.txt",
@@ -261,14 +282,18 @@ mod tests {
     async fn paths_limit_the_files_and_an_unknown_change_is_refused() {
         let (_f, reader, id) = setup().await;
         let out = reader.read(id, Some(&["b.txt".to_string()])).await.unwrap();
-        assert_eq!(out.as_array().unwrap().len(), 1);
-        assert_eq!(out[0]["path"], "b.txt");
+        assert_eq!(out["files"].as_array().unwrap().len(), 1);
+        assert_eq!(out["files"][0]["path"], "b.txt");
         let err = reader.read(id + 100, None).await.unwrap_err();
         assert!(err.contains("doesn't exist"), "{err}");
     }
 
+    /// A call returns the files that fit and names the rest, so a script
+    /// asks again with `paths = rest`: past the file count, or past the
+    /// text its hunk lines add up to. A file whose own lines are past the
+    /// limit is `too_large`, never read.
     #[tokio::test]
-    async fn a_call_past_a_limit_fails_naming_it() {
+    async fn a_call_past_a_limit_returns_what_fits_and_names_the_rest() {
         let (f, reader, id) = setup().await;
         // More files than the limit: pad the stored list.
         f.svc
@@ -278,7 +303,7 @@ mod tests {
                     tx.execute(
                         "INSERT INTO change_file (change_id, path, status, additions, deletions, is_test)
                          VALUES (?1, ?2, 'added', 0, 0, 0)",
-                        rusqlite::params![id, format!("pad/{n}.txt")],
+                        rusqlite::params![id, format!("pad/{n:03}.txt")],
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 }
@@ -286,15 +311,67 @@ mod tests {
             })
             .await
             .unwrap();
-        let err = reader.read(id, None).await.unwrap_err();
-        assert!(err.contains("at most 200 files"), "{err}");
-        // Asking for fewer files is fine.
-        reader.read(id, Some(&["a.txt".to_string()])).await.unwrap();
-        // Too much text: one big file.
+        let out = reader.read(id, None).await.unwrap();
+        assert_eq!(out["files"].as_array().unwrap().len(), MAX_FILES);
+        assert_eq!(out["files"][0]["path"], "a.txt");
+        let rest: Vec<String> = serde_json::from_value(out["rest"].clone()).unwrap();
+        assert_eq!(
+            rest,
+            vec!["pad/198.txt".to_string(), "pad/199.txt".to_string()]
+        );
+        let again = reader.read(id, Some(&rest)).await.unwrap();
+        assert_eq!(again["files"].as_array().unwrap().len(), 2);
+        assert_eq!(again["rest"], json!([]));
+        assert_eq!(again["too_large"], json!([]));
+
+        // A large file whose change is one line counts that line, not its
+        // two sides.
         let root = f.svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.txt"), "x\n".repeat(MAX_BYTES)).unwrap();
-        let sha = crate::test_fixtures::commit_all(&root, "big");
-        let big = ensure_change(
+        let lines = MAX_BYTES / 1000 + 1;
+        let body = format!("{}\n", "x".repeat(999)).repeat(lines);
+        std::fs::write(root.join("a.txt"), &body).unwrap();
+        crate::test_fixtures::commit_all(&root, "big base");
+        std::fs::write(root.join("a.txt"), format!("{body}y\n")).unwrap();
+        let one_line = change_at(&f, &root, "one line").await;
+        let out = reader.read(one_line, None).await.unwrap();
+        assert_eq!(
+            out["files"][0]["hunks"][0]["added"],
+            json!([{ "line": lines + 1, "text": "y" }])
+        );
+        assert_eq!(out["rest"], json!([]));
+
+        // Lines past the limit together: the first file fits, the second is
+        // the rest; one past it alone is too large.
+        let half = "h".repeat(MAX_BYTES / 2 + 1);
+        std::fs::write(root.join("c.txt"), format!("{half}\n")).unwrap();
+        std::fs::write(root.join("d.txt"), format!("{half}\n")).unwrap();
+        std::fs::write(
+            root.join("e.txt"),
+            format!("{}\n", "e".repeat(MAX_BYTES + 1)),
+        )
+        .unwrap();
+        let wide = change_at(&f, &root, "wide").await;
+        let out = reader.read(wide, None).await.unwrap();
+        let paths: Vec<&str> = out["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, vec!["c.txt"]);
+        assert_eq!(out["rest"], json!(["d.txt", "e.txt"]));
+        assert_eq!(out["too_large"], json!([]));
+        let rest: Vec<String> = serde_json::from_value(out["rest"].clone()).unwrap();
+        let again = reader.read(wide, Some(&rest)).await.unwrap();
+        assert_eq!(again["files"][0]["path"], "d.txt");
+        assert_eq!(again["rest"], json!([]));
+        assert_eq!(again["too_large"], json!(["e.txt"]));
+    }
+
+    /// The change of the commit of what's in `root` now.
+    async fn change_at(f: &crate::test_fixtures::ThreadFixture, root: &Path, message: &str) -> i64 {
+        let sha = crate::test_fixtures::commit_all(root, message);
+        ensure_change(
             &f.svc,
             ChangeTarget::Commit {
                 sha,
@@ -302,8 +379,7 @@ mod tests {
             },
         )
         .await
-        .unwrap();
-        let err = reader.read(big.id, None).await.unwrap_err();
-        assert!(err.contains("at most 2097152 bytes"), "{err}");
+        .unwrap()
+        .id
     }
 }

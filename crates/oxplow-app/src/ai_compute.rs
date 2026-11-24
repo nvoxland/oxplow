@@ -126,12 +126,27 @@ pub struct AiCompute {
 #[derive(Debug, Clone, Copy)]
 pub struct Caller<'a> {
     pub name: &'a str,
-    pub run: Option<&'a str>,
+    pub run: Option<&'a oxplow_domain::run::RunId>,
+    context: Option<&'a oxplow_domain::run::RunContext>,
+}
+
+impl<'a> Caller<'a> {
+    pub(crate) fn in_run(name: &'a str, run: &'a oxplow_domain::run::RunContext) -> Self {
+        Self {
+            name,
+            run: run.contribution_ref().map(|_| run.run()),
+            context: Some(run),
+        }
+    }
 }
 
 impl<'a> From<&'a str> for Caller<'a> {
     fn from(name: &'a str) -> Self {
-        Caller { name, run: None }
+        Caller {
+            name,
+            run: None,
+            context: None,
+        }
     }
 }
 
@@ -176,12 +191,8 @@ impl AiCompute {
         // Not under the job run's own pin: a job holds no generation, and
         // the model's binding is resolved under one of its own.
         run.check_authority().map_err(|_| refused())?;
-        run.used_ai();
         self.stream_typed(
-            Caller {
-                name: &name,
-                run: Some(run.run().as_str()),
-            },
+            Caller::in_run(&name, run),
             role,
             request,
             run.cancel(),
@@ -595,10 +606,7 @@ impl CollectorOracle {
     }
 
     fn caller(&self) -> Caller<'_> {
-        Caller {
-            name: &self.caller,
-            run: Some(self.run.run().as_str()),
-        }
+        Caller::in_run(&self.caller, &self.run)
     }
 
     /// `role` as the collector's own extension means it: a built-in, or
@@ -644,7 +652,6 @@ impl CollectorOracle {
         {
             return Err(reason);
         }
-        self.run.used_ai();
         let result = self.runtime.block_on(async {
             let f = self.compute.ai.read_run(&self.run, f);
             tokio::pin!(f);
@@ -738,6 +745,7 @@ fn site<'a>(caller: Caller<'a>, hash: &'a str) -> CallSite<'a> {
         caller: caller.name,
         input_hash: Some(hash),
         run: caller.run,
+        context: caller.context,
     }
 }
 
@@ -798,6 +806,59 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_model_call_from_a_command_names_its_contribution_run() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_model(&fx.svc, Role::SUMMARIZE, chat("A short summary.")).await;
+        let actor = oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            session_id: Some(fx.session),
+            stream_id: None,
+        };
+        for _ in 0..2 {
+            fx.svc
+                .commands
+                .run(
+                    &actor,
+                    "oxplow.ai.summarize",
+                    json!({ "text": "some text" }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let linked: i64 = fx
+            .svc
+            .db
+            .read(|conn| {
+                conn.query_row(
+                "SELECT count(*) FROM v_ai_call a JOIN v_contribution_run r ON a.run_id = r.run_id
+                 WHERE r.contribution = 'oxplow:oxplow/command?command=oxplow.ai.summarize'
+                   AND r.ai_calls = 1",
+                [], |row| row.get(0),
+            ).map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(linked, 1);
+        let costs =
+            fx.svc
+                .db
+                .read(|conn| {
+                    let mut statement = conn.prepare(
+                    "SELECT ai_calls FROM v_command_run WHERE command = 'oxplow.ai.summarize'
+                     ORDER BY id",
+                ).map_err(oxplow_db::map_sql_err)?;
+                    statement
+                        .query_map([], |row| row.get::<_, i64>(0))
+                        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+        assert_eq!(costs, [1, 0]);
     }
 
     /// P5.E1's red: the same computation twice is one call; the second

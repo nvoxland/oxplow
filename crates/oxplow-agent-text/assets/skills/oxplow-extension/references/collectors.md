@@ -37,11 +37,16 @@ Rules:
   extension is deployed; you can't approve. Once it is deployed,
   `run_command` `oxplow.collector.sync { collector: "<namespace>/<id>" }`
   re-runs it.
-- `v_collector` lists every enabled collector with its trigger, `enabled`,
-  `state` (`disabled`, `failing`, `never_run`, `ok`) and last run.
-- `v_collector_run` shows each collector's last run and error, and
-  `v_collector_state` whether this OS enforces its `network` list
-  (`network_enforced`) and why failures disabled it, if they did.
+- `v_collector` lists enabled extensions' collectors with their trigger,
+  `enabled`, `state` (`disabled`, `failing`, `never_run`, `ok`),
+  `last_run_at` and `last_outcome`.
+- `v_collector_run` lists runs with their outcome, error and usage. Filter
+  by `owner` (the namespace) and `id` for a collector's history. Use
+  `latest = 1` for its newest finished run.
+- `v_collector_checkpoint` has the last successful cursor and row counts
+  plus the last trigger sequence and finished run ID. `v_collector_state`
+  shows whether this OS enforces the collector's `network` list
+  (`network_enforced`) and why failures disabled it.
 - **Test a collector before you deploy it** with `$OXPLOW_BIN extension test
   <name>` from your terminal: it runs your source (a worktree's draft
   included) in a throwaway oxplow,
@@ -121,7 +126,9 @@ and summary):
   over the `v_*` datasets.
 - `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
   snapshot's files; `change_diff(change_id, paths?)`, an analysed change's
-  hunks with their added and removed lines (at most 200 files and 2 MB a call). A fact collector has it without declaring it.
+  hunks with their added and removed lines: `{ files, rest, too_large }`,
+  at most 200 files and 2 MB of line text a call, the files past that in
+  `rest` (ask again with `paths = rest` until it is empty). A fact collector has it without declaring it.
 - `ai.compute`: the `ai_*` builtins. The extension declares `ai.compute`. An
   entity collector that calls one has it without declaring it.
 - `ai.discover`: `scope("ai.discover", {role})` says whether a model
@@ -178,8 +185,8 @@ datasets:
 - The script's tree (`files()`, `grep_tree()`) is the change's head, whatever the worktree
   holds now: the event's `anchors.revision`. `language_of(path)` names a file's language
   for `code_metrics`.
-- The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)`
-  gives the hunks with their added and removed lines, `grep_tree(pattern)` the
+- The script gets `input["event"]["payload"]["change_id"]`; `change_diff(change_id)["files"]`
+  gives the hunks with their added and removed lines (loop on its `rest`), `grep_tree(pattern)` the
   tree, `scope("sql.read", …)` the semantic layer (`v_symbol` of the stream in
   `input["rows"][0]["stream_id"]`).
 - Key the rows by change, so one rerun replaces the change's rows: read its
@@ -191,8 +198,8 @@ datasets:
   end_line, title, why, uri` (one you lack is NULL). `severity` is `high`,
   `medium` or `info`.
 - A check runs after the analysis, so a Review page reads
-  `v_oxplow_review_check` (per change and check: `pending`, `failed` or `ok`) to
-  say a check is still running.
+  `v_oxplow_review_check` (per change and check: `pending`, `failed`, `ok`, `off` or
+  `not_run`) to say a check is still running.
 - The other ways to shape the review (a signal from SQL, a lint rule, ranking, a section) are in `references/recipes.md` "Customize the change review".
 - Test it with a fixture: commits with real files (`- { files: { "<path>": "…" } }`,
   `oxplow.vcs.stage` and `.commit`), `observe: analyze`, `observe: symbols`, a

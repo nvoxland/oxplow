@@ -19,7 +19,11 @@ use crate::event_pump::AsyncEventConsumer;
 pub const NAME: &str = "agent.context_changes";
 
 /// The commands whose runs change what the context lists: an item put in
-/// or moved into a basket, a basket set to go with a thread's next prompt.
+/// or moved into a basket, a basket set to go with a thread's next prompt
+/// (which, for This Thread, releases what Put Back held). Put Back holds
+/// what it returns to This Thread, so it adds nothing there; it stays here
+/// for an item it returns to a named basket that some thread has set to
+/// go next. A wake that changes nothing injects nothing.
 const CHANGING_COMMANDS: &[&str] = &[
     crate::commands::context_basket::ADD,
     crate::commands::context_basket::MOVE,

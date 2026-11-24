@@ -24,7 +24,7 @@ test("a command that asks waits for the person, then runs confirmed; Cancel drop
     runCommand: async (name, input, confirmed) => {
       calls.push([name, input, confirmed]);
       if (!confirmed) throw new IpcCallError("asks", "NEEDS_CONFIRMATION");
-      return { result: null, audit_id: 1, event_id: null, inverse: null } satisfies CommandOutcome;
+      return { result: null, command_run_id: 1, event_id: null, inverse: null } satisfies CommandOutcome;
     },
     undo: async () => {},
     toast: (m) => toasts.push(m),
@@ -70,12 +70,12 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
     runCommand: async (name) =>
       ({
         result: null,
-        audit_id: name === "acme.issue.transition" ? 7 : 8,
+        command_run_id: name === "acme.issue.transition" ? 7 : 8,
         event_id: null,
         inverse: name === "acme.issue.transition" ? { name: "acme.issue.transition", input: {} } : null,
       }) satisfies CommandOutcome,
-    undo: async (auditId) => {
-      undone.push(auditId);
+    undo: async (commandRunId) => {
+      undone.push(commandRunId);
     },
     toast: (m, undo) => toasts.push([m, undo]),
     run: recording(),
@@ -97,7 +97,7 @@ test("a result that names a thing gets an Open link on its toast", async () => {
   const links: Array<(() => void) | undefined> = [];
   const store = createPersonCommands({
     runCommand: async (name) =>
-      ({ result: name === "a" ? { uri: "task:t1" } : {}, audit_id: null, event_id: null, inverse: null }) satisfies CommandOutcome,
+      ({ result: name === "a" ? { uri: "task:t1" } : {}, command_run_id: null, event_id: null, inverse: null }) satisfies CommandOutcome,
     undo: async () => {},
     toast: (_m, _undo, open) => links.push(open),
     openPage: (uri) => opened.push(uri),

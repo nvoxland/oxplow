@@ -457,7 +457,7 @@ gateway — `HostDeps::sql`, metric functions included — or `state.read`
 over its own private namespace), each call counted
 into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
-`Invocation::trace` under its key) — so the run's audit
+`Invocation::trace` under its key) — so the run's command run
 row records it.The conformance kit has no project: it answers `host/call` like any
 other request.
 
@@ -556,7 +556,7 @@ unsetting the map through config reveals the inherited level.
   deployment of the extension, under the permissions deployed here, so in a
   project that hasn't deployed the extension it is not listed at all (above);
 - definitions are written through canonical `oxplow.config.set` with an
-  explicit level, preserving the command bus policy and audit path. Provider
+  explicit level, preserving the command bus policy and command run path. Provider
   domain operations still protect person-only global instance actions;
 - the registry serializes instance edits within this process using
   `instances_gate`; the shared settings store validates and atomically writes
@@ -1027,7 +1027,7 @@ reason logged, keeps it off across a reconcile, refuses an agent's
 `oxplow.contribution.enable` and comes back on a person's; and a command
 an extension declares over the fake's operation (`tracker.snapshot.mark`) is
 on the bus, run on the instance its `uri` or `instance` names, with one
-audit row, and its input is checked against its declared schema.
+command run record, and its input is checked against its declared schema.
 **Its commands appear in core menus** by their own `ui`: one about a
 URI's kind (`ui.about: <kind>`) is on that URI's page menu and its
 rows' right-click menus (`refOffers`).

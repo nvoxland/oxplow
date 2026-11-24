@@ -1,0 +1,18 @@
+# The Review page's About rail says how many of the change's files the
+# analysis read: a change of more files than it reads (200) reads the
+# files the languages parse first, and the Review says it read only some.
+given:
+  - observe: { change: { kind: commit, target: c1, analyzed_files: 2, files: [{ path: src/a.rs }, { path: src/b.rs }, { path: Cargo.lock }] } }
+when: { page: change-review, params: { change_id: 1 } }
+expect:
+  loaders:
+    change:
+      rows: [{ analysed: "2 of 3 files analysed (source files first)" }]
+steps:
+  - given:
+      - observe: { change: { kind: commit, target: c2, files: [{ path: src/a.rs }] } }
+  - params: { change_id: 2 }
+    expect:
+      loaders:
+        change:
+          rows: [{ analysed: "1 of 1 file analysed" }]

@@ -154,6 +154,9 @@ check already reported is not repeated.
   - `effect` (P8.D12) — `effects: [on-done]` on `thread.closed`, whose
     `effects/on-done.star` composes `oxplow.thread.rename`; its intent example dry-runs it on a fixture
     event;
+  - `job` — a typed model job with commands to enqueue, inspect and
+    cancel it. Its page lists `v_job_run` by `queued_at` and reads the
+    current attempt's streamed reply from `v_job_run_output`;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and an origin that isn't a URI. **What
   it writes passes `check` with no warnings and `extension test` clean**
@@ -516,7 +519,10 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   - **Every kind has them** (`scenario`): a fixture that isn't a page's
     runs its `given` steps first, its `when` and `expect` read the values
     they bound, and each `{ when?, expect }` step runs the same kind
-    again, its `when` keys over the fixture's. A step whose `when` names
+    again, its `when` keys over the fixture's. A step is `{ given }` or
+    `{ when?, expect }`: one with `when`, `expect` or `bind` beside `given`
+    is a `fixture.step` finding (`runner::scenario`), never a `given` that
+    silently drops the check beside it. A step whose `when` names
     another kind (`kind_of`) runs that instead — an event, then a `sql`
     read of what it did — and in a page's scenario a step with a `when`
     runs it (another page, a query, a command) and the scenario goes on
@@ -584,9 +590,16 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`; `trigger: turn_end` makes
   it the latest turn's end take, so its files are that turn's), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
-  at a snapshot taken with the file), `collect` (`run_event_collectors`) 
-  `run` (`extension_run_store::record_tx`; `days_ago` through
-  `RunContext::began_at`), `health` (`disable_tx`), `token_usage`, `hint`
+  at a snapshot taken with the file), `collect` (`run_event_collectors`),
+  `run` (`contribution_run_store`, read through `v_contribution_run`).
+  A run can set `version`, `days_ago` for its start, `wall_ms`, `cpu_ms`,
+  `peak_bytes`, `ai_calls`, `scopes` (scope names mapped to call counts)
+  and `decisions` (entries with `need`, `name` when the need has one,
+  `decision` and `reason` for denials and unenforced checks). For example,
+  `{ need: scope, name: sql.read, decision: denied, reason: missing grant }`.
+  With `live: true`, the store begins the run and leaves its outcome and
+  costs NULL. `caused_by: <event type>` sets its `cause_event_id` to the
+  latest logged event of that type (a collector's run for that event). Other kinds include `health` (`disable_tx`), `token_usage`, `hint`
   and `nudge` (their stores), `conversation` (a harness's saved
   conversation as `v_agent_conversation` lists it, `{ harness, id, title?,
   first_prompt?, started_at?, updated_at?, size_bytes?, parent? }`, or `{
@@ -711,7 +724,9 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
 
 - `requires: [shelf, shelf-folder]` at a fixture's top: the examples
   that run together (the existing key).
-- `given: - { files: { "<path>": "<body>" } }` writes project files;
+- `given: - { files: { "<path>": "<body>" } }` writes project files
+  (`"<path>": { repeat: "<text>", times: n }` writes `text` n times, a
+  large file a fixture need not spell out);
   `given: - { remove_files: ["<path>"] }` removes them; `given: - {
   rename_files: [{ from, to }] }` renames (built, `extension_test/observers.rs`;
   a path is relative to the throwaway's project root, no `..`, not
@@ -750,7 +765,11 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
 - `when: { action_point: <id>, context: {...} }` → `expect: { draws:
   none | button | menu, commands: [ids] }`.
 - `when: { item_commands: "<item uri>" }` → `expect: { commands: [ids]
-  }`.
+  }`. The item may be a web URL (`https://…`, the commands `about: https`)
+  or a file or directory URI, with `accepts.url` / `accepts.path` applied.
+- `when: { link_text: "<text>" }` → `expect: { links: [{ text, uri }] }`:
+  the links the extension's `links:` make in the text
+  (`link_rules::find_rule_links`, the matcher the desktop's mirrors).
 - `when: { search: "<text>", resource?: <id> }` → `expect: { uris: [...]
   }`, through the search index (not a `LIKE`).
 

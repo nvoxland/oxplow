@@ -37,11 +37,15 @@ view:
         path: path
         status: status
       columns:
+      # A file opens its diff against HEAD, as the Uncommitted page's does
+      # (a deleted one too: its diff is what it lost).
       - key: path
         label: File
         link:
-          kind: file
-          from: file_path
+          kind: diff-at
+          from: path
+          base: base_revision
+          head: head_revision
       empty: Working tree clean
     # The changes in one line (the collapsed view's), then where the branch
     # stands with its buttons: Git Status's part, without the branch's name.

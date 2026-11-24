@@ -7,6 +7,8 @@ import { pickFolder } from "../tauri-bridge/nativeDialog.js";
 import { useContextMenu, useRowContextMenu } from "../components/useRowContextMenu.js";
 import { formatRelativeSeconds } from "../components/format.js";
 import { logUi } from "../logger.js";
+import type { MenuItem } from "../menu.js";
+import { openInForPath } from "../openIn.js";
 import {
   forgetRemote,
   loadRecentRemotes,
@@ -294,7 +296,7 @@ function RecentRow({
   onOpen: (path: string, newWindow: boolean) => void;
   onRemove: (path: string) => void;
 }) {
-  const items = [
+  const items: MenuItem[] = [
     {
       id: "launcher.open",
       label: "Open",
@@ -307,6 +309,10 @@ function RecentRow({
       enabled: project.exists,
       run: () => onOpen(project.path, true),
     },
+    // The project's folder in the OS file manager (`openIn.ts`).
+    ...[project.exists ? openInForPath("dir", project.path, [], { terminal: false }) : null].filter(
+      (item): item is MenuItem => item !== null,
+    ),
     {
       id: "launcher.remove",
       label: "Remove from List",

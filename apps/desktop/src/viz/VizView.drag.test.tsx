@@ -22,7 +22,7 @@ const { VizView } = await import("./VizView.js");
 // A viz presses through the page that draws it: a runner stands in for it.
 const press: VizActionRunner = async (_id, action, _params, row, _streamId, confirmed, _input, drop) => {
   ran.push({ action, row, drop, confirmed });
-  return { result: null, audit_id: 1, event_id: null, inverse: null };
+  return { result: null, command_run_id: 1, event_id: null, inverse: null };
 };
 const wrapper = ({ children }: { children: ReactNode }) => <VizActionRunnerContext.Provider value={press}>{children}</VizActionRunnerContext.Provider>;
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper });

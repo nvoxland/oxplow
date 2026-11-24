@@ -1,0 +1,32 @@
+# A review check that has handled a later event than a change's analysis,
+# with no run for that analysis, never will run for it (it was disabled
+# then, or its run was swept): the change shows it as did not run, never as
+# still running. Change 1 is analysed while the check is off; the check is
+# turned on and runs for change 2, so its checkpoint is past change 1's event.
+requires: [oxplow-rust]
+given:
+  - { files: { "src/lib.rs": "pub fn run() -> u32 {\n    1\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/lib.rs": "pub fn run() -> u32 {\n    2\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Change }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Change } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  - observe: { health: { namespace: oxplow, contribution: oxplow.review.unused, disable: "Failed 3 times in a row" } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+  - { command: oxplow.contribution.enable, input: { namespace: oxplow, kind: collector, contribution: oxplow.review.unused } }
+  - observe: { change: { target: "0123456789abcdef0123456789abcdef01234567", files: [{ path: src/lib.rs, status: modified, additions: 1, deletions: 1 }] } }
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 2, kind: commit, target: "0123456789abcdef0123456789abcdef01234567", stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+when: { sql: "SELECT change_id, state, last_run_at FROM v_oxplow_review_check ORDER BY change_id" }
+expect:
+  rows:
+    - { change_id: 1, state: not_run, last_run_at: null }
+    - { change_id: 2, state: failed }
+steps:
+  # The Review page's About rail counts it.
+  - when: { page: change-review, params: { change_id: 1 } }
+    expect:
+      loaders:
+        change:
+          rows: [{ checks: "1 did not run" }]

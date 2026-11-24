@@ -1276,7 +1276,7 @@ writes the resolvable facts under one capture — the **only** output now (facts
 T-C3b). A ZERO-fact run still writes its (empty) capture — "this scan ran and found
 nothing" is the record the engine zero-fills a series from, so a count metric drops
 back to zero after the last offender is fixed (the analysis ingest records
-its capture for a clean report the same way). The count-over-threshold headline is the **spec** (the foundation metric's `metrics:` entry),
+its capture for a clean report the same way). The count-over-threshold headline is the **spec** (the bundled metric's `metrics:` entry),
 and the equivalence test `code_collector_facts_reaggregate_to_the_expected_headline`
 pins `engine.headline_for_spec(spec) == the expected baked total` for every bundled
 code metric — the proof the inversion is faithful. (Strict `> N` in the old baked count
@@ -1288,10 +1288,11 @@ per-language AST idiom collectors, but they don't have a natural per-subject mea
 so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
 carried on the fact's `rule` column via `CollectedFact.rule`). They live in the
-language packs. A lint-like collector records one `ast_hit` fact **per hit**
-(value 1, `rule` its slug, `line` where it is, `severity` how bad: the change
-review ranks a finding on a changed line by it); a count that isn't a finding
-(Clojure's `defn`) records one per file. Either way each metric is a
+language packs. Each records one `ast_hit` fact **per file** (value its
+count, `rule` its slug); a lint-like one adds `severity` and its hits' lines
+in `detail` (`{"lines": [3, 17]}`), which the change review matches to the
+changed lines. Not a fact per hit: that multiplied the facts the metric cube
+folds (41k on this repo) and pinned the daemon's CPU. Either way each metric is a
 `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the packs'
 `metrics:` entries), so the totals are the same. Idioms
 sharing the measure never collide because every spec read applies the rule filter
@@ -1351,7 +1352,7 @@ facts and 1.6 s from the cube; the measurement is in
 reached through `run_command`, audited like every command):
 - `oxplow.metric.enable { keys, enabled }` — `Tx`, through `oxplow.config.set`'s core.
 - `oxplow.metric.record { key, value, subject?, dims?, stream? }` — `Tx`: an
-  asserted fact (below) written in the bus transaction with its audit
+  asserted fact (below) written in the bus transaction with its command run record
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
   (the change loop announces `MetricSamplesChanged` for the measure).
 - `oxplow.metric.rebuild { force }` — `BestEffort` over
@@ -1758,8 +1759,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
   with the UI that used them; agents slice with `metric_grid(…, dim)`
   and read offenders with `metric_findings()`, and per-request deltas are
   `v_request_metric_delta`. The agent
-  gets the same numbers as prompt text via oxplow-bundled's `metric-deltas`
-  advisory (over the stored `v_request_metric_delta`).
+  gets no prompt text for them now: the `metric-deltas` advisory is gone.
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id, measures }`, from
   the change loop (the renderer refetches).
 
@@ -1782,7 +1782,7 @@ just carries a Help blurb pointing there.
   navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
 > ### ⚠️ A seeded spec does NOT mean an enabled metric
 >
-> The generation seeds a foundation **gauge's** spec only while its collector
+> The generation seeds an oxplow-bundled **gauge's** spec only while its collector
 > runs: the metric is on by default, or `use:`d when it says `default: off`.
 > An off metric has no spec, so `v_metric_spec` holds only metrics with a
 > source, and a read or write of an off metric by key says so and how to turn
@@ -1795,7 +1795,7 @@ just carries a Help blurb pointing there.
 >
 > (The "spec table = the enabled set" phrasing under the collection gate above is
 > about the **producer** measures, where disabling does prune. Don't generalize it
-> to the foundation's code metrics.)
+> to oxplow-bundled's code metrics.)
 >
 > Note enabling a C# idiom metric here still wouldn't show `0`: `oxplow.ast_hit` is
 > `capture_scope: per-path`, whose zero-fill is deliberately suppressed, so a scan
@@ -1888,7 +1888,7 @@ just carries a Help blurb pointing there.
 > **Definition descriptions.** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
 > once and not overridable by a `use:` entry (`resolve_one` reads `def.description`,
-> like trigger). Sources: the foundation's code metrics (the metric's `description:`),
+> like trigger). Sources: oxplow-bundled's code metrics (the metric's `description:`),
 > the always-on producers (`ProducerMetric.description` in `producer_metrics.rs`),
 > and config `key:` entries (`MetricEntry.description` → `ResolvedSpec` →
 > `spec_definition()`).
@@ -2240,25 +2240,9 @@ are the foundation's `oxplow.coverage.abs_pct` spec (`target: 80`, `warnAt:
 the request panel) and the Metrics page's `tone` (three tiers) draw that same line. See
 [theming.md](./theming.md).
 
-Feedback is **advisory — oxplow never blocks**. It lives in the bundled
-`oxplow-bundled` extension as **advisories** (see
-[extensions-commands.md](./extensions-commands.md) → "Advisories"), SQL over the stored
-per-request views, not in core:
-
-- **`metric-deltas`** (prompt, every turn): "# Metric deltas (this request)",
-  one `title: baseline → current (Δ ±N)` line per moved **code** metric
-  (`v_request_metric_delta`; operational `agent.*`/`task.*` and
-  `event` kinds skipped), then "(Advisory — for awareness, not gating.)".
-  The numbers are the same request-delta roll-up the task page
-  shows (file-attributed for snapshot-scan metrics).
-- **`threshold-crossed`** (prompt, once per metric per request): "⚠ <title>
-  crossed its warn/fail threshold (N)", from the delta's `crossing`
-  (`threshold_state`). This used to be a marker on the delta line; it's now
-  its own block.
-
-All three reach the agent as nudges (`v_agent_nudge`), taken by the next
-prompt or tool call (`.context/extensions-commands.md` "Advisories").
-Disabling `oxplow-bundled` turns them off.
+Feedback is **advisory — oxplow never blocks**. No advisory sends metric
+deltas or threshold crossings to the agent now. A person reads them in the
+request panel and on the Metrics page.
 
 ## Performance: the `producers_for_measure` memo
 

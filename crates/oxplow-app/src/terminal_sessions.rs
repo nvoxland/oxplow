@@ -19,11 +19,11 @@
 //! the replay buffer a re-attach starts from.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use bytes::Bytes;
-use oxplow_domain::{ThreadId, Timestamp};
+use oxplow_domain::{AgentSessionId, ThreadId, Timestamp};
 pub use oxplow_pty::SpawnRequest;
 use oxplow_pty::{PaneEvent, PaneId, PtyManager};
 use serde::{Deserialize, Serialize};
@@ -76,6 +76,7 @@ pub type SessionKey = String;
 
 struct SessionEntry {
     pane_id: PaneId,
+    size: (u16, u16),
     /// OS pid of the spawned child (the shell, for the `shell` pane).
     /// Used to read the live cwd for terminal file-link resolution.
     pid: Option<u32>,
@@ -244,6 +245,7 @@ pub struct TerminalSessionRegistry {
     /// look up an existing session for a given (stream, thread,
     /// pane, transport) tuple in O(1).
     by_key: Arc<Mutex<HashMap<SessionKey, String>>>,
+    agent_launches: Arc<std::sync::Mutex<HashMap<AgentSessionId, Weak<Mutex<()>>>>>,
     events_tx: broadcast::Sender<TerminalBridgeEvent>,
     /// Per-thread PTY liveness. The forwarder stamps it on every output
     /// burst (for sessions spawned with a known thread id) so the stall
@@ -278,6 +280,7 @@ impl TerminalSessionRegistry {
             pty,
             inner: Arc::new(Mutex::new(HashMap::new())),
             by_key: Arc::new(Mutex::new(HashMap::new())),
+            agent_launches: Default::default(),
             events_tx,
             activity,
             exits: Arc::new(std::sync::OnceLock::new()),
@@ -286,6 +289,52 @@ impl TerminalSessionRegistry {
             runtime: tokio::runtime::Handle::try_current().ok(),
             input_wait: INPUT_WAIT,
         }
+    }
+
+    /// Serialize starts and replacements of the same agent's PTY. An
+    /// agent launch can await its harness before a PTY is registered.
+    pub async fn lock_agent_launch(&self, id: AgentSessionId) -> tokio::sync::OwnedMutexGuard<()> {
+        let launch = {
+            let mut launches = self
+                .agent_launches
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            launches.retain(|_, launch| launch.strong_count() > 0);
+            launches
+                .get(&id)
+                .and_then(Weak::upgrade)
+                .unwrap_or_else(|| {
+                    let launch = Arc::new(Mutex::new(()));
+                    launches.insert(id, Arc::downgrade(&launch));
+                    launch
+                })
+        };
+        launch.lock_owned().await
+    }
+
+    pub async fn size(&self, session_id: &str) -> Option<(u16, u16)> {
+        self.inner
+            .lock()
+            .await
+            .get(session_id)
+            .map(|entry| entry.size)
+    }
+
+    /// Attached clients follow the replacement on the same URI. A
+    /// failed launch leaves them with the usual retry banner.
+    pub fn report_restart(&self, old_session_id: String, launch_error: Option<&str>) {
+        let message = match launch_error {
+            Some(message) => serde_json::json!({
+                "type": "exit",
+                "exitCode": null,
+                "outcome": { "kind": "launch_failed", "message": message },
+            }),
+            None => serde_json::json!({"type": "restart"}),
+        };
+        let _ = self.events_tx.send(TerminalBridgeEvent {
+            session_id: old_session_id,
+            message: message.to_string(),
+        });
     }
 
     /// The registry with input waiting `wait` for its PTY (tests).
@@ -441,11 +490,12 @@ impl TerminalSessionRegistry {
         let Some(existing_id) = self.by_key.lock().await.get(key).cloned() else {
             return Ok(None);
         };
-        let map = self.inner.lock().await;
-        let Some(entry) = map.get(&existing_id) else {
+        let mut map = self.inner.lock().await;
+        let Some(entry) = map.get_mut(&existing_id) else {
             return Ok(None);
         };
         self.pty.resize(&entry.pane_id, cols, rows).await?;
+        entry.size = (cols, rows);
         let replay = entry.ring.lock().await.replay();
         Ok(Some(Self::build_attach_result(existing_id, replay)))
     }
@@ -473,6 +523,7 @@ impl TerminalSessionRegistry {
         key: SessionKey,
         agent: Option<AgentPane>,
     ) -> Result<String, TerminalSessionError> {
+        let size = (req.cols, req.rows);
         let mut handle = self.pty.spawn_pane(req).await?;
         let pane_id = handle.id.clone();
         let pid = handle.pid;
@@ -605,6 +656,7 @@ impl TerminalSessionRegistry {
             session_id.clone(),
             SessionEntry {
                 pane_id,
+                size,
                 pid,
                 forwarder,
                 ring,
@@ -675,6 +727,9 @@ impl TerminalSessionRegistry {
                     return Ok(());
                 }
                 self.pty.resize(&pane_id, cols, rows).await?;
+                if let Some(entry) = self.inner.lock().await.get_mut(session_id) {
+                    entry.size = (cols, rows);
+                }
             }
             other => {
                 debug!(message_type = %other, "unhandled terminal message");

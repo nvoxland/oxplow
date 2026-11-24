@@ -96,6 +96,22 @@ pub(super) async fn scenario(
     for (index, step) in steps.iter().enumerate() {
         let label = format!("steps[{index}]");
         if let Some(given) = step.get("given") {
+            // A step changes the state or checks it, never both: a check
+            // beside a `given` would be dropped.
+            if let Some(key) = ["when", "expect", "bind"]
+                .into_iter()
+                .find(|key| step.get(key).is_some())
+            {
+                return report.errors.push(
+                    error(
+                        shown,
+                        ex.line("steps"),
+                        "fixture.step",
+                        format!("`{label}` has `{key}` beside `given`: a step is one or the other"),
+                    )
+                    .fix("split it: `- given: [..]`, then `- { when?, expect }`"),
+                );
+            }
             if !run_steps(
                 host,
                 ext,
@@ -231,6 +247,8 @@ pub(super) async fn dispatch(
         action_point_example(host, ext, ex, point, report).await;
     } else if let Some(uri) = ex.when.get("item_commands").and_then(Value::as_str) {
         item_commands_example(host, ex, uri, report).await;
+    } else if let Some(text) = ex.when.get("link_text").and_then(Value::as_str) {
+        link_text_example(ext, ex, text, report);
     } else if let Some(id) = ex.when.get("context").and_then(Value::as_str) {
         context_example(host, ext, ex, id, report).await;
     } else if let Some(id) = ex.when.get("language").and_then(Value::as_str) {
@@ -351,6 +369,11 @@ pub(super) const KINDS: &[Kind] = &[
         key: "item_commands",
         when: "{ item_commands: <uri> } (the commands about an item, its store filter applied)",
         expect: "{ commands: [ids] }",
+    },
+    Kind {
+        key: "link_text",
+        when: "{ link_text: <text> } (the links the extension's `links:` make in the text)",
+        expect: "{ links: [{ text, uri }] }",
     },
     Kind {
         key: "context",

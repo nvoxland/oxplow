@@ -1,0 +1,59 @@
+title: MCP Tool Calls
+description: Recent invocations of one Oxplow MCP tool, with call status, duration, and links to the session transcript.
+label: '{{param.tool}} calls'
+icon: activity
+params:
+- name: tool
+  label: Tool
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+- name: harness
+  type: choice
+  role: filter
+  label: Harness
+  default: all
+  options_from: interface-harnesses
+- name: status
+  type: choice
+  role: filter
+  label: Status
+  default: all
+  options: [{ value: all, label: All calls }, { value: problems, label: 'Failed, denied or abandoned' }]
+see_also:
+- { page: oxplow/agent-interface, params: { range: { param: range }, harness: { param: harness } } }
+loaders:
+  tool_calls:
+    sql: |
+      SELECT c.at, COALESCE(s.harness, 'unknown') AS harness, c.duration_ms,
+             CASE c.state
+               WHEN 'running' THEN 'Running'
+               WHEN 'denied' THEN 'Denied'
+               WHEN 'abandoned' THEN 'Abandoned'
+               ELSE CASE c.ok WHEN 1 THEN 'Succeeded' WHEN 0 THEN 'Failed' ELSE 'Unknown' END
+             END AS status,
+             COALESCE(NULLIF(s.title, ''), CASE WHEN t.transcript_page IS NOT NULL THEN 'Transcript' END) AS session,
+             t.transcript_page AS transcript_uri
+      FROM v_tool_call c LEFT JOIN v_agent_session s ON s.id = c.agent_session_id
+      LEFT JOIN v_agent_turn t ON t.id = c.turn_id
+      WHERE c.kind = 'mcp' AND c.tool = 'mcp__oxplow__' || :tool
+        AND (:range_from IS NULL OR c.at >= :range_from)
+        AND (:range_to IS NULL OR c.at <= :range_to)
+        AND (:harness = 'all' OR COALESCE(s.harness, 'unknown') = :harness)
+        AND (:status = 'all' OR c.state IN ('denied', 'abandoned') OR (c.state = 'finished' AND c.ok = 0))
+      ORDER BY c.at DESC, c.id DESC LIMIT 100
+view:
+  id: tool-calls
+  title: Latest 100 Calls
+  from: tool_calls
+  viz: table
+  columns:
+  - { key: at, label: Time, format: datetime }
+  - { key: harness, label: Harness }
+  - { key: status, label: Status }
+  - { key: duration_ms, label: Duration, format: duration }
+  - { key: session, label: Session, link: { kind: page, from: transcript_uri } }
+  empty: No calls of this tool match these filters.

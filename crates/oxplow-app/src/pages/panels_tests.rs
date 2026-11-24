@@ -7,7 +7,7 @@ use oxplow_db::SqlCell;
 
 use super::panels::*;
 use super::test_support::write;
-use crate::extension::extensions::{ExtensionPanel, PanelScope};
+use crate::extension::extensions::{ExtensionPanel, PanelDataScope};
 use crate::pages::spec::ViewContext;
 
 /// A thread panel with every part: a body with a `mode` toggle, a collapsed
@@ -19,7 +19,7 @@ async fn project() -> (tempfile::TempDir, std::sync::Arc<crate::Services>) {
     write(
         dir.path(),
         &format!("{ext}/extension.yaml"),
-        "manifest: 2\nname: acme\nintent:\n  purpose: test\npanels:\n  - { id: things, title: Things, scope: thread, body: body, collapsed: line, count: n, badge: alarm }\n  - { id: plain, title: Plain, scope: project, body: plain }\n",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\npanels:\n  - { id: things, title: Things, data_scope: thread, body: body, collapsed: line, count: n, badge: alarm }\n  - { id: plain, title: Plain, data_scope: project, body: plain }\n",
     );
     write(
         dir.path(),
@@ -62,13 +62,13 @@ view: { viz: table, from: things }
     (dir, svc)
 }
 
-fn panel(scope: PanelScope) -> ExtensionPanel {
+fn panel(data_scope: PanelDataScope) -> ExtensionPanel {
     ExtensionPanel {
         id: "acme/things".into(),
         extension: "acme".into(),
         title: "Things".into(),
         icon: None,
-        scope,
+        data_scope,
         body: "acme/body".into(),
         badge: Some("acme/alarm".into()),
         open: None,
@@ -80,7 +80,7 @@ fn panel(scope: PanelScope) -> ExtensionPanel {
 
 #[test]
 fn each_part_names_its_page() {
-    let p = panel(PanelScope::Thread);
+    let p = panel(PanelDataScope::Thread);
     assert_eq!(page_of(&p, PanelPart::Body), Some("acme/body"));
     assert_eq!(page_of(&p, PanelPart::Collapsed), Some("acme/line"));
     assert_eq!(page_of(&p, PanelPart::Count), Some("acme/n"));
@@ -183,7 +183,7 @@ async fn a_project_panel_runs_with_no_scope_and_says_itself_as_text() {
 
 #[test]
 fn the_header_counts_by_the_count_page_else_the_badge() {
-    let p = panel(PanelScope::Thread);
+    let p = panel(PanelDataScope::Thread);
     assert_eq!(counting_part(&p), Some(PanelPart::Count));
     let badge_only = ExtensionPanel {
         count: None,

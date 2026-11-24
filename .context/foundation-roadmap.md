@@ -283,7 +283,7 @@ Status: done. `oxplow_domain::grant` defines the request (derived from a
 contribution's declaration by `grants.rs`), the grant (the extension's declared `permissions`,
 approved when it was deployed; narrowing asks nothing new), and each
 run's decisions (`allowed`, `denied`, `unenforced`), recorded on
-`v_extension_run` — the usage record, with actor, cause, anchors, cost,
+`v_contribution_run` — the usage record, with actor, cause, anchors, cost,
 scopes and model calls, never values or contents. A deployment's
 permissions cover its whole declaration, and a deployment is immutable.
 Per-dataset reads,
@@ -323,7 +323,8 @@ Prerequisites: Define scoped extension grants and usage audit contracts.
 
 #### Expose consistent extension run health and safe usage evidence
 
-Status: planned.
+Status: in progress. The shared run record and dataset are in place. The
+per-kind detail migrations and run inspector are planned.
 
 Scope: Unify run identity, status, errors, cancellation, resource usage, grant decisions and data freshness across contributions. Publish semantic views and a small reusable inspector for extension authors and developers. Keep high-volume activity bounded and distinguish retryable execution failure from contract or permission rejection.
 
@@ -404,8 +405,8 @@ The first public path now declares typed AI jobs, enqueues/cancels intent throug
 native commands, reads owned results, publishes exact operations with the active
 generation and starts a bounded scheduler after coherent boot readiness. Fenced
 completion emits a metadata-only event. Restart, duplicate and cancellation
-behavior is pinned at each persistence boundary (`extension_job_hardening_tests.rs`,
-`extension_job_crash_tests.rs`): a crash after the claim, before the publish
+behavior is pinned at each persistence boundary (`job_run_hardening_tests.rs`,
+`job_run_crash_tests.rs`): a crash after the claim, before the publish
 transaction and inside it; two dispatchers racing for one claim; concurrent
 duplicate intents; the per-extension and project-wide caps and a changed
 duplicate at capacity; a late result after recovery (kept once, readable in
@@ -638,7 +639,7 @@ Acceptance: Core detects/report errors even when no task tracker or repair polic
 
 Validation: Exercise healthy/failing contributions, repeated events, no task tracker, a fake alternate provider, disabled policy and recovered contribution. Verify audit and links.
 
-Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`, `crates/oxplow-app/src/commands`.
+Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `extensions/oxplow-bundled/extension.yaml`, `crates/oxplow-app/src/commands`.
 
 Prerequisites: Use one versioned event envelope across runtime and authoring; Compose declared host services through the shared context.
 
@@ -659,7 +660,7 @@ Acceptance: At least one alternative review policy can combine test evidence, cu
 
 Validation: Compare default analysis results before/after extraction on a representative change; build an alternate domain-specific review and ensure it joins existing evidence with custom collected facts.
 
-Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`.
+Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `extensions/oxplow-bundled/extension.yaml`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology; Compose declared host services through the shared context.
 

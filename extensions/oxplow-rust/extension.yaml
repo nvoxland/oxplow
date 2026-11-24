@@ -100,9 +100,9 @@ configuration:
           clippyReport: { type: string, default: target/clippy.json, description: "The clippy report (JSON) that the analysis run reads, from the project root." }
 collectors:
   # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
-  - { id: oxplow.rust.unsafe_blocks, doc: "Finds each `unsafe` block in Rust files, one fact per hit at its line.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.unwrap_expect_calls, doc: "Finds each `unwrap` and `expect` call in Rust files, one fact per hit at its line.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.panic_macros, doc: "Finds each `panic!`, `todo!` and similar macro in Rust files, one fact per hit at its line.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unsafe_blocks, doc: "Finds each `unsafe` block in Rust files, one fact per file with the lines of its hits.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unwrap_expect_calls, doc: "Finds each `unwrap` and `expect` call in Rust files, one fact per file with the lines of its hits.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.panic_macros, doc: "Finds each `panic!`, `todo!` and similar macro in Rust files, one fact per file with the lines of its hits.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
   # A report: clippy's JSON findings, read after an analysis run.
   - { id: oxplow.rust.clippy_report, doc: "Reads the clippy report after an analysis run.", records: analysis, entry: "oxplow:clippy", report: { path: { setting: /rust/clippyReport, default: target/clippy.json } }, on: { run: analysis } }
 metrics:

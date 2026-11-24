@@ -36,7 +36,8 @@ use oxplow_config::collectors::{
     CollectorRuntime, CollectorSpec, CollectorSync, ColumnType, EntityDecl, Trigger,
 };
 use oxplow_db::{
-    CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore, StoredType,
+    CollectorObservation, CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore,
+    StoredType,
 };
 use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV2};
 use oxplow_domain::{DomainError, Envelope, StoredEvent};
@@ -1231,18 +1232,23 @@ async fn run_collector_held(
         )));
     }
     let run = collector_context(ctx, parent, owner, id)?;
-    let started = std::time::Instant::now();
+    parent.track_child(&run);
+    let last_event_id = trigger.event().map(|e| e.seq);
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
-    let recorded = match &result {
-        Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
-        // Stopped (a person's cancel, its extension changed or revoked): the
-        // run is recorded `cancelled`, and says nothing of the collector's health.
-        Err(RunCollectorError::Failed(_)) if run.cancel().is_cancelled() => Ok(()),
-        Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
-        Err(_) => Ok(()),
-    };
-    if let Err(e) = recorded {
-        tracing::warn!(collector = %format!("{owner}/{id}"), error = %e, "recording its health failed");
+    if let Err(RunCollectorError::Denied(error)) = &result {
+        ctx.store
+            .record_run(
+                run,
+                oxplow_domain::run::Outcome::Denied,
+                Some(error.clone()),
+                CollectorObservation {
+                    last_event_id,
+                    ..CollectorObservation::default()
+                },
+            )
+            .await
+            .map_err(RunCollectorError::Storage)?;
+        return result;
     }
     result
 }
@@ -1334,17 +1340,6 @@ async fn run_collector_once(
         Ok((plan_writes(declarer, owner, &spec, o)?, events, observed))
     });
     let last_event_id = trigger.event().map(|e| e.seq);
-    let run_row = |status: &str, error: Option<String>| CollectorRun {
-        owner: owner.to_string(),
-        id: id.to_string(),
-        status: status.into(),
-        last_run_at: now_rfc3339(),
-        error,
-        row_counts: BTreeMap::new(),
-        cursor: None,
-        last_event_id,
-        run_id: Some(run.run().to_string()),
-    };
     let collector = format!("{owner}/{id}");
     let event = Synced {
         source: source.clone(),
@@ -1355,10 +1350,6 @@ async fn run_collector_once(
     let error = match writes {
         Ok((writes, events, (models, fields, cursor, script_problems))) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
-            let ok_run = CollectorRun {
-                cursor,
-                ..run_row("ok", None)
-            };
             let registry = ctx.models.current();
             let (writer_ext, writer_source) = (declarer.to_string(), source.clone());
             let reconcile = trigger.name() == "start";
@@ -1434,17 +1425,19 @@ async fn run_collector_once(
                             }
                         }
                     }
-                    let run = CollectorRun {
+                    let observation = CollectorObservation {
                         row_counts: counts.clone(),
-                        ..ok_run.clone()
+                        cursor: cursor.clone(),
+                        last_event_id,
+                        ..CollectorObservation::default()
                     };
-                    oxplow_db::collector_store::record_run_in(tx, &run)
-                        .map_err(oxplow_db::map_sql_err)?;
-                    oxplow_db::extension_run_store::record_tx(
+                    oxplow_db::collector_store::record_run_in(
                         tx,
                         &this_run,
                         oxplow_domain::run::Outcome::Ok,
                         None,
+                        &observation,
+                        Some(&vocabulary.current()),
                     )?;
                     let vocabulary = vocabulary.current();
                     let mut synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
@@ -1482,7 +1475,6 @@ async fn run_collector_once(
         }
         Err(e) => e,
     };
-    let failed = run_row("error", Some(error.clone()));
     let envelope = event.envelope(
         "error",
         BTreeMap::new(),
@@ -1494,9 +1486,7 @@ async fn run_collector_once(
     let (this_run, why) = (run.clone(), error.clone());
     ctx.db
         .transaction(move |tx| {
-            oxplow_db::collector_store::record_run_in(tx, &failed)
-                .map_err(oxplow_db::map_sql_err)?;
-            oxplow_db::extension_run_store::record_tx(
+            oxplow_db::collector_store::record_run_in(
                 tx,
                 &this_run,
                 if this_run.cancel().is_cancelled() {
@@ -1505,6 +1495,11 @@ async fn run_collector_once(
                     oxplow_domain::run::Outcome::Failed
                 },
                 Some(&why),
+                &CollectorObservation {
+                    last_event_id,
+                    ..CollectorObservation::default()
+                },
+                Some(&vocabulary.current()),
             )?;
             oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &envelope).map(|_| ())
         })
@@ -1647,8 +1642,9 @@ pub struct RunRecord<'a> {
     pub facts: i64,
     pub elapsed_ms: i64,
     pub error: Option<String>,
-    /// The run, when it was an extension's: recorded with it.
-    pub run: Option<&'a RunContext>,
+    pub run: &'a RunContext,
+    /// Whether the collector recorded usage.
+    pub unmeasured_cost: bool,
 }
 
 impl RunLog {
@@ -1667,7 +1663,7 @@ impl RunLog {
         self.db
             .read(move |c| {
                 c.query_row(
-                    "SELECT coalesce(last_event_id, 0) FROM collector_run WHERE owner = ?1 AND id = ?2",
+                    "SELECT coalesce(last_event_id, 0) FROM collector_checkpoint WHERE owner = ?1 AND id = ?2",
                     [&owner, &id],
                     |r| r.get::<_, i64>(0),
                 )
@@ -1699,25 +1695,20 @@ impl RunLog {
         r: RunRecord<'_>,
         capture: Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)>,
     ) -> Result<bool, DomainError> {
-        let run = CollectorRun {
-            owner: r.owner.to_string(),
-            id: r.id.to_string(),
-            status: r.status.to_string(),
-            last_run_at: now_rfc3339(),
-            error: r.error.clone(),
+        let observation = CollectorObservation {
             row_counts: r.entities.clone(),
             cursor: None,
             last_event_id: r.cause.as_ref().map(|(_, seq)| *seq),
-            run_id: r.run.map(|run| run.run().to_string()),
+            unmeasured_cost: r.unmeasured_cost,
         };
-        let ended = r.run.map(|run| {
-            let outcome = match (r.status, run.cancel().is_cancelled()) {
-                ("ok", _) => oxplow_domain::run::Outcome::Ok,
-                (_, true) => oxplow_domain::run::Outcome::Cancelled,
-                _ => oxplow_domain::run::Outcome::Failed,
-            };
-            (run.clone(), outcome, r.error.clone())
-        });
+        use oxplow_domain::run::Outcome;
+        let outcome = match (r.status, r.run.cancel().is_cancelled()) {
+            ("ok", _) => Outcome::Ok,
+            (_, true) => Outcome::Cancelled,
+            _ => Outcome::Failed,
+        };
+        let run = r.run.clone();
+        let error = r.error.clone();
         let synced = Synced {
             source: r.source.to_string(),
             collector: format!("{}/{}", r.owner, r.id),
@@ -1728,7 +1719,7 @@ impl RunLog {
         let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                if let Some((run, oxplow_domain::run::Outcome::Ok, _)) = &ended {
+                if outcome == Outcome::Ok {
                     run.check_authority().map_err(DomainError::Invalid)?;
                 }
                 if !oxplow_db::event_log_store::append_unique_tx(
@@ -1741,11 +1732,14 @@ impl RunLog {
                 if let Some((capture, facts)) = &capture {
                     oxplow_db::fact_store::record_facts_tx(tx, capture, facts, None)?;
                 }
-                oxplow_db::collector_store::record_run_in(tx, &run)
-                    .map_err(oxplow_db::map_sql_err)?;
-                if let Some((run, outcome, error)) = &ended {
-                    oxplow_db::extension_run_store::record_tx(tx, run, *outcome, error.as_deref())?;
-                }
+                oxplow_db::collector_store::record_run_in(
+                    tx,
+                    &run,
+                    outcome,
+                    error.as_deref(),
+                    &observation,
+                    Some(&vocabulary.current()),
+                )?;
                 Ok(true)
             })
             .await
@@ -1775,6 +1769,8 @@ pub async fn run_for_event(
     id: &str,
     event: Arc<StoredEvent>,
 ) -> Result<EventRun, DomainError> {
+    let lock = run_lock(ctx.root, owner, id);
+    let _held = lock.lock().await;
     let seq = event.seq;
     if ctx
         .store
@@ -1790,60 +1786,40 @@ pub async fn run_for_event(
     // nothing — recorded as skipped (the last good counts stay), never as
     // a failure.
     let own = oxplow_domain::uri::build::collector_uri(owner, id);
-    if let Some(why) = crate::event_lineage::lineage(&ctx.db, &event, &own)
-        .await?
-        .refusal()
-    {
-        ctx.store
-            .record_run(CollectorRun {
-                owner: owner.to_string(),
-                id: id.to_string(),
-                status: "skipped".into(),
-                last_run_at: now_rfc3339(),
-                error: Some(why),
-                row_counts: BTreeMap::new(),
-                cursor: None,
-                last_event_id: Some(seq),
-                run_id: None,
-            })
-            .await?;
-        return Ok(EventRun::Guarded);
-    }
-    // The system's run, reacting to the event.
     let run = RunContext::core(oxplow_domain::Actor::System, Mode::External)
         .caused_by(event.envelope.id.clone())
         .anchored(event.envelope.anchors.clone())
         .about(event.envelope.subject.clone());
-    match run_collector(ctx, &run, owner, id, RunTrigger::On(event)).await {
+    if let Some(why) = crate::event_lineage::lineage(&ctx.db, &event, &own)
+        .await?
+        .refusal()
+    {
+        let collector = match collector_context(ctx, &run, owner, id) {
+            Ok(collector) => collector,
+            Err(RunCollectorError::NotFound) => return Ok(EventRun::Skipped),
+            Err(err) => return Err(DomainError::Invariant(format!("{err:?}"))),
+        };
+        ctx.store
+            .record_run(
+                collector,
+                oxplow_domain::run::Outcome::Skipped,
+                Some(why),
+                CollectorObservation {
+                    last_event_id: Some(seq),
+                    ..CollectorObservation::default()
+                },
+            )
+            .await?;
+        return Ok(EventRun::Guarded);
+    }
+    // The system's run, reacting to the event.
+    match run_collector_held(ctx, &run, owner, id, RunTrigger::On(event)).await {
         Ok(report) => Ok(EventRun::Ran(Ok(report))),
         Err(RunCollectorError::Failed(m)) => Ok(EventRun::Ran(Err(m))),
         Err(RunCollectorError::NotFound | RunCollectorError::Disabled(_)) => Ok(EventRun::Skipped),
-        Err(RunCollectorError::Denied(m)) => {
-            ctx.store
-                .record_run(CollectorRun {
-                    owner: owner.to_string(),
-                    id: id.to_string(),
-                    status: "error".into(),
-                    last_run_at: now_rfc3339(),
-                    error: Some(m),
-                    row_counts: BTreeMap::new(),
-                    cursor: None,
-                    last_event_id: Some(seq),
-                    run_id: None,
-                })
-                .await?;
-            Ok(EventRun::Denied)
-        }
+        Err(RunCollectorError::Denied(_)) => Ok(EventRun::Denied),
         Err(RunCollectorError::Storage(e)) => Err(e),
     }
-}
-
-/// Now as RFC 3339, as `Timestamp` serializes.
-fn now_rfc3339() -> String {
-    serde_json::to_value(oxplow_domain::Timestamp::now())
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
 }
 
 /// Rows per entity a preview shows.
@@ -2266,9 +2242,9 @@ impl CollectorRunner {
     }
 
     /// Run a collector from the primary worktree (collected data is
-    /// project-wide). It never approves: a refused run (no consent) or an
-    /// unknown collector changes nothing; one that ran is announced by its
-    /// `collector_run` commit (`v_collector_run` changes).
+    /// project-wide). It never approves. A refused run records its outcome
+    /// without collecting rows. A run that collects also announces completion
+    /// with `collector.synced`.
     pub async fn sync(
         &self,
         run: &RunContext,
@@ -2365,7 +2341,6 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
             let actor = invocation.actor().clone();
             let run = invocation.run.clone();
             let sync = sync.clone();
-            let source = actor.source();
             let acting = actor.clone();
             let trigger = match actor {
                 oxplow_domain::Actor::System => RunTrigger::Every,
@@ -2406,7 +2381,7 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                             &thread,
                             &owner,
                             &id,
-                            &source,
+                            &run,
                             sync.collection.command_turn(&acting, thread).await,
                         )
                         .await
@@ -2947,7 +2922,7 @@ pub(crate) mod tests {
         let err = reviewed_run(&ctx, "my_gh", "gh").await.unwrap_err();
         assert!(matches!(err, RunCollectorError::Failed(_)), "{err:?}");
         let st = &store.list_runs().await.unwrap()[0];
-        assert_eq!(st.status, "error");
+        assert_eq!(st.outcome, "failed");
         assert!(st.error.as_deref().unwrap().contains("nope"));
         assert_eq!(st.row_counts["pr"], 2, "last good counts kept");
     }
@@ -2967,7 +2942,7 @@ pub(crate) mod tests {
                 run: last.map(|t| CollectorRun {
                     owner: "e".into(),
                     id: "gh".into(),
-                    status: "ok".into(),
+                    outcome: "ok".into(),
                     last_run_at: t.into(),
                     error: None,
                     row_counts: BTreeMap::new(),
@@ -3358,7 +3333,7 @@ pub(crate) mod tests {
                     .map_err(oxplow_db::map_sql_err)?;
                 let cursor = tx
                     .query_row(
-                        "SELECT cursor_json FROM collector_run WHERE id = 'books'",
+                        "SELECT cursor_json FROM collector_checkpoint WHERE id = 'books'",
                         [],
                         |r| r.get(0),
                     )
@@ -3461,7 +3436,7 @@ pub(crate) mod tests {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let ran = run_due_collectors(&fx.svc).await;
         assert_eq!(ran, vec![("work".to_string(), "star".to_string())]);
-        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+        let audits = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(10)
             .await
             .unwrap();
@@ -3480,7 +3455,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let ran = listings.iter().find(|l| l.owner == "work").unwrap();
-        assert_eq!(ran.run.as_ref().unwrap().status, "ok");
+        assert_eq!(ran.run.as_ref().unwrap().outcome, "ok");
         let trigger: String = fx
             .svc
             .db

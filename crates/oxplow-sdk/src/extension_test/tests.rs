@@ -947,12 +947,57 @@ async fn a_given_observes_runs_health_usage_and_hints() {
   - observe: { hint: { hint: x/never, evaluated: 3 } }
   - observe: { nudge: { kind: x/spoke, message: m } }
 when:
-  sql: SELECT (SELECT group_concat(outcome || ':' || cpu_ms || ':' || ai_calls, ',') FROM (SELECT * FROM v_extension_run ORDER BY started_at)) AS runs, (SELECT state || ':' || reason FROM v_contribution_health) AS health, (SELECT input_tokens FROM v_token_usage) AS tokens, (SELECT evaluated FROM v_hint_stat WHERE hint = 'x/never') AS evaluated, (SELECT count(*) FROM v_agent_nudge WHERE kind = 'x/spoke') AS nudges
+  sql: SELECT (SELECT group_concat(outcome || ':' || cpu_ms || ':' || ai_calls, ',') FROM (SELECT * FROM v_contribution_run ORDER BY started_at)) AS runs, (SELECT state || ':' || reason FROM v_contribution_health) AS health, (SELECT input_tokens FROM v_token_usage) AS tokens, (SELECT evaluated FROM v_hint_stat WHERE hint = 'x/never') AS evaluated, (SELECT count(*) FROM v_agent_nudge WHERE kind = 'x/spoke') AS nudges
 expect:
   rows:
     - { runs: \"failed:30:2,ok:0:0\", health: \"disabled:boom\", tokens: 1999, evaluated: 3, nudges: 1 }
 ",
         );
+    let report = test_extension(dir.path(), "notes", false).await.unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_observes_run_details_and_live_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+    write(
+        dir.path(),
+        ".oxplow/extensions/notes/fixtures/basic.yaml",
+        r#"given:
+  - observe:
+      run:
+        extension: acme
+        contribution: pull
+        version: "2.1"
+        outcome: denied
+        days_ago: 2
+        wall_ms: 92
+        cpu_ms: 30
+        peak_bytes: 4096
+        ai_calls: 2
+        scopes: { sql.read: 3 }
+        decisions:
+          - { need: scope, name: sql.read, decision: allowed }
+          - { need: host, name: denied.example, decision: denied, reason: missing grant }
+  - observe:
+      run: { extension: acme, contribution: push, version: "3.0", live: true }
+when:
+  sql: >
+    SELECT version, outcome, wall_ms, peak_bytes,
+           json_extract(scopes, '$."sql.read"') AS reads,
+           json_extract(decisions, '$[0].decision') AS first_decision,
+           json_extract(decisions, '$[1].reason') AS denial,
+           finished_at IS NULL AS live, cpu_ms, ai_calls
+    FROM v_contribution_run
+    WHERE extension = 'acme'
+    ORDER BY started_at
+expect:
+  rows:
+    - { version: "2.1", outcome: denied, wall_ms: 92, peak_bytes: 4096, reads: 3, first_decision: allowed, denial: missing grant, live: 0, cpu_ms: 30, ai_calls: 2 }
+    - { version: "3.0", outcome: null, wall_ms: null, peak_bytes: null, reads: null, first_decision: null, denial: null, live: 1, cpu_ms: null, ai_calls: null }
+"#,
+    );
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
     assert!(report.ok, "{:?}", report.errors);
 }
@@ -1308,6 +1353,54 @@ steps:
         .join("\n");
     assert!(
         errors.contains(".oxplow/extensions/acme/fixtures/merged.yaml: steps[1]: "),
+        "{errors}"
+    );
+}
+
+/// A step of a fixture that isn't a page's is `{ given }` or `{ when?,
+/// expect }`: one with both is a finding, never a `given` that drops the
+/// check beside it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_with_given_and_a_check_is_a_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: PRs.
+  examples:
+    - { name: merged, input: { event_type: acme.merged }, expect: valid }
+event_types:
+  types:
+    - { type: acme.merged, v: 1, schema: merged.v1.json, summary: Merged. }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/merged.v1.json",
+        r#"{"type": "object", "required": ["pr"]}"#,
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/merged.yaml",
+        "when: { event_type: acme.merged, payload: { pr: 1 } }
+expect: { valid: true }
+steps:
+  - given: [{ command: oxplow.thread.create, input: { stream: str1, title: Fix it } }]
+    expect: { valid: false }
+",
+    );
+    let errors = test_extension(root, "acme", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("fixtures/merged.yaml:")
+            && errors.contains("`steps[0]` has `expect` beside `given`"),
         "{errors}"
     );
 }
@@ -2718,6 +2811,150 @@ commands:
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
+/// `when: { item_commands }` takes a web URL and a file too: a command
+/// about `https` is offered on the URLs its `accepts.url` takes, one about
+/// `oxplow/file` on the paths its `accepts.path` globs take.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_which_commands_a_link_is_offered() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Opens links elsewhere.
+  examples:
+    - { name: pr, input: { item_commands: \"https://github.com/acme/app/pull/12\" }, expect: the PR command }
+commands:
+  - name: pr.open
+    summary: Open the pull request in the review tool.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/open.star
+    examples:
+      - { name: happy, input: { uri: \"https://github.com/acme/app/pull/12\" }, expect_commands: [] }
+    ui: { label: Review Tool, group: Open In, about: { resource: https, accepts: { url: \"^https://github[.]com/[a-z]+/[a-z]+/pull/[0-9]+$\" } } }
+  - name: notebook.open
+    summary: Open the notebook in Jupyter.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/open.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/file?path=a.ipynb\" }, expect_commands: [] }
+    ui: { label: Jupyter, group: Open In, about: { resource: oxplow/file, accepts: { path: \"**/*.ipynb\" } } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/open.star",
+        "def transform(x):\n    return {\"commands\": []}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/pr.yaml",
+        "when: { item_commands: \"https://github.com/acme/app/pull/12\" }\nexpect: { commands: [acme.pr.open] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/not-a-pr.yaml",
+        "when: { item_commands: \"https://github.com/acme/app\" }\nexpect: { commands: [] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/notebook.yaml",
+        "when: { item_commands: \"oxplow:oxplow/file?path=work/a.ipynb\" }\nexpect: { commands: [acme.notebook.open] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
+/// A command's `about_if` is a function of its script that decides per
+/// link: called with `{ uri, kind, url }`, offered where it returns True.
+/// One its script doesn't define is refused where the command loads.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_a_commands_about_if_which_links_it_takes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let manifest = |func: &str| {
+        format!(
+            "manifest: 2
+name: acme
+intent:
+  purpose: Opens our own links elsewhere.
+  examples:
+    - {{ name: mine, input: {{ item_commands: \"https://mine.example/a\" }}, expect: the command }}
+commands:
+  - name: mine.open
+    summary: Open one of our links in our tool.
+    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
+    entry: handlers/mine.star
+    examples:
+      - {{ name: happy, input: {{ uri: \"https://mine.example/a\" }}, expect_commands: [] }}
+    ui: {{ label: Our Tool, group: Open In, about: https, about_if: {func} }}
+"
+        )
+    };
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest("is_mine"),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/mine.star",
+        "def transform(x):\n    return {\"commands\": []}\n\ndef is_mine(link):\n    return link[\"kind\"] == \"https\" and link[\"url\"].startswith(\"https://mine.example/\")\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/mine.yaml",
+        "when: { item_commands: \"https://mine.example/a\" }\nexpect: { commands: [acme.mine.open] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/other.yaml",
+        "when: { item_commands: \"https://other.example/a\" }\nexpect: { commands: [] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest("is_theirs"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    let errors = report.error_lines().join("\n");
+    assert!(errors.contains("defines no `is_theirs`"), "{errors}");
+}
+
+/// `when: { link_text }` lists the links an extension's `links:` make in
+/// the text: whole words only, the match encoded into the URI.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_which_links_text_makes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Links issue keys.
+  examples:
+    - { name: keys, input: { link_text: \"fixes PROJ-12\" }, expect: the issue link }
+links:
+  - { id: issue, pattern: '[A-Z]{2,10}-[0-9]+', uri: 'https://linear.app/acme/issue/{{match}}' }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/keys.yaml",
+        "when: { link_text: \"fixes PROJ-12, not XPROJ-1x\" }\nexpect: { links: [{ text: PROJ-12, uri: \"https://linear.app/acme/issue/PROJ-12\" }] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,
@@ -3854,8 +4091,8 @@ expect: { ok: true, result: { book: 1 } }
 when: { collector: books, trigger: start }
 expect: { ok: true, result: { book: 2 } }
 steps:
-  - given: [{ remove_files: [shelf/a.md] }]
-    expect: { ok: true, result: { book: 1 } }
+  - given: [{ files: { \"shelf/e.md\": \"Persuasion\" } }]
+  - expect: { ok: true, result: { book: 3 } }
 ",
             ),
             (

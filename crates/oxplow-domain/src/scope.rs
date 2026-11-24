@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use crate::commands::Access;
 
-/// What a run called, per scope: the per-run summary its audit row
+/// What a run called, per scope: the per-run summary its command run record
 /// records. One per run, shared by the runs nested in it and by the
 /// provider calls it makes (a capability verb's `host/call`s); a retried
 /// run starts a fresh one.
@@ -106,6 +106,13 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Open, rename and close a thread's agent sessions. Opening one only adds the slot (the UI starts its process, and nothing types into it); closing one stops its process.",
+    },
+    Scope {
+        id: "agent_terminal.write",
+        access: Access::Write,
+        host: Host::Window,
+        spends: false,
+        summary: "Restart an agent session's terminal process and resume its saved conversation.",
     },
     Scope {
         id: "agent_text.read",

@@ -38,8 +38,11 @@ intent:
   origin: null
   examples:
     - name: a person bookmarks a page for their thread
-      input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thr1" } }
-      expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+      input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, visibility_scope: thread, thread: "thr1" } }
+      expect: the page in v_bookmark at the thread's visibility scope, undone by oxplow.bookmark.remove
+    - name: run-details-shows-cost-and-denied-decisions-first
+      input: { part: run-details }
+      expect: the run's cost and scopes, with denied permission decisions before allowed ones
     - name: definition-reads-a-pages-title-origin-and-nodes
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/commit.yaml } }
       expect: the tab named for the file, then the page's source, the other pages that draw the file, its params, loaders, nodes and actions; no YAML (the Text view shows that)
@@ -463,13 +466,13 @@ panels:
   # The left nav's Go To, beside the Go To page its header opens: the
   # thread's bookmarks, recent or most visited pages, one kind at a time
   # (its header's icons); collapsed, the same pages as icons.
-  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-icons, open: 'oxplow:oxplow/page?page=go-to' }
+  - { id: go-to, title: Go To, icon: compass, data_scope: thread, body: go-to-panel, collapsed: go-to-icons, open: 'oxplow:oxplow/page?page=go-to' }
   # The stream's git: its uncommitted files as a folder tree, or where its
   # branch stands (the header picks); its header opens Git Status, which
   # acts on both. Collapsed, one line of counts; counted by files.
-  - { id: git, title: Git, icon: git-branch, scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
+  - { id: git, title: Git, icon: git-branch, data_scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
   # What only the person can move: a question an agent waits on, an open note; counted in its header.
-  - { id: waiting, title: Waiting on you, icon: bell, scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
+  - { id: waiting, title: Waiting on you, icon: bell, data_scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
 # What oxplow runs by default: snapshots, and the agent harnesses and AI
 # providers — core's built-ins, many of each at once (every one of those
 # declared here is active). Knowledge stores are extensions (oxwiki is one).
@@ -737,6 +740,13 @@ resources:
     resolve: job_run
     title: intent_key
     icon: activity
+  - name: contribution_run
+    description: "One execution of a contribution."
+    label: Contribution run
+    params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
+    resolve: contribution_run
+    title: contribution
+    icon: activity
   - name: ai_call
     description: "One call to a language model, with its cost."
     label: Model call
@@ -859,6 +869,11 @@ resources:
     label: File kind
     params: { file_kind: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: file-text
+  - name: link
+    description: "Text that is a link, such as an issue key: a pattern and the URI a match opens."
+    label: Link
+    params: { link: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: link
   - name: test_convention
     description: "What makes a file, container or function a test, and what counts as an assertion or a skip."
     label: Test convention
@@ -1030,12 +1045,12 @@ commands:
     example: {"id": "anthropic", "model": "claude-haiku-5-5"}
   # bookmarks.write — the person's navigation.
   - name: bookmark.set
-    summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
+    summary: "Bookmark a page at a visibility scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
     scope: bookmarks.write
     op: set
-    example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "page", "label": "Git dashboard", "scope": "thread", "thread": "thr3"}
+    example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "page", "label": "Git dashboard", "visibility_scope": "thread", "thread": "thr3"}
   - name: bookmark.remove
-    summary: "Take a page's bookmark off, whichever scope it's at."
+    summary: "Take a page's bookmark off, whichever visibility scope it's at."
     scope: bookmarks.write
     op: remove
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
@@ -1066,17 +1081,17 @@ commands:
     op: clear
     example: {"thread": "thr1"}
   - name: context.send_next
-    summary: "Choose what a `thread`'s next prompt carries: the named `basket` instead of the thread's own, or (no `basket`) the thread's own again. It lasts one send: the prompt carries that basket, empties it, and the thread sends its own after. A basket goes next for one thread at a time."
+    summary: "Choose what a `thread`'s next prompt carries: the named `basket` instead of the thread's own, or (no `basket`) the thread's own again, releasing its held items (put back) so they go too. It lasts one send: the prompt carries that basket, empties it, and the thread sends its own after. A basket goes next for one thread at a time."
     scope: context.write
     op: send_next
     example: {"basket": "Auth rework", "thread": "thr1"}
   - name: context.put_back
-    summary: "Put a `thread`'s last send back: each item it carried returns, with its note, to the basket it came from (a named basket made again if it was deleted); nothing is chosen to go next. Each thread keeps only its last send; the next send replaces it. An agent may run it for its own thread (when the person says something went by mistake); every other basket command is the person's."
+    summary: "Put a `thread`'s last send back: each item it carried returns, with its note, to the basket it came from (a named basket made again if it was deleted); nothing is chosen to go next, and what returns to the thread's own basket is held until `context.send_next` with no `basket`. Each thread keeps only its last send; the next send replaces it. An agent may run it for its own thread (when the person says something went by mistake); every other basket command is the person's."
     scope: context.write
     op: put_back
     example: {"thread": "thr1"}
   - name: context.create_basket
-    summary: "Make an empty named context basket (`name`: up to 60 characters, not \"This Thread\", unique in any case). Named baskets belong to the project, across all its streams."
+    summary: "Make an empty named context basket (`name`: up to 60 characters, not \"This Thread\", not starting with `@`, unique in any case). Named baskets belong to the project, across all its streams."
     scope: context.write
     op: create_basket
     example: {"name": "Auth rework"}
@@ -1665,7 +1680,7 @@ commands:
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   # terminals.write
   - name: terminal.open
-    summary: "Open a terminal: a shell (`$SHELL -l`) in a stream's worktree, at the end of its terminals. `title` defaults to the next \"Terminal N\". Answers `{ id, uri, title }`; the shell starts when a page attaches to the URI."
+    summary: "Open a terminal: a shell (`$SHELL -l`) in a stream's worktree, at the end of its terminals. `title` defaults to the next \"Terminal N\". `dir` starts the shell in a directory of the worktree (a relative path; a person may give any directory). Answers `{ id, uri, title }`; the shell starts when a page attaches to the URI."
     scope: terminals.write
     op: open
     example: {"stream": "str2", "title": "build"}
@@ -1762,9 +1777,10 @@ commands:
     ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
     example: {"stream": "str1"}
   - name: vcs.push
-    summary: "Push the stream's branch (to its upstream, or a named remote branch)."
+    summary: "Push the stream's branch (to its upstream, or a named remote branch). A person is asked first when it names a remote branch."
     scope: vcs.remote
     op: push
+    confirm_says: "Push this stream's branch to {{remote}}/{{branch}}. The remote branch then holds this branch's commits."
     ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
     example: {"stream": "str1"}
   # vcs.write
@@ -1853,6 +1869,12 @@ commands:
     scope: vcs.write
     op: stage
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
+  - name: agent_terminal.restart
+    summary: "Stop the current agent terminal and launch it again with the installed harness executable. Keeps the session and its saved conversation. Refused when nothing runs in it (its pane's Start Again opens it). A person's only."
+    scope: agent_terminal.write
+    op: restart
+    ui: { label: "Restart Terminal", group: Tasks, keywords: [agent, session, relaunch], when: 'pageKind == "oxplow/agent_session" && agentTerminalLive' }
+    example: {uri: "oxplow:oxplow/agent_session?id=ses3"}
   # window.show — the window's.
   - name: window.find
     summary: "Show the find bar in the file the window shows."

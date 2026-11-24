@@ -5,6 +5,7 @@
 # in the same request is not reminded again.
 requires: [oxplow-bundled, oxtask]
 given:
+  - { command: oxtask.tasks.set_workflow, input: { workflow: agent_tracks } }
   - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }
 when: { sql: "SELECT kind, message FROM v_agent_nudge" }
 expect:

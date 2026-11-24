@@ -64,6 +64,9 @@ export interface BasketItem {
   note: string | null;
   /** The named basket it is in; null: a thread's own. */
   basket: string | null;
+  /** Put back into the thread's own basket: the next prompt doesn't carry
+   *  it until Send Next on This Thread releases it. */
+  held: boolean;
 }
 
 /** A named basket and what is in it. */
@@ -106,7 +109,7 @@ export function lastSendFrom(result: SqlQueryResult): LastSend | null {
 }
 
 export const ITEMS_SQL = `
-  SELECT id, kind, source_uri, label, text, note, basket
+  SELECT id, kind, source_uri, label, text, note, basket, held_at
   FROM v_context_item
   WHERE thread_id = ?1 OR basket_id IS NOT NULL
   ORDER BY added_at, id`;
@@ -132,6 +135,7 @@ export function itemsFromResult(result: SqlQueryResult): BasketItem[] {
     text: str(at(row, "text")),
     note: str(at(row, "note")),
     basket: str(at(row, "basket")),
+    held: at(row, "held_at") != null,
   }));
 }
 
@@ -163,11 +167,12 @@ export function sendingNext(baskets: Baskets, thread: string | null): string | n
   return chosen ? chosen.name : THREAD_MARK;
 }
 
-/** What `thread`'s next prompt will carry: the items of the basket it sends. */
+/** What `thread`'s next prompt will carry: the items of the basket it
+ *  sends, This Thread's without the held ones (put back). */
 export function nextPrompt(baskets: Baskets, thread: string | null): BasketItem[] {
   const sending = sendingNext(baskets, thread);
   if (sending == null) return [];
-  if (sending === THREAD_MARK) return baskets.own;
+  if (sending === THREAD_MARK) return baskets.own.filter((i) => !i.held);
   return baskets.named.find((b) => b.name === sending)?.items ?? [];
 }
 
@@ -345,7 +350,7 @@ export async function putBack(thread: string): Promise<void> {
 }
 
 /** Send `basket` with `thread`'s next prompt instead of its own; null:
- *  send the thread's own. */
+ *  send the thread's own, its held items too. */
 export async function sendNext(thread: string, basket: string | null): Promise<void> {
   await personCommands.run("Send Next", "oxplow.context.send_next", basket ? { thread, basket } : { thread });
 }

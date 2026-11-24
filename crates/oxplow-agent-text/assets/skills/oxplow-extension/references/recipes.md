@@ -178,14 +178,15 @@ and a dataset that adds its rows. The full recipe is "A review check" in
 
 - `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,
   `needs: [tree.read, sql.read]`.
-- The script reads `change_diff(change_id)` (the hunks, with their added and
-  removed lines), `grep_tree(pattern)`, `language_of(path)` and
+- The script reads `change_diff(change_id)` (`files`: the hunks, with their
+  added and removed lines; `rest`: the files past this call's limits, to ask
+  for again with `paths = rest`), `grep_tree(pattern)`, `language_of(path)` and
   `code_metrics(text, language, path)`.
 - Its tree is the change's **head**, not the worktree: `files()` and
   `grep_tree()` read the snapshot or commit the change is headed at.
 - Key its rows by change. Return the keys it no longer makes in `deleted`.
-- `v_oxplow_review_check` says if the check is `pending`, `failed` or `ok`
-  for a change. `oxplow.review.unused` is oxplow's own check.
+- `v_oxplow_review_check` says if the check is `pending`, `failed`, `ok`, `off` or
+  `not_run` for a change. `oxplow.review.unused` is oxplow's own check.
 
 ### A lint rule that reaches the review
 
@@ -214,8 +215,10 @@ def transform(input):
     return {"facts": facts}
 ```
 
-- One fact per hit, at its `line`: a fact with no `line` (a count per
-  file) can't be matched to a changed line, so it never reaches the review.
+- The review needs the hits' lines: a fact at a `line`, or a fact per file
+  whose `detail` is `{"lines": [3, 17]}`. Prefer the second for a check that
+  hits often (one fact per file keeps the metric cube small); a count with
+  neither can't be matched to a changed line.
 - The review shows `lint-<rule>`. `severity` is `error`, `warning`, `info`
   or `note` (another word fails the run): `error` is `high`, `warning`
   `medium`, `info` and `note` `info`; none is `medium`. A project can still

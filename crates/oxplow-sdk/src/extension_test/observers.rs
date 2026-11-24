@@ -36,16 +36,26 @@ fn project_path(base: &std::path::Path, rel: &str) -> Result<std::path::PathBuf,
     }
 }
 
-/// `files: { "<path>": "<body>" }`: files written under `host` (the
-/// project, or the step's `root`), folders made.
+/// `files: { "<path>": "<body>" | { repeat: "<text>", times: n } }`: files
+/// written under `host` (the project, or the step's `root`), folders made;
+/// `repeat` writes `text` `times` times over (a large file, written out by
+/// the harness).
 pub(super) fn given_files(host: &std::path::Path, files: &Value) -> Result<(), String> {
     let files = files
         .as_object()
         .ok_or("`files` maps each path to its text — fix: `files: { \"shelf/a.md\": \"# A\" }`")?;
     for (rel, body) in files {
-        let body = body
-            .as_str()
-            .ok_or_else(|| format!("`files.{rel}` is the file's text"))?;
+        // A large file without its text written out: `{ repeat, times }`.
+        let repeated = body.get("repeat").and_then(Value::as_str).map(|text| {
+            let times = body.get("times").and_then(Value::as_u64).unwrap_or(1);
+            text.repeat(times as usize)
+        });
+        let body = repeated
+            .as_deref()
+            .or_else(|| body.as_str())
+            .ok_or_else(|| {
+                format!("`files.{rel}` is the file's text, or `{{ repeat: <text>, times: n }}`")
+            })?;
         let path = project_path(host, rel)?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("`{rel}`: {e}"))?;

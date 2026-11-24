@@ -219,12 +219,15 @@ mod tests {
         let seen = run(svc, &Actor::Human, MARK_SEEN, json!({ "event": push }))
             .await
             .unwrap();
-        assert!(seen.audit_id.is_some());
+        assert!(seen.command_run_id.is_some());
         assert_eq!(state(svc).await, vec![("Push to origin".into(), 1, 0)]);
         let again = run(svc, &Actor::Human, MARK_SEEN, json!({ "event": push }))
             .await
             .unwrap();
-        assert!(again.audit_id.is_none(), "nothing recorded: {again:?}");
+        assert!(
+            again.command_run_id.is_none(),
+            "nothing recorded: {again:?}"
+        );
 
         run(svc, &Actor::Human, DISMISS, json!({ "event": push }))
             .await
@@ -233,7 +236,10 @@ mod tests {
         let again = run(svc, &Actor::Human, DISMISS, json!({ "event": push }))
             .await
             .unwrap();
-        assert!(again.audit_id.is_none(), "nothing recorded: {again:?}");
+        assert!(
+            again.command_run_id.is_none(),
+            "nothing recorded: {again:?}"
+        );
 
         // The first event in the log is no failed operation.
         let other = fx
@@ -337,7 +343,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            again.audit_id.is_none() && again.result == json!({ "dismissed": 0 }),
+            again.command_run_id.is_none() && again.result == json!({ "dismissed": 0 }),
             "{again:?}"
         );
     }

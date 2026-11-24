@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef } from "react";
 import type { TabRef } from "./tabState.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
-import type { BookmarkScope } from "./bookmarks.js";
+import type { VisibilityScope } from "../visibilityScope.js";
 import type { Origin } from "./session.js";
 import type { PageAction } from "../kit/actions.js";
 
@@ -25,14 +25,14 @@ export interface NavigateOptions {
 }
 
 export interface BookmarkBinding {
-  /** The scope this page is bookmarked at, as this thread sees it. */
-  scope: BookmarkScope | null;
-  /** Bookmark it at `scope` (moving it there), or take it off when it's
-   *  already there. */
-  toggle(scope: BookmarkScope): void;
-  /** The same page is bookmarked at other values (another view); the scope
-   *  of that bookmark, and what moves it to this view. */
-  other?: { scope: BookmarkScope } | null;
+  /** The visibility scope this page is bookmarked at, as this thread sees it. */
+  visibilityScope: VisibilityScope | null;
+  /** Bookmark it at `visibilityScope` (moving it there), or take it off
+   *  when it's already there. */
+  toggle(visibilityScope: VisibilityScope): void;
+  /** The same page is bookmarked at other values (another view); the
+   *  visibility scope of that bookmark, and what moves it to this view. */
+  other?: { visibilityScope: VisibilityScope } | null;
   updateOther?(): void;
 }
 

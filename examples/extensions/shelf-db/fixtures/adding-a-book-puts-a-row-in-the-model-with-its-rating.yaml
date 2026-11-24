@@ -4,7 +4,7 @@ expect: { ok: true, result: { id: dune } }
 steps:
   - when: { collector: shelf_db/books, trigger: sqlite }
     expect: { ok: true }
-  - when: { sql: "SELECT cursor_json FROM v_collector_run WHERE owner = 'shelf_db' AND id = 'books'" }
+  - when: { sql: "SELECT cursor_json FROM v_collector_checkpoint WHERE owner = 'shelf_db' AND id = 'books'" }
     expect: { rows: [{ cursor_json: '{"seq":1}' }] }
   - when:
       sql: |

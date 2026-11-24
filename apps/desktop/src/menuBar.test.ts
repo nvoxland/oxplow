@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildMenuBar, buildNativeMenuSnapshots, GO_PREFIX, goMenuItems, goRowsOf, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, GO_PREFIX, goMenuItems, goRowsOf, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu } from "./menuBar.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
@@ -167,4 +167,43 @@ test("the Go To pane's rows are read off its body's run: group, title and URI", 
   } as never;
   expect(goRowsOf(run)).toEqual([{ group: "Bookmarks", title: "Git", uri: "oxplow:x" }]);
   expect(goRowsOf(null)).toEqual([]);
+});
+
+test("View ▸ Sidebar Panels lists the shown panels under their groups' headings, then the rest by title", () => {
+  const toggled: string[] = [];
+  const view = viewMenu(
+    [
+      { id: "ext:a/prs", title: "PRs", shown: true, group: "thread" },
+      { id: "ext:a/work", title: "Work", shown: true, group: "project" },
+      { id: "ext:a/zed", title: "Zed", shown: false },
+      { id: "ext:a/go", title: "Go To", shown: true, group: "project" },
+      { id: "ext:a/alpha", title: "Alpha", shown: false },
+    ],
+    (id) => toggled.push(id),
+  );
+  expect([view.id, view.label]).toEqual(["view", "View"]);
+  const panels = view.items[0]!;
+  expect(panels.label).toBe("Sidebar Panels");
+  // A heading is a disabled line; only a group with panels has one.
+  expect(panels.submenu!.map((i) => (i.separator ? "—" : [i.label, i.enabled ? i.checked : "heading"]))).toEqual([
+    ["This thread", "heading"],
+    ["PRs", true],
+    ["This project", "heading"],
+    ["Work", true],
+    ["Go To", true],
+    "—",
+    ["Alpha", false],
+    ["Zed", false],
+  ]);
+  void panels.submenu!.find((i) => i.label === "Alpha")!.run?.();
+  expect(toggled).toEqual(["ext:a/alpha"]);
+});
+
+test("a View ▸ Sidebar Panels item is found by its menu id, and the native menu keeps it checked", () => {
+  const view = viewMenu([{ id: "ext:a/go", title: "Go To", shown: true, group: "project" }], () => {});
+  const id = view.items[0]!.submenu![1]!.id;
+  expect(menuItemById([view], id)?.label).toBe("Go To");
+  const native = buildNativeMenuSnapshots([view], []);
+  const rail = native.find((g) => g.id === "view")!.items[0]!;
+  expect(rail.submenu?.[1]).toMatchObject({ id, label: "Go To", checked: true });
 });

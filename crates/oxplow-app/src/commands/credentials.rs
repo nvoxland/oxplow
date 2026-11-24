@@ -292,17 +292,17 @@ mod tests {
         assert!(!out.result.to_string().contains("sk-very-secret"));
         assert_eq!(set().await[0][0], oxplow_db::SqlCell::Int(1));
 
-        // Nowhere the audit or the event log holds it.
-        let audit = fx
+        // Nowhere the command run or the event log holds it.
+        let run_row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(1_000)
             .await
             .unwrap();
         assert!(
-            !format!("{audit:?}").contains("sk-very-secret"),
-            "{audit:?}"
+            !format!("{run_row:?}").contains("sk-very-secret"),
+            "{run_row:?}"
         );
 
         // An agent may; a blank value clears it.
@@ -433,7 +433,7 @@ mod tests {
             "{:?}",
             fx.svc
                 .commands
-                .audit_store()
+                .command_run_store()
                 .list_recent(1000)
                 .await
                 .unwrap()
@@ -527,14 +527,14 @@ mod tests {
         assert!(!out.result.to_string().contains("bearer-very-secret"));
         assert_eq!(rows().await[0][4], oxplow_db::SqlCell::Int(1));
 
-        let audit = fx
+        let run_row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(1_000)
             .await
             .unwrap();
-        assert!(!format!("{audit:?}").contains("bearer-very-secret"));
+        assert!(!format!("{run_row:?}").contains("bearer-very-secret"));
 
         run(
             &fx,

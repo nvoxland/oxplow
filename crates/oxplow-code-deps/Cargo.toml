@@ -10,7 +10,7 @@ oxplow-code-metrics = { workspace = true }
 tree-sitter = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

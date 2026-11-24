@@ -149,7 +149,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         .svc
         .sql
         .query_sql(
-            "SELECT decisions FROM v_extension_run WHERE contribution = 'oxplow:oxplow/command?command=acme.read.requests'",
+            "SELECT decisions FROM v_contribution_run WHERE contribution = 'oxplow:oxplow/command?command=acme.read.requests'",
             vec![],
             None,
         )

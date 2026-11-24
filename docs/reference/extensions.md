@@ -225,6 +225,7 @@ Settings → Extensions lists each declared reference with Set… and Revoke.
 | `context` | text for the coding agent's context, sent once, then when it changes |  |
 | `run_patterns` | command substrings that mark a shell call as a test or static-analysis run |  |
 | `file_kinds` | what kind of file a path is, by glob: CI, generated, vendored, sensitive, … |  |
+| `links` | text that is a link, such as an issue key: a pattern and the URI a match opens |  |
 | `test_conventions` | what makes a file, container or function a test, and what counts as an assertion or a skip |  |
 | `languages` | a language oxplow can parse or suggest a server for: its grammar, analysis, symbols and server |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
@@ -376,6 +377,10 @@ collectors:
 - It has no `input`, `env`, `credentials` or `network`, and it writes no
   facts or entities.
 
+Each parse records a run under the declaring extension. Query
+`v_collector_run` for the outcome, error and elapsed time. CPU time, peak
+memory and AI call count are NULL for report parsers.
+
 ### Open datasets
 
 A dataset may say `open: true`. Other extensions' datasets then add rows to
@@ -461,6 +466,24 @@ test_conventions:
 
 A bad glob, pattern or expression is an error at its line.
 
+### Links in text
+
+`links:` makes text a link wherever the app shows text: in the terminal and
+in markdown. Each entry has a pattern and the URI a match opens. The
+pattern uses the same rules as a resource's param pattern, without `^` and
+`$`, and matches only a whole word. The URI is an `https://` URL or an
+oxplow URI, with `{{match}}` where the matched text goes.
+
+```yaml
+links:
+  - { id: issue, pattern: "[A-Z]{2,10}-[0-9]+", uri: "https://linear.app/acme/issue/{{match}}" }
+```
+
+A click opens the link. A right-click shows the same menu as any link,
+with Open In and the commands about the link. Test it with a fixture:
+`when: { link_text: "fixes PROJ-12" }` and
+`expect: { links: [{ text: PROJ-12, uri: "https://linear.app/acme/issue/PROJ-12" }] }`.
+
 ### File kinds and run patterns
 
 `file_kinds:` says what a path is, by glob. `run_patterns:` says which
@@ -501,6 +524,33 @@ A command with `about` is offered on every ref of that resource. Add
 dataset row is truthy (not null, 0, empty or false), for a command whose
 operation refuses some states. In a page's ☰ it sits at the top level among
 the page's own actions, sorted by label.
+
+A command can also act on links. `about: https` makes it a command about
+web links, and `about: oxplow/file` or `oxplow/dir` a command about files
+or directories. `accepts: { url: <pattern> }` or `accepts: { path: <glob> }`
+narrows which links. With `group: Open In`, it is in the link's right-click
+**Open In** submenu wherever the app shows the link: the terminal, a
+markdown link, a page row, a tab.
+
+```yaml
+  - name: pr.review
+    summary: Open the pull request in the review tool.
+    entry: handlers/review.star
+    ui:
+      label: Review Tool
+      group: Open In
+      about: { resource: https, accepts: { url: "^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$" } }
+```
+
+When a pattern is not enough, `about_if: <function>` names a function of
+the command's script. It gets the link (`uri`, `kind`, and `url` or `path`)
+and returns `True` where the command is offered.
+
+`v_command_run` lists command history, including reads and refusals. Filter
+on `command` and order by `started_at` and `id` for the latest runs.
+`changed = 1` selects successful runs that recorded their input. The row's URI opens
+the run's cost, permissions and model calls. To look up a run from a
+`command.executed` event, match its `command_run_id` to `v_command_run.id`.
 
 - A script reaches oxplow only through the scopes in `needs`. Today a
   script can call `sql.read`; naming another scope is a load error.

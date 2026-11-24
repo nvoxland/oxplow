@@ -1,7 +1,7 @@
 //! Test evidence an agent hands oxplow: `oxplow.test.record_run`, a run whose
 //! counts oxplow couldn't read from its output. `External` over the
 //! `CollectionService`: the capture with its `test.run.recorded` commits in
-//! the collector's own transaction. Audited to the actor; an agent's goes
+//! the collector's own transaction. Recorded to the actor; an agent's goes
 //! on its own thread whatever it names, a person names one. A report file
 //! oxplow parses itself is a report collector's, run by `oxplow.collector.sync`.
 
@@ -96,7 +96,7 @@ mod tests {
 </classes></package></packages></coverage>"#;
 
     /// `oxplow.collector.sync` runs a project report collector by hand —
-    /// the agent's own thread records it, audited to the agent; a person
+    /// the agent's own thread records it, recorded to the agent; a person
     /// names the thread, and `thread` is refused for any other collector.
     #[tokio::test]
     async fn collector_sync_reads_a_report_into_the_agents_thread() {

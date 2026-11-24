@@ -71,7 +71,7 @@ prost = "0.14"
 # The metric-ancestry oracle (metric_visibility.rs) asks git two questions —
 # ancestor-of and commit-time — directly via git2; oxplow-git wraps neither.
 git2 = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 # `#[tokio::test(start_paused = true)]` in the knowledge tests needs the paused

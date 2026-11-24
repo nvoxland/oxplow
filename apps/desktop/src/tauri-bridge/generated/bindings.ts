@@ -131,12 +131,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getPanelLayout: () => typedError<PanelPlacement[], IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout")),
+	getPanelLayout: (streamId: string | null, threadId: string | null) => typedError<ScopedPanelLayout, IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout", { streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setPanelLayout: (layout: PanelPlacement[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { layout })),
+	setPanelLayout: (streamId: string | null, threadId: string | null, layout: ScopedPanelLayout) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { streamId, threadId, layout })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -497,11 +497,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getConfig: () => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("get_config")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError_Serialize>(__TAURI_INVOKE("get_workspace_context")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -557,19 +552,19 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	undoCommand: (auditId: AuditId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
+	undoCommand: (commandRunId: CommandRunId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { commandRunId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	decideProposal: (proposal: ProposalId, approve: boolean) => typedError<{
 	result: unknown,
-	/**  The `command_audit` row; `None` for a `Read` command. */
-	audit_id: number | null,
+	/**  The `command_run` row; `None` for a `Read` command. */
+	command_run_id: number | null,
 	/**  The `command.executed` event; `None` for a `Read` command. */
 	event_id: EventId | null,
 	/**
-	 *  Present when the command is undoable: `commands.undo(audit_id)`
+	 *  Present when the command is undoable: `commands.undo(command_run_id)`
 	 *  runs it.
 	 */
 	inverse: CommandCall | null,
@@ -650,6 +645,10 @@ export const commands = {
 	 *  have to grant the renderer the broader Tauri clipboard plugin permission.
 	 */
 	clipboardReadText: () => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("clipboard_read_text")),
+	/**  Show `path` in the OS file manager, selected. */
+	revealPath: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("reveal_path", { path })),
+	/**  Open `path` with its default app (a directory: in the file manager). */
+	openPath: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("open_path", { path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -680,6 +679,7 @@ export const commands = {
 	 *  run directly in a PTY, named by its URI (`oxplow_rpc::commands::terminal`).
 	 */
 	openTerminalSession: (uri: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { uri, cols, rows })),
+	restartAgentTerminal: (uri: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("restart_agent_terminal", { uri })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -782,13 +782,13 @@ export type Access =
 /**  Reads, changes nothing (`sql.read`). */
 "read" |
 /**
- *  Changes oxplow's own records (filing and editing tasks): audited,
+ *  Changes oxplow's own records (filing and editing tasks): recorded,
  *  open to any thread.
  */
 "record" |
 /**
  *  Changes something outside oxplow's records — files, git, processes,
- *  the configuration: audited, and an agent's or job's run must be
+ *  the configuration: recorded, and an agent's or job's run must be
  *  bound to an open thread (the worktree it changes).
  */
 "write";
@@ -853,6 +853,9 @@ export type Advisory = {
 	 *  run.
 	 */
 	needs: string[],
+	when?: ConfigCondition | null,
+	/**  Post-tool advisories read collection results unless they opt out. */
+	afterCollection?: boolean,
 };
 
 /**  Who a hint is for. */
@@ -991,17 +994,6 @@ export type AiRestriction =
 /**  Image input. */
 "images";
 
-/**  One `ai.roles` entry. */
-export type AiRoleOverride = {
-	provider: string,
-	model: string,
-	/**
-	 *  What the project forbids this binding (`restrict: [tools, sql]`);
-	 *  absent, nothing.
-	 */
-	restrict?: AiRestriction[],
-};
-
 export type AiSettings = {
 	providers: ProviderStatus[],
 	/**
@@ -1041,10 +1033,10 @@ export type ArgSource =
 unknown;
 
 /**
- *  Whether the handler runs inside the bus's transaction (with the audit
+ *  Whether the handler runs inside the bus's transaction (with the command run
  *  row and `command.executed`), or outside it, against a system the bus
  *  doesn't own — a VCS, a provider process, a collector's script — and is
- *  audited after it returns (`External`). A `Dispatch` command decides
+ *  recorded after it returns (`External`). A `Dispatch` command decides
  *  per input (the `task.*` verbs: oxplow's own items in the
  *  transaction, another provider's through its process) and then runs
  *  exactly as one or the other. A test lists the `External` and the
@@ -1061,9 +1053,6 @@ export type AttachResult = {
 	sessionId: string,
 	replayB64: string,
 };
-
-/**  A `command_audit` row. */
-export type AuditId = number;
 
 export type BackgroundTask = {
 	id: string,
@@ -1611,16 +1600,19 @@ undoable: boolean };
 /**  A completed run. */
 export type CommandOutcome = {
 	result: unknown,
-	/**  The `command_audit` row; `None` for a `Read` command. */
-	audit_id: number | null,
+	/**  The `command_run` row; `None` for a `Read` command. */
+	command_run_id: number | null,
 	/**  The `command.executed` event; `None` for a `Read` command. */
 	event_id: EventId | null,
 	/**
-	 *  Present when the command is undoable: `commands.undo(audit_id)`
+	 *  Present when the command is undoable: `commands.undo(command_run_id)`
 	 *  runs it.
 	 */
 	inverse: CommandCall | null,
 };
+
+/**  A `command_run` row. */
+export type CommandRunId = number;
 
 /**  What a command declares about itself. */
 export type CommandSpec = {
@@ -1671,7 +1663,9 @@ export type CommandSpec = {
 	/**
 	 *  How a person meets it — label, group, where it's offered and how
 	 *  it runs from there. `None`: it isn't offered to a person by itself
-	 *  (a step other commands compose, an agent's tool).
+	 *  (a step other commands compose, an agent's tool). Boxed: it is
+	 *  large and most commands have none, and specs are moved and listed
+	 *  by the hundred.
 	 */
 	ui?: CommandUi | null,
 	/**
@@ -1683,7 +1677,7 @@ export type CommandSpec = {
 	 *  Top-level input fields its record leaves out — a file's content —
 	 *  kept as their size (`{ "omitted_bytes": n }`). The reserved `*`
 	 *  marker omits the entire input, including non-object inputs: the run is still
-	 *  audited, the audit log doesn't grow by every file saved.
+	 *  recorded, the command run log doesn't grow by every file saved.
 	 */
 	unrecorded?: string[],
 };
@@ -1711,6 +1705,15 @@ export type CommandUi = {
 	 *  extensions load. Absent, every ref of the kind is offered it.
 	 */
 	about_when?: string | null,
+	/**
+	 *  A function of the command's `entry:` script that decides, for each
+	 *  link of `about`'s kind that passes `about.accepts`, whether the
+	 *  command is offered on it: called with `{ uri, kind, url?, path? }`,
+	 *  offered when it returns `True`. The logic a pattern can't say (a
+	 *  URL of a host the extension's settings name). Needs `about`; the
+	 *  function is checked against the script when the extension loads.
+	 */
+	about_if?: string | null,
 	/**
 	 *  The named action point it joins (`<namespace>/<name>`, declared
 	 *  by an extension's `action_points:`): the point's page places it,
@@ -1880,7 +1883,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "test_convention" | "language" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "link" | "test_convention" | "language" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -2370,7 +2373,7 @@ export type EventBodyKey = "input" | "output" |
 /**
  *  An event's public identity: a UUIDv7 in its canonical text form, so
  *  ids sort by creation time. `seq` (the log's insert order) is the
- *  delivery order; `id` is what other events and the audit log point at.
+ *  delivery order; `id` is what other events and the command run record point at.
  */
 export type EventId = string;
 
@@ -2454,7 +2457,10 @@ export type ExtensionCommand = {
 	 *  (`oxplow_domain::capability::check_need`).
 	 */
 	needs: string[],
-	/**  How a person meets it (label, group, …), as core's commands do. */
+	/**
+	 *  How a person meets it (label, group, …), as core's commands do
+	 *  (boxed, as theirs is).
+	 */
 	ui: CommandUi | null,
 	/**
 	 *  Stable: the commands of an extension that ships with oxplow are;
@@ -2477,27 +2483,6 @@ export type ExtensionCommand = {
 	unrecorded: string[],
 };
 
-/**  One instance of an extension's provider (`extensionInstances`). */
-export type ExtensionInstanceConfig = {
-	/**  Run it (once this machine approved the provider). */
-	enabled?: boolean,
-	/**  The instance's config, as the provider's `config_schema` describes. */
-	config?: unknown,
-	/**
-	 *  How often its collectors are read, in minutes (absent:
-	 *  [`DEFAULT_SYNC_MINUTES`]; `0`: only when someone runs
-	 *  `oxplow.provider.sync`).
-	 */
-	syncMinutes?: number | null,
-	/**
-	 *  Which of the extension's providers this is an instance of, for an
-	 *  instance whose id isn't a provider's own (`tracker/issues_acme:
-	 *  { provider: issues }` — a second account on the same tracker). Absent, the
-	 *  instance id is the provider id.
-	 */
-	provider?: string | null,
-};
-
 /**
  *  A left-nav panel an extension contributes (P6.G1, target §11.3): its
  *  `body` viz renders compact in the nav; its `badge` viz's alert gives
@@ -2509,7 +2494,7 @@ export type ExtensionPanel = {
 	extension: string,
 	title: string,
 	icon: string | null,
-	scope: PanelScope,
+	dataScope: PanelDataScope,
 	/**  The body viz (`<extension>/<slug>`). */
 	body: string,
 	/**  The badge viz, which declares an `alert`. */
@@ -2649,6 +2634,11 @@ export type Extension_Deserialize = {
 	 *  invalid ones are in `errors`).
 	 */
 	fileKinds: FileKindDecl[],
+	/**
+	 *  The text it makes links of (`links:`; valid ones — invalid ones are
+	 *  in `errors`): the terminal and markdown match them.
+	 */
+	links: LinkRuleDecl[],
 	/**
 	 *  What makes a file, container or function a test, and what counts as
 	 *  an assertion or a skip (`test_conventions:`; valid ones — invalid
@@ -2834,6 +2824,11 @@ export type Extension_Serialize = {
 	 */
 	fileKinds: FileKindDecl[],
 	/**
+	 *  The text it makes links of (`links:`; valid ones — invalid ones are
+	 *  in `errors`): the terminal and markdown match them.
+	 */
+	links: LinkRuleDecl[],
+	/**
 	 *  What makes a file, container or function a test, and what counts as
 	 *  an assertion or a skip (`test_conventions:`; valid ones — invalid
 	 *  ones are in `errors`).
@@ -2976,21 +2971,6 @@ export type FileKindDecl = {
 	label: string | null,
 };
 
-/**
- *  One of the project's own file-kind rules (`oxplow.files.kinds`): files
- *  matching `glob` (repo-relative, `/`-separated) are of `kind`
- *  (`generated`, `ci`, `sensitive`, …, as an extension's `file_kinds:`
- *  names them), on top of what the enabled extensions declare.
- */
-export type FileKindRule = {
-	/**  Lowercase letters, digits and dashes. */
-	kind: string,
-	/**  A glob (`literal_separator`, as `testPaths`): `deploy/**`. */
-	glob: string,
-	/**  What a person calls the kind; optional. */
-	label?: string | null,
-};
-
 export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId,
@@ -3035,12 +3015,6 @@ export type FileSnapshot = {
 
 /**  A `file_snapshot` row: one captured file under a snapshot. */
 export type FileSnapshotId = number;
-
-/**  What the project says about its files (`oxplow.files.*`). */
-export type FilesConfig = {
-	/**  `oxplow.files.kinds`: the project's own file-kind rules. */
-	kinds: FileKindRule[],
-};
 
 /**  What a folder's `path` is relative to. */
 export type FolderRoot = string;
@@ -3310,24 +3284,6 @@ export type FsStat = {
 	language: string | null,
 };
 
-/**
- *  What oxplow watches / snapshots / indexes, on top of the always-on
- *  `.git`/`.oxplow` ignores and the repo's `.gitignore`.
- *
- *  - `exclude`: extra paths to ignore even when `.gitignore` doesn't
- *    (e.g. a tracked-but-noisy generated file).
- *  - `include`: gitignored paths to force back in (override
- *    `.gitignore` for something oxplow should still see).
- *
- *  Each entry is a single segment (matches any path component —
- *  `target` matches every `target/`) or a repo-relative path (matches
- *  that path exactly or as a prefix — `apps/desktop/dist`).
- */
-export type GeneratedConfig = {
-	exclude?: string[],
-	include?: string[],
-};
-
 /**  One registered harness, as the session picker and Settings see it. */
 export type HarnessListing = {
 	/**  Its key (what `agents:` and a session's `harness` name). */
@@ -3562,12 +3518,12 @@ export type IpcError_Deserialize = {
 	 */
 	details?: string[],
 	/**
-	 *  A person's command whose run failed: the audit row that recorded it
-	 *  (`command_audit.id`), so the window's record of the failure
+	 *  The detail row of a person's failed command run
+	 *  (`command_run.id`), so the window's record of the failure
 	 *  (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
 	 *  (row ids start at 1), which keeps the error small.
 	 */
-	auditId?: number | null,
+	commandRunId?: number | null,
 };
 
 /**
@@ -3595,12 +3551,12 @@ export type IpcError_Serialize = {
 	 */
 	details?: string[],
 	/**
-	 *  A person's command whose run failed: the audit row that recorded it
-	 *  (`command_audit.id`), so the window's record of the failure
+	 *  The detail row of a person's failed command run
+	 *  (`command_run.id`), so the window's record of the failure
 	 *  (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
 	 *  (row ids start at 1), which keeps the error small.
 	 */
-	auditId?: number | null,
+	commandRunId?: number | null,
 };
 
 /**  A `ui.about` command's filter on the item it is offered on. */
@@ -3611,6 +3567,18 @@ export type ItemAccepts = {
 	 *  rule (`present`, `absent`, an anchored id pattern).
 	 */
 	store?: StoreFilter | null,
+	/**
+	 *  About a web link (`about: https` / `http`): the URLs it is offered
+	 *  on, a pattern over the whole URL in the param-pattern dialect
+	 *  (anchored `^…$`; Rust and the desktop read it alike).
+	 */
+	url?: string | null,
+	/**
+	 *  About a file or a directory (`oxplow/file`, `oxplow/dir`): the
+	 *  worktree paths it is offered on, a glob or a list of them
+	 *  (`**\/*.ipynb`; `*` stops at `/`).
+	 */
+	path?: StoreFilter | null,
 };
 
 /**  A host-recognized operation owned by one extension contribution. */
@@ -3715,6 +3683,19 @@ export type LinkKind =
  */
 "compare";
 
+/**  One `links:` entry, checked. */
+export type LinkRuleDecl = {
+	/**  Its id within the extension. */
+	id: string,
+	/**
+	 *  The pattern as both engines read it: the param pattern's kept form,
+	 *  without `^…$` (`\d` spelled `[0-9]`).
+	 */
+	pattern: string,
+	/**  The URI a match links to, `{{match}}` where the text goes. */
+	uri: string,
+};
+
 export type Loader =
 /**
  *  A read-only query over the published datasets, binding `:param`s
@@ -3795,13 +3776,6 @@ export type LoaderRun = {
 	 *  are the same rows.
 	 */
 	key: string,
-};
-
-export type LspServerConfig = {
-	languageId: string,
-	extensions: string[],
-	command: string,
-	args?: string[],
 };
 
 /**
@@ -4351,143 +4325,6 @@ export type Owner = {
 	version: string | null,
 };
 
-export type OxplowConfig = {
-	agentEnabled?: { [key in string]: boolean },
-	/**
-	 *  Human-readable project name. Defaults to the basename of the
-	 *  project dir when not set in .oxplow/project.yaml.
-	 */
-	projectName: string,
-	/**  Extra language servers registered on top of the built-ins. */
-	lspServers: LspServerConfig[],
-	/**  User-supplied text appended verbatim to every agent's system prompt. */
-	agentPromptAppend: string,
-	/**  File-snapshot retention window in days. 0 disables pruning. */
-	snapshotRetentionDays: number,
-	/**
-	 *  Metric-capture retention window in days: captures older than the
-	 *  cutoff are pruned (facts cascade) — EXCEPT each producer's newest capture, and any capture
-	 *  still contributing a current value to the fold. **0 (the default)
-	 *  keeps everything**; pruning trades away per-test drill-down /
-	 *  flakiness horizon for bounded growth, so it is strictly opt-in.
-	 */
-	metricRetentionDays: number,
-	/**
-	 *  Keep the per-run `detail_json` drill-in payload for only the newest N
-	 *  captures **per producer**; older ones are compacted (the payload is
-	 *  nulled, the capture and all its facts stay). `0` disables the cap.
-	 *
-	 *  This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
-	 *  coverage run, so age alone never catches up with a repo that runs tests
-	 *  dozens of times a day. Compaction never changes a metric value
-	 *  — only the Tests/Coverage panel's detail for old runs is lost.
-	 */
-	metricDetailMaxPerProducer: number,
-	/**
-	 *  Compact `detail_json` older than this many days. `0` disables it.
-	 *  Complements [`Self::metric_detail_max_per_producer`]: the count cap
-	 *  bounds a busy repo, this reaches a project that has gone quiet.
-	 */
-	metricDetailRetentionDays: number,
-	/**
-	 *  Extra `exclude`/`include` paths layered on top of `.gitignore`
-	 *  for fs-watch / snapshot capture / code-quality scans. `.git`,
-	 *  `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)
-	 *  are ignored automatically — this only adds extras or forces
-	 *  gitignored paths back in. See [`GeneratedConfig`].
-	 */
-	generated: GeneratedConfig,
-	/**
-	 *  Maximum blob size for content-addressed snapshotting; larger
-	 *  files get a stat-only entry. Default 5 MiB.
-	 */
-	snapshotMaxFileBytes: number,
-	/**
-	 *  How long the Stop hook waits for the turn-end snapshot, in ms.
-	 *  A take that runs longer keeps going in the background and is
-	 *  recorded as over budget. Default 2000.
-	 */
-	snapshotTurnBudgetMs: number,
-	/**
-	 *  When true, the UserPromptSubmit hook injects a session-context
-	 *  block into every agent prompt.
-	 */
-	injectSessionContext: boolean,
-	/**
-	 *  Hex colour composited behind this project's app icon, so concurrent
-	 *  windows are tellable apart at a glance (`#c2410c`, `#abc`, or
-	 *  unprefixed). `None` leaves the stock icon alone.
-	 *
-	 *  Per-project rather than a dev-only flag: colour-coding *any* checkout is
-	 *  the general case, and "this is the dev build" is just one instance of
-	 *  it. Consumed on macOS only — see the desktop shell's `icon_tint`.
-	 *
-	 *  No `skip_serializing_if`: this type is a command result, and specta
-	 *  rejects conditional omission in unified mode.
-	 */
-	iconTint: string | null,
-	/**  How the project's tests run (the `testing:` block). */
-	testing: TestingConfig,
-	/**  What the project says about its files (`oxplow.files.*`). */
-	files: FilesConfig,
-	/**  Limits on script workers (the `scripts:` block). */
-	scripts: ScriptsConfig,
-	/**
-	 *  Which metrics are on in this project (the `metrics:` block): a `use:`
-	 *  turns one on, layering its thresholds; an `enabled: false` marker
-	 *  turns an on-by-default one off. Metrics, measures, dimensions and
-	 *  collectors are defined by extensions (the project's own in its own
-	 *  extension); see [`resolve_metrics`].
-	 */
-	metrics?: MetricEntry[],
-	/**
-	 *  Each harness's configuration, by its key: what its `launch` reads,
-	 *  e.g. `agentConfig: { opencode: { model: "github-copilot/gpt-5-mini" } }`.
-	 */
-	agentConfig: { [key in string]: unknown },
-	/**
-	 *  The project's extension provider instances
-	 *  (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
-	 */
-	extensionInstances: { [key in string]: ExtensionInstanceConfig },
-	/**
-	 *  The project's choice of implementation per choosable capability
-	 *  (`activeProviders: { snapshots: hashes }`); a
-	 *  capability absent here keeps its default.
-	 */
-	activeProviders: { [key in string]: string },
-	/**  Resolved origin of each independently registered capability preference. */
-	activeProviderOrigins?: { [key in string]: Level },
-	/**
-	 *  Whose component shows for a replaceable core sub-component, by
-	 *  target (`replacements: { task.board: task-views,
-	 *  vcs.history.graph: oxplow }`): an extension replacing it, or
-	 *  `oxplow` for oxplow's own. A target not listed shows its default:
-	 *  the only extension replacing it, or a bound target's provider's.
-	 *  Only `oxplow` may be chosen for a bound target (its provider's
-	 *  extension decides otherwise).
-	 */
-	replacements: { [key in string]: string },
-	/**
-	 *  How long this project keeps each event namespace's payloads and
-	 *  large content (`eventRetention: { agent: { payloadDays,
-	 *  contentDays } }`), over core's defaults; an extension's namespace is
-	 *  kept no longer than its own window.
-	 */
-	eventRetention: { [key in string]: RetentionWindow },
-	/**
-	 *  Resolved AI role assignments, keyed by role name (one of
-	 *  [`AI_ROLE_NAMES`]). Provider ids refer to `oxplow.ai.providers`.
-	 */
-	aiRoles: { [key in string]: AiRoleOverride },
-	/**
-	 *  Where an extension's source is when it isn't
-	 *  `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
-	 *  relative to the checkout or absolute.
-	 */
-	extensionSources: { [key in string]: string },
-};
-
 /**
  *  What changed. Variants are deliberately broad — the renderer
  *  refetches the affected bucket on receipt rather than trying to
@@ -4562,7 +4399,7 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
- *  the renderer refetches `get_config`.
+ *  the renderer re-reads its settings.
  */
 ({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
@@ -4690,7 +4527,7 @@ export type PageAction_Deserialize = {
 	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
-	 *  the URI it opens. It runs no command (no bus run, no audit): the
+	 *  the URI it opens. It runs no command (no bus run, no command run record): the
 	 *  app navigates, and an agent pressing it is told the URI.
 	 */
 	open?: string | null,
@@ -4892,7 +4729,7 @@ export type PageAction_Serialize = {
 	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
-	 *  the URI it opens. It runs no command (no bus run, no audit): the
+	 *  the URI it opens. It runs no command (no bus run, no command run record): the
 	 *  app navigates, and an agent pressing it is told the URI.
 	 */
 	open?: string | null,
@@ -5561,21 +5398,24 @@ export type PanelChoice_Serialize = {
 	value: string,
 };
 
+/**
+ *  Which data a left-nav panel shows (`data_scope`): the project's, the
+ *  current stream's, or the current thread's — which of `stream_id` /
+ *  `thread_id` its pages get. Not where it shows: that is the person's
+ *  layout (`VisibilityScope`).
+ */
+export type PanelDataScope = "project" | "stream" | "thread";
+
 /**  One of a panel's parts. */
 export type PanelPart = "body" | "collapsed" | "count" | "badge";
 
-/**  One panel's place in the layout. */
+/**  One panel's place in a list. */
 export type PanelPlacement = {
 	panel: string,
+	/**  Only in the project's list: placed, but not shown there. */
 	hidden: boolean,
 	collapsed: boolean,
 };
-
-/**
- *  What a left-nav panel is bound to: the project, the current stream, or
- *  the current thread — which of `stream_id` / `thread_id` its viz nodes get.
- */
-export type PanelScope = "project" | "stream" | "thread";
 
 /**
  *  One of a resource's params: whether every URI carries it, and the
@@ -5926,14 +5766,6 @@ export type ResourceDecl = {
 	description: string | null,
 };
 
-/**  How long a namespace's event payloads and large content are kept. */
-export type RetentionWindow = {
-	/**  Days an event's payload is kept; after it, `{}`. */
-	payloadDays: number,
-	/**  Days its large content (tool input and output) is kept. */
-	contentDays: number,
-};
-
 export type RoleBinding = {
 	/**  A provider `id`. */
 	provider: string,
@@ -6090,21 +5922,13 @@ export type RunsOn =
 { on: "declared" };
 
 /**
- *  The limits on the processes that run extension and project scripts
- *  (the `scripts:` block): how many run at once, host-wide, and how much
- *  memory one may use before it is stopped.
+ *  The lists a viewer sees, each in order: its thread's, its stream's and
+ *  the project's (with its hidden rows).
  */
-export type ScriptsConfig = {
-	/**
-	 *  Workers running at once; a run past it waits for a slot. Default
-	 *  `min(4, available parallelism)`, minimum 1.
-	 */
-	max_concurrent: number,
-	/**
-	 *  A worker's memory cap in bytes (`memoryMb` in the file). Default
-	 *  512 MiB, minimum 64 MiB.
-	 */
-	memory_bytes: number,
+export type ScopedPanelLayout = {
+	thread: PanelPlacement[],
+	stream: PanelPlacement[],
+	project: PanelPlacement[],
 };
 
 /**
@@ -6388,7 +6212,7 @@ export type StageDecl = {
 	bucket: Bucket,
 };
 
-/**  One store id or a list of them. */
+/**  One store id or a list of them (and one glob or a list, for `path`). */
 export type StoreFilter = string | string[];
 
 export type Stream = {
@@ -6505,58 +6329,6 @@ export type TestDecl = {
 	accepted_values?: AcceptedValues | null,
 	relationships?: Relationship | null,
 	sql?: string | null,
-};
-
-/**
- *  How this project's tests run (the `testing:` block), written by
- *  `/oxplow:configure`. The Bash-hook detector reads the commands and
- *  patterns to tell a test or analysis run; what such a run's reports hold
- *  is read by the report collectors (`collectors:` with `records:`, see
- *  [`collectors::Records`]). All optional.
- */
-export type TestingConfig = {
-	/**
-	 *  The command that runs the project's tests and writes their reports
-	 *  (counts as a test run; named in the report-less nudge).
-	 */
-	command: string | null,
-	/**
-	 *  The coverage-free counterpart to `command`, for the red/green loop.
-	 *  It still writes a test report (JUnit), so the
-	 *  progression lands in the Tests panel, but skips coverage
-	 *  and should accept a filter.
-	 *
-	 *  This exists because the alternative is worse. When the only
-	 *  report-emitting command is a full instrumented run of the whole
-	 *  suite, "route every invocation through it" is unfollowable in a TDD
-	 *  loop, so it gets dropped — and then NONE of the red→green runs are
-	 *  recorded. A weaker rule that is actually followed beats a stricter
-	 *  one that isn't.
-	 */
-	fastCommand: string | null,
-	/**
-	 *  Extra command substrings that count as a test run, on top of the
-	 *  built-in defaults (pytest, cargo test, jest, …).
-	 */
-	runPatterns: string[],
-	/**
-	 *  Extra command substrings that count as a static-analysis run, on
-	 *  top of the built-in defaults (cargo clippy, eslint, ruff, …).
-	 */
-	analysisPatterns: string[],
-	/**
-	 *  Globs (repo-relative, `/`-separated) naming test files, on top of the
-	 *  built-in conventions (`.test.` / `.spec.` files, `test/` and `tests/`
-	 *  directories, `test_*.py`, `*_test.go`, …): `spec/**`, `**\/it/**`. Change
-	 *  analysis reads them for `is_test` in `v_change_file` and
-	 *  `v_change_function` on its next run.
-	 */
-	testPaths: string[],
-	/**
-	 *  Free-form hint injected verbatim into every agent system prompt:
-	 *  which test command to run, what coverage to meet, and so on.
-	 */
-	agentHint: string | null,
 };
 
 export type Thread = {

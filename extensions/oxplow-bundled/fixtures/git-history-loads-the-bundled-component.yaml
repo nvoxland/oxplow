@@ -1,0 +1,14 @@
+given:
+  - observe: { commit: { sha: aaaaaaa, at: "2026-01-01T00:00:00Z", subject: Main work } }
+  - observe: { commit: { sha: bbbbbbb, at: "2026-01-02T00:00:00Z", subject: Side work, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ccccccc, at: "2026-01-03T00:00:00Z", subject: Main again, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ddddddd, at: "2026-01-04T00:00:00Z", subject: Merge side, parents: [ccccccc, bbbbbbb] } }
+when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: ddddddd } }
+expect:
+  loaders:
+    history/history_graph:
+      rows:
+        - { sha: ddddddd }
+        - { sha: ccccccc }
+        - { sha: bbbbbbb }
+        - { sha: aaaaaaa }

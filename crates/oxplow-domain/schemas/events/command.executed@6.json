@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "ActorKind": {
+      "description": "Who ran a command (`.context/target-architecture.md` §7).",
+      "oneOf": [
+        {
+          "enum": [
+            "human",
+            "agent",
+            "system"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "page",
+          "description": "A page acting for whoever pressed it.",
+          "type": "string"
+        },
+        {
+          "const": "component",
+          "description": "An extension's custom component, for whoever uses it.",
+          "type": "string"
+        },
+        {
+          "const": "effect",
+          "description": "An extension's effect (P8.D8).",
+          "type": "string"
+        },
+        {
+          "const": "job",
+          "description": "A durable host-managed extension job.",
+          "type": "string"
+        }
+      ]
+    },
+    "CommandOutcome": {
+      "description": "How a command run ended.",
+      "enum": [
+        "ok",
+        "denied",
+        "invalid",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Version 6 names the command detail row by its command run ID.",
+  "properties": {
+    "actor_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_kind": {
+      "$ref": "#/$defs/ActorKind"
+    },
+    "command": {
+      "description": "The command's name (`oxplow.thread.mark`, `oxplow.config.set`).",
+      "type": "string"
+    },
+    "command_run_id": {
+      "description": "The `command_run` row, which holds the input and the inverse.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "outcome": {
+      "$ref": "#/$defs/CommandOutcome"
+    },
+    "undoable": {
+      "description": "Whether an inverse was recorded, i.e. `commands.undo` can apply.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "command",
+    "actor_kind",
+    "outcome",
+    "command_run_id",
+    "undoable"
+  ],
+  "title": "CommandExecutedV6",
+  "type": "object"
+}

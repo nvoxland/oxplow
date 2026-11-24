@@ -3,9 +3,10 @@
 //! the store filter"). The command registry is one list, and a command with
 //! a `ui` is offered under one of two keys:
 //!
-//! - an **item** key (`ui.about`, a resource kind): on a ref of that kind,
-//!   narrowed by `ui.about.accepts.store` (the item URI's `store` param) and
-//!   `ui.about_when` (a column of the ref's own row);
+//! - an **item** key (`ui.about`, a resource kind, or a web link's scheme):
+//!   on a ref of that kind, narrowed by `ui.about.accepts.store` (the item
+//!   URI's `store` param), `accepts.url` / `accepts.path` (a link's URL or
+//!   path) and `ui.about_when` (a column of the ref's own row);
 //! - a **point** key (`ui.at`, an action point's id): at a place a page
 //!   puts that point, run with the point's context as its input.
 //!
@@ -89,6 +90,68 @@ pub fn accepts_store(
     })
 }
 
+/// Whether `ui`'s link filters let `uri` through: `about.accepts.url`, a
+/// param pattern over the whole URL, and `about.accepts.path`, globs over
+/// the item's `path` param (a file or directory's worktree path). None:
+/// every link. A filter that doesn't compile lets nothing through (the
+/// command's check refuses it before it registers).
+pub fn link_accepted(ui: &CommandUi, uri: &str, params: &BTreeMap<String, String>) -> bool {
+    let Some(accepts) = ui.about.as_ref().and_then(|a| a.accepts()) else {
+        return true;
+    };
+    if let Some(pattern) = &accepts.url {
+        let hit = crate::param_pattern::param_pattern(pattern)
+            .ok()
+            .and_then(|kept| regex::Regex::new(&kept).ok())
+            .is_some_and(|re| re.is_match(uri.trim()));
+        if !hit {
+            return false;
+        }
+    }
+    if let Some(globs) = &accepts.path {
+        let Some(path) = params.get("path") else {
+            return false;
+        };
+        let hit = globs.rules().into_iter().any(|glob| {
+            globset::GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()
+                .is_ok_and(|g| g.compile_matcher().is_match(path))
+        });
+        if !hit {
+            return false;
+        }
+    }
+    true
+}
+
+/// What is wrong with `ui`'s link filters, as `(field, message)`: a `url`
+/// that isn't a param pattern, a `path` that isn't a glob. Checked where an
+/// extension's command registers, beside `CommandUi::problem`.
+pub fn link_filter_problem(ui: &CommandUi) -> Option<(String, String)> {
+    let accepts = ui.about.as_ref().and_then(|a| a.accepts())?;
+    if let Some(pattern) = &accepts.url {
+        if let Err(why) = crate::param_pattern::param_pattern(pattern) {
+            return Some((
+                "/ui/about/accepts/url".into(),
+                format!("`{pattern}` isn't a URL pattern: {why}"),
+            ));
+        }
+    }
+    for glob in accepts.path.iter().flat_map(|p| p.rules()) {
+        if let Err(why) = globset::GlobBuilder::new(glob)
+            .literal_separator(true)
+            .build()
+        {
+            return Some((
+                "/ui/about/accepts/path".into(),
+                format!("`{glob}` isn't a glob: {why}"),
+            ));
+        }
+    }
+    None
+}
+
 /// The param that names an item's store: the one its shared model declares
 /// (`store_param`) when a model's resource is `resource`, else `store`.
 pub fn store_param_of(registry: &crate::models::ModelRegistry, resource: &str) -> String {
@@ -128,15 +191,26 @@ pub fn offered<'a>(
 /// and a `ui.about_when` that holds on its row.
 /// A command whose condition can't be tested (no row: the ref is gone, or
 /// no dataset holds it) is not offered; one without a condition always is.
-/// Not an oxplow URI: none.
+/// A web URL is named by its scheme (`about: https`), as a page that draws
+/// it is (`renderers::resource_of`); a link filter (`accepts.url`,
+/// `accepts.path`) narrows either. Anything else: none.
 pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, String> {
-    let Ok(parsed) = OxplowUri::parse(uri.trim()) else {
+    let Some(resource) = crate::pages::renderers::resource_of(uri) else {
         return Ok(Vec::new());
     };
-    let key = OfferKey::Item(parsed.resource().to_string());
+    let params = OxplowUri::parse(uri.trim())
+        .map(|u| u.params().clone())
+        .unwrap_or_default();
+    let key = OfferKey::Item(resource.clone());
     let all = svc.commands.list(&Actor::Human);
-    let store_param = store_param_of(&svc.models.current(), &parsed.resource().to_string());
-    let about = offered(&all, &key, parsed.params(), &store_param);
+    let store_param = store_param_of(&svc.models.current(), &resource);
+    let about: Vec<&CommandSpec> = offered(&all, &key, &params, &store_param)
+        .into_iter()
+        .filter(|s| {
+            s.ui.as_ref()
+                .is_some_and(|ui| link_accepted(ui, uri, &params))
+        })
+        .collect();
     // One read of the row, and only when some command's offer depends on it.
     let conditional = about
         .iter()
@@ -172,8 +246,162 @@ pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, Stri
         })
         .map(|s| s.id.clone())
         .collect();
+    // `about_if`: the command's own script decides on this link, all of
+    // the menu's at once. Boxed: its script runs' state is large, and a
+    // menu's ref commands are awaited deep in a fixture's or a page's run.
+    let refused = Box::pin(refused_by_about_if(
+        svc, &all, &ids, uri, &resource, &params,
+    ))
+    .await;
+    ids.retain(|id| !refused.contains(id));
     ids.sort();
     Ok(ids)
+}
+
+/// The ids among `ids` whose command's `about_if` says no to `uri`.
+async fn refused_by_about_if(
+    svc: &Services,
+    all: &[CommandSpec],
+    ids: &[String],
+    uri: &str,
+    resource: &str,
+    params: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let deciding = about_ifs(all, ids);
+    if deciding.is_empty() {
+        return Vec::new();
+    }
+    let input = about_if_input(uri, resource, params);
+    let decided = futures::future::join_all(deciding.iter().map(|(id, func)| {
+        Box::pin(about_if_holds(
+            svc,
+            id.clone(),
+            func.clone(),
+            uri.to_string(),
+            input.clone(),
+        ))
+    }))
+    .await;
+    deciding
+        .into_iter()
+        .zip(decided)
+        .filter(|(_, holds)| !holds)
+        .map(|((id, _), _)| id)
+        .collect()
+}
+
+/// The ids among `ids` whose command has a `ui.about_if`, with its function.
+fn about_ifs(all: &[CommandSpec], ids: &[String]) -> Vec<(String, String)> {
+    all.iter()
+        .filter(|s| ids.contains(&s.id))
+        .filter_map(|s| {
+            let func = s.ui.as_ref()?.about_if.clone()?;
+            Some((s.id.clone(), func))
+        })
+        .collect()
+}
+
+/// What an `about_if` function is called with: the link, its kind, and
+/// the URL (a web link) or the worktree path (a file or directory).
+pub fn about_if_input(
+    uri: &str,
+    resource: &str,
+    params: &BTreeMap<String, String>,
+) -> serde_json::Value {
+    let mut input = serde_json::json!({ "uri": uri.trim(), "kind": resource });
+    if oxplow_domain::commands::is_web_resource(resource) {
+        input["url"] = serde_json::Value::String(uri.trim().to_string());
+    } else if let Some(path) = params.get("path") {
+        input["path"] = serde_json::Value::String(path.clone());
+    }
+    input
+}
+
+/// How long one `about_if` call may run: a menu waits on it.
+const ABOUT_IF_BUDGET: oxplow_domain::run::Budget =
+    oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(1));
+
+/// How long an `about_if` answer is kept for the same command, link and
+/// script: a menu opened again soon asks no script.
+const ABOUT_IF_KEPT: std::time::Duration = std::time::Duration::from_secs(30);
+
+type AboutIfKey = (String, String, u64);
+
+fn about_if_answers(
+) -> &'static std::sync::Mutex<std::collections::HashMap<AboutIfKey, (std::time::Instant, bool)>> {
+    static ANSWERS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<AboutIfKey, (std::time::Instant, bool)>>,
+    > = std::sync::OnceLock::new();
+    ANSWERS.get_or_init(Default::default)
+}
+
+/// The script of command `id` (an enabled extension's `entry:`).
+fn command_script(svc: &Services, id: &str) -> Option<String> {
+    svc.extension_catalog
+        .get(&svc.layout.project_dir)
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.commands.iter())
+        .find(|c| c.name == id)
+        .and_then(|c| match &c.handler {
+            crate::extension::extension_commands::CommandHandler::Script { script, .. } => {
+                Some(script.clone())
+            }
+            _ => None,
+        })
+}
+
+/// Whether command `id`'s `func` returns `True` for the link: one script
+/// run (`ABOUT_IF_BUDGET`). A run that fails, runs too long or answers
+/// anything else is no, and is logged.
+async fn about_if_holds(
+    svc: &Services,
+    id: String,
+    func: String,
+    uri: String,
+    input: serde_json::Value,
+) -> bool {
+    use std::hash::{Hash, Hasher};
+    let Some(script) = command_script(svc, &id) else {
+        return false;
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    script.hash(&mut hasher);
+    let key = (id.clone(), uri, hasher.finish());
+    if let Some((at, holds)) = about_if_answers()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&key).copied())
+    {
+        if at.elapsed() < ABOUT_IF_KEPT {
+            return holds;
+        }
+    }
+    let ran = tokio::task::spawn_blocking(move || {
+        use oxplow_script::workers::{shared, ScriptRun};
+        shared().run(
+            &ABOUT_IF_BUDGET,
+            ScriptRun::starlark_fn(&script, &func, input),
+            None,
+        )
+    })
+    .await;
+    let holds = match ran {
+        Ok(Ok(ran)) => ran.value == serde_json::Value::Bool(true),
+        Ok(Err(e)) => {
+            tracing::warn!(command = %id, error = %e, "a command's about_if failed: not offered");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(command = %id, error = %e, "a command's about_if didn't finish: not offered");
+            false
+        }
+    };
+    if let Ok(mut answers) = about_if_answers().lock() {
+        answers.retain(|_, (at, _)| at.elapsed() < ABOUT_IF_KEPT);
+        answers.insert(key, (std::time::Instant::now(), holds));
+    }
+    holds
 }
 
 #[cfg(test)]
@@ -283,6 +511,68 @@ mod tests {
         assert_eq!(at(Some("git-hub")), ["any", "pat"]);
         assert_eq!(at(Some("other")), ["any"]);
         assert_eq!(at(None), ["any", "none"]);
+    }
+
+    /// A command about web links or files narrows them by the URL (a
+    /// pattern over it whole) or the worktree path (globs, `*` stopping at
+    /// `/`); with neither, every link of its kind.
+    #[test]
+    fn a_link_filter_matches_the_url_or_the_path() {
+        let gh = spec(
+            "gh",
+            json!({ "label": "PR", "about": { "resource": "https", "accepts": { "url": "^https://github[.]com/[a-z]+/[a-z]+/pull/[0-9]+$" } } }),
+        );
+        let any_web = spec("web", json!({ "label": "Web", "about": "https" }));
+        let nb = spec(
+            "nb",
+            json!({ "label": "Jupyter", "about": { "resource": "oxplow/file", "accepts": { "path": ["**/*.ipynb", "*.ipynb"] } } }),
+        );
+        let ui = |s: &CommandSpec| s.ui.clone().unwrap();
+        let none = BTreeMap::new();
+        let pr = "https://github.com/acme/app/pull/12";
+        assert!(link_accepted(&ui(&gh), pr, &none));
+        assert!(!link_accepted(
+            &ui(&gh),
+            "https://github.com/acme/app",
+            &none
+        ));
+        assert!(link_accepted(&ui(&any_web), "https://example.com", &none));
+        let at = |path: &str| BTreeMap::from([("path".to_string(), path.to_string())]);
+        assert!(link_accepted(
+            &ui(&nb),
+            "oxplow:oxplow/file?path=a.ipynb",
+            &at("a.ipynb")
+        ));
+        assert!(link_accepted(
+            &ui(&nb),
+            "oxplow:oxplow/file?path=x/y/a.ipynb",
+            &at("x/y/a.ipynb")
+        ));
+        assert!(!link_accepted(
+            &ui(&nb),
+            "oxplow:oxplow/file?path=a.py",
+            &at("a.py")
+        ));
+        assert!(!link_accepted(&ui(&nb), "oxplow:oxplow/file", &none));
+    }
+
+    /// A URL filter is a param pattern and a path filter a glob, or the
+    /// command is refused where it registers.
+    #[test]
+    fn a_link_filter_that_cant_match_is_refused() {
+        let ui = |v| -> CommandUi { serde_json::from_value(v).unwrap() };
+        assert_eq!(
+            link_filter_problem(&ui(
+                json!({ "label": "x", "about": { "resource": "https", "accepts": { "url": "^https://a[.]b/[a-z/]+$" } } })
+            )),
+            None
+        );
+        let (field, _) = link_filter_problem(&ui(json!({ "label": "x", "about": { "resource": "https", "accepts": { "url": "github.com" } } })))
+            .expect("unanchored");
+        assert_eq!(field, "/ui/about/accepts/url");
+        let (field, _) = link_filter_problem(&ui(json!({ "label": "x", "about": { "resource": "oxplow/file", "accepts": { "path": "a/[b" } } })))
+            .expect("bad glob");
+        assert_eq!(field, "/ui/about/accepts/path");
     }
 
     /// A shared model may name its store by another param (tasks keep

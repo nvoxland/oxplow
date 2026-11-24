@@ -1,0 +1,44 @@
+# Bundled's effects: a reaction is listed only while its effect is declared.
+requires: [oxplow-bundled]
+given:
+  - observe:
+      run:
+        kind: effect
+        extension: oxplow-bundled
+        contribution: assign-on-start
+        outcome: denied
+        error: Missing grant
+        decisions:
+          - { need: host, name: denied.example, decision: denied, reason: missing grant }
+  - observe:
+      run:
+        kind: effect
+        extension: oxplow-bundled
+        contribution: release-on-thread-close
+        outcome: interrupted
+        error: Oxplow stopped before the reaction ended
+  - observe:
+      run:
+        kind: effect
+        extension: oxplow-bundled
+        contribution: release-on-stream-archive
+        outcome: ok
+  - command: oxplow.sql.query
+    input: { sql: "SELECT run_id FROM v_effect_run WHERE extension = 'oxplow-bundled' AND outcome = 'denied'" }
+    bind: denied
+when: { part: alerts-reactions }
+expect:
+  loaders:
+    alerts_reactions:
+      rows:
+        - { effect: oxplow/release-on-thread-close, outcome: interrupted, error: Oxplow stopped before the reaction ended }
+        - { effect: oxplow/assign-on-start, outcome: denied, error: Missing grant }
+  text:
+    contains: [Outcome, denied, interrupted]
+steps:
+  - when: { part: run-details, params: { run_id: "$denied.rows[0][0]" } }
+    expect:
+      loaders:
+        decisions:
+          rows:
+            - { need: host, name: denied.example, decision: denied, reason: missing grant }

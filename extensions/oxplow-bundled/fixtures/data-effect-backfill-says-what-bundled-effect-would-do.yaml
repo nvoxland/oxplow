@@ -1,0 +1,6 @@
+# A fresh project has no events for this bundled effect to catch up on.
+when: { part: oxplow/data-effect-backfill, params: { effect: oxplow/assign-on-start } }
+expect:
+  loaders:
+    data_effect_backfill:
+      rows: [{ effect: oxplow/assign-on-start, planned: 0, what: Nothing to catch up on. }]

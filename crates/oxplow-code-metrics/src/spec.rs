@@ -422,31 +422,38 @@ pub struct CommentsDecl {
 
 impl CommentsDecl {
     /// `text` without its comments (each block comment leaves its newlines,
-    /// so the lines still count the same). Strings aren't read: a marker
-    /// inside one starts a comment, as it did before comments were declared.
+    /// so the lines still count the same). A `"` or `'` string is skipped
+    /// (a `\` escapes the next character; one left open ends at its line),
+    /// so a marker inside one stays code. For a language with no grammar:
+    /// one with a grammar drops its comment nodes ([`crate::strip_comments`]).
     pub fn strip(&self, text: &str) -> String {
         let mut out = String::with_capacity(text.len());
         let mut rest = text;
         while !rest.is_empty() {
-            let line = self
-                .line
-                .iter()
-                .filter(|m| !m.is_empty())
-                .filter_map(|m| rest.find(m.as_str()))
-                .min();
+            // The first to start wins; at one place a block comment beats a
+            // line comment (Lua's `--[[` against `--`), and both beat a quote.
             let block = self
                 .block
                 .iter()
                 .filter(|[open, close]| !open.is_empty() && !close.is_empty())
-                .filter_map(|pair| rest.find(pair[0].as_str()).map(|i| (i, pair)))
-                .min_by_key(|(i, _)| *i);
-            match (line, block) {
-                (Some(l), b) if b.is_none_or(|(i, _)| l < i) => {
-                    out.push_str(&rest[..l]);
-                    rest = rest[l..].find('\n').map_or("", |n| &rest[l + n..]);
-                }
-                (_, Some((i, [open, close]))) => {
-                    out.push_str(&rest[..i]);
+                .filter_map(|pair| rest.find(pair[0].as_str()).map(|i| (i, 0, Some(pair))));
+            let line = self
+                .line
+                .iter()
+                .filter(|m| !m.is_empty())
+                .filter_map(|m| rest.find(m.as_str()).map(|i| (i, 1, None)));
+            let quote = rest.find(['"', '\'']).map(|i| (i, 2, None));
+            let Some((i, rank, pair)) = block
+                .chain(line)
+                .chain(quote)
+                .min_by_key(|(i, rank, _)| (*i, *rank))
+            else {
+                out.push_str(rest);
+                break;
+            };
+            out.push_str(&rest[..i]);
+            match (rank, pair) {
+                (0, Some([open, close])) => {
                     let body = &rest[i + open.len()..];
                     let (skipped, after) = match body.find(close.as_str()) {
                         Some(c) => (&body[..c], &body[c + close.len()..]),
@@ -455,14 +462,38 @@ impl CommentsDecl {
                     out.extend(skipped.chars().filter(|c| *c == '\n'));
                     rest = after;
                 }
+                (1, _) => rest = rest[i..].find('\n').map_or("", |n| &rest[i + n..]),
                 _ => {
-                    out.push_str(rest);
-                    break;
+                    let len = quoted_len(&rest[i..]);
+                    out.push_str(&rest[i..i + len]);
+                    rest = &rest[i + len..];
                 }
             }
         }
         out
     }
+}
+
+/// The bytes of the quoted string `s` starts with: through its closing
+/// quote, or up to the end of its line when it isn't closed there.
+fn quoted_len(s: &str) -> usize {
+    let mut chars = s.char_indices();
+    let Some((_, quote)) = chars.next() else {
+        return 0;
+    };
+    while let Some((j, c)) = chars.next() {
+        match c {
+            '\n' => return j,
+            '\\' => {
+                if let Some((k, '\n')) = chars.next() {
+                    return k;
+                }
+            }
+            c if c == quote => return j + c.len_utf8(),
+            _ => {}
+        }
+    }
+    s.len()
 }
 
 /// A language's declaration with its files' texts: what an extension's
@@ -865,6 +896,13 @@ impl Language {
         crate::grammar::parser(self.grammar()?)
     }
 
+    /// Whether its WebAssembly grammar has been compiled: this language's
+    /// own, so a test reads it whatever other tests load at the same time.
+    #[cfg(test)]
+    fn wasm_grammar_loaded(&self) -> bool {
+        matches!(&self.0.grammar, GrammarSlot::Wasm { loaded, .. } if loaded.get().is_some())
+    }
+
     /// Whether oxplow can parse it.
     pub fn analyzable(&self) -> bool {
         self.0.spec.is_some()
@@ -1199,11 +1237,10 @@ mod lazy_grammar_tests {
     /// parses nothing of it) doesn't pay for it.
     #[test]
     fn a_wasm_grammar_is_loaded_on_first_use() {
-        let before = crate::grammar::loaded_count();
         let lang = Language::build(&clojure("")).unwrap();
-        assert_eq!(crate::grammar::loaded_count(), before, "built, not loaded");
+        assert!(!lang.wasm_grammar_loaded(), "built, not loaded");
         assert!(lang.parser().is_some());
-        assert_eq!(crate::grammar::loaded_count(), before + 1);
+        assert!(lang.wasm_grammar_loaded());
         assert!(lang.check().is_ok());
     }
 

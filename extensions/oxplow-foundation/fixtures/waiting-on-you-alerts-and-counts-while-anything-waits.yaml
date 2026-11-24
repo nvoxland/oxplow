@@ -10,7 +10,7 @@ expect:
   alert: { firing: false }
 steps:
   - given:
-      - observe: { turn: { prompt: go, answer: "Pick A or B?" } }
+      - observe: { turn: { prompt: go, open: true, tools: [{ name: AskUserQuestion, kind: ask, question: "Pick A or B?", pre: true }] } }
   - expect:
       loaders: { waiting_on_me: { rows: [{ what: Waiting for your answer, title: "Pick A or B?" }] } }
       alert: { firing: true, message: "Waiting on you: 1" }

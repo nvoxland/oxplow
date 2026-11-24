@@ -1,4 +1,4 @@
-# TypeScript: each @ts-ignore and @ts-expect-error comment gives a warning fact at its line.
+# TypeScript: each @ts-ignore and @ts-expect-error comment is found; the file's fact counts them and lists their lines.
 when:
   collector: oxplow.ts.ts_ignore
   files:
@@ -7,5 +7,5 @@ when:
     "src/b.tsx": "// @ts-expect-error\nexport const C = () => { console.warn('x'); return null; };\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.ts", "path": "src/a.ts", "line": 2, "rule": "ts_ignore", "severity": "warning", "dims": {"oxplow.language": "typescript"}}
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/b.tsx", "path": "src/b.tsx", "line": 1, "rule": "ts_ignore", "severity": "warning", "dims": {"oxplow.language": "typescript"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.ts", "path": "src/a.ts", "rule": "ts_ignore", "severity": "warning", "detail": "{\"lines\":[2]}", "dims": {"oxplow.language": "typescript"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/b.tsx", "path": "src/b.tsx", "rule": "ts_ignore", "severity": "warning", "detail": "{\"lines\":[1]}", "dims": {"oxplow.language": "typescript"}}

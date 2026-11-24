@@ -424,7 +424,7 @@ mod tests {
         };
         let none = run(json!({ "thread_id": tid })).await.unwrap();
         assert_eq!(none.result["open"], Value::Null);
-        assert!(none.audit_id.is_none(), "a read leaves no record");
+        assert!(none.command_run_id.is_none(), "a read leaves no record");
 
         report(
             &fx.svc,

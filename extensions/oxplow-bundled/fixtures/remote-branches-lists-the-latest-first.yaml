@@ -1,0 +1,53 @@
+given:
+  - observe: { commit: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", at: "2023-11-14T22:13:20Z", author: Ada, subject: older } }
+  - observe: { commit: { sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", at: "2023-11-15T22:13:20Z", author: Ada, subject: newer } }
+  - observe:
+      refs:
+        branches:
+          - { name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true, upstream: origin/new, ahead: 0, behind: 1 }
+          - { name: old, kind: remote, remote: upstream, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+          - { name: new, kind: remote, remote: origin, head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+          - { name: HEAD, kind: remote, remote: origin, head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+        heads: [{ stream: 1, sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+when: { page: remote-branches, params: { stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ branch: main }] }
+    remotes:
+      rows:
+        - short_name: origin/new
+          subject: newer
+          remote_ahead: 1
+          remote_behind: 0
+          tracking: 1
+          can_pull: 1
+          can_push: 0
+          graph_uri: 'oxplow:oxplow/page?head_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&page=oxplow/git-history&stream_id=1#reveal_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        - { short_name: upstream/old, subject: older, remote_ahead: 0, remote_behind: 0, tracking: 0, can_pull: 0, can_push: 0 }
+steps:
+  - params: { remote: upstream, q: older }
+    expect:
+      loaders:
+        remotes: { rows: [{ short_name: upstream/old }] }
+  - params: { remote: origin, q: older }
+    expect:
+      loaders:
+        remotes: { rows: 0 }
+  - given:
+      - observe:
+          refs:
+            branches:
+              - { name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true, upstream: origin/new, ahead: 2, behind: 1 }
+              - { name: new, kind: remote, remote: origin, head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+  - expect:
+      loaders:
+        remotes: { rows: [{ short_name: origin/new, status: Diverged, can_pull: 1, can_push: 0 }] }
+  - given:
+      - observe:
+          refs:
+            branches:
+              - { name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true, upstream: origin/new, ahead: 2, behind: 0 }
+              - { name: new, kind: remote, remote: origin, head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+  - expect:
+      loaders:
+        remotes: { rows: [{ short_name: origin/new, status: Local branch is ahead, can_pull: 0, can_push: 1 }] }

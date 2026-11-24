@@ -100,9 +100,9 @@ macro_rules! rpc_dispatch {
             } else {
                 args
             };
-            // A person's run that fails says which audit row recorded it
-            // (`IpcError::audit_id`), so the window's record links the run.
-            let (out, audited) = ::oxplow_app::commands::tracking_failed_audit(Box::pin(async move { match name {
+            // A person's run that fails says which command run record recorded it
+            // (`IpcError::command_run_id`), so the window's record links the run.
+            let (out, audited) = ::oxplow_app::commands::tracking_failed_run(Box::pin(async move { match name {
                 $(
                     $cname => {
                         #[derive(serde::Deserialize)]
@@ -160,7 +160,7 @@ macro_rules! rpc_dispatch {
                 _ => Err($crate::IpcError::not_found()),
             } })).await;
             out.map_err(|mut e| {
-                e.audit_id = e.audit_id.or(audited.and_then(std::num::NonZeroI64::new));
+                e.command_run_id = e.command_run_id.or(audited.and_then(std::num::NonZeroI64::new));
                 e
             })
         }
@@ -191,6 +191,7 @@ macro_rules! oxplow_command_table {
             ctx {
                 // terminal — the agent-spawn path needs plugin_runtime
                 "open_terminal_session" => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 },
+                "restart_agent_terminal" => $crate::commands::terminal::restart_agent_terminal { uri: String },
             }
             svc {
             }
@@ -221,7 +222,7 @@ macro_rules! oxplow_command_table {
                 run_command_for_call => $crate::commands::bus::run_command_for_call { client: String, call: String, id: String, input: ::oxplow_domain::Json } -> ::oxplow_domain::CommandOutcome,
                 run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 command_open_after => $crate::commands::bus::command_open_after { id: String, result: ::oxplow_domain::Json } -> Option<String>,
-                undo_command => $crate::commands::bus::undo_command { audit_id: ::oxplow_domain::AuditId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                undo_command => $crate::commands::bus::undo_command { command_run_id: ::oxplow_domain::CommandRunId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 decide_proposal => $crate::commands::bus::decide_proposal { proposal: ::oxplow_domain::ProposalId, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
                 // hooks
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
@@ -234,8 +235,8 @@ macro_rules! oxplow_command_table {
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
-                get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
-                set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),
+                get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
+                set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
                 get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
                 set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,
@@ -288,7 +289,6 @@ macro_rules! oxplow_command_table {
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
                 // code_quality (duplication only — the metrics scan was retired in)
                 // config
-                get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,

@@ -3243,6 +3243,19 @@ dimensions:
         );
     }
 
+    /// Zones are gone: a setting still naming them says so.
+    #[test]
+    fn the_zones_setting_is_retired() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.zones: []\n").unwrap();
+        let error = load_project_config(dir.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("is retired") && error.contains("no zones"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn rejects_unknown_keys() {
         let dir = tempdir().unwrap();

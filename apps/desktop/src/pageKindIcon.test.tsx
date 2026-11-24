@@ -19,9 +19,14 @@ test("a declared page draws the icon its declaration names", async () => {
   await waitFor(() => expect(container.querySelector("svg.lucide-triangle-alert")).not.toBeNull());
 });
 
-test("a page no extension declares draws the page icon", () => {
+test("a page no extension declares draws the missing-page icon", () => {
   const { container } = render(<PageKindIcon kind="page" />);
-  expect(container.querySelector("svg.lucide-glasses")).not.toBeNull();
+  expect(container.querySelector("svg.lucide-square-dashed")).not.toBeNull();
+});
+
+test("a kind nothing knows still draws an icon: the missing page's", () => {
+  const { container } = render(<PageKindIcon kind="assistant-settings" />);
+  expect(container.querySelector("svg.lucide-square-dashed")).not.toBeNull();
 });
 
 // `mock.module` is process-wide: put the real module back so the files that

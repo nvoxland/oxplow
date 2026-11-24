@@ -30,7 +30,7 @@ afterEach(() => {
   undone.length = 0;
 });
 
-const outcome = (inverse: boolean): CommandOutcome => ({ result: null, audit_id: 7, event_id: null, inverse: inverse ? {} : null }) as unknown as CommandOutcome;
+const outcome = (inverse: boolean): CommandOutcome => ({ result: null, command_run_id: 7, event_id: null, inverse: inverse ? {} : null }) as unknown as CommandOutcome;
 
 test("an undoable run offers Undo, which undoes it", async () => {
   const { result } = renderHook(() => useFormSubmit("Rename", async () => outcome(true), () => {}));
@@ -47,7 +47,7 @@ test("a run that can't be undone just says it's done", async () => {
 });
 
 test("a commit's toast names the commit; its Undo says the changes are back", async () => {
-  const commit = { result: { rev: "0123456789abcdef" }, audit_id: 9, event_id: null, inverse: {} } as unknown as CommandOutcome;
+  const commit = { result: { rev: "0123456789abcdef" }, command_run_id: 9, event_id: null, inverse: {} } as unknown as CommandOutcome;
   const { result } = renderHook(() => useFormSubmit("Commit", async () => commit, () => {}));
   await act(() => result.current.submit({}, false));
   expect(toasts[0]?.message).toBe("✓ Committed 0123456");

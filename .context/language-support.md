@@ -232,8 +232,8 @@ field, constant, variable, module, namespace, macro.
 
 `oxplow_code_metrics::extract(languages, path, source) -> Vec<Definition>`; a
 `Definition` is `{ kind, name, container, signature, id, name_line/col,
-start/end line/col }`. Per-language tests are under
-`crates/oxplow-code-metrics/src/symbols/` (`tests_<lang>.rs`; Rust, Python and Java in `tests.rs`).
+start/end line/col }`. The symbol tests are in
+`crates/oxplow-code-metrics/src/symbols/tests.rs`; each language pack's own fixtures cover its language.
 
 ### Ids
 
@@ -372,8 +372,9 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
   against a whole name: `*`, `?` and `[A-Z]`, so `Test*`'s "followed by an
   uppercase letter, `_` or nothing" is `Test`, `Test_*`, `Test[A-Z]*`.
   `assertions` and `skips` are regular expressions; every match on a code
-  line counts once (a span two conventions both match counts once), and line
-  comments (`//`, `#` lines but not `#[attribute]`) are left out.
+  line counts once (a span two conventions both match counts once), and the
+  comments the path's language declares (`comments:` on its `languages:` entry)
+  are left out; a path in no language has none stripped.
 - A bad glob, name pattern or regex is an error at the entry's line.
 - **The engine is core's** (`crate::test_conventions`): `TestConventions`
   is built from the enabled extensions at each publication, swapped into
@@ -399,7 +400,11 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
    complete on its own), `comments:` and `keywords:` (they sit on the
    declaration, not in `analysis.yaml`, because a language known only by its
    server has comments and keywords too). Core knows none of them: the
-   assertion counter strips the path's language's comments, `unused.star`
+   assertion counter strips the path's language's comments
+   (`oxplow_code_metrics::strip_comments`: a language with a grammar drops
+   the grammar's comment nodes, kinds containing "comment", so a `/*` or `#`
+   inside a string stays code; one without strips its `comments:` markers,
+   skipping `"` and `'` strings, a string left open ending at its line), `unused.star`
    skips its keywords, the editor reads its Monaco id. The one table core
    keeps is `oxplow_domain::language_id` — the editor's highlighting for
    extensions *no enabled pack declares* (Monaco's own ids: kotlin, sql, …);

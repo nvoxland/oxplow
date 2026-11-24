@@ -1,14 +1,15 @@
 //! Bookmark operations (`bookmarks.write`; declared as commands in
-//! `extensions/oxplow-foundation`): a person stars a page at a scope — the
+//! `extensions/oxplow-foundation`): a person stars a page at a visibility scope — the
 //! thread they're in, its stream, or the project — or takes the star off.
 //! `Tx` over the bookmark store's `_tx` cores; read back through
 //! `v_bookmark`. The viewer is the thread (`oxplow:oxplow/thread?id=thr1`) the person is in, its
 //! stream implied; a bookmark is visible once per viewer, so setting it at
-//! another scope moves it. Each undoes to what the viewer saw before.
+//! another visibility scope moves it. Each undoes to what the viewer saw before.
 
 use std::sync::Arc;
 
-use oxplow_db::bookmark_store::{remove_tx, set_tx, Bookmark, BookmarkScope, Viewer};
+use oxplow_db::bookmark_store::{remove_tx, set_tx, Bookmark};
+use oxplow_db::visibility_scope::{Viewer, VisibilityScope};
 use oxplow_domain::{CommandCall, CommandError, StreamId, ThreadId};
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
@@ -25,24 +26,6 @@ pub const CAPABILITY: &str = "bookmarks.write";
 pub const SET: &str = "oxplow.bookmark.set";
 pub const REMOVE: &str = "oxplow.bookmark.remove";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ScopeInput {
-    Thread,
-    Stream,
-    Project,
-}
-
-impl From<ScopeInput> for BookmarkScope {
-    fn from(s: ScopeInput) -> Self {
-        match s {
-            ScopeInput::Thread => BookmarkScope::Thread,
-            ScopeInput::Stream => BookmarkScope::Stream,
-            ScopeInput::Project => BookmarkScope::Project,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetInput {
@@ -53,7 +36,8 @@ pub struct SetInput {
     /// Its title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    pub scope: ScopeInput,
+    /// Where it shows: the thread's, its stream's or the project's.
+    pub visibility_scope: VisibilityScope,
     /// The thread the person is in (`thr1`); its stream is the stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
@@ -116,7 +100,7 @@ fn restore(before: Option<Bookmark>, page_ref: &str, at: &Value) -> CommandCall 
             name: SET.into(),
             input: json!({
                 "uri": b.page_ref, "page_kind": b.page_kind, "label": b.label,
-                "scope": b.scope, "thread": at["thread"], "stream": at["stream"],
+                "visibility_scope": b.visibility_scope, "thread": at["thread"], "stream": at["stream"],
             }),
         },
         None => CommandCall {
@@ -126,7 +110,7 @@ fn restore(before: Option<Bookmark>, page_ref: &str, at: &Value) -> CommandCall 
     }
 }
 
-/// `set { ref, page_kind, label?, scope, thread?, stream? }`.
+/// `set { ref, page_kind, label?, visibility_scope, thread?, stream? }`.
 pub fn set_op() -> Op {
     Op::new(
         CAPABILITY,
@@ -141,10 +125,10 @@ pub fn set_op() -> Op {
                 page_ref: input.uri.clone(),
                 page_kind: input.page_kind,
                 label: input.label,
-                scope: input.scope.into(),
+                visibility_scope: input.visibility_scope,
             };
             let before = set_tx(ctx.conn, viewer, &bookmark).map_err(|e| match e {
-                oxplow_domain::DomainError::Invalid(m) => invalid("/scope", m),
+                oxplow_domain::DomainError::Invalid(m) => invalid("/visibility_scope", m),
                 other => CommandError::from(other),
             })?;
             Ok(HandlerOutput {
@@ -195,7 +179,7 @@ mod tests {
             .db
             .read(move |conn| {
                 conn.query_row(
-                    "SELECT scope FROM bookmark WHERE uri = ?1",
+                    "SELECT visibility_scope FROM bookmark WHERE uri = ?1",
                     [page_ref],
                     |r| r.get(0),
                 )
@@ -214,7 +198,7 @@ mod tests {
         let thread = fx.thread.to_string();
         let set = |scope: &str| {
             json!({ "uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
-                    "label": "Git", "scope": scope, "thread": thread })
+                    "label": "Git", "visibility_scope": scope, "thread": thread })
         };
         let first = fx
             .svc
@@ -236,7 +220,7 @@ mod tests {
         );
         fx.svc
             .commands
-            .undo(&Actor::Human, second.audit_id.unwrap(), false)
+            .undo(&Actor::Human, second.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(
@@ -247,7 +231,7 @@ mod tests {
         );
         fx.svc
             .commands
-            .undo(&Actor::Human, first.audit_id.unwrap(), false)
+            .undo(&Actor::Human, first.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(
@@ -261,7 +245,7 @@ mod tests {
     async fn an_agent_may_bookmark() {
         let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
-        let input = json!({ "uri": "oxplow:oxplow/file?path=src/b.rs", "page_kind": "file", "scope": "stream", "thread": thread });
+        let input = json!({ "uri": "oxplow:oxplow/file?path=src/b.rs", "page_kind": "file", "visibility_scope": "stream", "thread": thread });
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -279,7 +263,7 @@ mod tests {
     async fn remove_undoes() {
         let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
-        let input = json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
+        let input = json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "visibility_scope": "stream", "thread": thread });
         fx.svc
             .commands
             .run(&Actor::Human, SET, input, false)
@@ -303,7 +287,7 @@ mod tests {
         );
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(

@@ -9,7 +9,7 @@
 /// An agent's (`startOnActivate`) spawns nothing until it is shown, but
 /// attaches at once to one that runs. Unmounting detaches: the process
 /// keeps running.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Terminal } from "@xterm/xterm";
 
 import { desktopBridge, onRemoteReconnect } from "../api.js";
@@ -56,14 +56,54 @@ export interface TerminalSession {
   ended: { exitCode: number | null; outcome: ExitOutcome } | null;
 }
 
+/** The URIs whose pane has a running process attached (opened, not yet
+ *  ended): what Restart Terminal is offered for (`agentTerminalLive`).
+ *  Replaced, never changed, so a snapshot of it is stable. */
+let liveUris: ReadonlySet<string> = new Set();
+const liveListeners = new Set<() => void>();
+function setLive(uri: string, live: boolean) {
+  if (liveUris.has(uri) === live) return;
+  const next = new Set(liveUris);
+  if (live) next.add(uri);
+  else next.delete(uri);
+  liveUris = next;
+  for (const listener of liveListeners) listener();
+}
+function subscribeLive(listener: () => void) {
+  liveListeners.add(listener);
+  return () => void liveListeners.delete(listener);
+}
+
+/** The URIs a pane shows a running process for. */
+export function useLiveTerminals(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribeLive, () => liveUris);
+}
+
+/** Whether a pane shows a running process for `uri`. */
+export function useTerminalLive(uri: string | null): boolean {
+  const live = useLiveTerminals();
+  return uri !== null && live.has(uri);
+}
+
 export function useTerminalSession(uri: string, opts: TerminalSessionOptions): TerminalSession {
   const sessionIdRef = useRef<string | null>(null);
+  const uriRef = useRef(uri);
+  uriRef.current = uri;
   const reopenRef = useRef<(() => void) | null>(null);
   const activateRef = useRef<(() => void) | null>(null);
   const activatedRef = useRef(false);
   const endedRef = useRef(false);
   const launchFailedRef = useRef(false);
-  const [ended, setEnded] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
+  const [ended, setEndedState] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
+  // Ended or not is what the pane shows; live is the same fact, for the
+  // tab menu and `when`.
+  const setEnded = useCallback(
+    (next: { exitCode: number | null; outcome: ExitOutcome } | null) => {
+      setEndedState(next);
+      setLive(uri, next === null);
+    },
+    [uri],
+  );
   const live = useRef({ shown: opts.shown, startOnActivate: !!opts.startOnActivate });
   live.current = { shown: opts.shown, startOnActivate: !!opts.startOnActivate };
 
@@ -82,12 +122,14 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
     if (opts.shown) activateRef.current?.();
   }, [opts.shown]);
 
-  // Unmounted: detach, never kill (closing is the row's command).
+  // Unmounted: detach, never kill (closing is the row's command). No pane
+  // shows it now.
   useEffect(
     () => () => {
       const sessionId = sessionIdRef.current;
       sessionIdRef.current = null;
       if (sessionId) void desktopBridge().closeTerminalSession(sessionId);
+      setLive(uriRef.current, false);
     },
     [],
   );
@@ -99,12 +141,22 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
       // Output may arrive before the open answers (a replay sent from
       // inside it): held until the session id is known.
       const pendingEvents: TerminalEvent[] = [];
+      let opening = false;
+      let followRestart = false;
       const applyEvent = (event: TerminalEvent) => {
         const msg = readSessionMessage(event.message);
         if (msg?.kind === "data") term.write(msg.bytes);
+        if (msg?.kind === "restart") {
+          endedRef.current = true;
+          sessionIdRef.current = null;
+          restartPendingRef.current = false;
+          if (opening) followRestart = true;
+          else openSession(true);
+        }
         if (msg?.kind === "exit") {
           endedRef.current = true;
-          if (restartPendingRef.current) {
+          launchFailedRef.current = msg.outcome.kind === "launch_failed";
+          if (restartPendingRef.current && !launchFailedRef.current) {
             restartPendingRef.current = false;
             reopenRef.current?.();
             return;
@@ -121,7 +173,6 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
         applyEvent(event);
       });
 
-      let opening = false;
       const openSession = (again: boolean) => {
         if (opening || disposed) return;
         opening = true;
@@ -178,6 +229,10 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
           })
           .finally(() => {
             opening = false;
+            if (followRestart) {
+              followRestart = false;
+              openSession(true);
+            }
           });
       };
       activatedRef.current = false;
@@ -213,7 +268,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
         activateRef.current = null;
       };
     },
-    [uri],
+    [uri, setEnded],
   );
 
   const send = useCallback(

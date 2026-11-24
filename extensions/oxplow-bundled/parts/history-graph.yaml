@@ -1,0 +1,84 @@
+title: Git History
+description: A commit list and an ancestry graph with shared filters, branch labels and tags.
+params:
+- name: stream_id
+  label: Stream
+- name: head_sha
+  label: Head commit
+- name: reveal_sha
+  role: filter
+  label: Commit to reveal
+  default: ''
+- name: limit
+  role: filter
+  label: Commits
+  default: 500
+# Git History's view (the `vcs.history.graph` contract's): the List's
+# search runs in SQL over the whole history, before the limit.
+- name: q
+  role: filter
+  label: Find
+  type: search
+- name: author
+  role: filter
+  label: Author
+  default: ''
+- name: branch
+  role: filter
+  label: Branch
+  type: branch
+loaders:
+  # The Graph's rows: the newest `limit` reachable from the head, unfiltered
+  # (lanes need every commit between two matches). The author and branch
+  # choices come from them.
+  history_graph:
+    sql: |
+      WITH RECURSIVE reach(sha) AS (
+        SELECT :head_sha
+        UNION
+        SELECT p.value FROM reach
+          JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+      )
+      SELECT c.sha, c.author, c.email, c.committed_at, c.subject, c.parents,
+             (SELECT json_group_array(b.name) FROM v_branch b
+               WHERE b.kind = 'local' AND b.head_sha = c.sha) AS branches,
+             (SELECT json_group_array(t.name) FROM v_tag t WHERE t.sha = c.sha) AS tags,
+             (SELECT b.name FROM v_branch b
+               WHERE b.kind = 'local' AND b.stream_id = :stream_id LIMIT 1) AS current_branch
+      FROM v_commit c JOIN reach USING (sha)
+      ORDER BY (c.sha = :reveal_sha) DESC, c.committed_at DESC, c.sha
+      LIMIT :limit
+  # The List's rows: every reachable commit matching `q`, `author` and
+  # `branch`, filtered before the limit, so an older commit is found too.
+  history_matches:
+    sql: |
+      WITH RECURSIVE reach(sha) AS (
+        SELECT :head_sha
+        UNION
+        SELECT p.value FROM reach
+          JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+      ),
+      on_branch(sha) AS (
+        SELECT b.head_sha FROM v_branch b WHERE b.name = :branch AND b.kind = 'local'
+        UNION
+        SELECT p.value FROM on_branch
+          JOIN v_commit c ON c.sha = on_branch.sha, json_each(c.parents) p
+      )
+      SELECT c.sha, c.author, c.email, c.committed_at, c.subject, c.parents,
+             (SELECT json_group_array(b.name) FROM v_branch b
+               WHERE b.kind = 'local' AND b.head_sha = c.sha) AS branches,
+             (SELECT json_group_array(t.name) FROM v_tag t WHERE t.sha = c.sha) AS tags,
+             (SELECT b.name FROM v_branch b
+               WHERE b.kind = 'local' AND b.stream_id = :stream_id LIMIT 1) AS current_branch
+      FROM v_commit c JOIN reach USING (sha)
+      WHERE (:branch IS NULL OR :branch = '' OR c.sha IN (SELECT sha FROM on_branch))
+        AND (:author = '' OR c.author = :author)
+        AND (:q IS NULL OR :q = '' OR c.sha LIKE :q || '%' OR instr(lower(c.subject), lower(:q)) > 0
+             OR instr(lower(c.author), lower(:q)) > 0 OR instr(lower(c.email), lower(:q)) > 0)
+      ORDER BY c.committed_at DESC, c.sha
+      LIMIT :limit
+view:
+  from: history_graph
+  viz: custom
+  custom:
+    component: history-graph

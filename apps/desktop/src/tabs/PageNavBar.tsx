@@ -10,7 +10,7 @@ import type { PageAction } from "../kit/actions.js";
 import { PageMenu } from "./PageMenu.js";
 import { barActions } from "./pageMenuItems.js";
 import type { TabRef } from "./tabState.js";
-import type { BookmarkScope } from "./bookmarks.js";
+import { VISIBILITY_SCOPES, visibilityScopeLabel, type VisibilityScope } from "../visibilityScope.js";
 
 export interface PageNavBarProps {
   /** Back and forward through the tab's history. A pinned page has none
@@ -57,12 +57,12 @@ export interface PageNavBarProps {
    *  The button always opens a popover that lets the user toggle this
    *  page's bookmark at one scope (thread / stream / project). */
   bookmark?: {
-    /** The scope this page is bookmarked at; the star is filled when set. */
-    scope: BookmarkScope | null;
-    onToggleScope(scope: BookmarkScope): void;
+    /** The visibility scope this page is bookmarked at; the star is filled when set. */
+    visibilityScope: VisibilityScope | null;
+    onToggleVisibilityScope(visibilityScope: VisibilityScope): void;
     /** The same page is bookmarked at other values (its view): the star
      *  says so and the popover offers to move that bookmark here. */
-    other?: { scope: BookmarkScope } | null;
+    other?: { visibilityScope: VisibilityScope } | null;
     onUpdateOther?(): void;
   };
   /** Optional backlinks dropdown content — when omitted, no dropdown renders. */
@@ -394,15 +394,15 @@ export function PageNavBar({
           <button
             type="button"
             data-testid="page-nav-bookmark"
-            title={bookmark.scope == null && bookmark.other ? "Bookmarked at other values" : "Bookmark"}
+            title={bookmark.visibilityScope == null && bookmark.other ? "Bookmarked at other values" : "Bookmark"}
             onClick={() => setScopeOpen((v) => !v)}
             aria-expanded={scopeOpen}
             style={{
               ...navButtonStyle(true),
-              color: bookmark.scope != null || bookmark.other ? "var(--accent-fg)" : "var(--text-secondary)",
+              color: bookmark.visibilityScope != null || bookmark.other ? "var(--accent-fg)" : "var(--text-secondary)",
             }}
           >
-            {bookmark.scope != null ? "★" : "☆"}
+            {bookmark.visibilityScope != null ? "★" : "☆"}
           </button>
           {scopeOpen ? (
             <div
@@ -421,7 +421,7 @@ export function PageNavBar({
                 fontSize: "var(--text-xs)",
               }}
             >
-              {bookmark.scope == null && bookmark.other && bookmark.onUpdateOther ? (
+              {bookmark.visibilityScope == null && bookmark.other && bookmark.onUpdateOther ? (
                 <button
                   type="button"
                   data-testid="page-nav-bookmark-update"
@@ -447,14 +447,14 @@ export function PageNavBar({
               <div style={{ padding: "4px 6px", fontSize: 11, color: "var(--muted)" }} data-testid="page-nav-bookmark-heading">
                 Bookmark for:
               </div>
-              {(["thread", "stream", "project"] as BookmarkScope[]).map((scope) => {
-                const active = bookmark.scope === scope;
+              {VISIBILITY_SCOPES.map((scope) => {
+                const active = bookmark.visibilityScope === scope;
                 return (
                   <button
                     key={scope}
                     type="button"
                     data-testid={`page-nav-bookmark-scope-${scope}`}
-                    onClick={() => bookmark.onToggleScope(scope)}
+                    onClick={() => bookmark.onToggleVisibilityScope(scope)}
                     style={{
                       display: "block",
                       width: "100%",
@@ -470,7 +470,7 @@ export function PageNavBar({
                     <span style={{ display: "inline-block", width: 14 }}>
                       {active ? "★" : " "}
                     </span>
-                    {scope === "thread" ? "This thread" : scope === "stream" ? "This stream" : "This project"}
+                    {visibilityScopeLabel(scope)}
                   </button>
                 );
               })}

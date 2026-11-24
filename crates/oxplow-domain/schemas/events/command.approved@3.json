@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`command.approved@3`: a person approved a proposal and the command ran\nas them. Its detail row is `command_run_id`.",
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "command_run_id": {
+      "description": "The approving run's `command_run` row.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "proposal": {
+      "description": "The proposal's id.",
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "proposal",
+    "command",
+    "command_run_id"
+  ],
+  "title": "CommandApprovedV3",
+  "type": "object"
+}

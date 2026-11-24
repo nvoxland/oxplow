@@ -344,6 +344,11 @@ pub fn dataset_uri(name: &str) -> String {
     keyed(r::DATASET, name)
 }
 
+/// One recorded contribution run (`v_contribution_run.run_id`).
+pub fn contribution_run_uri(id: &str) -> String {
+    keyed(r::CONTRIBUTION_RUN, id)
+}
+
 /// One run of a declared job (`v_job_run.id`).
 pub fn job_run_uri(id: &str) -> String {
     keyed(r::JOB_RUN, id)

@@ -28,11 +28,11 @@ loaders:
     sql: |
       SELECT event_id, label, at, seen, (NOT seen) AS unseen, CASE WHEN seen THEN 'muted' ELSE 'danger' END AS tone,
              -- What recorded it: an approval's proposal, else the command
-             -- whose page lists its runs (this one's audit row among them).
+             -- whose page lists its runs (this one's command run record among them).
              CASE WHEN proposal_id IS NOT NULL THEN 'Proposal ' || proposal_id
-                  WHEN audit_id IS NOT NULL THEN command END AS run,
+                  WHEN command_run_id IS NOT NULL THEN command END AS run,
              CASE WHEN proposal_id IS NOT NULL THEN uri('oxplow/proposal', 'id', proposal_id)
-                  WHEN audit_id IS NOT NULL THEN uri('oxplow/command', 'command', command) END AS run_uri
+                  WHEN command_run_id IS NOT NULL THEN uri('oxplow/command', 'command', command) END AS run_uri
       FROM v_op_error WHERE dismissed = 0 ORDER BY at DESC
 view:
   stack:

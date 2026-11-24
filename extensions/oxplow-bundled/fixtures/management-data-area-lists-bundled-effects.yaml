@@ -1,0 +1,10 @@
+# Manage services → Data lists the effects declared by Bundled.
+when: { page: oxplow/management, params: { area: data } }
+expect:
+  loaders:
+    data_effects:
+      rows:
+        contains:
+          - { effect: oxplow/assign-on-start, extension: oxplow-bundled }
+          - { effect: oxplow/release-on-stream-archive, extension: oxplow-bundled }
+          - { effect: oxplow/release-on-thread-close, extension: oxplow-bundled }

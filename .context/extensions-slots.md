@@ -73,7 +73,7 @@ loaders' first rows and params are what a mount can take):
 | `oxplow/change-review.sections` | oxplow-bundled's Review page (one analysed change; nodes `asked`, `look-here`, `by-area`). A signal belongs on `v_oxplow_review_signal` (`adds_to: oxplow/review_signal`); mount here only a whole section of your own | `change_id` |
 | `oxplow/settings.integrations` | Settings → Integrations, under Capabilities: an extension's own settings for the project. oxtask mounts its Task workflow (`task-workflow-settings`) | none (the page's params: `area`) |
 | `oxplow/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
-| `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
+| `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). Nothing shipped mounts here | `path`, `left`, `right`, `label`, `base`, `lines` |
 
 `change_id` points at the page's change in `v_change`, with its analysis
 in `v_change_file`, `v_change_function`, `v_change_import`, `v_change_hunk`,
@@ -217,26 +217,27 @@ choosing one on Settings are the e2e specs'. The pages with every
 enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
 ([tasks.md](./tasks.md), "Conformance").
 
-**The first real one: the history graph.** oxplow-bundled's
-`history-graph` component (`components/history-graph/`, classic scripts on
-the client library and the kit) draws the stream's commits as `git log
---graph` does — a lane per line of descent, a dot per commit — from its
-`history-graph` part (a recursive walk of `v_commit` from
-`:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
-Its text, author and branch filters only dim or hide rows, so typing never
-re-runs the page. On Git History they are the page's `q`, `author` and
-`branch` (the contract's `view`): they start from the page's, each change
-writes them (`setViewParams`; an echo of its own write is ignored, so
-typing is not undone by a late one) and Back sets them again
-(`onViewParams`). With no view (a tile) they are its own. The host re-runs
-the page when a commit lands or a ref moves (its reads). A row opens the
-commit's URI (`oxplow:oxplow/commit?sha=<sha>`); a Cmd/Ctrl-click opens it
-in a new tab (`navigate(uri, { newTab: true })`). It declares no commands,
-so it is not a program to approve. Core keeps no lane code: `CommitList`
-(the fallback, and the Git dashboard's recent commits with their stats) is
-a plain list. `viz/historyGraph.test.ts` runs the bundle's own script
-against its page — lanes, merge lanes, child-before-parent order,
-filters, reveal, Cmd-click.
+**Git History.** Bundled's `history-graph` component replaces the commit
+list at `vcs.history.graph`. It starts in List view. Graph draws each commit
+and its parents in lanes, with children before their parents. Both views
+use the same rows from `:head_sha` through `v_commit` and label local branch
+tips and tags from `v_branch` and `v_tag`. A `reveal_sha` link starts in Graph
+and highlights the commit. The mode is kept in the tab entry's history state.
+The List filters hide nonmatching rows. Graph dims text and author mismatches
+to retain their connections; its branch filter keeps the reachable rows.
+Both share Git History's `q`, `author` and `branch` view params, which the
+replacement page also declares as params, so they flow into its run by
+name. The List shows the `history_matches` loader: the search runs in SQL
+over everything reachable from the head, before `limit`, as core's list
+does, so an older commit is found too. The Graph draws the `history_graph`
+loader, the newest `limit` commits unfiltered: lanes need every commit
+between two matches, so a match beyond the loaded range is not drawn
+there. Both also filter locally, so a change shows before the re-run
+answers, and a tile (no view) filters its loaded rows only
+(`git-history-search-finds-commits-beyond-the-loaded-limit`). The host refreshes the rows when a commit or ref moves. Each row
+links to the commit, with Cmd/Ctrl-click or middle-click opening a new tab.
+Setting `oxplow.replacements.vcs.history.graph` to `oxplow` restores the
+standard list. Bundled's fixtures exercise the replacement and its controls.
 
 **The example that proves views and forms: `examples/extensions/task-views`.**
 An extension with no provider of its own, replacing `task.board`
@@ -403,12 +404,35 @@ opens its form with the context's keys (and the `{{uri}}` bindings) as
 params; the form's submit is the input.
 
 **The store filter.** `ui.about` is either the resource kind (a string) or
-`{ resource, accepts?: { store: <id> | [ids] } }`. An item URI's `store`
+`{ resource, accepts?: { store: <id> | [ids], url?: <pattern>, path?: <glob> | [globs] } }`. An item URI's `store`
 param is matched like a renderer's `accepts` rule: an id equal to the
 entry, or `present`, `absent` or an anchored id pattern
 (`pages::renderers::takes`); a list is any-of. The command shows only on
 items whose store passes; an item with no `store` param passes only a
 filter that says `absent`.
+
+**Links: `url` and `path`.** A command about web links (`about: https`
+or `http`: a URL is named by its scheme, as a page that draws one is,
+`renderers::resource_of`) narrows them by `accepts.url`, a param pattern
+over the whole URL (anchored `^…$`, classes not `.`:
+`^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$`). One
+about files or directories (`oxplow/file`, `oxplow/dir`) narrows them by
+`accepts.path`, globs over the worktree path (`**/*.ipynb`; `*` stops at
+`/`). `CommandUi::problem` refuses a filter on the wrong kind, and
+`ref_commands::link_filter_problem` one that can't compile, where the
+command registers. `ref_commands` checks both (`link_accepted`). A
+command whose `ui.group` is **`Open In`** joins the Open In ▸ of a link to
+its item (`withLinkOffers` / `mergeOpenInOffers`, `openIn.ts`): a markdown
+link, a page row that names a file, a tab, the page ☰, the terminal's
+path or URL. Its other groups stay their own submenus. A fixture tests it
+with `when: { item_commands: <url or file URI> }`.
+
+**Custom logic: `about_if`.** What a pattern or glob can't say, the
+command's own script decides: `ui.about_if: <function>` names a function of
+its `entry:` script, called with `{ uri, kind, url?, path? }` for each link
+that passes `accepts`; the command is offered where it returns `True`
+([commands.md](./commands.md) `about_if`). Keep the filters too: each call
+is a script run (about 35 ms), and the filters decide first.
 
 **Tests.** A fixture `when: { action_point: <id | name>, context? }` has
 `expect: { draws: none | button | menu, commands?: [ids] }`; `when: {

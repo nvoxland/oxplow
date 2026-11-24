@@ -1,3 +1,4 @@
+import { currentPlatform } from "./platform.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 
 /** A key press, as a shortcut sees it. */
@@ -52,5 +53,5 @@ export function formatShortcut(shortcut: string, mac: boolean = isMacPlatform())
 }
 
 export function isMacPlatform(): boolean {
-  return typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+  return typeof navigator !== "undefined" && currentPlatform() === "mac";
 }

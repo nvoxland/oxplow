@@ -301,19 +301,19 @@ mod tests {
         )
         .await
         .unwrap_err();
-        let audited = fx
+        let recorded = fx
             .svc
             .sql
             .query_sql(
-                "SELECT error FROM v_command_audit WHERE command = 'oxplow.ai.set_provider' \
+                "SELECT error FROM v_command_run WHERE command = 'oxplow.ai.set_provider' \
                  AND outcome != 'ok'",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert_eq!(audited.rows.len(), 1);
-        let error = format!("{:?}", audited.rows[0][0]);
+        assert_eq!(recorded.rows.len(), 1);
+        let error = format!("{:?}", recorded.rows[0][0]);
         assert!(error.contains("private input"), "{error}");
         assert!(!error.contains("sk-secret-123"), "{error}");
 
@@ -343,7 +343,7 @@ mod tests {
         let recorded = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(5)
             .await
             .unwrap()

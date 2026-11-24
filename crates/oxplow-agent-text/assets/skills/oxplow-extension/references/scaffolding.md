@@ -88,7 +88,7 @@ that exists is refused):
   the values (a scalar key; the values in its `enum` if it has one), and a
   settings change rewrites what's offered;
 - `panel` — a part compact in the left nav, written to `parts/<name>.yaml` (a
-  panel's `scope` is the param its part declares);
+  panel's `data_scope` is the param its part declares);
 - `extension` — the manifest only.
 
 Words used exactly: an **extension** is the folder; a **contribution** is
@@ -106,7 +106,7 @@ unless `permissions` has `sql: read`; the loader refuses the extension.
 ## A language pack
 
 A language is an extension's `languages:` entry (`id`, `title`,
-`extensions`, `grammar`, `analysis`, `symbols`, `lsp`, `test_conventions:` …).
+`extensions`, `grammar`, `analysis`, `symbols`, `lsp`, `comments`, `editor` …); the test conventions are a separate top-level `test_conventions:` key.
 A grammar of your own is a tree-sitter grammar compiled to WebAssembly (the steps, `analysis.yaml`, symbols and test conventions are in `references/recipes.md` "Add a language"):
 
 ```yaml

@@ -38,7 +38,7 @@ mock.module("../api.js", () => ({
     },
   }),
 }));
-const { useTerminalSession } = await import("./useTerminalSession.js");
+const { useTerminalSession, useTerminalLive } = await import("./useTerminalSession.js");
 
 afterEach(() => {
   cleanup();
@@ -124,6 +124,36 @@ test("an exit is said with its outcome, and Start Again opens it again under a n
   act(() => result.current.reopen());
   await waitFor(() => expect(result.current.ended).toBeNull());
   expect(written).toContain("<reset>");
+});
+
+// Restart Terminal is offered only while a process runs in the pane: an
+// ended one shows Start Again and takes no keys, so a restart there would
+// start an agent nobody sees.
+test("a session is live while its process runs, and not once it ends or the pane goes", async () => {
+  const live = renderHook(() => useTerminalLive(AGENT));
+  expect(live.result.current).toBe(false);
+  const { result, unmount } = renderHook(() => useTerminalSession(AGENT, { shown: true, startOnActivate: true }));
+  act(() => void result.current.attach(fakeTerm().term));
+  await waitFor(() => expect(live.result.current).toBe(true));
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "exit", exitCode: 0 }) }));
+  expect(live.result.current).toBe(false);
+  act(() => result.current.reopen());
+  await waitFor(() => expect(live.result.current).toBe(true));
+  unmount();
+  expect(live.result.current).toBe(false);
+});
+
+test("an attached agent follows a restarted PTY", async () => {
+  const { result } = renderHook(() => useTerminalSession(AGENT, { shown: true, startOnActivate: true }));
+  const { term, written } = fakeTerm();
+  act(() => void result.current.attach(term));
+  await waitFor(() => expect(written).toContain("hello"));
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "restart" }) }));
+  await waitFor(() => expect(written.filter((chunk) => chunk === "hello")).toHaveLength(2));
+  expect(written).toContain("<reset>");
+  expect(result.current.ended).toBeNull();
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "exit", exitCode: 1 }) }));
+  expect(result.current.ended).toBeNull();
 });
 
 test("an agent moved to another conversation opens again once its process exits", async () => {

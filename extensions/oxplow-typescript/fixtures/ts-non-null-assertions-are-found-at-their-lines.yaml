@@ -1,4 +1,4 @@
-# TypeScript: each non-null assertion gives an info fact at its line.
+# TypeScript: each non-null assertion is found; the file's fact counts them and lists their lines.
 when:
   collector: oxplow.ts.non_null_assertions
   files:
@@ -7,5 +7,4 @@ when:
     "src/b.tsx": "// @ts-expect-error\nexport const C = () => { console.warn('x'); return null; };\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.ts", "path": "src/a.ts", "line": 6, "rule": "non_null_assertion", "severity": "info", "dims": {"oxplow.language": "typescript"}}
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.ts", "path": "src/a.ts", "line": 9, "rule": "non_null_assertion", "severity": "info", "dims": {"oxplow.language": "typescript"}}
+    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/a.ts", "path": "src/a.ts", "rule": "non_null_assertion", "severity": "info", "detail": "{\"lines\":[6,9]}", "dims": {"oxplow.language": "typescript"}}

@@ -115,6 +115,23 @@ fn target_of(uri: &str) -> Result<Target, IpcError> {
     )))
 }
 
+/// Where a terminal's shell starts: its `dir` (relative to `worktree`, or
+/// absolute) when that is a directory now, else the worktree.
+pub(crate) fn terminal_cwd(worktree: &str, dir: Option<&str>) -> std::path::PathBuf {
+    let root = std::path::PathBuf::from(worktree);
+    match dir {
+        Some(d) => {
+            let at = root.join(d);
+            if at.is_dir() {
+                at
+            } else {
+                root
+            }
+        }
+        None => root,
+    }
+}
+
 /// Open a renderer-attached terminal session for `uri`: a terminal's shell
 /// or an agent session's agent CLI, run directly in a PTY. There is no
 /// terminal multiplexer: the process lives as long as the daemon,
@@ -142,7 +159,7 @@ pub async fn open_terminal_session(
                 .await?
                 .filter(|s| s.archived_at.is_none())
                 .ok_or_else(|| IpcError::invalid(format!("terminal {id}'s stream is gone")))?;
-            let cwd = std::path::PathBuf::from(&stream.worktree_path);
+            let cwd = terminal_cwd(&stream.worktree_path, row.dir.as_deref());
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
             return Ok(ctx
                 .terminal_sessions
@@ -163,6 +180,52 @@ pub async fn open_terminal_session(
         // its stream — what the person has selected doesn't matter.
         Target::AgentSession(id) => id,
     };
+    let _launch = ctx.terminal_sessions.lock_agent_launch(session_id).await;
+    open_agent_terminal(ctx, session_id, cols, rows).await
+}
+
+/// Replace a terminal process without closing the agent session or
+/// changing its conversation binding. The ordinary launch resolves the
+/// harness executable again and, for Codex, attaches to the same thread.
+pub async fn restart_agent_terminal(ctx: &RpcContext, uri: String) -> Result<(), IpcError> {
+    let Target::AgentSession(id) = target_of(&uri)? else {
+        return Err(IpcError::invalid(
+            "restart requires an agent session terminal",
+        ));
+    };
+    let terminals = &ctx.terminal_sessions;
+    let key = agent_pane_key(id);
+    let requested = terminals.session_id_for_key(&key).await;
+    let _launch = terminals.lock_agent_launch(id).await;
+    let current = terminals.session_id_for_key(&key).await;
+    if current.is_some() && current != requested {
+        // A concurrent open or restart has already started a replacement.
+        return Ok(());
+    }
+    // Nothing runs: no pane follows a replacement (an ended one shows
+    // Session ended and takes no keys), so a restart here would start an
+    // agent nobody sees. The pane's own Start Again opens it at its size.
+    let Some(pty) = current else {
+        return Err(IpcError::invalid(
+            "nothing runs in this agent terminal to restart: use Start Again in its pane",
+        ));
+    };
+    let (cols, rows) = terminals.size(&pty).await.unwrap_or((80, 24));
+    match terminals.close(&pty).await {
+        Ok(()) | Err(oxplow_app::terminal_sessions::TerminalSessionError::NotFound(_)) => {}
+        Err(err) => return Err(err.into()),
+    }
+    let result = open_agent_terminal(ctx, id, cols, rows).await;
+    terminals.report_restart(pty, result.as_ref().err().map(|err| err.message.as_str()));
+    result.map(|_| ())
+}
+
+async fn open_agent_terminal(
+    ctx: &RpcContext,
+    session_id: AgentSessionId,
+    cols: u16,
+    rows: u16,
+) -> Result<AttachResult, IpcError> {
     // Already running: nothing about how to start it matters, and a switch
     // back to its stream shouldn't wait on the database to work that out.
     if let Some(attached) = ctx
@@ -442,7 +505,27 @@ pub async fn terminate_terminal_session(
 mod tests {
     use serde_json::json;
 
-    use super::{identity_env, session_endpoints};
+    use super::{identity_env, session_endpoints, terminal_cwd};
+
+    /// A terminal opened at a directory starts there: relative to the
+    /// worktree, or absolute. One that is gone, or none, is the worktree.
+    #[test]
+    fn a_terminal_starts_in_its_directory_else_the_worktree() {
+        let wt = tempfile::tempdir().unwrap();
+        std::fs::create_dir(wt.path().join("src")).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let w = wt.path().to_str().unwrap();
+        assert_eq!(terminal_cwd(w, None), wt.path());
+        assert_eq!(terminal_cwd(w, Some("src")), wt.path().join("src"));
+        assert_eq!(
+            terminal_cwd(w, Some(other.path().to_str().unwrap())),
+            other.path()
+        );
+        assert_eq!(terminal_cwd(w, Some("gone")), wt.path());
+        // A file's own path is not a directory: the worktree.
+        std::fs::write(wt.path().join("a.txt"), "").unwrap();
+        assert_eq!(terminal_cwd(w, Some("a.txt")), wt.path());
+    }
     use crate::error::IpcError;
     use crate::test_support::services;
     use oxplow_domain::uri::build::agent_session_uri;
@@ -740,7 +823,7 @@ mod tests {
     )]
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_codex_session_resumes_its_thread_after_a_backend_restart() {
+    async fn a_codex_session_resumes_its_thread_after_terminal_and_backend_restarts() {
         // A failure shows as a failure, not a hang.
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
             use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
@@ -856,10 +939,42 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             assert_eq!(bound().await, "thr-restart");
-            let _ = ctx
-                .terminal_sessions
-                .close(first["sessionId"].as_str().unwrap())
-                .await;
+            let upgraded = bin.join("codex-next");
+            std::fs::copy(&program, &upgraded).unwrap();
+            std::fs::write(
+                &upgraded,
+                "#!/bin/sh\ntouch .restarted-with-upgrade\nexec sleep 600\n",
+            )
+            .unwrap();
+            std::fs::rename(upgraded, &program).unwrap();
+            let uri = agent_session_uri(session.id);
+            let mut events = ctx.terminal_sessions.subscribe();
+            crate::dispatch("restart_agent_terminal", json!({ "uri": uri }), &ctx)
+                .await
+                .unwrap();
+            let replacement = open(&ctx, &session.id.to_string()).await.unwrap();
+            assert_ne!(replacement["sessionId"], first["sessionId"]);
+            assert_eq!(bound().await, "thr-restart");
+            loop {
+                let event = events.recv().await.unwrap();
+                if event.session_id == first["sessionId"].as_str().unwrap()
+                    && event.message == r#"{"type":"restart"}"#
+                {
+                    break;
+                }
+            }
+            let marker = project.path().join(".restarted-with-upgrade");
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !marker.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("the replacement TUI ran the newly installed executable");
+            ctx.terminal_sessions
+                .close(replacement["sessionId"].as_str().unwrap())
+                .await
+                .unwrap();
 
             // The backend restarts: everything in memory is gone; the database,
             // the daemon and the program are not.
@@ -997,6 +1112,25 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_null(), "expected null, got {out}");
+    }
+
+    #[tokio::test]
+    async fn restart_refuses_a_session_with_nothing_running() {
+        // Nothing runs (it never started, or it exited and was
+        // unregistered): no pane follows a replacement, so a restart
+        // would start an agent nobody sees. The pane's Start Again opens it.
+        let (mut ctx, _dir) = services().await;
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await.id;
+        let uri = agent_session_uri(session);
+        let err = crate::dispatch("restart_agent_terminal", json!({ "uri": uri }), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Start Again"), "{err}");
+        let out = crate::dispatch("lookup_terminal_session", json!({ "uri": uri }), &ctx)
+            .await
+            .unwrap();
+        assert!(out.is_null(), "the refused restart spawned {out}");
     }
 
     #[tokio::test]

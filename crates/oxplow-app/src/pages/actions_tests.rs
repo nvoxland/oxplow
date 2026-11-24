@@ -130,7 +130,7 @@ async fn a_page_action_reads_the_first_loaders_row() {
 }
 
 /// An `open` page action runs nothing: pressed, it tells what URI to open
-/// (the row's column), with no audit row; a row with no URI is refused.
+/// (the row's column), with no command run record; a row with no URI is refused.
 #[tokio::test]
 async fn an_open_action_returns_the_uri_and_runs_no_command() {
     let (_dir, svc) = fixture().await;
@@ -143,7 +143,7 @@ async fn an_open_action_returns_the_uri_and_runs_no_command() {
         out.result,
         serde_json::json!({ "opened": "oxplow:oxplow/file?path=a.rs" })
     );
-    assert!(out.audit_id.is_none() && out.event_id.is_none() && out.inverse.is_none());
+    assert!(out.command_run_id.is_none() && out.event_id.is_none() && out.inverse.is_none());
     let err = run_page_action(&svc, &runs, call(&id, None, "nothing", None))
         .await
         .unwrap_err();

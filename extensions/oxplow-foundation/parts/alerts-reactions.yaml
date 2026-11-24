@@ -1,17 +1,17 @@
 title: Failed reactions
-description: "Effects that failed on an event."
+description: "Reactions whose latest attempt can be retried."
 loaders:
   alerts_reactions:
     sql: |
-      SELECT r.effect, r.event_id, coalesce(e.type, 'an event') AS event_type,
+      SELECT r.run_id, r.effect, r.event_id, coalesce(e.type, 'an event') AS event_type,
              -- The extension whose effect it is: the source chip every alert uses.
              json_object('kind', 'extension', 'label', r.effect,
                          'uri', uri('oxplow/extension', 'name', r.extension)) AS source,
              r.attempt || CASE WHEN r.retry_at IS NULL THEN '' ELSE ', tries again by itself' END AS tries,
              coalesce(r.finished_at, r.started_at) AS at,
-             r.reason
+             r.version, r.cpu_ms, r.outcome, r.error
       FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
-      WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC
+      WHERE r.latest = 1 AND r.retryable = 1 ORDER BY r.id DESC
 view:
   from: alerts_reactions
   viz: table
@@ -28,9 +28,17 @@ view:
     label: When
     format: relative
     width: 130
-  - key: reason
+    expand: oxplow/run-details
+  - key: version
+    label: Version
+  - key: cpu_ms
+    label: CPU
+    format: duration
+  - key: outcome
+    label: Outcome
+  - key: error
     label: Why
-  empty: No reaction failed.
+  empty: No reactions to retry.
   actions:
   - id: retry
     label: Retry

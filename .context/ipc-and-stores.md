@@ -25,7 +25,7 @@ command):
 | Write | Why it isn't a command |
 |---|---|
 | select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
-| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
+| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: a command run record per tab switch would flood `command_run`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
@@ -34,6 +34,13 @@ command):
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized dataset — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
+
+**Contribution runs.** The kind's store owns the shared run row and its
+detail. Use that store so the two rows begin or finish in the same
+transaction. Within oxplow-db, the kind stores use
+`contribution_run_store::begin_tx`, `finish_tx`, and `record_tx`.
+For a run without a kind ledger, such as an implementation run, use
+`contribution_run_store::record_unlogged_tx`.
 
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
 callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,
@@ -209,8 +216,9 @@ touches roughly seven files. They sit in this order:
    the command over `POST /ipc/:name`, and — via `tauri_adapters!` in
    `oxplow-tauri-ipc`'s `commands::generated` — the `#[tauri::command]`
    whose only job is to give `tauri-specta` something to derive the TS
-   binding from. **Do not hand-write adapters**; they were all deleted
-   in.
+   binding from. The standard generator takes `&Services`. Terminal
+   launch and restart also need the plugin endpoints, so their dispatch
+   rows use `ctx` and their adapters supply `RpcContext`.
 
    `cargo test -p oxplow-tauri-ipc` (`export_ts_bindings`) regenerates
    `apps/desktop/src/tauri-bridge/generated/bindings.ts`; CI fails on a
@@ -320,8 +328,8 @@ orphaned, an agent's status, `ConfigChanged` for the Settings view).
 Settings list (Extensions, Data, Capabilities, Integrations) loads each
 part on its own trigger: the catalog or config change
 (`extensionsChanged`) for extensions and their checks, entities and
-collectors; `useRerunOnChange` over the datasets the part read (`v_collector_run` for
-the collector list, `v_extension_run` for the last runs); and a dataset's
+collectors; `useRerunOnChange` over the datasets the part read (such as
+`v_collector` for the collector list); and a dataset's
 row count when that dataset's own `DatasetsChanged` names it
 (each loader re-runs on its own reads). A collector run (frequent) therefore re-lists the collectors and nothing else.
 The daemon still re-reads `project.yaml` on each extension-catalog call;
@@ -370,8 +378,7 @@ are no hand-written IPC types any more: `api-types.ts` is gone
 renderer-side view over it lives beside what builds it (the branch
 pickers' `BranchRef` / `GroupedGitRefs` / `RefOption` in
 `vcsHistory.ts`).
-Config reads (`getConfig`, the `set*` writers) return the generated
-`OxplowConfig` and the native menu is built as the generated
+The native menu is built as the generated
 `MenuGroupSnapshot`, with no casts at the boundary; a list the daemon
 always sends but the bindings mark optional (a `serde(default)` field)
 is defaulted at one reader (`generatedPaths`).
@@ -598,7 +605,7 @@ reaches the frontend as `number`:
 - **A command's argument or result** (the command table in `oxplow-rpc`):
   no attribute reaches it, so it has a type. The entity ids in `ids.rs`
   travel as `"thr1"` strings; the plain-number rows have their own
-  newtypes in `row_ids.rs` (`SnapshotId`, `FileSnapshotId`, `AuditId`,
+  newtypes in `row_ids.rs` (`SnapshotId`, `FileSnapshotId`, `CommandRunId`,
   `ProposalId`, `DeadLetterId`, `AiCallId`, `ByteSize`), serialized as the
   number. A limit or small count is `u32`.
 
@@ -720,9 +727,9 @@ The collection subsystem (`.context/collection.md`) follows the same
 
 ## Agent nudges
 
-The persisted record of the informational nudges `CollectionService`
-surfaces to the agent from the PostToolUse hook (report-less-run +
-post-tool-use advisories). A standard 7-layer instance backed by
+The persisted record of what `CollectionService` raises from the
+PostToolUse hook: the missing-report notice (`report-less-run`), which goes
+to the person in Alerts, and post-tool-use advisories, which go to the agent. A standard 7-layer instance backed by
 `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`;
 schema in [data-model.md](./data-model.md), migration `V33`).
 

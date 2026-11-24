@@ -121,7 +121,7 @@ What core publishes, by where it comes from. Each row names its datasets
 | Source | Datasets | Facts |
 |---|---|---|
 | work | `stream`, `thread`, `request`, `context_read` (tasks are the task model's datasets, `.context/tasks.md`) | cycle time, lifecycle |
-| collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
+| collectors | `collector` (declaration, standing and last run), `collector_run` (run history), `collector_checkpoint` (last successful output and latest finished run), `collector_state` / `collector_credential` (live network and credential standing) | — |
 | knowledge | the knowledge pages are bundled's `knowledge_page` (`v_oxplow_knowledge_page`) | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
@@ -177,7 +177,7 @@ Every connection registers three scalar functions for URIs
 (`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
 a canonical URI — the params sorted and escaped, a NULL value left out —
 so a dataset or page links to another page
-(`uri('oxplow/page', 'page', 'oxplow/job-run-output', 'job_run', uri)`)
+(`uri('oxplow/page', 'page', 'oxplow/job-run-output', 'uri', uri)`)
 or builds a record's URI (`uri('oxplow/request', 'id', json_extract(e.payload, '$.request'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
@@ -246,11 +246,17 @@ A published view is a **dataset**: one `SELECT` in a file, reading only
 through `ref('<dataset>')` and `source('<table>')`, compiled to a view at
 every open (`crates/oxplow-db/src/datasets.rs`, called from
 `migrate_and_compile` after the migrations). Core datasets live in
-`crates/oxplow-db/datasets/`: `<name>.sql` plus an entry in `datasets.yaml`
+`crates/oxplow-db/datasets/`: `<name>.sql` plus an entry under `datasets:` in `datasets.yaml`
 (`name`, `version`, `description`, `fields` — the contract, with each
-field's SQLite type and doc — optional `relationships`, and `tests`); the build script embeds every
-file there, and view `v_<name>` publishes it. The compiler, per owner, in
-one transaction:
+field's SQLite type and doc — optional `relationships`, and `tests`).
+Core's top-level `field_groups:` declares reusable lists of fields. A
+dataset's `groups: [contribution_run]` prepends the group's fields and docs
+to its own `fields:`. The SQL still names each column in that order. A
+field cannot appear twice, and a change to a group changes the pinned
+contract of every dataset that uses it.
+
+The build script embeds every file there, and view `v_<name>` publishes
+it. The compiler, per owner, in one transaction:
 
 - resolves `ref()` / `source()` with the tokenizer — an unknown dataset or
   table, or a non-literal argument, is an error at `file:line:col`;
@@ -900,11 +906,12 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_token_usage` | model tokens per thread / request / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [DATA_DATASET_X.md](./DATA_DATASET_X.md) "event_log"); `payload_expired_at` since V102) |
-| `v_extension_run` | one row per finished run of extension code (V48; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
-| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions-jobs.md](./extensions-jobs.md) "Jobs"): `id`, `job` (`job:<namespace>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
+| `v_contribution_run` | One row per recorded contribution run. Its `uri` is an `oxplow/contribution_run` resource. Holds identity, actor kind and id, cause, timing, outcome, cost, scopes and permission decisions. `parent_run_id` links to a recorded parent. `thread_id`, `turn_id` and `session_id` link to their datasets. Live rows have NULL `finished_at`, `outcome` and cost. Finished rows have a 90-day window by default. Successful commands with recorded input stay, and refused commands age out after 30 days. |
+| `v_command_run` | One row per recorded command run, including reads and unchanged calls. Joins command detail to the shared run. `id` is the integer detail ID. `changed` says whether the run succeeded and recorded its input, and `undone` says whether its inverse completed. The run's URI opens Run details. |
+| `v_job_run` | One row per job with `id`, `job`, `uri`, `intent_key`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested` and `queued_at`. Shared run fields describe its current attempt, including `run_id`, `outcome` and measured `ai_calls`. `rounds`, `tool_calls`, `input_tokens` and `output_tokens` follow the attempt's live output. Before the first claim, `extension` and `version` come from the job. [Jobs](./extensions-jobs.md) |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a page over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
-| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@2` event (`oxplow.ui.report_error`): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, `audit_id` (v3: the person's failed run's `v_command_audit` row) and `proposal_id` (v3: an approval's proposal), and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
+| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@3` event (`oxplow.ui.report_error`): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, `command_run_id` (the person's failed run's `v_command_run.id`) and `proposal_id` (an approval's proposal), and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
 | `v_op_error_output` | what each failed operation printed: `event_id`, `stream_id`, `stderr`, `stdout`, `truncated` — its `ui.op_failed` event's `output` body, read in SQL from `event_content`'s bytes (stored as JSON text). The one event body published to SQL: it is what the person saw on screen. Tool input and output and prompts stay behind `read_event_content` (`v_event_content` lists them without bytes). A failure with nothing captured, or whose body retention removed, has no row |
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `oxplow.delivery.retry` / `oxplow.delivery.discard` (V94) |
@@ -1045,7 +1052,7 @@ The result keeps the two apart.
   `input` fails past 10 000 rows (`collectors::MAX_INPUT_ROWS`) unless it
   declares `input: { sql, limit }`; then the script gets `limit` rows
   and `input.complete` saying whether they were all of them
-  (`collector_runner::input_rows_for_run`). The page view and Explore Data say
+  (`collector_runner::input_rows_for_run`). The page view says
   "Showing the first N rows" above a truncated result
   (`apps/desktop/src/page/completeness.ts`, `ResultCompleteness`); a
   compact strip shows nothing. Exactly the cap is allowed; SQL
@@ -1055,10 +1062,11 @@ The result keeps the two apart.
   entry per collector that declares an entity whose view the query read
   (`collection_coverage::Feeds`, restated on every catalog change):
   `{ dataset, source: "collector:<namespace>/<id>", status, at, error }`, the
-  status read at query time from `collector_run` and
-  `contribution_health` — `never` (no run), `failed` (the last run's
-  error), `disabled` (health says so, with its
-  reason), `stale` (its schedule's `next_due_at` passed) or `current`.
+  status read at query time from the latest run via `collector_checkpoint`
+  and from `contribution_health`. The status is `never` before the first run,
+  `failed` after a run that ended in error or was denied,
+  `disabled` according to its health, `stale` when its schedule's
+  `next_due_at` passed, or `current`.
   Core's own datasets carry no entry: core keeps them current. Nothing is
   inferred from timestamps alone. The page view lists each entry that
   isn't `current` with its last run and error.
@@ -1131,8 +1139,8 @@ extension's own declared event types, logged with the run (P9.D2;
   {at?, replaces?}}` and nothing else (`collected_of`; `capture` places the
   run's capture and names whose earlier captures it replaces — metrics.md
   "Placed, replacing captures"). A fact on a measure not in `facts:` or not defined is
-  dropped. Each run records one metric capture (or a failed one) plus a
-  `collector_run` row and `collector.synced@2` with its `facts` count.
+  dropped. Each run records one metric capture (or a failed one) with its
+  run, checkpoint update and `collector.synced@2` event with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,) is any enabled extension's when it reads with a bundled parser or a sandboxed script, and the
@@ -1144,15 +1152,14 @@ extension's own declared event types, logged with the run (P9.D2;
   analysis }` — when the `collection` reactor detects that kind of run and
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
-  the run (`.context/collection.md`); its run and health are any
-  collector's (`collector_run`, `collector.synced@2`, `contribution_health`), and
-  its extension's permissions apply (`process` for an exec script).
+  the run. Its run history records elapsed wall time and leaves CPU time,
+  peak memory and AI call count NULL. Its extension's permissions apply
+  (`process.run` for an exec script). [Collection](./collection.md)
 
-**Owners.** An extension (its name), always: the project's own collectors
-belong to its own extension, `project` by convention
-(`.oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
-ordinary extension name. There are no global collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
-that metrics name runs only while one of them is on.
+**Owners.** Each collector is named by `<namespace>/<id>`. In collector
+history and checkpoints, `owner` is that namespace. The shared run's
+`extension` names the declaring package. The project's own extension in
+`.oxplow/extensions/project/` uses `project` by convention.
 
 - **The project's own extension** declares its collectors in its
   `extension.yaml`, scripts under `collectors/` (relative to the extension
@@ -1189,17 +1196,28 @@ starlark/jaq; exactly one of `entities` / `facts`; `report` only with
 whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 
-**An entity collector's run** (`collector_runner::run_collector`) commits its rows, its
-`collector_run` row and its `collector.synced@2` event in **one
-transaction**; a failed run commits the failure the same way (no rows,
-the last good counts and checkpoint kept). The event's subject is
-`oxplow:oxplow/collector?collector=<namespace>/<id>` (resource `oxplow/collector`), its `trigger` is
-`manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler, as the
-system) or `on`. `collector_run` (V133, `v_collector_run`; it replaced
-V75 `ext_source_state`) keeps `owner, id, status (ok | error |
-skipped), last_run_at, error, row_counts_json, cursor_json,
-last_event_id`. The UI refreshes when `v_collector_run` changes
-(`collectorRan`); the in-memory `SourceSynced` is gone.
+**An entity collector's run** (`collector_runner::run_collector`) commits
+its rows, shared run, detail, checkpoint and `collector.synced@2` event in
+**one transaction**. It records a failure while keeping the last good
+counts and cursor. The event's subject is
+`oxplow:oxplow/collector?collector=<namespace>/<id>`. Its `trigger` is
+`manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler
+running as the system) or `on`.
+
+- `v_collector_run` exposes one row per run, with the shared run fields,
+  the collector's `owner`, `id`, `uri` and per-run `row_counts_json`.
+  `latest = 1` identifies the run named by the checkpoint. Older runs
+  whose individual counts were never recorded have NULL counts.
+- `v_collector_checkpoint` holds one row per collector that has run.
+  It exposes the latest finished `last_run_id`, the highest processed
+  `last_event_id`, the last successful `cursor_json` and the last
+  successful `row_counts_json`.
+- `v_collector` joins the declaration to the checkpoint and looks up the
+  shared run by its primary key for `last_run_at`, `last_outcome` and
+  `error`. Its row counts come from the checkpoint.
+
+Collector history ages out after `CONTRIBUTION_RUN_DAYS`. A checkpoint's
+latest finished run stays available for standing queries.
 
 **Health (P7.C2).** Collectors share the contribution failure policy
 ([extensions-activation.md](./extensions-activation.md) "Health, disable and repair"): three
@@ -1222,8 +1240,8 @@ type without a `trigger` field:
   integers, and the event itself — `:event_id` its id, `:event_seq` its
   seq; NULL when absent), and the script gets the event envelope as
   `input.event` ([extensions-events.md](./extensions-events.md) "The event envelope").
-- **Once per event.** The run's `collector_run.last_event_id` is the
-  event's seq, and its `collector.synced@2` is caused by the event with a
+- **Once per event.** `collector_checkpoint.last_event_id` tracks the
+  highest processed event seq. `collector.synced@2` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
   collector's rows, or a fact collector's capture and facts
   (`RunLog::record_with`) — so a redelivered event writes nothing,
@@ -1306,7 +1324,7 @@ entities from data already in the semantic layer:
 | Script services (`runtime::Hosts`, `TreeHost`), `facts_of`, `parse_report` | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
 | Exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
-| Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
+| Entity tables and views, run details and checkpoints | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read dataset (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | `v_collector` (standing) / `v_collector_credential`; setting a credential is `run_command oxplow.collector.set_credential`, running is `run_command oxplow.collector.sync` | `crates/oxplow-app/src/collector_runner.rs` |
 | MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |
@@ -1463,8 +1481,12 @@ oxplow-bundled change cards) only read them.
 - **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream; or `kind = 'range' AND target = :start || '..' || :end`, the two sides as params — a `start` left NULL would make the whole value NULL, so a page defaults it to `''`), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
   the `v_change` row, computing first if needed. It diffs its two
   revisions (`v_change.base_revision` → `head_revision`) through `Trees`
-  (shared with the `diff` IPC, `.context/vcs.md`), reads the
-  first 200 changed files' contents, runs `code_analysis::analyze_files`
+  (shared with the `diff` IPC, `.context/vcs.md`), reads at most 200
+  changed files' contents (`analysis_order`: the files an enabled language
+  parses first — not `generated` or `vendored` files, nor the `lockfile`
+  kind's — then the rest, each by path; `v_change.analyzed_files` of
+  `changed_files` says how many it read, and the Review's About rail shows
+  "N of M files analysed"), runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
   - files: status, +/−, `is_test` (the
     the enabled extensions' `test_conventions:` plus the project's `testing.testPaths`
@@ -1494,7 +1516,7 @@ oxplow-bundled change cards) only read them.
     a test file or has tests on either side (Rust's inline `mod tests`
     counts), test functions plus assertion calls and skip markers
     before and after (`TestConventions::count`, the enabled extensions'
-    `test_conventions:`, a heuristic across languages; `//` and `#` comment lines don't count, so commenting an
+    `test_conventions:`, a heuristic across languages; the file's language's own comments don't count, so commenting an
     assertion out lowers the count).
   - hunks (`v_change_hunk`, V54): one row per contiguous changed range of
     each analysed file (the same at most 200 files as functions; an added

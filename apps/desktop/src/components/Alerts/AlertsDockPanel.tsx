@@ -161,7 +161,7 @@ function AlertRowView({
           onToggle();
         }
       }}
-      style={{ margin: "0 -6px", borderBottom: "1px solid var(--border-subtle)", background: expanded ? "rgba(255, 255, 255, 0.025)" : "transparent" }}
+      style={{ margin: "0 -6px", borderBottom: "1px solid var(--border-subtle)", background: expanded ? "var(--button-secondary-bg-hover)" : "transparent" }}
     >
       <div
         tabIndex={0}
@@ -172,7 +172,7 @@ function AlertRowView({
         onKeyDown={keys}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", background: hover ? "rgba(255, 255, 255, 0.04)" : "transparent", cursor: "pointer", minWidth: 0 }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", background: hover ? "var(--button-secondary-bg-hover)" : "transparent", cursor: "pointer", minWidth: 0 }}
       >
         <ChevronRight size={12} aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)", transform: expanded ? "rotate(90deg)" : "none", transition: "transform 150ms ease" }} />
         <Icon size={13} aria-label={label} style={{ flexShrink: 0, color }} />

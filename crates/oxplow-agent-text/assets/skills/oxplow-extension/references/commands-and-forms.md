@@ -13,6 +13,31 @@
   command, so use it where the operation refuses some states. To offer
   another command there with a fixed input, declare your own over the
   same operation.
+- **A command on a link's Open In ▸** (a web URL, a file or a directory
+  anywhere the app shows one: the terminal, a markdown link, a page row, a
+  tab) has `group: Open In` and is about the link: `about: https` (a web
+  link, by its scheme) or `about: oxplow/file` / `oxplow/dir`. Narrow it
+  with `about: { resource, accepts: { url: <pattern> } }` (the whole URL,
+  anchored `^…$`, a class instead of `.`:
+  `"^https://github[.]com/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/pull/[0-9]+$"`) or
+  `accepts: { path: "**/*.ipynb" }` (globs over the worktree path; `*`
+  stops at `/`). It gets `{ uri }`: the URL, or the file's URI. Test it
+  with a fixture `when: { item_commands: "https://…" }` →
+  `expect: { commands: [<ids>] }`.
+- **Deciding with your own logic:** `ui.about_if: <function>` names a
+  function of the command's `entry:` script. It gets `{ uri, kind, url?,
+  path? }` for each link that passes `accepts` and returns `True` where
+  the command is offered (`def is_mine(link): return
+  link["url"].startswith("https://mine.example/")`). Each call is a script
+  run, so keep a `url` or `path` filter in front of it.
+- **Making text a link** (an issue key, a ticket number) in the terminal
+  and in markdown: a top-level `links: [{ id, pattern, uri }]`. The pattern
+  is a param pattern without `^…$` (classes, no `.`), matched as a whole
+  word; the uri is `https://…` or an oxplow URI with `{{match}}`:
+  `{ id: issue, pattern: "[A-Z]{2,10}-[0-9]+", uri:
+  "https://linear.app/acme/issue/{{match}}" }`. The link gets Open In ▸
+  and the commands about its URI. Test it: `when: { link_text: "fixes
+  PROJ-12" }` → `expect: { links: [{ text: PROJ-12, uri: "…" }] }`.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional
@@ -176,7 +201,8 @@ Fixed object fields become independent fully qualified keys, such as
 your category a title in `configuration: categories:`
 (`tasks: { title: Tasks, description: …, order: 15 }`; core's categories
 `project`, `agents`, `ai`, … are core's to declare, a field may still name one). Optional
-annotations are `x-ui`, `x-order`, `x-secret` and `x-atomic`; any other `x-`
+annotations are `x-ui`, `x-order`, `x-secret`, `x-mask` and `x-atomic`
+(`x-mask: { prefix, suffix }`, on a secret only, is how many characters, 0 to 8, of each end an agent sees); any other `x-`
 annotation is an error at `extension check`.
 `x-ui` has one hint: `x-ui: { editor: multiline }` makes a string field a text
 area. A choice comes from `enum`, or, to label each choice, from `oneOf` of

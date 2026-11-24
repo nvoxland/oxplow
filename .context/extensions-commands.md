@@ -201,17 +201,17 @@ the bus routes it.
 The bus runs what it composes ([commands.md](./commands.md) →
 "Composition"): when every call stays in oxplow's records, as children
 in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's policy and
-confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one audit row with `{ result,
+confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one command run record with `{ result,
 children }`, the children's events caused by the run, the reversed
 children as its undo; when one leaves it (`task.*` on another
 provider's item, `oxplow.extension_store.write`, `oxplow.extension_files.write`,
 a provider call), as **steps** — all checked first, then run in
-order, each landing as it runs, stopping at the first failure, one audit
+order, each landing as it runs, stopping at the first failure, one command run
 row, no undo of their own. **`inverse`:** a script may return `"inverse":
 { "commands": [{ name, input }, …] }` beside `commands`; for a steps run
-the bus keeps it as the run's undo (the audit row's inverse, the same Undo
+the bus keeps it as the run's undo (the command run record's inverse, the same Undo
 as a built-in command's), and the undo runs it through the bus with its own
-policy, confirmation and audit. It names *commands*: to take back a store
+policy, confirmation and command run record. It names *commands*: to take back a store
 write, name the extension's own command that makes the opposite write
 (`shelf_db.book.add` for `shelf_db.book.remove`), not
 `oxplow.extension_store.write`, which runs only for the composing script. A
@@ -518,7 +518,7 @@ advisories:
 ```
 
 - **Triggers.** `post-tool-use` runs on each `agent.tool.finished`
-  (`advisories.post_tool`), `prompt` on each prompt the person sends, and
+  (`advisories.post_tool` or `advisories.post_tool.immediate`), `prompt` on each prompt the person sends, and
   `turn-end` on each `thread.checkpoint` (`advisories.turn_end`): evaluated when the turn ends, heard when the agent
   next hears from oxplow. A turn's end is the one point every harness
   reaches, blocked or not.
@@ -541,6 +541,12 @@ advisories:
   the person dismisses one (`oxplow.hint.dismiss`, the row's right-click)
   or all (`oxplow.hint.dismiss_all`, Clear notices on the page and the
   dock panel's Clear).
+- **Eligibility and ordering.** `when: { config: /tasks/workflow, in: [agent_tracks] }`
+  uses the extension's effective settings to decide whether an advisory runs.
+  Post-tool advisories keep collection-before-advisory ordering by default.
+  An advisory that reads no results from the current tool run can declare
+  `after_collection: false` and run after tool-call projection. Oxtask uses
+  both declarations for `untracked-work`.
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<namespace>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call
@@ -573,13 +579,9 @@ advisories:
 - oxtask ships one hint: `untracked-work` (post-tool-use,
   `once_per: request`, while the task model has a live store: the request has
   a recorded edit and no linked task, and the thread has no task in
-  progress; the `track-work` skill says what to do). The earlier
-  outcome hints (`large-uncommitted`, `landed-in-progress`, the two
-  shared-files hints (requests on different threads changed one file
-  within `sharedFiles.windowMinutes`; see work-tracking.md "Cross-thread
-  ownership"), `metric-deltas`, `threshold-crossed`) are in the
-  parked `oxplow-bundled-todo` project extension (see
-  [metrics.md](./metrics.md) for the metric ones). **Bundled advisories set no coding
+  progress; the `track-work` skill says what to do). Shared Work shows
+  overlapping edits and Agent Interface shows advisory effectiveness.
+  **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never
   how a project should code — no coverage target, no "add tests" — and
   a project that wants one writes its own advisory (the `coverage-target`
@@ -841,8 +843,8 @@ tool: open_work              # offered as <namespace>_open_work
   `oxplow.extension.deploy { name }` (extensions-deploy.md "Sources and deployments"); the
   authoring tools read the source, so the agent checks its work first.
 - **No scaffold tools (decided).** A scaffold tool would write project
-  files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
-  Save as Page in Explore Data. The same rule holds for metrics:
+  files outside the write guard and the caller's worktree. The skill carries the templates instead, and people can
+  save a shown view or a table presentation with Save as Page. The same rule holds for metrics:
   the `oxplow.metric.scaffold` command returns the metric extension's files for
   the agent to write itself.
 - `oxplow_validate_extension(name)` returns load errors, schema errors and a dry

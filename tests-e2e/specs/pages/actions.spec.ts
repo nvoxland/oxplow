@@ -32,7 +32,7 @@ commands:
 // an extension can't compose one: this one notes the wallaby as a bookmark.
 const handler = `def transform(x):
     stream = scope("sql.read", {"sql": "SELECT 'str' || id AS stream FROM v_stream LIMIT 1", "params": {}})[0]["stream"]
-    return {"commands": [{"name": "oxplow.bookmark.set", "input": {"uri": "oxplow:oxplow/file?path=wallabies%2F" + x["input"]["label"], "page_kind": "file", "label": "Wallaby " + x["input"]["label"], "scope": "stream", "stream": stream}}]}
+    return {"commands": [{"name": "oxplow.bookmark.set", "input": {"uri": "oxplow:oxplow/file?path=wallabies%2F" + x["input"]["label"], "page_kind": "file", "label": "Wallaby " + x["input"]["label"], "visibility_scope": "stream", "stream": stream}}]}
 `;
 
 const pageYaml = `title: Action Wallaby

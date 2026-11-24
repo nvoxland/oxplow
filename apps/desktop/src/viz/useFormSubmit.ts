@@ -46,7 +46,7 @@ export function useFormSubmit(
       setServerErrors(undefined);
       // A run that came back undoable offers its Undo, as a pressed action's
       // does (the person's click on Undo is their confirmation of it).
-      const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
+      const commandRunId = outcome.inverse && outcome.command_run_id != null ? outcome.command_run_id : null;
       showToast({
         message: ranMessage(label, outcome.result),
         ...(resultUri(outcome.result) === null
@@ -60,12 +60,12 @@ export function useFormSubmit(
                 },
               },
             }),
-        ...(auditId === null
+        ...(commandRunId === null
           ? {}
           : {
               onUndo: () =>
                 void runner
-                  .run(`Undo ${label}`, () => undoCommand(auditId, true))
+                  .run(`Undo ${label}`, () => undoCommand(commandRunId, true))
                   .then((r) => (r.ok ? showToast({ message: undoneMessage(label, outcome.result) }) : undefined)),
             }),
       });

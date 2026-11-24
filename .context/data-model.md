@@ -5,39 +5,47 @@ What this doc covers: the SQLite tables, their store classes, and the
 assignment queues. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
-## Extension jobs
+## Job runs
 
 What a job is and how it runs: [extensions-jobs.md](./extensions-jobs.md) "Jobs".
-The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
-`oxplow-db/src/extension_job_store.rs`. Tables (V52, V56):
+The lifecycle is pure in `oxplow-domain/src/job_run.rs`; the store is
+`oxplow-db/src/job_run_store.rs`. V67 links each attempt to its
+shared contribution run. V69 gives the five tables their `job_run` names.
 
-- **`extension_job`** — one row per job: owner (`contribution_id`, package
-  version, generation, contract version), operation, invoker, the run that
-  asked (`run_id`), `intent_key` (`UNIQUE (contribution_id, intent_key)`:
+- **`job_run`** — one row per enqueued job: owner (`contribution_id`, package
+  version, deployment hash, contract version), operation, invoker, the run that
+  asked (`queued_by_run_id`), `intent_key` (`UNIQUE (contribution_id, intent_key)`:
   one intent is one job), replay policy, `state` (`queued`, `running`,
   `succeeded`, `failed`, `cancelled`, `interrupted`), `attempt` and `fence`,
   the lease, the first cancellation request, `revision` and the private
   `request_json` (≤ 1 MiB). Every transition is a revision CAS
   (`transition_tx`); triggers keep identity, the request and the first
   cancellation time immutable, and an ended row frozen.
-- **`extension_job_context`** — the job's immutable provenance (the asking
+- **`job_run_context`** — the job's immutable provenance (the asking
   actor, anchors, subjects, cause), written with the intent; a dispatch
   without it doesn't run. No grant or credential is in it.
-- **`extension_job_attempt`** — one row per attempt, its odd fence kept
+- **`job_run_attempt`** — one row per attempt, its odd fence kept
   after recovery; closed once (succeeded, failed, cancelled with stop
-  evidence, interrupted) with its result (≤ 1 MiB).
-- **`extension_job_output`** (V56) — what an attempt produced as it ran,
+  evidence, interrupted) with its result (≤ 1 MiB). Its unique `run_id`
+  references the shared run with a delete cascade. The claim begins the
+  run in the same transaction as the fence update. The dispatcher
+  rechecks authority before executing under that identity. Completion
+  closes the run with the attempt and records measured usage. Lease
+  recovery closes the shared run as `interrupted` and leaves CPU,
+  memory and model costs unknown.
+- **`job_run_output`** (V56) — what an attempt produced as it ran,
   `(job_id, attempt, seq)`: `kind` `text` | `tool_call` | `tool_result` |
   `usage`, `content_json` (≤ 256 KiB). Append-only; a trigger refuses rows
   for an attempt that isn't open, so a worker that lost its attempt writes
   nothing. Written by `append_output` in short transactions of its own.
-- **`extension_job_observation`** — late-outcome evidence: a worker that
+- **`job_run_observation`** — late-outcome evidence: a worker that
   finished after its attempt was fenced off records what it had here, never
   on the job.
 
-Published as **`v_job_run`** (no request, no result: state, attempt, the current
-attempt's model rounds, tool calls and tokens) and **`v_job_run_output`**. A
-job's request and result are read only through its extension's
+**`v_job_run`** publishes the job's state and current attempt's shared
+run, with live rounds, tool calls and tokens from **`v_job_run_output`**.
+The queued job gets its package and version from its declaration and
+persisted version. A job's request and result are read through its extension's
 `jobs.read/snapshot`. The writers are on the thin-caller clippy deny lists:
 jobs change through their commands and the dispatcher.
 
@@ -600,14 +608,16 @@ Work handed from one thread to another (the `handoff` table,
 do the useful part, and handoffs were used once. V51 dropped the table
 with its `page_ref` edges, its `oxplow/handoff` search rows, its
 `handoff.sent` and `handoff.settled` events and the `oxplow.handoff.*`
-audit rows. `v_handoff` and `v_search_handoff` went with it, and so did
+command run records. `v_handoff` and `v_search_handoff` went with it, and so did
 the `hnd` id kind.
 
 ### `terminal` (`terminal_store.rs`, V106)
 
 A stream's terminals, one row per shell: `stream_id` (`ON DELETE CASCADE`;
 an archive deletes the rows itself and ends the shells), `title`, `position`
-(dense order within the stream) and `created_at`. Written only by the
+(dense order within the stream), `created_at` and `dir` (V80: where its
+shell starts, relative to the worktree or absolute; NULL is the worktree).
+Written only by the
 `oxplow.terminal.*` commands through the store's `_tx` cores (`open_tx`
 titles "Terminal N" — one past the highest numbered title, never below the
 count — `rename_tx`, `delete_tx`); read as `v_terminal` (with its `uri`,
@@ -625,15 +635,16 @@ them. **V25** dropped their data: the `effort`, `effort_file`,
 `effort_metric_delta`, `effort_observation_row` and
 `effort_evidence_state` tables; every `effort_id` column
 (`agent_nudge`, `agent_token_usage`, `agent_tool_call`, `metric_capture`,
-`once_mark`, `snapshot_op`, `event_log`, `extension_run`; the tables with
-a foreign key rebuilt, every token row and capture kept); the effort
+`once_mark`, `snapshot_op`, `event_log` and the old run table, now replaced
+by `contribution_run`; the tables with a foreign key rebuilt, every token
+row and capture kept); the effort
 events, their measures, specs and the effort producers' captures; the
 `effort` change kind; the effort-projected `page_ref` edges and search
 entries; the `effort_policy` capability rows; and an effort-only once
 mark. A take an effort asked for (`effort_start` / `effort_end`) stays,
 as `manual`, in `snapshot_op` and its `snapshot.taken` payload. A nudge
 whose cause only an effort told apart keeps its row without its cause.
-`extension_job_context` drops `anchors.effort_id` from stored contexts.
+`job_run_context` drops `anchors.effort_id` from stored contexts.
 On a copy of a real database (2.1 GB, 150k captures, 1.9M facts, 340k
 events) it ran in 12 s.
 
@@ -808,7 +819,7 @@ at all apart by the text oxplow had written into `answer`, cleared that
 text, and rewrote `agent.turn.ended@3` rows to `@4` (an expired payload
 only its version). The new enum-like columns of V2–V7 carry no CHECK:
 Rust owns their values, and a CHECK could only grow by rebuilding the
-table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_turn.request_id`, set when the turn opens. **Messages between sessions** (V15, `agent_message`: the sending turn, recipient, text hash, the turn it was matched to on receipt, and V27's `notify_when_idle` ask with the `idle_notice_turn_id` of the notice that answered it). **A call's files** (V18, `agent_tool_call_path`: every file a call names, `named`, or its harness reports, `reported`; backfilled from the finishes' payloads), with an index on `file_snapshot(stream_id, captured_at)`. **A turn's files** (V21, `turn_file`: turn, path, stream, first/last change, `timed`, `shared`), written by the `snapshot_op_turn_file` trigger when a take is logged and backfilled once; `v_turn_file` adds the claim and confidence. **A request as a change** (V19 widened `change.kind`). **A commit's requests** (V20, `commit_request`: per (commit, path, request) with its basis and `sole`/`shared` confidence; `file_snapshot.git_oid` is a captured file's git blob id, so a commit's content is matched without reading bytes). **A request's analysis** (V22, `request_analysis` per (request, stream) with its span and input signature, `request_metric_delta`, `request_observation`; collection.md "A request's analysis"). **Pacing per request** (V24: `once_mark.request_id`, `agent_nudge.request_id`). **The question it ended on** (V10, `question`) is set in the close transaction. `agent_turn` open/close log
+table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_turn.request_id`, set when the turn opens. **Messages between sessions** (V15, `agent_message`: the sending turn, recipient, text hash, the turn it was matched to on receipt, and V27's `notify_when_idle` ask with the `idle_notice_turn_id` of the notice that answered it). **A call's files** (V18, `agent_tool_call_path`: every file a call names, `named`, or its harness reports, `reported`; backfilled from the finishes' payloads), with an index on `file_snapshot(stream_id, captured_at)`. **A turn's files** (V21, `turn_file`: turn, path, stream, first/last change, `timed`, `shared`), written by the `snapshot_op_turn_file` trigger when a take is logged and backfilled once; `v_turn_file` adds the claim and confidence. **A request as a change** (V19 widened `change.kind`). **A commit's requests** (V20, `commit_request`: per (commit, path, request) with its basis and `sole`/`shared` confidence; `file_snapshot.git_oid` is a captured file's git blob id, so a commit's content is matched without reading bytes). **A request's analysis** (V22, `request_analysis` per (request, stream) with its span and input signature, `request_metric_delta`, `request_observation`; collection.md "A request's analysis"). **Pacing per request** (V24: `once_mark.request_id`, `agent_nudge.request_id`). (V10's `question`, the question a turn's final message ended on, was dropped in V77: a reply's wording no longer says the thread waits.) `agent_turn` open/close log
 `agent.turn.started@3` / `agent.turn.ended@5` in the same transaction as
 the row change; **background jobs** (V7, `agent_job`) are written beside
 them by the hook ingest ([agent-model.md](./agent-model.md) "Background
@@ -1239,7 +1250,7 @@ own initial-scan paths and don't need separate backfill. Efforts were
 removed (2026-11-10), and their slice of the graph (touched files, summary
 refs, declared impacts) went with them.
 
-### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_audit` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
+### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_run` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
 
 The event log, built in P1.4. **State tables hold current truth; the log
 records activity and state changes**, and it is written in the *same
@@ -1267,6 +1278,11 @@ producer's second `append_tx` fails with `Constraint` and writes nothing;
 NOTHING` and reports whether it landed, so a concurrent twin is skipped by
 the insert itself rather than a check before it).
 `seq` (AUTOINCREMENT) is the delivery order; `id` is the public identity.
+V73 initializes the immediate post-tool advisory consumer from the existing
+post-tool advisory checkpoint. On upgrade, the new consumer starts at the
+same position in the log and can process the outstanding events.
+The existing consumer remains the completion barrier for both groups of
+post-tool advisories for extensions that declare it in `after:`.
 
 These are the schema's first **STRICT** tables; every later spine table
 is STRICT too.
@@ -1343,11 +1359,10 @@ sweep deletes a body after its namespace's window and the event stays. It is sep
 retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
-and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
-ten minutes after boot, then daily; it also deletes refused runs'
-`command_audit` rows — `invalid` / `denied`, which nothing points at —
-older than `REFUSED_AUDIT_DAYS` (30), through the partial index
-`command_audit_refused` (V33), [commands.md](./commands.md) "Retention"; batches of 5,000 rows per transaction
+and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11).
+It runs ten minutes after boot and then daily. The same sweep applies the
+run retention rules described below.
+The event payload sweep works in batches of 5,000 rows per transaction
 through the partial index `event_log_live_payload (type, at) WHERE
 payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
 can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
@@ -1443,14 +1458,15 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
 | `thread.checkpoint` | async | `snapshot.taken` (`turn_end`) | logs `thread.checkpoint` (changed since the turn began, writing tool count) | `Services::new` |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
-| `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
+| `advisories.post_tool` | async | `agent.tool.finished` | post-tool advisories that follow collection, persisted as nudges | boot |
+| `advisories.post_tool.immediate` | async | `agent.tool.finished` | post-tool advisories that need only the tool projection, persisted as nudges | boot |
 | `advisories.turn_end` | async | `thread.checkpoint` | turn-end advisories (hints) for the request holding the turn's end, persisted as undelivered nudges for the next prompt | `Services::new` |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_datasets.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and the requests' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
-| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced the metrics bus `SnapshotTaken` arm) | boot.rs |
+| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector once per event (`collector_checkpoint.last_event_id`). Entity collectors write rows and fact collectors use the fact engine. On `snapshot.taken`, delta collectors run when the snapshot recorded files and whole-tree collectors run on every take. Other events use the stream's latest snapshot. The transaction also records the run and logs `collector.synced@2`. | boot.rs |
 
 **Async consumers (P2.6.2).** `trait AsyncEventConsumer { name,
 after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
@@ -1499,18 +1515,19 @@ the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 
-`command_audit` (who ran which command, the input, outcome, the undo as
-`inverse_json`, `undone_by`, `scopes_json` — V27, named so in V34: the scopes the run called and how often,
-NULL for none — `session_id`, V40: the agent session that ran it, NULL
-for anyone else; `via`, which named what an actor acted through, was
-dropped in V50 with the Assistant, its only writer) is written by the command bus through
-`command_audit_store::insert_tx` / `set_event_id_tx` / `mark_undone_tx`
-inside the run's transaction; `SqliteCommandAuditStore` reads it. See
-[commands.md](./commands.md). V147 rebuilt it (an `effect` actor kind in
-the CHECK) with `INSERT … SELECT` into the new AUTOINCREMENT table, which
-set `sqlite_sequence` to `max(id)` — any higher high-water mark was lost.
-Harmless while nothing deletes audit rows; a future rebuild that must
-keep it copies the old `sqlite_sequence` row too.
+`command_run` is the command detail table named by V68. Its unique,
+required `run_id` names a `contribution_run`. It keeps the integer
+`id`, the command's name, `input_json`, `result_json`, `event_id`,
+`inverse_json` and `undone_by`. Reads and no-ops leave the payload and
+inverse columns NULL. The bus writes the run and its details through
+`command_run_store::insert_tx`, then links an event or undo when there
+is one. A nested write's details land with its transaction. A rolled-back
+child keeps its outcome and its own error without payloads or an inverse.
+Successful writes cancelled by the parent transaction carry the rollback reason.
+`SqliteCommandRunStore` joins the run for the common fields, and
+`v_command_run` publishes them. V64 preserves existing audit IDs and the
+old AUTOINCREMENT high-water mark before backfilling detail rows.
+See [commands.md](./commands.md).
 
 **Event cores.** A store core that logs an event in its own transaction
 (`open_turn_tx` and `close_turn_tx` log `agent.turn.started@3` and
@@ -1798,18 +1815,28 @@ already-recorded usage. No FK (the transcript outlives any single row).
 
 Store methods: `record`, `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
 reads `v_token_usage` through pages (bundled's `task-tokens`,
-foundation's `thread-activity`, the holder's `usage`), which re-run on `DatasetsChanged`.
+foundation's `thread-activity`, bundled's `usage`), which re-run on `DatasetsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
-V126 (P6.G1). The person's left-nav layout in this project: one row per
-panel they've placed (`panel` — a core id like `core:bookmarks` or
-`ext:<namespace>/<id>` — `position`, `hidden`, `collapsed`). Local state,
-never the repo. `get` returns the placements in order; `set` replaces
-them all in one transaction. A panel the table doesn't name shows
-expanded after the ones it does, and a named panel that no longer exists
-is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
-RPCs `get_panel_layout` / `set_panel_layout`.
+V126 (P6.G1), in three lists since V79: the person's left-nav layout in
+this project. A row is a panel (`ext:<namespace>/<id>`) at a
+`visibility_scope` — `thread` (`thread_id`), `stream` (`stream_id`) or
+`project` (neither), FKs cascading as bookmarks' — with its `position` in
+that list, `collapsed`, and `hidden` (a project row only). A viewer — a
+thread and its stream — sees its thread's list, then its stream's, then
+the project's (`ScopedPanelLayout`). The store keeps two rules on every
+`set`: **each panel once per viewer** (a set that shows one twice is
+refused; shown in the project's list it leaves every other list, in a
+stream's it leaves that stream's threads' lists), and **the project list
+names every panel placed** (one in a thread's or stream's list keeps a
+hidden project row, so it isn't new for another viewer). So one panel can
+be in threads A and C of stream X and in stream Y's list, and nowhere for
+stream Z. A panel no list names shows expanded at the end of the
+project's, and a named panel that no longer exists is dropped
+(`components/Panels/panelLayout.ts` `resolveLayout`). Local state, never
+the repo. UI-only RPCs `get_panel_layout` / `set_panel_layout { stream_id?,
+thread_id? }` (a thread's stream is its own, `viewer_tx`).
 
 ### `ui_preference` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
 
@@ -1827,20 +1854,22 @@ value_json | null }`; agents read `v_ui_preference`.
 
 ### `bookmark` — `bookmark_store` (`crates/oxplow-db/src/bookmark_store.rs`)
 
-V4. The pages the person starred, each at one scope: `thread`
+V4. The pages the person starred, each at one visibility scope
+(`visibility_scope`, V78; the `VisibilityScope` of
+`crates/oxplow-db/src/visibility_scope.rs`, with its `Viewer`): `thread`
 (`thread_id`), `stream` (`stream_id`) or `project` (neither — the old
 localStorage "global" scope; every ref is this project's anyway). A
 viewer — a thread and its stream — sees its thread's, its stream's and
 the project's, and a ref is bookmarked at most once across those:
-`set_tx` takes it out of every scope the viewer sees before inserting, so
-bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
+`set_tx` takes it out of every visibility scope the viewer sees before
+inserting, so bookmarking at another one moves it. Read through `v_bookmark` (the UI's
 `tabs/bookmarks.ts`, a page, the agent); every write is `oxplow.bookmark.set` /
 `oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither pages nor the
 agent could see them; those weren't carried over.
 
 ### `context_item`, `context_basket` — `context_store` (`crates/oxplow-db/src/context_store.rs`)
 
-V47 (rebuilt from V107's `thread_context_item`, keeping what still
+V47 (rebuilt from the baseline's `thread_context_item`, keeping what still
 waited). What the person collected for agents while exploring, each item
 in one basket: a thread's own (`thread_id`, shown as "This Thread") or a
 named basket (`basket_id`; a CHECK keeps exactly one). `kind` is `page`
@@ -1851,8 +1880,13 @@ whose source has no lines to read back (a terminal's scrollback).
 `stream_id` is the stream it was collected in, so a file it names is read
 in that worktree when it is delivered in another stream.
 
+`held_at` (V74) marks an item Put Back returned to the thread's own
+basket: the next prompt skips it until Send Next on This Thread clears it
+(`release_held_tx`; `hold_tx` sets it again for undo; a move drops it).
+
 `context_basket` holds the named baskets: `name` (unique, NOCASE; never
-"This Thread"), and `next_thread_id` (V48), the thread whose next prompt
+"This Thread", never starting with `@`, the app's marks for This Thread and
+a new basket), and `next_thread_id` (V48), the thread whose next prompt
 carries it instead of the thread's own (Send Next; a unique partial index
 keeps one per thread, a basket is next for one thread at a time; SET NULL
 when the thread goes). They belong to the project, across every stream.
@@ -1864,7 +1898,8 @@ the thread sends its own again
 (`agent-model.md` "The context basket"): there is no delivered history.
 `context_sent_item` (V49) is each thread's **last send**: a copy of what it
 carried (`basket_name`, NULL for the thread's own, and the item's fields),
-replaced by the next send, gone once put back (`put_back_tx`; read through
+replaced by the next send, gone once put back (`put_back_tx`, which keeps
+each item's first `added_at`; read through
 `v_context_sent`, one row per thread). Read through `v_context_item` and
 `v_context_basket`; every write is an `oxplow.context.*` command
 (commands.md).
@@ -1899,72 +1934,106 @@ one fails and deleted in the transaction of the next success; `v_asset`
 (v3) joins it, so an asset that never succeeded is listed too. See [semantic-layer.md](./semantic-layer.md)
 "Assets".
 
-### `collector_run` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)
+### `collector_run` and `collector_checkpoint` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)
 
-V133 (P7.B3; replaced V75 `ext_source_state`, its rows copied). Each
-collector's last run: `owner` + `id` (the primary key; the owner is the
-declaring extension, the project's own among them), `status` (`ok` / `error` /
-`skipped` — the loop guard refused its run for an
-event, V154 rebuilt the table for the CHECK), `last_run_at`, `error`, `row_counts_json` (rows per
-entity after the last good run), `cursor_json` (its opaque checkpoint)
-and `last_event_id` (the last trigger event it ran for; it never moves
-back). A failed run keeps the last good counts and cursor.
-`record_run_in` runs in the transaction that writes the run's rows and
-logs its `collector.synced@2`. Read as `v_collector_run`; see
+V65 moves each collector's saved state into `collector_checkpoint` and
+gives `collector_run` one row per run. A detail row has `run_id` (the
+primary key and a cascading reference to `contribution_run`), `owner`
+(the collector's namespace), `id`, and `row_counts_json` for that run.
+The migration leaves older per-run counts NULL where they were never
+recorded and creates a shared run for a checkpoint that lacks its last
+run.
+
+`collector_checkpoint` is keyed by `(owner, id)`. It stores the opaque
+`cursor_json`, the highest processed trigger sequence in `last_event_id`,
+the newest finished run in `last_run_id`, and the last successful run's
+`row_counts_json`. A failed run advances the last-run pointer and keeps
+the last good counts and cursor. `record_run_in` writes the shared run,
+detail and checkpoint together. The entity runner includes those writes
+in the transaction for the collector's output and `collector.synced@2`.
+
+Read history as `v_collector_run`, checkpoint state as
+`v_collector_checkpoint`, and standing as `v_collector`. The history
+view marks the run named by the checkpoint with `latest = 1`. See
 [semantic-layer.md](./semantic-layer.md) "Collectors".
 
 ### `effect_run` — `crates/oxplow-db/src/effect_run_store.rs`
 
-V149 (P8.D10), rebuilt by V156 (P9.D4). Each **attempt** at an
-extension effect's reaction to an event: `effect` (`<namespace>/<id>`),
-`event_id` / `event_seq`, `attempt` (from 1), `origin` (`live` — the
-event's delivery; `retry` — a person's `oxplow.effect.retry`; `backfill`),
-`state` (`started` / `ok` / `skipped` / `proposed` / `failed`), `reason`,
-`audit_id`, `proposal_id`, `started_at`, `finished_at`. `UNIQUE (effect,
-event_id, attempt)`: an attempt is made once, and the reaction's state is
-its latest attempt's (`latest_tx`; `v_effect_run.latest`). The command
-bus writes an attempt's row in its run's transaction, or claims it
-`started` first when a step runs outside it (`claim_tx` / `finish_tx`).
-See [extensions-events.md](./extensions-events.md) "Effects".
+V66 gives each **attempt** at an effect's reaction a shared run.
+`effect_run` keeps its integer `id`, `effect` (`<namespace>/<id>`),
+`event_id`, `event_seq`, `attempt` (from 1), `origin` (`live`, `retry`,
+`backfill` or `auto`), `command_run_id`, `proposal_id`, `retry_at` and
+`resend_json`. The unique key `(effect, event_id, attempt)` prevents an
+attempt from landing twice. The highest attempt number describes the
+reaction's current state (`latest_tx` and `v_effect_run.latest`).
+`v_effect_run.retryable` identifies attempts that ended failed, denied,
+cancelled, invalid or interrupted and have no proposal, of an effect an
+enabled extension declares and that isn't disabled (v7; Retry all reads it).
 
-### `extension_run` — `crates/oxplow-db/src/extension_run_store.rs`
+`effect_run.run_id` uniquely references `contribution_run` with a delete
+cascade. A claimed attempt begins the shared row in the claim transaction.
+A transaction that finishes the attempt also finishes the shared row.
+A live attempt has NULL `outcome`. Its recovery ends it as `interrupted`.
+An attempt that asked for confirmation records `skipped` and its proposal
+ID. [Effect delivery and retry](./extensions-events.md)
 
-V48. One row per finished run of extension code (`oxplow_domain::run`,
-[extensions-permissions.md](./extensions-permissions.md) "The run context"): `run_id` (a
-UUIDv7), `parent_run_id`, `extension`, `contribution`
-(its URI, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=request_review/review`), `kind`, `version`, `generation`, `actor_kind` /
-`actor`, the anchors (`stream_id`, `thread_id`, `turn_id`,
-`agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
-`mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /
-`failed` / `denied` / `cancelled` / `stale`), `error`, `wall_ms`,
-`cpu_ms` (its scripts' CPU, summed), `peak_bytes` (the most one of its
-scripts held), `ai_calls`, `scopes_json`, `decisions_json`. STRICT.
+### `contribution_run` — `crates/oxplow-db/src/contribution_run_store.rs`
 
-- **Written once, by the host that ran it**, in the transaction its own
-  record lands in: a collector's with its `collector_run` row, a fact
-  collector's with its capture, a command's (an extension's `commands:`
-  entry, or a policy's call) with its audit row (`record_tx` /
-  `audit_only`); an effect's by the bus with its run, or by the effect
-  host when its script skipped or failed before the bus. `INSERT OR
-  REPLACE`: a host that learns the final outcome later rewrites it.
-- **Core's own work writes nothing**: `record_tx` is a no-op for a run
-  with no contribution.
-- **What it never holds:** an input, a result, a credential's value, a
-  prompt. What a run read or was answered stays where it already is
-  (`command_audit`, `event_content`). A program's own words in an `error`
-  have the credentials the run was handed replaced by `[redacted]`.
-- **`generation` is NULL for a run that holds none:** a collector's, an
-  effect's and a job's run belongs to its extension's `version` (its live
-  check rechecks that at each host call and at publication), so only a
-  command's run, which pins a generation, records one. A run stopped by a
-  person, or because its extension changed or was disabled, is `cancelled`
-  and says nothing of the contribution's health.
-- **Linked from the records that already existed:** `command_audit`,
-  `effect_run`, `collector_run` and `ai_call` each gained `run_id`
-  (V48). A person's `oxplow.collector.sync` run is the collector run's
-  `parent_run_id`.
-- **Swept** on the collector window (`EXTENSION_RUN_DAYS`, 90 days) by
-  `event_retention::sweep`, in its 5,000-row batches.
+The shared record for a run of contribution code
+(`oxplow_domain::run`, [The run context](./extensions-permissions.md)).
+It holds the fields common to every run. The command, collector and
+effect detail tables reference it directly. A job references it from each
+attempt so retries have their own timing, costs and outcome.
+
+- **Identity and cause.** `run_id` is a UUIDv7. `contribution` is the
+  contribution's URI. The row records its `kind`, `extension`, `version`
+  and `generation` when pinned. `actor_kind` and `actor_id` identify who
+  ran it. `stream_id`, `thread_id`, `turn_id`, `session_id` and
+  `snapshot_id` are integer anchors. `cause_event_id` identifies the
+  causing event (indexed with `contribution`: a change's review check reads
+  the run its analysis event caused), and `mode` says how the run executes.
+- **Parent.** `parent_run_id` is set only if the parent's row exists.
+  Deleting the parent clears the link. A run without a contribution
+  still writes no shared row.
+- **Lifecycle.** Commands and collectors use `record_tx` to begin and end
+  in one transaction. A run that spans transactions can use `begin_tx`
+  and `finish_tx`. A live row has NULL `finished_at`, `outcome` and cost.
+  The store refuses a second finish. Startup recovery ends stray live
+  rows as `interrupted` with unknown cost. The effect and job ledgers
+  recover their claims through their delivery and lease rules.
+- **End and cost.** `started_at` and `finished_at` are RFC 3339.
+  `outcome` is `ok`, `skipped`, `failed`, `denied`, `cancelled`,
+  `invalid` or `interrupted`. The row records `error`, `wall_ms`,
+  summed script `cpu_ms`, maximum script `peak_bytes`, `ai_calls`,
+  `scopes_json` and `decisions_json`. Inputs, results, credential values
+  and prompts stay outside this table. Program errors redact any
+  credentials the run received.
+- **Readers.** `v_contribution_run` publishes the shared fields, with
+  `scopes` and `decisions` for the two JSON columns, and the run's URI.
+  `command_run.run_id`, `collector_run.run_id` and `effect_run.run_id`
+  name their shared runs. `job_run_attempt.run_id` names the
+  attempt's run. `ai_call.run_id` names the run behind a call when one is
+  known. The run's model-call count increments when the provider is invoked.
+  A cached result keeps its original call link and adds no new call.
+- **Retention.** `event_retention::sweep` applies all run retention rules
+  in one sweep, in batches of 5,000. It sweeps finished runs only.
+  Deleting a run also deletes its detail row through the foreign key.
+  - Refused commands (`invalid` or `denied`) age out after 30 days
+    (`REFUSED_COMMAND_RUN_DAYS`). Other runs age out after 90 days, with
+    successful commands that recorded input kept for undo.
+  - Collector runs age out after 90 days. The run named by
+    `collector_checkpoint.last_run_id` stays for as long as the checkpoint
+    points to it.
+  - Effect attempts and their runs stay to prevent delivery or backfill
+    from repeating a reaction.
+  - Job attempts and their runs stay while the job exists.
+  - Runs without a kind ledger follow the 90-day window
+    (`CONTRIBUTION_RUN_DAYS`).
+
+  The indexed batch selection took 0.2 ms on 66,535 copied project runs
+  at the current cutoffs and 2.4 ms to select a full batch with cutoffs
+  advanced 120 days. These measurements cover selection; the current
+  indexes are sufficient for this history size.
 
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 
@@ -2013,23 +2082,23 @@ kept until a person decides: the command and input, who proposed it
 (`actor_kind`, `actor_id`, `thread_id`, `stream_id`), the confirmation
 `preview_json`, `dry_run_json` (what it would have done when proposed;
 NULL when it can't be dry-run), and `decision` — `pending`, `approved`
-(with the approving run's `audit_id`), `declined` or `superseded`.
+(with the approving run's `command_run_id`), `declined` or `superseded`.
 `proposal_key(command, input)` is `config:<key>` for `oxplow.config.set` /
 `oxplow.config.unset`, else the command and its input with keys sorted;
 `insert_tx` marks pending rows with the same key `superseded` (with
 `superseded_by`) and returns which (`Inserted { id, superseded }`, for
-`command.proposed@3.supersedes`). `approve_tx` / `decline_tx` decide a
+`command.proposed@4.supersedes`). `approve_tx` / `decline_tx` decide a
 pending row once — a decided one is `Invalid`, a missing one `NotFound`.
 An `External` command's approval is the claim trio instead: `claim_tx`
-marks it approved with no `audit_id` before the run, `finish_claim_tx`
-names the run's audit row, and `release_claim_tx` makes it pending again
+marks it approved with no `command_run_id` before the run, `finish_claim_tx`
+names the command run, and `release_claim_tx` makes it pending again
 when the run failed. `dry_run_json` is the `Tx` handler's `result` run
 confirmed and rolled back: `oxplow.config.set` / `oxplow.config.unset` give `{ key,
 before, after, changed }`, a composite `{ result, children: [{ name,
 input, result, inverse? }] }`, any other command its own result. No
 expiry. Written
 inside the bus's transactions; read as `v_command_proposal` (ref
-`proposal:<id>`). Events `command.proposed@3`, `command.approved@2`,
+`proposal:<id>`). Events `command.proposed@4`, `command.approved@3`,
 `command.declined@2`.
 
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
@@ -2215,17 +2284,6 @@ no override schema stamp, and no configuration compare-and-swap. Extension neste
 snapshots are projections over registered keys; private workflow state continues
 to use its separate CAS store above. See [settings.md](./settings.md) and
 [extensions-manifest.md](./extensions-manifest.md) for the runtime contracts.
-
-## Dedicated job actor audit compatibility
-
-Draft V54 widens command_audit actor_kind to include `job`, retaining every
-column/row, proposal audit links, the refused-audit index and AUTOINCREMENT
-high-water. The rebuild uses the migration transaction and legacy rename mode;
-the runner turns foreign_keys off around migrations. It has not been executed.
-ActorKindV2 preserves command.proposed@3's actor kinds; command.executed@4
-adds a custom component (`component`) to v3's (V93 rewrote v3 events, each
-a v4 one as is). command.proposed remains v2 because neither a job nor a
-component (which acts for a person) creates a confirmation proposal.
 
 Metric declaration upserts expose caller-transaction helpers for coherent
 extension generation publication. Their async wrappers use the same helpers;

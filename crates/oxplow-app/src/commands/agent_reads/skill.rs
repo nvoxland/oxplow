@@ -106,7 +106,7 @@ mod tests {
             .await
             .unwrap();
         assert!(body.result.as_str().unwrap().contains("oxplow-extension"));
-        assert!(body.audit_id.is_none(), "a read leaves no record");
+        assert!(body.command_run_id.is_none(), "a read leaves no record");
 
         let err = svc
             .commands

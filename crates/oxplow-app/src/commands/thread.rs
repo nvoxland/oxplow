@@ -1,7 +1,7 @@
 //! Thread commands (P8.A3, `.context/commands.md`): a thread's lifecycle
 //! — create (or fork), rename, its custom prompt, its mark, close and
 //! reopen — as `Tx` commands, so every surface (the desktop, an agent, a
-//! page) goes through the same validation, policy, audit and undo. A
+//! page) goes through the same validation, policy, command run and undo. A
 //! thread is open or closed, nothing more: every open thread of a stream
 //! shares its worktree, and any of them may change it
 //! (`.context/agent-model.md` "Why there is no writer thread").
@@ -599,7 +599,7 @@ mod tests {
         assert_eq!(thread(&fx, fx.thread).await.mark, Some(ThreadMark::Violet));
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.mark, Some(ThreadMark::Red));
@@ -690,7 +690,7 @@ mod tests {
     }
 
     /// Moving a thread to the state it's in changes nothing, so it leaves
-    /// no record — no audit row, nothing to undo — like any such call.
+    /// no record — no command run row, nothing to undo — like any such call.
     #[tokio::test]
     async fn a_move_to_the_state_a_thread_is_in_leaves_no_record() {
         let fx = services_with_thread().await;
@@ -699,12 +699,12 @@ mod tests {
         // An open thread reopened, an unmarked one unmarked.
         for (name, input) in [(REOPEN, &open), (MARK, &open)] {
             let out = run(&fx, &Actor::Human, name, input.clone()).await.unwrap();
-            assert_eq!(out.audit_id, None, "{name}");
+            assert_eq!(out.command_run_id, None, "{name}");
             assert!(out.inverse.is_none(), "{name}");
         }
         run(&fx, &Actor::Human, CLOSE, open.clone()).await.unwrap();
         let again = run(&fx, &Actor::Human, CLOSE, open).await.unwrap();
-        assert_eq!(again.audit_id, None, "closing a closed thread");
+        assert_eq!(again.command_run_id, None, "closing a closed thread");
     }
 
     /// An agent acts on its own stream only, and closes only its own
@@ -744,7 +744,7 @@ mod tests {
         assert!(!t.is_open());
         fx.svc
             .commands
-            .undo(&Actor::Human, closed.audit_id.unwrap(), false)
+            .undo(&Actor::Human, closed.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert!(thread(&fx, second).await.is_open());
@@ -786,7 +786,7 @@ mod tests {
         assert_eq!(thread(&fx, fx.thread).await.title, "Mine");
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.title, "Thread");

@@ -1,0 +1,16 @@
+when: { page: oxplow/management, params: { area: integrations } }
+expect:
+  loaders:
+    replacements:
+      rows:
+        contains:
+          - { target: vcs.history.graph, whose: oxplow-bundled }
+steps:
+  - given:
+      - command: oxplow.config.set
+        confirmed: true
+        input: { key: oxplow.replacements, value: { vcs.history.graph: oxplow }, level: project }
+  - when: { page: oxplow/git-history, params: { stream_id: 1 } }
+    expect:
+      loaders:
+        history: { rows: 0 }

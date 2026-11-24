@@ -1,4 +1,4 @@
-# Rust: each unwrap and expect call gives an info fact at its line.
+# Rust: each unwrap and expect call is found; the file's fact counts them and lists their lines.
 when:
   collector: oxplow.rust.unwrap_expect_calls
   files:
@@ -7,5 +7,4 @@ when:
     "src/b.rs": "// FIXME later\nfn c() { let s = \"a TODO in a string is ignored\"; }\n"
 expect:
   facts:
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "line": 5, "rule": "unwrap_expect", "severity": "info", "dims": {"oxplow.language": "rust"}}
-    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "line": 6, "rule": "unwrap_expect", "severity": "info", "dims": {"oxplow.language": "rust"}}
+    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "rule": "unwrap_expect", "severity": "info", "detail": "{\"lines\":[5,6]}", "dims": {"oxplow.language": "rust"}}

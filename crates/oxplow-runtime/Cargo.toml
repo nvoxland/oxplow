@@ -16,7 +16,7 @@ thiserror = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 time = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

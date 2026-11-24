@@ -1351,7 +1351,7 @@ pub struct PageAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub point: Option<String>,
     /// An `open` action: the column of the row it is offered on that holds
-    /// the URI it opens. It runs no command (no bus run, no audit): the
+    /// the URI it opens. It runs no command (no bus run, no command run record): the
     /// app navigates, and an agent pressing it is told the URI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open: Option<String>,

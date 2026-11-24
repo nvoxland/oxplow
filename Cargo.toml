@@ -37,11 +37,11 @@ members = [
     "crates/oxplow-oauth-sim",
     "crates/oxplow-oauth-redirect",
     "crates/oxplow-ai-fake",
-    "crates/oxplow-workspace-hack",
+    "crates/oxplow-unified-deps",
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.98"
 authors = ["Nathan Voxland <nathan@voxland.net>"]
@@ -147,6 +147,7 @@ specta-typescript = "0.0.12"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 
 # Code metrics (tree-sitter-based)

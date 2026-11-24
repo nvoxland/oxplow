@@ -1,8 +1,8 @@
 //! `vcs.*` and `git.*`: version-control mutations as commands (P5.B6,
 //! `.context/vcs.md`, `.context/commands.md`). Each drives the VCS — a
 //! system the bus doesn't own — so each is `External`: it runs, then the
-//! bus audits it, the result (the VCS's `OpOutcome`, conflicts included)
-//! on the audit row. A person's or an agent's — an agent's on its own
+//! bus records it as a command run, the result (the VCS's `OpOutcome`, conflicts included)
+//! on the command run row. A person's or an agent's — an agent's on its own
 //! stream only, as its terminal's `git` reaches only its own worktree; a
 //! destructive one asks a person first. Only `commit` is undoable (its inverse is `uncommit`, a soft reset of an unpushed commit). Each names the stream it acts on; the router resolves
 //! it strictly, so a missing stream never lands on the primary's branch.
@@ -210,7 +210,7 @@ async fn announcement(
 
 /// A VCS op's answer. One that failed outright — a rejected push, a
 /// remote it couldn't reach — is the run's failure, git's log its message,
-/// so its audit row says `error` rather than `ok` with a result that says
+/// so its command run row says `error` rather than `ok` with a result that says
 /// otherwise. One that stopped at conflicts did what it does — the
 /// repository is mid-merge for a person to resolve — and answers with them,
 /// readable on its row after the fact.
@@ -493,7 +493,16 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
                 let to = i.remote_branch()?;
                 outcome(t.vcs.push(&ws, to).await.map_err(vcs_err)?)
             },
-        ),
+        )
+        // A push to a branch the person names (Remote Branches' Push) asks
+        // first, as a merge does; the branch's own upstream doesn't.
+        .with_confirm_for(Arc::new(|input: &Value| {
+            if input.get("branch").is_some_and(|b| !b.is_null()) {
+                Confirm::Always
+            } else {
+                Confirm::Never
+            }
+        })),
         vcs_op(
             "vcs.write",
             "merge",
@@ -627,8 +636,31 @@ mod tests {
 
     use crate::test_fixtures::{commit_all, services_with_thread};
 
+    /// A push to a named remote branch (Remote Branches' Push) asks a
+    /// person first, as a merge does; a push to the branch's own upstream
+    /// (the Git menu's Push Changes) doesn't.
+    #[tokio::test]
+    async fn a_push_to_a_named_remote_branch_asks_first() {
+        let f = services_with_thread().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        let push = |input| {
+            svc.commands
+                .run(&Actor::Human, "oxplow.vcs.push", input, false)
+        };
+        let err = push(json!({ "stream": stream, "remote": "origin", "branch": "main" }))
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
+        let err = push(json!({ "stream": stream })).await.unwrap_err();
+        assert!(!format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
+    }
+
     /// A git op that failed outright — a push with nowhere to go — is the
-    /// run's failure, its log the message, and its audit row says `error`:
+    /// run's failure, its log the message, and its command run row says `error`:
     /// never an `ok` row whose result says it failed.
     #[tokio::test]
     async fn a_failed_git_op_is_a_failed_run() {
@@ -644,7 +676,7 @@ mod tests {
                 &Actor::Human,
                 "oxplow.vcs.push",
                 json!({ "stream": stream, "remote": "nowhere", "branch": "main" }),
-                false,
+                true,
             )
             .await
             .unwrap_err();
@@ -652,14 +684,14 @@ mod tests {
             matches!(&err, oxplow_domain::CommandError::Failed { message } if message.contains("nowhere")),
             "{err:?}"
         );
-        let audits = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+        let command_runs = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
             .list_recent(5)
             .await
             .unwrap();
-        let push = audits
+        let push = command_runs
             .iter()
             .find(|a| a.command == "oxplow.vcs.push")
-            .expect("the push is audited");
+            .expect("the push is recorded");
         assert_eq!(
             push.outcome,
             oxplow_domain::events::schema::CommandOutcome::Error
@@ -760,10 +792,10 @@ mod tests {
 
     /// P5.B6: an agent runs VCS commands on its own stream only
     /// (as its terminal's git reaches only its own worktree); a destructive
-    /// one needs a person's confirmation; the audit row holds what the VCS
+    /// one needs a person's confirmation; the command run row holds what the VCS
     /// reported.
     #[tokio::test]
-    async fn vcs_commands_are_an_agents_on_its_own_stream_confirmed_and_audited() {
+    async fn vcs_commands_are_an_agents_on_its_own_stream_confirmed_and_recorded() {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
@@ -844,12 +876,12 @@ mod tests {
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "one\n"
         );
-        let audit = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
-            .get(out.audit_id.unwrap())
+        let run_row = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(audit.result.unwrap()["success"], json!(true));
+        assert_eq!(run_row.result.unwrap()["success"], json!(true));
 
         // A merge of the head is a no-op the VCS still reports on.
         let merged = svc
@@ -862,12 +894,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let audit = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
-            .get(merged.audit_id.unwrap())
+        let run_row = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
+            .get(merged.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
-        let result = audit.result.unwrap();
+        let result = run_row.result.unwrap();
         assert_eq!(result["success"], json!(true), "{result}");
         assert_eq!(result["conflicts"], json!([]));
 
@@ -926,7 +958,7 @@ mod tests {
             json!({ "stream": stream, "rev": rev, "parent": base })
         );
         svc.commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), false)
             .await
             .expect("the commit is undone");
         assert_eq!(git(&root, &["rev-parse", "HEAD"]), base);
@@ -968,7 +1000,7 @@ mod tests {
             .unwrap();
         assert!(out.inverse.is_some(), "a page's commit is undoable");
         svc.commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), true)
+            .undo(&Actor::Human, out.command_run_id.unwrap(), true)
             .await
             .expect("the person undoes it");
         assert_eq!(git(&root, &["rev-parse", "HEAD"]), base);
@@ -1028,7 +1060,7 @@ mod tests {
                 let head = git(&root, &["rev-parse", "HEAD"]);
                 let err = svc
                     .commands
-                    .undo(&Actor::Human, out.audit_id.unwrap(), false)
+                    .undo(&Actor::Human, out.command_run_id.unwrap(), false)
                     .await
                     .unwrap_err();
                 assert!(format!("{err:?}").contains(why), "{err:?}");

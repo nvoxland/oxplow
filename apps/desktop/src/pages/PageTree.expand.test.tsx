@@ -77,7 +77,7 @@ test("an expanded row's page offers its viz's own actions as buttons, pressed on
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: null, event_id: null, inverse: null } as never;
   };
   const { getByLabelText, findByTestId } = render(
     <PageActionContext.Provider value={press}>
@@ -123,7 +123,7 @@ test("a lazy branch runs the node's page with the lazy param set to its id; its 
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: null, event_id: null, inverse: null } as never;
   };
   const view = render(
     <PageActionContext.Provider value={press}>

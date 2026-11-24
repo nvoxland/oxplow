@@ -402,6 +402,21 @@ are two PTY writes, as they were typed. Nothing merges keys any more.
 
 ## When a session ends or goes away
 
+**Restart Terminal** is available in Quick Open while an agent terminal
+is shown and in the agent session tab's right-click menu, both only while
+a process runs in its pane (`agentTerminalLive`: the pane opened it and it
+has not ended, `useLiveTerminals` in `useTerminalSession.ts`). An ended
+pane offers Start Again instead. `restart_agent_terminal` refuses when no
+PTY is registered for the session: no pane would follow the replacement,
+so it would start an agent nobody sees
+(`restart_refuses_a_session_with_nothing_running`). It stops the
+old PTY process and launches the selected harness again with the same
+session URI, conversation binding, worktree and terminal size. The
+normal launch resolves the currently installed executable. Codex's TUI
+rejoins the observed thread on the shared app-server, which keeps running.
+Attached views follow a `restart` event on the old PTY and replay the
+replacement; a launch failure leaves them with the Retry banner.
+
 A session's process exiting sends `{type:"exit", exitCode}`; the registry
 then unregisters it (`TerminalSessionRegistry`'s forwarder removes it from
 both maps), so attaching to its key spawns a fresh one instead of replaying
@@ -440,11 +455,16 @@ group reaches the panes' groups.
 ## Terminals are rows
 
 A stream's terminals are rows of the `terminal` table (`id`, `stream_id`,
-`title`, `position`, `created_at`; `SqliteTerminalStore`), read as the model
+`title`, `position`, `created_at`, `dir`; `SqliteTerminalStore`), read as the model
 `v_terminal` (with its `uri`, `oxplow:oxplow/terminal?id=trm3`) and named by
 the `oxplow/terminal` resource. Three commands (`commands/terminal.rs`, scope
-`terminals.write`) write them: `oxplow.terminal.open { stream, title? }`
-(auto-numbered "Terminal N": one past the highest numbered title and never
+`terminals.write`) write them: `oxplow.terminal.open { stream, title?, dir? }`
+(`dir`: where its shell starts, relative to the worktree or absolute;
+Open In ▸ Terminal sets it, and `terminal_cwd` falls back to the worktree
+when it is not a directory when the shell starts; an agent's is a relative
+path with no `..`, so its terminals stay in its stream's worktree; the
+window shows the new one by its title, in the Terminal page's view;
+auto-numbered "Terminal N": one past the highest numbered title and never
 below the count, so a generated title never repeats after renames; answers
 `{ id, uri, title }`; an agent opens only in its own stream),
 `oxplow.terminal.rename { terminal, title }` (undoable) and
@@ -492,7 +512,7 @@ now passes the hook's `guard`, which suppresses the passive closes
   re-attach replays the buffer. The open one is history state
   (`terminalActive`, `Record<streamId, terminalId>`).
 
-## File-path link provider
+## File-path and URL link providers
 
 `apps/desktop/src/terminal-link-provider.ts` exports two pieces:
 
@@ -530,6 +550,26 @@ relative paths against the prop `worktreePath` first (`/`-prefixed
 paths pass through; `~/` paths are dropped — the frontend doesn't
 know HOME).
 
+**Web URLs are links too.** `findUrlMatches(line)` finds `http(s)://…`
+(prose punctuation after one trimmed, a closing parenthesis kept when the
+URL opened it), and `installUrlLinkProvider` registers them: a click opens
+the system browser (`openInBrowser`).
+
+**Extensions' `links:` are links too** (`installRuleLinkProvider`, the
+rules read fresh from `extensionsNow()` on each scan): a click follows the
+URI (`followRuleLink`: a web URL in the browser, an oxplow URI's page),
+and the menu has its Open In ▸ and commands.
+
+**The right-click menu knows the link under the pointer.** Both providers
+take `onHover(match | null)` (xterm's `ILink.hover` / `leave`); the
+surface keeps the hovered link, and its menu puts that link's items first.
+Only a left click activates a link (xterm calls `activate` on any button).
+The URL provider is registered first, so a path inside a URL is the URL's.
+The menu's link items
+(`terminalMenuItems({ link })`) are Open In ▸ (`openIn.ts`) and Copy path /
+Copy link. A path resolves as a click does (`resolveClickedPath`); one that
+ends in `/` is a directory, any other a file (the terminal can't tell).
+
 ## Path resolution and caveats
 
 - Relative paths resolve against the session's **live cwd**, falling
@@ -560,8 +600,6 @@ Compose a separate xterm link provider rather than expanding
 `findFilePathMatches`. xterm allows multiple registered providers;
 each scans the same line. Examples for the future:
 
-- A WebLinks-style URL provider (currently no `WebLinksAddon`
-  installed; URLs in terminal output are not clickable).
 - Stack-trace formats from non-rust/non-js languages
   (`File "x.py", line 42`, `at com.foo.Bar(Bar.java:42)`).
 

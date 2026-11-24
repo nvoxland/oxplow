@@ -193,9 +193,10 @@ impl TestConventions {
     }
 
     /// Count assertions and skip markers in `content`, a file at `path`.
-    /// Comments, as the path's language declares them (`comments:` on its
-    /// `languages:` entry), are ignored, so commenting an assertion out lowers
-    /// the count; a path in no language has none stripped. A span two
+    /// Comments are ignored, so commenting an assertion out lowers the
+    /// count: the grammar's comment nodes when the path's language has a
+    /// grammar (a `/*` in a string stays code), else what its `comments:`
+    /// declares; a path in no language has none stripped. A span two
     /// conventions both match counts once.
     pub fn count(&self, path: &str, content: &str) -> TestSignals {
         let rules: Vec<&Rule> = self.applicable(path).collect();
@@ -209,8 +210,7 @@ impl TestConventions {
         let stripped = self
             .languages
             .declared_for_path(path)
-            .and_then(|l| l.decl().comments.as_ref())
-            .map(|c| c.strip(content));
+            .and_then(|l| oxplow_code_metrics::strip_comments(content, l));
         for line in stripped.as_deref().unwrap_or(content).lines() {
             if line.is_empty() {
                 continue;
@@ -335,6 +335,24 @@ mod tests {
             2,
             "no language, no comments"
         );
+    }
+
+    /// A comment marker inside a string literal is code: a `/*` in a glob
+    /// doesn't hide the assertions after it, nor `//` or `#` the rest of
+    /// their line.
+    #[test]
+    fn comment_markers_inside_strings_hide_no_assertions() {
+        let rs = "#[test]\nfn a() {\n    let g = glob(\"src/**/*.rs\");\n    assert!(x); let u = \"http://x\"; assert!(y);\n    assert_eq!(1, 1);\n}\n";
+        assert_eq!(c("a.rs", rs), (3, 0));
+        // A raw string's `\` escapes nothing: only the grammar knows the
+        // `"/*"` after it is a string of its own.
+        let raw = "let p = r\"C:\\\"; let g = \"/*\"; assert!(y);\nassert!(z);\n";
+        assert_eq!(c("a.rs", raw), (2, 0));
+        let ts = "it('a', () => {\n  const g = 'src/**/*.ts';\n  const u = \"http://x\"; expect(x).toBe(1);\n  expect(y).toBe(2);\n});\n";
+        assert_eq!(c("a.test.ts", ts), (2, 0));
+        let py =
+            "def test_a():\n    s = \"# /* not a comment\"; assert x == 1\n    assert y == 2\n";
+        assert_eq!(c("test_a.py", py), (2, 0));
     }
 
     /// A convention for one language doesn't apply to another's files, and

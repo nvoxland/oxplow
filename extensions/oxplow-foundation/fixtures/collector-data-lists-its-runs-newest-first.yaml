@@ -1,0 +1,24 @@
+given:
+  - command: oxplow.collector.sync
+    input: { collector: oxplow/oxplow.request_outcome }
+  - command: oxplow.collector.sync
+    input: { collector: oxplow/oxplow.request_outcome }
+  - command: oxplow.sql.query
+    input:
+      sql: |
+        SELECT run_id FROM v_collector_run
+        WHERE owner = 'oxplow' AND id = 'oxplow.request_outcome'
+        ORDER BY latest DESC, run_id
+    bind: history
+when:
+  page: oxplow/collector-data
+  params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome", range: all }
+expect:
+  nodes: [{ id: runs, viz: table }]
+  loaders:
+    about: { rows: [{ name: oxplow.request_outcome, last_outcome: ok }] }
+    runs:
+      columns: [run_id, started_at, outcome, error, version, cpu_ms, ai_calls, row_counts]
+      rows:
+        - { run_id: "$history.rows[0][0]", outcome: ok }
+        - { run_id: "$history.rows[1][0]", outcome: ok }

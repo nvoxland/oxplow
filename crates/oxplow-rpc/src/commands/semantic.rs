@@ -28,10 +28,34 @@ pub async fn query_sql(
         .await?)
 }
 
-/// The person's left-nav layout (P6.G1): each panel's order, and whether
-/// it's hidden or collapsed. UI-only.
-pub async fn get_panel_layout(svc: &Services) -> Result<Vec<oxplow_db::PanelPlacement>, IpcError> {
-    Ok(svc.panel_layout_store.get().await?)
+/// The viewer of `thread_id` (its own stream) or of `stream_id` alone.
+async fn panel_viewer(
+    svc: &Services,
+    stream_id: Option<String>,
+    thread_id: Option<String>,
+) -> Result<oxplow_db::visibility_scope::Viewer, IpcError> {
+    let thread = thread_id
+        .as_deref()
+        .and_then(oxplow_domain::ThreadId::try_from_str);
+    let stream = stream_id
+        .as_deref()
+        .and_then(oxplow_domain::StreamId::try_from_str);
+    Ok(svc
+        .db
+        .read(move |c| oxplow_db::panel_layout_store::viewer_tx(c, thread, stream))
+        .await?)
+}
+
+/// The person's left-nav layout (P6.G1) as the viewer sees it: its
+/// thread's list, its stream's and the project's, each panel's order and
+/// whether it's collapsed (or, in the project's, hidden). UI-only.
+pub async fn get_panel_layout(
+    svc: &Services,
+    stream_id: Option<String>,
+    thread_id: Option<String>,
+) -> Result<oxplow_db::ScopedPanelLayout, IpcError> {
+    let viewer = panel_viewer(svc, stream_id, thread_id).await?;
+    Ok(svc.panel_layout_store.get(viewer).await?)
 }
 
 /// Everything the person's oxplow remembers outside any one tab: page
@@ -55,16 +79,19 @@ pub async fn set_ui_preference(
     Ok(svc.ui_preference_store.set(scope, key, value_json).await?)
 }
 
-/// Replace the layout (the order is the list's).
+/// Replace the lists the viewer sees (each in its order).
 #[expect(
     clippy::disallowed_methods,
     reason = "off the bus: the left-nav panel layout"
 )]
 pub async fn set_panel_layout(
     svc: &Services,
-    layout: Vec<oxplow_db::PanelPlacement>,
+    stream_id: Option<String>,
+    thread_id: Option<String>,
+    layout: oxplow_db::ScopedPanelLayout,
 ) -> Result<(), IpcError> {
-    Ok(svc.panel_layout_store.set(layout).await?)
+    let viewer = panel_viewer(svc, stream_id, thread_id).await?;
+    Ok(svc.panel_layout_store.set(viewer, layout).await?)
 }
 
 #[cfg(test)]

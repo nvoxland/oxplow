@@ -26,6 +26,7 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
 use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_db::{SqliteSnapshotStore, SqliteThreadStore};
+use oxplow_domain::run::{Mode, RunContext};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, ThreadId};
 use oxplow_script::{Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRuntime};
@@ -663,6 +664,11 @@ impl CollectionService {
                     .map(|s| ReportCollector {
                         owner: e.name.clone(),
                         namespace: e.namespace.clone(),
+                        contribution: crate::run_context::unpinned_contribution(
+                            e,
+                            oxplow_domain::contribution::ContributionKind::Collector,
+                            &s.id,
+                        ),
                         own: e.is_own(),
                         configuration: e.configuration.clone(),
                         dir: e.path.clone(),
@@ -713,7 +719,7 @@ impl CollectionService {
         let root = self.worktrees.resolve(None).await.into_local_path();
         self.report_collectors(&root)
             .iter()
-            .any(|r| r.owner == owner && r.spec.id == id)
+            .any(|r| r.matches(owner, id))
     }
 
     /// `rel` under the checkout `root`, after every symlink: `None`
@@ -830,7 +836,7 @@ impl CollectionService {
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return ReportRead::Missing(path);
         };
-        let key = crate::collector_runner::contribution_key(&collector.owner, &spec.id);
+        let key = crate::collector_runner::contribution_key(&collector.namespace, &spec.id);
         if let Some(log) = &self.run_log {
             match log.health().disabled_reason(&key).await {
                 Ok(Some(reason)) => {
@@ -846,6 +852,10 @@ impl CollectionService {
                 }
             }
         }
+        let run = how
+            .parent
+            .child(Some(collector.contribution.clone()), Mode::External);
+        how.parent.track_child(&run);
         let started = std::time::Instant::now();
         let parsed = match self.report_parser(collector, root) {
             Err(ParserProblem::Broken(e)) => Err(e),
@@ -872,7 +882,7 @@ impl CollectionService {
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
         let error = parsed.as_ref().err().cloned();
-        self.record_report_run(&collector.owner, &spec.id, how, &key, elapsed, error)
+        self.record_report_run(&run, how, &key, elapsed, error)
             .await;
         match parsed {
             Ok((output, exec, label)) => ReportRead::Parsed {
@@ -890,8 +900,7 @@ impl CollectionService {
     /// counted.
     async fn record_report_run(
         &self,
-        owner: &str,
-        id: &str,
+        run: &RunContext,
         how: &ReportRun<'_>,
         key: &oxplow_db::ContributionKey,
         elapsed_ms: i64,
@@ -903,10 +912,10 @@ impl CollectionService {
         let recorded = log
             .record_with(
                 crate::collector_runner::RunRecord {
-                    owner,
-                    id,
+                    owner: &key.namespace,
+                    id: &key.contribution,
                     trigger: how.trigger,
-                    source: how.source,
+                    source: &run.actor().source(),
                     cause: how
                         .cause
                         .map(|c| (oxplow_domain::EventId(c.event_id.clone()), c.seq)),
@@ -914,32 +923,15 @@ impl CollectionService {
                     entities: Default::default(),
                     facts: 0,
                     elapsed_ms,
-                    error: error.clone(),
-                    run: None,
+                    error,
+                    run,
+                    unmeasured_cost: true,
                 },
                 None,
             )
             .await;
-        match recorded {
-            Ok(false) => {}
-            Ok(true) => {
-                let health = log.health();
-                let counted = match &error {
-                    None => {
-                        health
-                            .succeeded(
-                                key,
-                                Some(std::time::Duration::from_millis(elapsed_ms.max(0) as u64)),
-                            )
-                            .await
-                    }
-                    Some(e) => health.failed(key, e).await.map(|_| ()),
-                };
-                if let Err(e) = counted {
-                    tracing::warn!(collector = %id, error = %e, "recording its health failed");
-                }
-            }
-            Err(e) => tracing::warn!(collector = %id, error = %e, "recording its run failed"),
+        if let Err(e) = recorded {
+            tracing::warn!(collector = %key.contribution, error = %e, "recording its run failed");
         }
     }
 
@@ -1024,7 +1016,8 @@ impl CollectionService {
         let Some(log) = &self.run_log else {
             return false;
         };
-        let key = crate::collector_runner::contribution_key(&collector.owner, &collector.spec.id);
+        let key =
+            crate::collector_runner::contribution_key(&collector.namespace, &collector.spec.id);
         matches!(log.health().disabled_reason(&key).await, Ok(Some(_)))
     }
 
@@ -1039,10 +1032,15 @@ impl CollectionService {
         root: &std::path::Path,
     ) -> RunReports {
         let cause = origin.cause();
-        let source = oxplow_domain::Actor::System.source();
+        let mut parent = RunContext::core(oxplow_domain::Actor::System, Mode::External);
+        if let Some(cause) = cause {
+            parent = parent
+                .caused_by(oxplow_domain::EventId(cause.event_id.clone()))
+                .anchored(cause.anchors.clone());
+        }
         let how = ReportRun {
             trigger: "on",
-            source: &source,
+            parent: &parent,
             cause,
         };
         let mut out = RunReports::default();
@@ -1477,7 +1475,7 @@ impl CollectionService {
         thread: &ThreadId,
         owner: &str,
         id: &str,
-        source: &str,
+        parent: &RunContext,
         turn: Option<i64>,
     ) -> Result<ReportSync, crate::collector_runner::RunCollectorError> {
         use crate::collector_runner::RunCollectorError;
@@ -1485,11 +1483,12 @@ impl CollectionService {
         let collector = self
             .report_collectors(&root)
             .into_iter()
-            .find(|r| r.owner == owner && r.spec.id == id)
+            .filter(|r| r.matches(owner, id))
+            .min_by_key(|r| r.namespace != owner)
             .ok_or(RunCollectorError::NotFound)?;
         let how = ReportRun {
             trigger: "manual",
-            source,
+            parent,
             cause: None,
         };
         let mut reads = RunReports::default();
@@ -2283,49 +2282,45 @@ impl CollectionService {
         }) {
             return Ok(None);
         }
-        // The nudge below is paced per request (its turn's), else per
-        // thread. The runs above are already recorded.
-        let request = self.request_of_turn(origin.turn()).await;
-        // Nudge: the agent ran tests but this run regenerated no report
-        // oxplow could parse (so the request gets a command-only test-run
-        // and no coverage). Steer it to the
-        // report-emitting command — at most once per request. This is
-        // tool-agnostic: it keys only on "test run detected" + "no fresh
-        // report", never on which tool ran; the command it names comes
-        // from the project's own config.
-        //
-        // The project's own runner writing no report never got to the tests
-        // (a compile error, a timeout, a pipe cut short): naming the runner
-        // again adds nothing, so that run spends no nudge.
+        // Make missing report details visible to the person without putting
+        // instructions in the agent's next tool response.
         let produced_report = report.is_some() || coverage.is_some();
         let ran_the_runner = reads.unread.is_empty()
             && test_run_segment(bash.command, &test_patterns)
                 .is_some_and(|run| names_configured_runner(&cfg, &run));
-        if !produced_report && !ran_the_runner && self.mark_nudged(thread, request).await {
-            let msg = if reads.unread.is_empty() {
-                let root = self.worktree(thread).await;
-                // A test run's reports are tests and coverage: a linter's
-                // collector (a language pack's clippy) wires none of them.
-                let wired = self.report_collectors(&root).iter().any(|c| {
-                    matches!(
-                        c.spec.records,
-                        Some(
-                            oxplow_config::collectors::Records::Tests
-                                | oxplow_config::collectors::Records::Coverage
-                        )
+        if produced_report || ran_the_runner {
+            return Ok(None);
+        }
+        let message = if reads.unread.is_empty() {
+            let wired = self.report_collectors(&root).iter().any(|c| {
+                matches!(
+                    c.spec.records,
+                    Some(
+                        oxplow_config::collectors::Records::Tests
+                            | oxplow_config::collectors::Records::Coverage
                     )
-                });
-                report_nudge_message(&cfg, wired)
-            } else {
-                unread_reports_message(&reads.unread)
-            };
-            self.persist_nudge(
-                thread,
-                Raised::agent("report-less-run", &msg, bash.command),
-                origin,
-            )
-            .await;
-            return Ok(Some(msg));
+                )
+            });
+            report_nudge_message(&cfg, wired)
+        } else {
+            Some(unread_reports_message(&reads.unread))
+        };
+        if let Some(message) = message {
+            let request = self.request_of_turn(origin.turn()).await;
+            if self.mark_nudged(thread, request).await {
+                self.persist_nudge(
+                    thread,
+                    Raised {
+                        kind: "report-less-run",
+                        message: &message,
+                        trigger: bash.command,
+                        audience: oxplow_db::Audience::Person,
+                    },
+                    origin,
+                )
+                .await;
+                return Ok(Some(message));
+            }
         }
         Ok(None)
     }
@@ -2658,8 +2653,7 @@ impl CollectionService {
     }
 
     /// Roll every metric up over `window` (`v_request_metric_delta`) — the
-    /// structured sibling of the oxplow-bundled `metric-deltas` advisory
-    /// (which builds the agent-prompt text). Reads the spec catalog and, per
+    /// request panel's read. Reads the spec catalog and, per
     /// family, aggregates the window's own facts (T-D; see metrics.md):
     /// - **per-file gauges** (`File`): Σ over the window's files of
     ///   `(current − baseline)` fact value — the slice this work actually
@@ -3490,50 +3484,30 @@ fn names_configured_runner(cfg: &oxplow_config::TestingConfig, run: &str) -> boo
         .any(|c| !c.is_empty() && run.contains(&c))
 }
 
-/// The PostToolUse nudge shown when a detected test run produced no
-/// report oxplow could parse. Tool-agnostic: it names only
-/// the project's own configured command (or routes to oxplow's `configure` command),
-/// so it works for any current/future test tool without the hook knowing
-/// anything tool-specific. It doesn't repeat the agent's command back (the
-/// agent just wrote it), and with a `fastCommand` it names only that one:
-/// which tests to run, and whether to pay for the full run, is the agent's
-/// call.
-fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collectors: bool) -> String {
-    let configured = |c: Option<&str>| {
-        c.map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    };
-    if let Some(runner) =
-        configured(cfg.fast_command.as_deref()).or(configured(cfg.command.as_deref()))
-    {
-        format!(
-            "That test run wrote no report oxplow reads, so its results won't show in \
-             oxplow. `{runner}` writes one{}; run it in the foreground.",
-            if cfg.fast_command.is_some() {
-                " and takes a filter"
-            } else {
-                ""
-            }
-        )
-    } else if has_report_collectors {
-        "That test run wrote none of the reports this project's report collectors read. \
-         Run the command that writes them, and set `testing.command` in \
-         .oxplow/project.yaml to make it one step."
-            .to_string()
+/// A missing report notice for a project that has configured collection.
+fn report_nudge_message(
+    cfg: &oxplow_config::TestingConfig,
+    has_report_collectors: bool,
+) -> Option<String> {
+    let runner = [cfg.fast_command.as_deref(), cfg.command.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|command| !command.is_empty());
+    if let Some(runner) = runner {
+        Some(format!(
+            "Oxplow received no report from this test run. The project's report command is `{runner}`."
+        ))
     } else {
-        "That test run's results can't reach oxplow: this project reads no test \
-         reports. Run oxplow's `configure` slash command to wire this stack's report(s)."
-            .to_string()
+        has_report_collectors.then(|| {
+            "Oxplow received none of the reports this project's test collectors read.".to_owned()
+        })
     }
 }
 
-/// The report-less nudge when the run's collectors didn't count:
-/// why each didn't. Running the tests again changes none of it.
 fn unread_reports_message(unread: &[String]) -> String {
     format!(
-        "oxplow read none of that test run's reports: {}. Running the tests again won't \
-         change that.",
+        "Oxplow could not read this test run's reports. {}",
         unread.join("; ")
     )
 }
@@ -3682,6 +3656,7 @@ struct ReportCollector {
     owner: String,
     /// Its extension's namespace: its settings are stored under it.
     namespace: String,
+    contribution: oxplow_domain::run::ContributionRef,
     /// Whether its extension is one of the project's own (in the
     /// checkout, not installed): it wins a collision over one that isn't.
     own: bool,
@@ -3692,9 +3667,15 @@ struct ReportCollector {
     spec: CollectorSpec,
 }
 
+impl ReportCollector {
+    fn matches(&self, owner: &str, id: &str) -> bool {
+        self.spec.id == id && (self.namespace == owner || self.owner == owner)
+    }
+}
+
 struct ReportRun<'a> {
     trigger: &'static str,
-    source: &'a str,
+    parent: &'a RunContext,
     cause: Option<&'a RunCause>,
 }
 
@@ -4030,7 +4011,7 @@ mod tests {
 
     #[test]
     fn report_nudge_names_configured_test_command() {
-        let msg = report_nudge_message(&testing(Some("bun run test:collect"), None), true);
+        let msg = report_nudge_message(&testing(Some("bun run test:collect"), None), true).unwrap();
         // Names the project's own command — tool-agnostic, no built-in
         // tool→command knowledge in the hook.
         assert!(msg.contains("bun run test:collect"), "{msg}");
@@ -4046,20 +4027,18 @@ mod tests {
         let msg = report_nudge_message(
             &testing(Some("bun run test:collect"), Some("bun run test:fast")),
             true,
-        );
+        )
+        .unwrap();
         assert!(msg.contains("`bun run test:fast`"), "{msg}");
         assert!(!msg.contains("test:collect"), "{msg}");
     }
 
     #[test]
-    fn report_nudge_routes_to_configure_without_profile() {
-        // Nothing reads reports → route to the agent-driven configure flow
-        // (which adapts to any tool).
-        let msg = report_nudge_message(&testing(None, None), false);
-        assert!(msg.contains("`configure` slash command"), "{msg}");
-        let with_collectors = report_nudge_message(&testing(None, None), true);
+    fn missing_report_notices_require_collection_configuration() {
+        assert!(report_nudge_message(&testing(None, None), false).is_none());
+        let with_collectors = report_nudge_message(&testing(None, None), true).unwrap();
         assert!(
-            with_collectors.contains("testing.command"),
+            with_collectors.contains("test collectors"),
             "{with_collectors}"
         );
     }
@@ -4074,7 +4053,7 @@ mod tests {
             (testing(None, None), true),
             (testing(None, None), false),
         ] {
-            let msg = report_nudge_message(&cfg, collectors);
+            let msg = report_nudge_message(&cfg, collectors).unwrap_or_default();
             assert!(!msg.contains(".context/"), "leaked repo path: {msg}");
         }
     }
@@ -4429,7 +4408,13 @@ mod tests {
         async fn sync_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
-                .sync_report_collector(&h.thread, "project", "tests.coverage", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "tests.coverage",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap()
             {
@@ -4788,7 +4773,13 @@ mod tests {
                 .unwrap();
             match h
                 .service
-                .sync_report_collector(&thread.id, "project", "tests.coverage", "human", Some(TURN))
+                .sync_report_collector(
+                    &thread.id,
+                    "project",
+                    "tests.coverage",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
             {
                 Ok(ReportSync::Coverage(CoverageIngest::Stored { summary_pct, .. })) => {
@@ -6945,7 +6936,7 @@ mod tests {
             h.db.read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT status, error FROM collector_run WHERE owner = 'project' AND id = ?1",
+                    "SELECT r.outcome, r.error FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id WHERE p.owner = 'project' AND p.id = ?1",
                     [&id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -7173,6 +7164,27 @@ mod tests {
                 collector_run(&h, "tests.junit").await,
                 Some(("ok".into(), None))
             );
+            let recorded = h.db.read(move |c| {
+                c.query_row(
+                    "SELECT r.extension, r.contribution, r.cause_event_id,
+                            r.wall_ms IS NOT NULL, r.cpu_ms IS NULL AND r.peak_bytes IS NULL AND r.ai_calls IS NULL
+                     FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id
+                     WHERE p.owner = 'project' AND p.id = 'tests.junit'",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?, r.get::<_, bool>(3)?, r.get::<_, bool>(4)?)),
+                ).map_err(oxplow_db::map_sql_err)
+            }).await.unwrap();
+            assert_eq!(
+                recorded,
+                (
+                    "project".into(),
+                    "oxplow:oxplow/collector?collector=project/tests.junit".into(),
+                    cause.event_id,
+                    true,
+                    true,
+                )
+            );
             let synced: Vec<serde_json::Value> =
                 h.db.read(|c| {
                     let mut stmt = c
@@ -7275,7 +7287,7 @@ mod tests {
                     "before failure {n}"
                 );
                 run_reads(&h, RunKind::Test).await;
-                assert_eq!(collector_run(&h, "tests.junit").await.unwrap().0, "error");
+                assert_eq!(collector_run(&h, "tests.junit").await.unwrap().0, "failed");
             }
             assert!(health.disabled_reason(&key).await.unwrap().is_some());
             // A good report now isn't read: the collector is off.
@@ -7283,7 +7295,13 @@ mod tests {
             assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "project", "tests.junit", "human", Some(TURN))
+                    .sync_report_collector(
+                        &h.thread,
+                        "project",
+                        "tests.junit",
+                        &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                        Some(TURN)
+                    )
                     .await,
                 Err(crate::collector_runner::RunCollectorError::Disabled(_))
             ));
@@ -7299,7 +7317,7 @@ mod tests {
                         &h.thread,
                         "project",
                         "tests.coverage",
-                        "human",
+                        &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
                         Some(TURN)
                     )
                     .await,
@@ -7561,6 +7579,8 @@ mod tests {
         #[tokio::test]
         async fn the_report_less_run_nudge_fires_once_per_request() {
             let h = build(None).await;
+            h.service.config.write().unwrap().testing.fast_command =
+                Some("bun run test:fast".into());
             let thread = h.thread.value();
             h.service
                 .nudges
@@ -7599,6 +7619,8 @@ mod tests {
         #[tokio::test]
         async fn a_report_less_run_with_no_request_is_nudged_once_per_thread() {
             let h = build(None).await;
+            h.service.config.write().unwrap().testing.fast_command =
+                Some("bun run test:fast".into());
             let run = || async {
                 h.service
                     .on_shell_run(
@@ -7668,6 +7690,8 @@ mod tests {
             // The nudge is at most once per request — second no-report run
             // in the same turn returns None.
             let h = build(None).await;
+            h.service.config.write().unwrap().testing.fast_command =
+                Some("bun run test:fast".into());
             {
                 let mut cfg = h.service.config.write().unwrap();
                 cfg.testing.command = Some("bun run test:collect".into());
@@ -7721,6 +7745,13 @@ mod tests {
             let rows = h.nudges.list_for_thread("thr1").await.unwrap();
             assert_eq!(rows.len(), 1, "exactly one nudge persisted");
             assert_eq!(rows[0].kind, "report-less-run");
+            assert_eq!(rows[0].audience, oxplow_db::Audience::Person);
+            assert!(h
+                .nudges
+                .take_for_agent(&h.thread.to_string(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty());
             assert!(rows[0].message.contains("bun run test:collect"));
             assert_eq!(rows[0].trigger.as_deref(), Some("bun test --watch false"));
             assert_eq!(rows[0].request_id.as_deref(), Some("req1"));
@@ -7776,8 +7807,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn on_post_tool_use_routes_to_configure_when_no_collection_profile() {
-            // No collection block → nudge routes to oxplow's configure command.
+        async fn no_missing_report_notice_without_collection_configuration() {
             let h = build(None).await;
             // No test command and no report collectors by default.
             let result = h
@@ -7789,11 +7819,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let nudge = result.expect("nudge returned even without report collectors");
-            assert!(
-                nudge.contains("`configure` slash command"),
-                "nudge should route to the configure command when no profile exists; got: {nudge}"
-            );
+            assert!(result.is_none());
+            assert!(h.nudges.list_for_thread("thr1").await.unwrap().is_empty());
         }
 
         #[tokio::test]
@@ -8051,7 +8078,13 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.eslint",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap()
             {
@@ -8126,7 +8159,13 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.eslint",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap()
             {
@@ -8239,7 +8278,13 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.report", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.report",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap_err();
             assert!(
@@ -8250,7 +8295,13 @@ mod tests {
             // loaded at all: there is no such collector to run.
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.entry", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.entry",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap_err();
             assert!(
@@ -8276,7 +8327,13 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
+                .sync_report_collector(
+                    &h.thread,
+                    "project",
+                    "lint.eslint",
+                    &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+                    Some(TURN),
+                )
                 .await
                 .unwrap_err();
             assert!(

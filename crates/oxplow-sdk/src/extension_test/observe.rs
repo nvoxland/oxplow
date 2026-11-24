@@ -17,8 +17,9 @@ use super::*;
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
-/// - `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls?, error? }`:
-///   a finished run of an extension's code, as the host records it.
+/// - `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls?, error?, live?, caused_by? }`:
+///   a run of an extension's code, as the host records it (`caused_by`: the
+///   latest logged event of that type caused it).
 /// - `health: { namespace, contribution, kind?, disable }`: a contribution
 ///   disabled after failures, with the reason.
 /// - `token_usage: { thread?, session?, model?, prompt?, input_tokens?,
@@ -69,7 +70,7 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "visit" => observe_visit(host, body).await,
         "refs" => observe_refs(host, body).await,
         "analyze" => observe_analyze(host, body).await,
-        "run" => observe_run(host, body).await,
+        "run" => Box::pin(observe_run(host, body)).await,
         "health" => observe_health(host, body).await,
         "token_usage" => observe_token_usage(host, body).await,
         "hint" => observe_hint(host, body).await,
@@ -193,6 +194,8 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
             ..Default::default()
         });
     }
+    // How many of its files the analysis read: every one, unless it says.
+    results.analyzed_files = int(body, "analyzed_files").unwrap_or(results.files.len() as i64);
     let stream = first_stream(host).await?;
     let (row, _) = host
         .svc
@@ -463,13 +466,24 @@ pub(super) async fn observe_symbols(host: &Host, body: &Value) -> Result<(), Str
         .map_err(|e| e.to_string())
 }
 
-/// `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?,
-/// ai_calls?, error? }`: a finished run of `extension`'s `contribution`
-/// (`kind` a collector by default), recorded as the host does
-/// (`extension_run_store::record_tx`); `days_ago` is when it began.
+/// Observe a contribution run through its store. Use `days_ago` to set
+/// when it began, `live: true` to leave it unfinished and `caused_by:
+/// <event type>` to make it the run for the latest logged event of that type.
 pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_domain::contribution::{ContributionId, ContributionKind};
-    use oxplow_domain::run::{ContributionRef, Mode, Outcome, RunContext};
+    use oxplow_domain::run::{ContributionRef, Mode, Outcome, RunContext, Usage};
+
+    #[derive(Default, serde::Deserialize)]
+    #[serde(default)]
+    struct Observations {
+        cpu_ms: u64,
+        peak_bytes: u64,
+        ai_calls: u32,
+        scopes: std::collections::BTreeMap<String, u32>,
+        decisions: Vec<oxplow_domain::grant::Decided>,
+        wall_ms: Option<u64>,
+        live: bool,
+    }
     let text = |k: &str| body.get(k).and_then(Value::as_str);
     let extension = text("extension").ok_or("`run.extension` names the extension")?;
     let local = text("contribution").ok_or("`run.contribution` names the contribution")?;
@@ -482,23 +496,17 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
         "implementation" => ContributionKind::Implementation,
         other => return Err(format!("`run.kind: {other}` — fix: collector, effect, command, job, advisory or implementation")),
     };
-    let outcome = match text("outcome").unwrap_or("ok") {
-        "ok" => Outcome::Ok,
-        "skipped" => Outcome::Skipped,
-        "failed" => Outcome::Failed,
-        "denied" => Outcome::Denied,
-        "cancelled" => Outcome::Cancelled,
-        other => {
-            return Err(format!(
-                "`run.outcome: {other}` — fix: ok, skipped, failed, denied or cancelled"
-            ))
-        }
-    };
+    let outcome = text("outcome")
+        .unwrap_or("ok")
+        .parse::<Outcome>()
+        .map_err(|e| format!("`run.outcome`: {e}"))?;
+    let observations: Observations =
+        serde_json::from_value(body.clone()).map_err(|e| format!("run observations: {e}"))?;
     let mut run = RunContext::contribution(
         ContributionRef {
             id: ContributionId::new(&host.namespace_of(extension), kind, local),
             extension: extension.to_string(),
-            version: None,
+            version: text("version").map(str::to_owned),
             generation: None,
             deployment: None,
         },
@@ -511,15 +519,228 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
         );
         run = run.began_at(at);
     }
-    run.used_cpu(body.get("cpu_ms").and_then(Value::as_u64).unwrap_or(0), 0);
-    for _ in 0..body.get("ai_calls").and_then(Value::as_u64).unwrap_or(0) {
-        run.used_ai();
+    // Caused by the latest logged event of a type: the run a collector on
+    // it makes for that event (`cause_event_id`).
+    if let Some(event_type) = text("caused_by") {
+        let event_type = event_type.to_string();
+        let id: Option<String> = host
+            .svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT (SELECT id FROM event_log WHERE type = ?1 ORDER BY seq DESC LIMIT 1)",
+                    [&event_type],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let id = id.ok_or_else(|| {
+            format!(
+                "`run.caused_by: {}`: no such event is logged — fix: log it first",
+                text("caused_by").unwrap_or_default()
+            )
+        })?;
+        run = run.caused_by(oxplow_domain::EventId(id));
     }
+    let run = run.with_observed_result(
+        Usage {
+            cpu_ms: observations.cpu_ms,
+            peak_bytes: observations.peak_bytes,
+            ai_calls: observations.ai_calls,
+            scopes: observations.scopes,
+            observed_wall_time: observations.wall_ms.map(std::time::Duration::from_millis),
+        },
+        observations.decisions,
+    );
+    let local = local.to_string();
+    let effect = format!("{}/{}", host.namespace_of(extension), local);
+    let live = observations.live;
     let error = text("error").map(str::to_string);
+    let input = body.get("input").cloned();
+    let outcome = (!live).then_some(outcome);
+    if kind == ContributionKind::Job {
+        return Box::pin(observe_job_attempt(host, run, outcome)).await;
+    }
+    host.svc
+        .db
+        .transaction(move |tx| match kind {
+            ContributionKind::Collector => match outcome {
+                Some(outcome) => oxplow_db::collector_store::record_run_in(
+                    tx,
+                    &run,
+                    outcome,
+                    error.as_deref(),
+                    &Default::default(),
+                    None,
+                ),
+                None => oxplow_db::collector_store::begin_run_in(tx, &run),
+            },
+            ContributionKind::Effect => {
+                use oxplow_db::effect_run_store::{self, EffectRunKey, Finished, ReactionOrigin};
+                let key = EffectRunKey::first(
+                    &effect,
+                    oxplow_domain::EventId::generate().to_string(),
+                    0,
+                    ReactionOrigin::Live,
+                );
+                match outcome {
+                    Some(outcome) => effect_run_store::finish_tx(
+                        tx,
+                        &key,
+                        &Finished {
+                            outcome,
+                            reason: error.clone(),
+                            command_run_id: None,
+                            proposal_id: None,
+                        },
+                        Some(&run),
+                        None,
+                    ),
+                    None => effect_run_store::claim_tx(tx, &key, &run, None),
+                }
+            }
+            ContributionKind::Command => {
+                use oxplow_db::command_run_store::{insert_with_outcome_tx, NewCommandRun};
+                use oxplow_domain::events::schema::CommandOutcome;
+                insert_with_outcome_tx(
+                    tx,
+                    &run,
+                    &NewCommandRun {
+                        command: local.clone(),
+                        input: input.clone(),
+                        outcome: CommandOutcome::Ok,
+                        error: error.clone(),
+                        result: None,
+                        inverse: None,
+                        scopes: Default::default(),
+                    },
+                    outcome,
+                )
+                .map(|_| ())
+            }
+            _ => oxplow_db::contribution_run_store::record_unlogged_tx(
+                tx,
+                &run,
+                outcome,
+                error.as_deref(),
+            ),
+        })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn observe_job_attempt(
+    host: &Host,
+    observed: oxplow_domain::run::RunContext,
+    outcome: Option<oxplow_domain::run::Outcome>,
+) -> Result<(), String> {
+    use oxplow_db::job_run_store::{
+        enqueue_with_context_tx, transition_with_run_tx, EnqueueResult, NewJobRun,
+    };
+    use oxplow_domain::job_run::{
+        AttemptFence, Completion, IntentKey, JobEvent, JobId, JobOwner, JobRun, ReplayPolicy,
+    };
+    use oxplow_domain::job_run_context::{JobExecutionIdentity, JobInvocationContext};
+    use oxplow_domain::run::{Mode, Outcome, RunContext};
+    use oxplow_domain::DomainError;
+
     host.svc
         .db
         .transaction(move |tx| {
-            oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
+            let invalid = |e: &dyn std::fmt::Display| DomainError::Invalid(e.to_string());
+            let owner = observed
+                .contribution_ref()
+                .expect("the fixture named a job")
+                .clone();
+            let queued_by = RunContext::core(Actor::System, Mode::External);
+            let provenance = JobInvocationContext::capture(&queued_by).map_err(|e| invalid(&e))?;
+            let id = JobId::generate();
+            let start = observed.began().unix_ms();
+            let intent_key = IntentKey::new(id.as_str().to_string()).map_err(|e| invalid(&e))?;
+            let job = JobRun::queued(
+                id.clone(),
+                JobOwner {
+                    contribution: owner.id.clone(),
+                    package_version: owner.version.clone(),
+                    contract_version: None,
+                    deployment: None,
+                },
+                queued_by.run().clone(),
+                intent_key.clone(),
+                ReplayPolicy::Never,
+                start,
+            )
+            .map_err(|e| invalid(&e))?;
+            let EnqueueResult::Created(queued) = enqueue_with_context_tx(
+                tx,
+                &NewJobRun {
+                    job,
+                    operation: "fixture".into(),
+                    invoker: "system".into(),
+                    request: serde_json::json!({}),
+                },
+                &provenance,
+            )
+            .map_err(|e| invalid(&e))?
+            else {
+                return Err(DomainError::Invariant("fixture job already exists".into()));
+            };
+            let token = AttemptFence {
+                attempt: 1,
+                fence: 1,
+            };
+            let identity = JobExecutionIdentity::new(id.clone(), token).map_err(|e| invalid(&e))?;
+            let run = RunContext::job(owner, &identity, &provenance)
+                .map_err(|e| invalid(&e))?
+                .with_observed_result(observed.usage(), observed.decisions());
+            let advance = |revision, event| {
+                transition_with_run_tx(tx, &id, revision, &event, None, Some(&run))
+                    .map_err(|e| invalid(&e))
+            };
+            let lease = 30_000;
+            let claimed = advance(
+                queued.revision,
+                JobEvent::Claim {
+                    now_ms: start,
+                    lease_ms: lease,
+                    intent_key,
+                },
+            )?;
+            let now_ms = start + 1;
+            let event = match outcome {
+                None => return Ok(()),
+                Some(Outcome::Ok) => JobEvent::Complete {
+                    now_ms,
+                    token,
+                    outcome: Completion::Succeeded,
+                },
+                Some(Outcome::Failed) => JobEvent::Complete {
+                    now_ms,
+                    token,
+                    outcome: Completion::Failed,
+                },
+                Some(Outcome::Interrupted) => JobEvent::RecoverExpired {
+                    now_ms: start + lease,
+                },
+                Some(Outcome::Cancelled) => {
+                    let stopping =
+                        advance(claimed.revision, JobEvent::RequestCancellation { now_ms })?;
+                    return advance(
+                        stopping.revision,
+                        JobEvent::ConfirmStopped { now_ms, token },
+                    )
+                    .map(|_| ());
+                }
+                Some(outcome) => {
+                    return Err(DomainError::Invalid(format!(
+                        "job attempts cannot end {}",
+                        outcome.as_str()
+                    )))
+                }
+            };
+            advance(claimed.revision, event).map(|_| ())
         })
         .await
         .map_err(|e| e.to_string())

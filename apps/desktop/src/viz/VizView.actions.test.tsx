@@ -49,7 +49,7 @@ mock.module("../api.js", () => ({
   },
   runCommand: async (name: string, input: unknown) => {
     commandRuns.push([name, input]);
-    return { result: null, audit_id: 1, event_id: null, inverse: null };
+    return { result: null, command_run_id: 1, event_id: null, inverse: null };
   },
 }));
 
@@ -63,7 +63,7 @@ const press: VizActionRunner = async (_id, _action, _params, _row, _streamId, co
       "process — runs programs with your authority; oxplow does not confine them",
     ]);
   }
-  return { result: null, audit_id: 1, event_id: null, inverse: null };
+  return { result: null, command_run_id: 1, event_id: null, inverse: null };
 };
 const wrapper = ({ children }: { children: ReactNode }) => <VizActionRunnerContext.Provider value={press}>{children}</VizActionRunnerContext.Provider>;
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
@@ -207,7 +207,7 @@ test("an action with options offers each option, the row's own checked", async (
   const options: Array<string | null | undefined> = [];
   const pressing: VizActionRunner = async (_id, _action, _params, _row, _streamId, _confirmed, _input, _drop, option) => {
     options.push(option);
-    return { result: null, audit_id: 1, event_id: null, inverse: null };
+    return { result: null, command_run_id: 1, event_id: null, inverse: null };
   };
   const marked: VizRun = {
     ...run,

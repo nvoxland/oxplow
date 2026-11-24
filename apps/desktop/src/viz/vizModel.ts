@@ -24,7 +24,7 @@ import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, knowled
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { knowledgeOf, parseUri, requestUri } from "../uri/uri.js";
+import { fileUri, knowledgeOf, parseUri, requestUri, typeOf } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -577,6 +577,37 @@ export function rowRef(viz: VizConfig, columns: string[], row: SqlCell[]): strin
   for (const c of viz.columns) {
     const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
     if (ref && parseUri(linkTargetId(ref))) return linkTargetId(ref);
+  }
+  return null;
+}
+
+/** What a row's Open In ▸ is for (`openIn.ts`): the file a `file` link
+ *  names, the file or directory URI or web URL a `page` link names, or the
+ *  file of a `diff-at` link whose newer side is the working copy. Null
+ *  when the row names none. */
+export function rowOpenInRef(viz: VizConfig, columns: string[], row: SqlCell[]): string | null {
+  for (const c of viz.columns) {
+    const link = c.link;
+    if (!link) continue;
+    const i = columns.indexOf(link.from ?? c.key);
+    const v = i === -1 ? null : row[i];
+    if (v === null || v === undefined || v === "") continue;
+    const s = String(v);
+    switch (link.kind) {
+      case "file":
+        return fileUri(s);
+      case "page": {
+        if (/^https?:\/\//i.test(s)) return s;
+        const type = typeOf(s);
+        if (type === "oxplow/file" || type === "oxplow/dir") return s;
+        break;
+      }
+      case "diff-at": {
+        const h = link.head ? columns.indexOf(link.head) : -1;
+        if (h !== -1 && parseRevision(row[h] ?? null) === WORKING) return fileUri(s);
+        break;
+      }
+    }
   }
   return null;
 }

@@ -37,7 +37,7 @@ headings inside that doc.
 | How pages run today: page files, ids, reading from the live set, params, checks, IPC/MCP surfaces, panels, page actions, the desktop UI | [extensions-page-host.md](./extensions-page-host.md) |
 | The page YAML: metadata, params, loaders, view nodes, actions, checks, agents; change links; page layout | [extensions-pages.md](./extensions-pages.md) |
 | Slots, replacements (`ui.mounts`), commands in core menus, decorators | [extensions-slots.md](./extensions-slots.md) |
-| Custom components (the frame, the protocol, testing one), Explore Data | [extensions-components.md](./extensions-components.md) |
+| Custom components (the frame, the protocol, testing one) | [extensions-components.md](./extensions-components.md) |
 | Sources and deployments, builds, `extensionSources`, sharing, disabling, reviewing by impact | [extensions-deploy.md](./extensions-deploy.md) |
 | Health, disable and repair; candidate publication, vocabulary generations, runtime adapters, ingress | [extensions-activation.md](./extensions-activation.md) |
 | Permissions and approval, the run context, services, grants, secret references | [extensions-permissions.md](./extensions-permissions.md) |

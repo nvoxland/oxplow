@@ -1,8 +1,8 @@
 /**
- * The person's bookmarks: pages starred at one scope — the
+ * The person's bookmarks: pages starred at one visibility scope — the
  * thread, its stream or the project. Read from `v_bookmark`, written
  * through the `oxplow.bookmark.set` / `oxplow.bookmark.remove` commands. From one thread
- * a page is bookmarked once across what it sees, so setting another scope
+ * a page is bookmarked once across what it sees, so setting another visibility scope
  * moves it. `.context/pages-and-tabs.md` → "Bookmarks".
  */
 import { useCallback, useEffect, useState } from "react";
@@ -16,12 +16,12 @@ import { recordedPageKind, refFromTabId } from "./pageRefs.js";
 import { identityOf } from "./session.js";
 import type { TabRef } from "./tabState.js";
 
-export type BookmarkScope = "thread" | "stream" | "project";
+import type { VisibilityScope } from "../visibilityScope.js";
 
 export interface Bookmark {
   ref: TabRef;
   label: string | null;
-  scope: BookmarkScope;
+  visibilityScope: VisibilityScope;
 }
 
 /** Who's looking: the selected thread and its stream. */
@@ -33,14 +33,14 @@ export interface BookmarkViewer {
 /** What a viewer sees, newest first — a page once, at the narrowest scope
  *  it's bookmarked at. */
 export const BOOKMARKS_SQL = `
-  SELECT uri, label, scope FROM (
-    SELECT uri, label, scope, added_at, id,
+  SELECT uri, label, visibility_scope FROM (
+    SELECT uri, label, visibility_scope, added_at, id,
            row_number() OVER (PARTITION BY uri ORDER BY
-             CASE scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
+             CASE visibility_scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
     FROM v_bookmark
-    WHERE (scope = 'thread' AND thread_id = ?1)
-       OR (scope = 'stream' AND stream_id = ?2)
-       OR scope = 'project'
+    WHERE (visibility_scope = 'thread' AND thread_id = ?1)
+       OR (visibility_scope = 'stream' AND stream_id = ?2)
+       OR visibility_scope = 'project'
   ) WHERE n = 1
   ORDER BY added_at DESC, id DESC`;
 
@@ -58,7 +58,7 @@ export function bookmarksFromResult(result: SqlQueryResult): Bookmark[] {
     const ref = refFromTabId(String(at(row, "uri")));
     if (!ref) continue;
     const label = at(row, "label");
-    out.push({ ref, label: label == null ? null : String(label), scope: String(at(row, "scope")) as BookmarkScope });
+    out.push({ ref, label: label == null ? null : String(label), visibilityScope: String(at(row, "visibility_scope")) as VisibilityScope });
   }
   return out;
 }
@@ -98,16 +98,16 @@ function viewerInput(viewer: BookmarkViewer): Record<string, string> {
   return {};
 }
 
-export function setBookmarkInput(viewer: BookmarkViewer, ref: TabRef, label: string | null, scope: BookmarkScope) {
-  return { uri: ref.id, page_kind: recordedPageKind(ref), ...(label ? { label } : {}), scope, ...viewerInput(viewer) };
+export function setBookmarkInput(viewer: BookmarkViewer, ref: TabRef, label: string | null, visibilityScope: VisibilityScope) {
+  return { uri: ref.id, page_kind: recordedPageKind(ref), ...(label ? { label } : {}), visibility_scope: visibilityScope, ...viewerInput(viewer) };
 }
 
-/** Bookmark `ref` at `scope`, moving it if it's at another. */
-export async function setBookmark(viewer: BookmarkViewer, ref: TabRef, label: string | null, scope: BookmarkScope): Promise<void> {
-  await runCommand("oxplow.bookmark.set", setBookmarkInput(viewer, ref, label, scope));
+/** Bookmark `ref` at `visibilityScope`, moving it if it's at another. */
+export async function setBookmark(viewer: BookmarkViewer, ref: TabRef, label: string | null, visibilityScope: VisibilityScope): Promise<void> {
+  await runCommand("oxplow.bookmark.set", setBookmarkInput(viewer, ref, label, visibilityScope));
 }
 
-/** Take `ref`'s bookmark off; the outcome carries the audit id its undo
+/** Take `ref`'s bookmark off; the outcome carries the command run id its undo
  *  needs (`undoCommand`). */
 export function removeBookmark(viewer: BookmarkViewer, refId: string): ReturnType<typeof runCommand> {
   return runCommand("oxplow.bookmark.remove", { uri: refId, ...viewerInput(viewer) });
@@ -127,7 +127,7 @@ export function moveBookmarkInput(viewer: BookmarkViewer, from: Bookmark, ref: T
   return {
     calls: [
       { name: "oxplow.bookmark.remove", input: { uri: from.ref.id, ...viewerInput(viewer) } },
-      { name: "oxplow.bookmark.set", input: setBookmarkInput(viewer, ref, label, from.scope) },
+      { name: "oxplow.bookmark.set", input: setBookmarkInput(viewer, ref, label, from.visibilityScope) },
     ],
   };
 }

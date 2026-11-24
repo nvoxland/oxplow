@@ -4,8 +4,8 @@
  * a person through `retry_dead_letter` / `discard_dead_letter`. Settings →
  * Data lists them under Delivery; Alerts shows one row while any wait.
  *
- * Beside them, the reactions of extensions' effects that failed (P9.D4,
- * `v_effect_run`'s latest attempts). One whose every step went to a
+ * Beside them, reactions whose latest attempt is retryable (P9.D4,
+ * `v_effect_run`). One whose every step went to a
  * provider keeping `idempotent_writes` is sent again by itself (P10,
  * `retry_at`); any other — a step outside oxplow may already have run —
  * waits for a person's retry (`oxplow.effect.retry`, asked first).
@@ -79,14 +79,15 @@ export function useUndelivered(): UndeliveredEvent[] {
   return letters;
 }
 
-/** An effect's reaction to an event whose latest attempt failed. */
+/** An effect's reaction to an event whose latest attempt can be retried. */
 export interface FailedReaction {
-  /** `<extension>/<id>`. */
+  /** `<namespace>/<id>`. */
   effect: string;
   eventId: string;
   eventSeq: number;
-  /** The attempt that failed, from 1. */
+  /** The latest attempt, from 1. */
   attempt: number;
+  outcome: string;
   reason: string;
   eventType: string;
   /** When it is sent again by itself (P10); null when it waits for a person. */
@@ -101,6 +102,7 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
       eventId: String(at("event_id")),
       eventSeq: Number(at("event_seq")),
       attempt: Number(at("attempt") ?? 1),
+      outcome: String(at("outcome")),
       reason: String(at("reason") ?? ""),
       eventType: String(at("event_type") ?? "an event"),
       retryAt: at("retry_at") === null ? null : String(at("retry_at")),
@@ -108,19 +110,19 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
   });
 }
 
-/** The reactions whose latest attempt failed, newest first, and what was read. */
+/** The retryable reactions, newest attempt first, and what was read. */
 export async function readFailedReactions(): Promise<{ reactions: FailedReaction[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.reason, e.type AS event_type, r.retry_at
+    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.outcome, r.error AS reason, e.type AS event_type, r.retry_at
        FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
-      WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC`,
+      WHERE r.latest = 1 AND r.retryable = 1 ORDER BY r.id DESC`,
     [],
     200,
   );
   return { reactions: reactionsFromResult(res), reads: res.reads };
 }
 
-/** The failed reactions, re-read when they change. */
+/** The retryable reactions, re-read when they change. */
 export function useFailedReactions(): FailedReaction[] {
   const [reactions, setReactions] = useState<FailedReaction[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);

@@ -237,7 +237,7 @@ pub struct ThreadFixture {
 }
 
 /// An agent session (a Claude terminal) on `thread`, as setup — written to
-/// the store, not run as a command, so it leaves no audit row behind.
+/// the store, not run as a command, so it leaves no command run record behind.
 pub async fn open_session(
     svc: &crate::Services,
     thread: ThreadId,

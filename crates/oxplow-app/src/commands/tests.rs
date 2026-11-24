@@ -192,7 +192,7 @@ fn agent() -> Actor {
 }
 
 /// A `Read` handler runs in a snapshot that is always rolled back, so
-/// a write it makes (by mistake) never lands — it isn't audited.
+/// a write it makes (by mistake) never lands — it isn't recorded.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_read_commands_write_never_lands() {
     let (db, bus) = bus();
@@ -210,9 +210,9 @@ async fn a_read_commands_write_never_lands() {
     assert_eq!(kv_value(&db, "a").await, None);
 }
 
-/// A `View` runs as a `Read` does: neither is recorded.
+/// A read has a detail row without recording the command's payload.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_read_command_is_not_recorded() {
+async fn a_read_command_has_details_without_its_payload() {
     for access in [Access::View, Access::Read] {
         let (_db, bus) = bus();
         let mut spec = kv_spec("oxplow.kv.get", Confirm::Never);
@@ -240,9 +240,18 @@ async fn a_read_command_is_not_recorded() {
             .await
             .unwrap();
         assert_eq!(out.result["k"], "a");
-        assert_eq!((out.audit_id, out.event_id), (None, None), "{access:?}");
+        assert_eq!(
+            (out.command_run_id, out.event_id),
+            (None, None),
+            "{access:?}"
+        );
         assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
-        assert!(bus.audit_store().list_recent(10).await.unwrap().is_empty());
+        let rows = bus.command_run_store().list_recent(10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].command, "oxplow.kv.get");
+        assert!(rows[0].input.is_null());
+        assert!(rows[0].result.is_none());
+        assert!(rows[0].inverse.is_none());
     }
 }
 
@@ -401,7 +410,7 @@ async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_tx_command_writes_its_state_audit_and_events_together() {
+async fn a_tx_command_writes_its_state_run_and_events_together() {
     let (db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
         .unwrap();
@@ -416,18 +425,18 @@ async fn a_tx_command_writes_its_state_audit_and_events_together() {
         .unwrap();
     assert_eq!(out.result, json!({"k": "a", "v": "1"}));
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
-    let audit = bus
-        .audit_store()
-        .get(out.audit_id.unwrap())
+    let run_row = bus
+        .command_run_store()
+        .get(out.command_run_id.unwrap())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(audit.command, "oxplow.kv.set");
-    assert_eq!(audit.thread_id, Some(ThreadId::new(7)));
-    assert_eq!(audit.outcome, Outcome::Ok);
-    assert_eq!(audit.event_id, out.event_id.clone());
+    assert_eq!(run_row.command, "oxplow.kv.set");
+    assert_eq!(run_row.thread_id, Some(ThreadId::new(7)));
+    assert_eq!(run_row.outcome, Outcome::Ok);
+    assert_eq!(run_row.event_id, out.event_id.clone());
     assert_eq!(
-        audit.inverse.as_ref().unwrap().input,
+        run_row.inverse.as_ref().unwrap().input,
         json!({"k": "a", "v": ""})
     );
     // command.executed then the handler's domain event, caused by it,
@@ -437,8 +446,8 @@ async fn a_tx_command_writes_its_state_audit_and_events_together() {
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].envelope.event_type, "command.executed");
     assert_eq!(
-        events[0].envelope.payload["audit_id"],
-        out.audit_id.unwrap()
+        events[0].envelope.payload["command_run_id"],
+        out.command_run_id.unwrap()
     );
     assert_eq!(events[0].envelope.payload["actor_kind"], "agent");
     assert_eq!(events[0].envelope.source, "agent:thr7");
@@ -451,7 +460,7 @@ async fn a_tx_command_writes_its_state_audit_and_events_together() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
+async fn a_failing_tx_handler_rolls_everything_back_and_is_recorded_as_error() {
     let (db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
         .unwrap();
@@ -471,7 +480,7 @@ async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
         "the handler's write rolled back"
     );
     assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
-    let recent = bus.audit_store().list_recent(5).await.unwrap();
+    let recent = bus.command_run_store().list_recent(5).await.unwrap();
     assert_eq!(recent.len(), 1);
     assert_eq!(recent[0].outcome, Outcome::Error);
     assert!(recent[0]
@@ -482,7 +491,7 @@ async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn schema_rejection_names_the_field_and_is_audited_invalid() {
+async fn schema_rejection_names_the_field_and_is_recorded_invalid() {
     let (_db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
         .unwrap();
@@ -500,7 +509,7 @@ async fn schema_rejection_names_the_field_and_is_audited_invalid() {
         "{err:?}"
     );
     assert_eq!(
-        bus.audit_store().list_recent(1).await.unwrap()[0].outcome,
+        bus.command_run_store().list_recent(1).await.unwrap()[0].outcome,
         Outcome::Invalid
     );
     assert!(matches!(
@@ -577,8 +586,12 @@ async fn confirmation_is_a_persons_move_and_an_agents_run_doesnt_ask() {
     assert_eq!(preview.details, ["k: a", "v: 1"]);
     assert_eq!(kv_value(&db, "a").await, None);
     assert!(
-        bus.audit_store().list_recent(5).await.unwrap().is_empty(),
-        "nothing audited"
+        bus.command_run_store()
+            .list_recent(5)
+            .await
+            .unwrap()
+            .is_empty(),
+        "nothing recorded"
     );
     bus.run(
         &Actor::Human,
@@ -663,7 +676,7 @@ fn kv_undone_by_noop() -> Handler {
 }
 
 /// a call that says it changed nothing keeps nothing — what it
-/// wrote is rolled back, so it can't land unaudited — and one that
+/// wrote is rolled back, so it can't land unrecorded — and one that
 /// returns events (a change) while saying so is refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
@@ -679,7 +692,7 @@ async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
         )
         .await
         .unwrap();
-    assert_eq!(out.audit_id, None);
+    assert_eq!(out.command_run_id, None);
     assert_eq!(kv_value(&db, "a").await, None, "its write rolled back");
     let err = bus
         .run(
@@ -692,14 +705,16 @@ async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
         .unwrap_err();
     assert!(err.to_string().contains("changed nothing"), "{err}");
     assert_eq!(kv_value(&db, "b").await, None);
-    // The refused call is audited as the failure it is; the unchanged
-    // one left nothing.
-    let rows = audits(&db).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
+    // The refused call keeps its failure, and the genuine no-op keeps only
+    // its run details.
+    let rows = command_runs(&db).await;
+    assert_eq!(rows.len(), 2, "{rows:?}");
     assert_eq!(
         rows[0].outcome,
         oxplow_domain::events::schema::CommandOutcome::Error
     );
+    assert_eq!(rows[1].outcome, Outcome::Ok);
+    assert!(rows[1].input.is_null());
 }
 
 /// an undo, or a person's approval, whose run changes nothing
@@ -727,17 +742,17 @@ async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
         .await
         .unwrap();
     let undo = bus
-        .undo(&Actor::Human, marked.audit_id.unwrap(), true)
+        .undo(&Actor::Human, marked.command_run_id.unwrap(), true)
         .await
         .unwrap();
-    assert!(undo.audit_id.is_some(), "the undo is recorded");
+    assert!(undo.command_run_id.is_some(), "the undo is recorded");
     let row = bus
-        .audit_store()
-        .get(marked.audit_id.unwrap())
+        .command_run_store()
+        .get(marked.command_run_id.unwrap())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(row.undone_by, undo.audit_id);
+    assert_eq!(row.undone_by, undo.command_run_id);
 
     let err = bus
         .run(
@@ -751,7 +766,10 @@ async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
     assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
     let rows = pending(&db).await;
     let approved = bus.approve(&Actor::Human, rows[0].id).await.unwrap();
-    assert!(approved.audit_id.is_some(), "the approval is recorded");
+    assert!(
+        approved.command_run_id.is_some(),
+        "the approval is recorded"
+    );
     let p = proposal(&db, rows[0].id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
 }
@@ -780,19 +798,19 @@ async fn undo_applies_the_inverse_and_marks_the_row_once() {
         .unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("2"));
     let undo = bus
-        .undo(&Actor::Human, second.audit_id.unwrap(), false)
+        .undo(&Actor::Human, second.command_run_id.unwrap(), false)
         .await
         .unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let row = bus
-        .audit_store()
-        .get(second.audit_id.unwrap())
+        .command_run_store()
+        .get(second.command_run_id.unwrap())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(row.undone_by, undo.audit_id);
+    assert_eq!(row.undone_by, undo.command_run_id);
     let err = bus
-        .undo(&Actor::Human, second.audit_id.unwrap(), false)
+        .undo(&Actor::Human, second.command_run_id.unwrap(), false)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("already undone"), "{err}");
@@ -825,7 +843,7 @@ async fn concurrent_undos_apply_the_inverse_once() {
         )
         .await
         .unwrap()
-        .audit_id
+        .command_run_id
         .unwrap();
     let (b1, b2) = (bus.clone(), bus.clone());
     let (r1, r2) = tokio::join!(
@@ -840,7 +858,7 @@ async fn concurrent_undos_apply_the_inverse_once() {
     );
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let ok_runs = bus
-        .audit_store()
+        .command_run_store()
         .list_recent(20)
         .await
         .unwrap()
@@ -929,9 +947,9 @@ async fn an_external_run_whose_record_fails_still_reports_success() {
         )
         .await
         .unwrap();
-    assert_eq!(out.audit_id, None);
+    assert_eq!(out.command_run_id, None);
     assert_eq!(kv_value(&db, "e").await.as_deref(), Some("1"));
-    let rows = bus.audit_store().list_recent(10).await.unwrap();
+    let rows = bus.command_run_store().list_recent(10).await.unwrap();
     assert!(rows.iter().all(|r| r.outcome != Outcome::Error), "{rows:?}");
 }
 
@@ -975,12 +993,12 @@ async fn a_shortcut_is_held_once_per_when() {
     let (_db, bus) = bus();
     let keyed = |id: &str, when: Option<&str>| {
         let mut spec = kv_spec(id, Confirm::Never);
-        spec.ui = Some(oxplow_domain::CommandUi {
+        spec.ui = Some(Box::new(oxplow_domain::CommandUi {
             label: id.into(),
             shortcut: Some("Ctrl/Cmd+K".into()),
             when: when.map(str::to_string),
             ..Default::default()
-        });
+        }));
         Command::new(spec, kv_set())
     };
     bus.register(keyed("oxplow.kv.a", Some("fileShown")).unwrap())
@@ -1018,7 +1036,7 @@ async fn an_agents_undo_doesnt_ask() {
         )
         .await
         .unwrap();
-    bus.undo(&agent(), done.audit_id.unwrap(), false)
+    bus.undo(&agent(), done.command_run_id.unwrap(), false)
         .await
         .unwrap();
     assert!(pending(&db).await.is_empty());
@@ -1120,7 +1138,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
 
 /// A handler that only writes when the run was confirmed: it sees
 /// step 4's answer in `ctx.confirmed`. A refusal it raises itself is
-/// a confirmation, not an error — rolled back, nothing audited.
+/// a confirmation, not an error — rolled back, nothing recorded.
 fn kv_set_if_confirmed() -> Handler {
     Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
         if !ctx.confirmed {
@@ -1146,8 +1164,8 @@ fn kv_set_if_confirmed() -> Handler {
     }))
 }
 
-async fn audits(db: &Database) -> Vec<CommandAudit> {
-    SqliteCommandAuditStore::new(db.clone())
+async fn command_runs(db: &Database) -> Vec<CommandRun> {
+    SqliteCommandRunStore::new(db.clone())
         .list_recent(50)
         .await
         .unwrap()
@@ -1179,7 +1197,7 @@ async fn a_tx_handler_sees_whether_the_run_was_confirmed() {
     );
     assert_eq!(kv_value(&db, "a").await, None);
     assert!(
-        audits(&db).await.is_empty(),
+        command_runs(&db).await.is_empty(),
         "a confirmation is not an error"
     );
     bus.run(
@@ -1195,7 +1213,7 @@ async fn a_tx_handler_sees_whether_the_run_was_confirmed() {
 
 /// `oxplow.command.sequence` composes Tx commands in one run: each child's
 /// own job tools, policy and confirmation apply; the children share the
-/// parent's transaction and audit row; the inverse is the children's
+/// parent's transaction and command run row; the inverse is the children's
 /// inverses, reversed.
 fn composing_bus() -> (Database, Arc<CommandBus>) {
     let (db, bus) = bus();
@@ -1262,6 +1280,131 @@ fn composing_bus_on(db: Database, bus: CommandBus) -> (Database, Arc<CommandBus>
 
 fn calls(items: &[(&str, &str, &str)]) -> Value {
     json!({ "calls": items.iter().map(|(n, k, v)| json!({ "name": n, "input": { "k": k, "v": v } })).collect::<Vec<_>>() })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_composed_core_command_keeps_its_effect_senders_authority() {
+    use oxplow_domain::contribution::{ContributionId, ContributionKind};
+    use oxplow_domain::grant::{Decision, Enforcement, Grant, GrantRequest};
+    use oxplow_domain::permissions::Permissions;
+    use oxplow_domain::run::{Authority, ContributionRef};
+
+    let (db, bus) = composing_bus();
+    let sequence = "oxplow.command.sequence";
+    let leaf = "oxplow.kv.read_then_set";
+    let Handler::Tx(set) = kv_set() else {
+        unreachable!("kv_set is transactional");
+    };
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        if let Decision::Denied(reason) = ctx.run.decide_service("sql.read") {
+            return Err(CommandError::Denied { reason });
+        }
+        set(ctx, input)
+    }));
+    bus.register(Command::new(kv_spec(leaf, Confirm::Never), handler).unwrap())
+        .unwrap();
+
+    let sender = RunContext::contribution(
+        ContributionRef {
+            id: ContributionId::new("acme", ContributionKind::Effect, "note"),
+            extension: "acme".into(),
+            version: None,
+            generation: None,
+            deployment: None,
+        },
+        Actor::Effect {
+            effect: "acme/note".into(),
+            thread_id: Some(ThreadId::new(7)),
+            stream_id: Some(oxplow_domain::StreamId::new(1)),
+        },
+        Mode::Pure,
+    )
+    .authorized(Authority {
+        declared: GrantRequest {
+            scopes: ["sql.read".into()].into(),
+            ..GrantRequest::default()
+        },
+        grant: Grant::from_permissions(
+            "acme",
+            &Permissions {
+                commands: vec![sequence.into(), leaf.into()],
+                ..Permissions::default()
+            },
+        ),
+        enforcement: Enforcement { hosts: false },
+    });
+    let Decision::Denied(expected) = sender.decide_service("sql.read") else {
+        panic!("the sender has no SQL grant");
+    };
+    let input = calls(&[(leaf, "a", "1")]);
+    let err = bus
+        .run_in(&sender, sequence, input.clone(), false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CommandError::Denied { ref reason } if reason == &expected),
+        "{err:?}"
+    );
+    assert_eq!(kv_value(&db, "a").await, None);
+
+    bus.run(&Actor::Human, sequence, input, false)
+        .await
+        .unwrap();
+    assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn summing_root_command_runs_counts_each_childs_cpu_once() {
+    let (db, bus) = composing_bus();
+    let leaf = "oxplow.kv.measured";
+    let Handler::Tx(set) = kv_set() else {
+        unreachable!("kv_set is transactional");
+    };
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+        // Supply measured CPU directly, so the result needs no clock or worker.
+        ctx.run
+            .used_cpu(input["v"].as_str().unwrap().parse().unwrap(), 0);
+        set(ctx, input)
+    }));
+    bus.register(Command::new(kv_spec(leaf, Confirm::Never), handler).unwrap())
+        .unwrap();
+    let result = bus
+        .run(
+            &Actor::Human,
+            "oxplow.command.sequence",
+            calls(&[(leaf, "first", "9"), (leaf, "second", "17")]),
+            false,
+        )
+        .await
+        .unwrap();
+    let root = result.command_run_id.unwrap();
+    let (totals, children) = db
+        .read(move |conn| {
+            let totals: (i64, i64) = conn
+                .query_row(
+                    "SELECT count(*), sum(cpu_ms) FROM v_contribution_run WHERE parent_run_id IS NULL",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let mut statement = conn
+                .prepare(
+                    "SELECT cpu_ms FROM v_contribution_run
+                      WHERE parent_run_id = (SELECT run_id FROM command_run WHERE id = ?1)
+                      ORDER BY cpu_ms",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let children = statement
+                .query_map([root], |row| row.get::<_, i64>(0))
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok((totals, children))
+        })
+        .await
+        .unwrap();
+    assert_eq!(children, vec![9, 17]);
+    assert_eq!(totals, (1, 26));
 }
 
 /// Step 0 holds for a composed call as for a direct one: a child
@@ -1479,12 +1622,12 @@ async fn a_child_that_changed_nothing_doesnt_keep_the_composite_from_undoing() {
         .await
         .unwrap();
     assert!(out.inverse.is_some(), "undoable: the change to `a`");
-    bus.undo(&Actor::Human, out.audit_id.unwrap(), false)
+    bus.undo(&Actor::Human, out.command_run_id.unwrap(), false)
         .await
         .unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some(""));
 
-    let before = audits_of(&db, "oxplow.command.sequence").await.len();
+    let before = command_runs_of(&db, "oxplow.command.sequence").await.len();
     let out = bus
         .run(
             &Actor::Human,
@@ -1494,11 +1637,13 @@ async fn a_child_that_changed_nothing_doesnt_keep_the_composite_from_undoing() {
         )
         .await
         .unwrap();
-    assert_eq!(out.audit_id, None, "nothing changed, nothing recorded");
     assert_eq!(
-        audits_of(&db, "oxplow.command.sequence").await.len(),
-        before
+        out.command_run_id, None,
+        "the no-op has no public command run ID"
     );
+    let recorded = command_runs_of(&db, "oxplow.command.sequence").await;
+    assert_eq!(recorded.len(), before + 1);
+    assert!(recorded[0].input.is_null());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1558,9 +1703,12 @@ async fn a_nested_run_applies_each_childs_own_checks() {
     assert_eq!(kv_value(&db, "c").await, None);
 }
 
-/// The audit rows of `name`, newest first.
-async fn audits_of(db: &Database, name: &str) -> Vec<oxplow_db::command_audit_store::CommandAudit> {
-    oxplow_db::SqliteCommandAuditStore::new(db.clone())
+/// The command run rows of `name`, newest first.
+async fn command_runs_of(
+    db: &Database,
+    name: &str,
+) -> Vec<oxplow_db::command_run_store::CommandRun> {
+    oxplow_db::SqliteCommandRunStore::new(db.clone())
         .list_recent(50)
         .await
         .unwrap()
@@ -1570,7 +1718,7 @@ async fn audits_of(db: &Database, name: &str) -> Vec<oxplow_db::command_audit_st
 }
 
 /// P7 review: a composite with a step outside the transaction
-/// runs its steps in order, each landing as it runs — one audit row
+/// runs its steps in order, each landing as it runs — one command run row
 /// and one `command.executed` naming them all, and no undo (a system
 /// outside the bus can't be rolled back with it).
 #[tokio::test(flavor = "multi_thread")]
@@ -1603,16 +1751,12 @@ async fn a_composite_with_an_external_step_runs_its_steps_in_order() {
         ["oxplow.kv.set", "oxplow.kv.external", "oxplow.kv.set"]
     );
     assert!(out.inverse.is_none(), "not undoable");
-    let rows = audits_of(&db, "oxplow.command.sequence").await;
+    let rows = command_runs_of(&db, "oxplow.command.sequence").await;
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].outcome, Outcome::Ok);
     assert!(rows[0].inverse.is_none());
-    for child in ["oxplow.kv.set", "oxplow.kv.external"] {
-        assert!(
-            audits_of(&db, child).await.is_empty(),
-            "{child} has no row of its own"
-        );
-    }
+    assert_eq!(command_runs_of(&db, "oxplow.kv.set").await.len(), 2);
+    assert_eq!(command_runs_of(&db, "oxplow.kv.external").await.len(), 1);
 }
 
 /// P8.D4: a composite's own events, on the steps path, are recorded
@@ -1697,7 +1841,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
 }
 
 /// P7 review: a step that fails stops the run; the steps
-/// before it stand, and the one audit row says what landed and what
+/// before it stand, and the one command run row says what landed and what
 /// failed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_step_stops_the_run_and_what_landed_stands() {
@@ -1722,7 +1866,7 @@ async fn a_failed_step_stops_the_run_and_what_landed_stands() {
     );
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"), "it stands");
     assert_eq!(kv_value(&db, "c").await, None, "nothing after the failure");
-    let rows = audits_of(&db, "oxplow.command.sequence").await;
+    let rows = command_runs_of(&db, "oxplow.command.sequence").await;
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].outcome, Outcome::Error);
     let result = rows[0].result.clone().unwrap();
@@ -1838,8 +1982,8 @@ async fn a_nested_run_asks_when_any_child_asks() {
         "nothing written before the answer"
     );
     assert!(
-        audits(&db).await.is_empty(),
-        "no audit row for a confirmation"
+        command_runs(&db).await.is_empty(),
+        "no command run row for a confirmation"
     );
     bus.run(&Actor::Human, "oxplow.command.sequence", input, true)
         .await
@@ -1848,7 +1992,44 @@ async fn a_nested_run_asks_when_any_child_asks() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_nested_run_is_one_transaction_with_one_audit_row() {
+async fn a_denied_child_keeps_its_error_when_its_sibling_rolls_back() {
+    let (db, bus) = composing_bus();
+    let denied = "oxplow.kv.denied";
+    bus.register(
+        Command::new(
+            kv_spec(denied, Confirm::Never),
+            Handler::Tx(Arc::new(|_, _| {
+                Err(CommandError::Denied {
+                    reason: "this child cannot change the key".into(),
+                })
+            })),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let error = bus
+        .run(
+            &Actor::Human,
+            "oxplow.command.sequence",
+            calls(&[("oxplow.kv.set", "a", "1"), (denied, "b", "2")]),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, CommandError::Denied { .. }));
+    assert_eq!(kv_value(&db, "a").await, None);
+    let cancelled = command_runs_of(&db, "oxplow.kv.set").await;
+    assert_eq!(
+        cancelled[0].error.as_deref(),
+        Some("parent command transaction rolled back")
+    );
+    let denied = command_runs_of(&db, denied).await;
+    assert_eq!(denied[0].outcome, Outcome::Denied);
+    assert_eq!(denied[0].error.as_deref(), Some(error.to_string().as_str()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_nested_run_is_one_transaction_with_details_for_each_child() {
     let (db, bus) = composing_bus();
     let err = bus
         .run(
@@ -1865,6 +2046,11 @@ async fn a_nested_run_is_one_transaction_with_one_audit_row() {
         None,
         "the first child rolled back with the second"
     );
+    let children = command_runs_of(&db, "oxplow.kv.set").await;
+    assert_eq!(children.len(), 2);
+    assert!(children
+        .iter()
+        .all(|child| child.input.is_null() && child.inverse.is_none()));
 
     let out = bus
         .run(
@@ -1877,15 +2063,15 @@ async fn a_nested_run_is_one_transaction_with_one_audit_row() {
         .unwrap();
     assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
     assert_eq!(out.result["children"][1]["result"]["v"], "2");
-    let rows: Vec<_> = audits(&db)
+    let rows: Vec<_> = command_runs(&db)
         .await
         .into_iter()
         .filter(|a| a.outcome == Outcome::Ok)
         .collect();
     assert_eq!(
         rows.len(),
-        1,
-        "one audit row for the parent, none for the children"
+        3,
+        "one row each for the parent and its two children"
     );
     assert_eq!(rows[0].command, "oxplow.command.sequence");
 }
@@ -1919,7 +2105,7 @@ async fn a_nested_runs_inverse_is_the_reversed_children_and_undoes() {
             { "name": "oxplow.kv.set", "input": { "k": "a", "v": "0" } }
         ])
     );
-    bus.undo(&Actor::Human, out.audit_id.unwrap(), false)
+    bus.undo(&Actor::Human, out.command_run_id.unwrap(), false)
         .await
         .unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("0"));
@@ -2044,7 +2230,10 @@ async fn an_effects_run_that_needs_confirmation_becomes_a_proposal() {
         "what it would have done"
     );
     assert_eq!(kv_value(&db, "a").await, None, "the dry run rolled back");
-    assert!(audits(&db).await.is_empty(), "a proposal is not a run");
+    assert!(
+        command_runs(&db).await.is_empty(),
+        "a proposal is not a run"
+    );
     let events = logged(&bus).await;
     assert_eq!(
         events
@@ -2098,19 +2287,23 @@ async fn a_composite_an_agent_runs_is_proposed_with_its_children() {
     assert_eq!(children.len(), 2);
     assert_eq!(children[1]["name"], "oxplow.kv.danger");
     assert_eq!(kv_value(&db, "a").await, None);
-    assert!(audits(&db).await.is_empty());
+    assert!(command_runs(&db).await.is_empty());
     // Approving runs the whole composite as the person, once.
     let out = bus.approve(&Actor::Human, rows[0].id).await.unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
     let p = proposal(&db, rows[0].id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
-    assert_eq!(p.audit_id, out.audit_id);
-    assert_eq!(audits(&db).await.len(), 1, "one row for the composite");
+    assert_eq!(p.command_run_id, out.command_run_id);
+    assert_eq!(
+        command_runs(&db).await.len(),
+        3,
+        "one row each for the composite and its two children"
+    );
 }
 
 /// Two people approve one proposal at once: it runs once; the other
-/// approval lost the race — `Invalid`, and no audit row of its own.
+/// approval lost the race — `Invalid`, and no command run row of its own.
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_approvals_run_it_once() {
     let (db, bus) = confirming_bus();
@@ -2132,7 +2325,7 @@ async fn concurrent_approvals_run_it_once() {
         matches!(&lost, CommandError::Invalid { message, .. } if message.contains(&oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::PROPOSAL, &id.to_string()))),
         "{lost:?}"
     );
-    assert_eq!(audits(&db).await.len(), 1, "only the run that won");
+    assert_eq!(command_runs(&db).await.len(), 1, "only the run that won");
     let approved = logged(&bus)
         .await
         .into_iter()
@@ -2175,7 +2368,7 @@ async fn a_failed_external_approval_leaves_the_proposal_pending() {
     assert!(err.to_string().contains("the remote said no"), "{err}");
     let p = proposal(&db, id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Pending);
-    assert_eq!(p.audit_id, None);
+    assert_eq!(p.command_run_id, None);
 }
 
 /// A dry run is rolled back with everything it would have caused: its
@@ -2213,20 +2406,20 @@ async fn approving_runs_it_as_the_person_and_marks_the_proposal_with_the_run() {
     let id = propose(&bus, "a", "1").await;
     let out = bus.approve(&Actor::Human, id).await.unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
-    let audit = out.audit_id.unwrap();
-    let rows = audits(&db).await;
+    let run_row = out.command_run_id.unwrap();
+    let rows = command_runs(&db).await;
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].id, audit);
+    assert_eq!(rows[0].id, run_row);
     assert_eq!(rows[0].actor_kind, ActorKind::Human, "it ran as the person");
     let p = proposal(&db, id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
-    assert_eq!(p.audit_id, Some(audit));
+    assert_eq!(p.command_run_id, Some(run_row));
     let approved = logged(&bus)
         .await
         .into_iter()
         .find(|e| e.envelope.event_type == "command.approved")
         .expect("approval logged");
-    assert_eq!(approved.envelope.payload["audit_id"], audit);
+    assert_eq!(approved.envelope.payload["command_run_id"], run_row);
     assert_eq!(approved.envelope.cause, out.event_id, "caused by the run");
     // A proposal is decided once.
     let err = bus.approve(&Actor::Human, id).await.unwrap_err();
@@ -2234,7 +2427,7 @@ async fn approving_runs_it_as_the_person_and_marks_the_proposal_with_the_run() {
         matches!(&err, CommandError::Invalid { message, .. } if message.contains("already approved")),
         "{err:?}"
     );
-    assert_eq!(audits(&db).await.len(), 1);
+    assert_eq!(command_runs(&db).await.len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2253,7 +2446,7 @@ async fn an_approval_whose_run_fails_leaves_the_proposal_pending() {
     bus.approve(&Actor::Human, id).await.unwrap_err();
     let p = proposal(&db, id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Pending);
-    assert_eq!(p.audit_id, None);
+    assert_eq!(p.command_run_id, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2291,7 +2484,7 @@ async fn an_external_command_is_proposed_without_a_dry_run_and_approved_after_it
     let out = bus.approve(&Actor::Human, row.id).await.unwrap();
     let p = proposal(&db, row.id).await;
     assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
-    assert_eq!(p.audit_id, out.audit_id);
+    assert_eq!(p.command_run_id, out.command_run_id);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2300,7 +2493,7 @@ async fn declining_writes_only_the_decision() {
     let id = propose(&bus, "a", "1").await;
     bus.decline(&Actor::Human, id).await.unwrap();
     assert_eq!(kv_value(&db, "a").await, None);
-    assert!(audits(&db).await.is_empty());
+    assert!(command_runs(&db).await.is_empty());
     assert_eq!(
         proposal(&db, id).await.decision,
         oxplow_db::ProposalDecision::Declined
@@ -2325,7 +2518,7 @@ fn effect() -> Actor {
 
 /// P8.D8: an effect's run of a command that asks becomes a proposal for a
 /// person (even when it says it confirmed: an effect is code reacting,
-/// not a person); one that doesn't ask runs; the audit says it was the
+/// not a person); one that doesn't ask runs; the command run says it was the
 /// effect.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_effects_run_that_asks_is_proposed_and_never_confirmed() {
@@ -2354,7 +2547,7 @@ async fn an_effects_run_that_asks_is_proposed_and_never_confirmed() {
     .await
     .unwrap();
     assert_eq!(kv_value(&db, "b").await.as_deref(), Some("1"));
-    let rows = audits_of(&db, "oxplow.kv.mine").await;
+    let rows = command_runs_of(&db, "oxplow.kv.mine").await;
     assert_eq!(
         rows[0].actor_kind,
         oxplow_domain::events::schema::ActorKind::Effect

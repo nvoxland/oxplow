@@ -566,7 +566,7 @@ console.log(JSON.stringify(posts));
     /// The bridge hands what oxplow answers to the model — a prompt hook's
     /// context as a synthetic part of the user's message, a tool hook's
     /// appended to the tool's result — and sends the agent's final message
-    /// with the Stop, so ending a reply with a question sets waiting. Run
+    /// with the Stop, as the turn's answer. Run
     /// under bun with `fetch` answering and a stubbed plugin client.
     #[test]
     fn its_bridge_delivers_hook_context_and_sends_the_final_message() {

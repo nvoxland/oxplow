@@ -637,8 +637,8 @@ async fn handle_hook_inner(
     };
 
     let envelope_for_resume = envelope.clone();
-    let harness = match ctx.services.hook_ingest.ingest(envelope).await {
-        Ok(outcome) => outcome.harness,
+    let outcome = match ctx.services.hook_ingest.ingest(envelope).await {
+        Ok(outcome) => outcome,
         Err(err) => {
             // The agent can't act on an error status — Claude Code just
             // prints a "non-blocking status code" warning into the user's
@@ -647,7 +647,7 @@ async fn handle_hook_inner(
             return respond(&ctx.services.harnesses, None, &HookAnswer::Ack).await;
         }
     };
-    let harness = harness.as_deref();
+    let harness = outcome.harness.as_deref();
     // Token usage is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
@@ -660,7 +660,7 @@ async fn handle_hook_inner(
             if let Some(context) = ctx
                 .services
                 .agent_context
-                .post_tool_context(&ctx.services, thread_id, harness)
+                .post_tool_context(&ctx.services, thread_id, harness, outcome.finished_tool_seq)
                 .await
             {
                 return respond(

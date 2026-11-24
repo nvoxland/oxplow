@@ -424,8 +424,6 @@ pub struct TurnEnd<'a> {
     pub left_running: Option<&'a [oxplow_domain::hook::RunningWork]>,
     /// The harness's own words for an error that ended it.
     pub error: Option<&'a str>,
-    /// The question its final message ended on, when it did.
-    pub question: Option<&'a str>,
 }
 
 impl TurnEnd<'_> {
@@ -442,7 +440,6 @@ impl TurnEnd<'_> {
             context_window: None,
             left_running: None,
             error: None,
-            question: None,
         }
     }
 }
@@ -460,7 +457,7 @@ pub fn close_turn_tx(
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
                     model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7,
-                    outcome = ?8, error = ?9, question = ?10
+                    outcome = ?8, error = ?9
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
             params![
@@ -472,8 +469,7 @@ pub fn close_turn_tx(
                 end.context_tokens,
                 end.context_window,
                 end.outcome.as_str(),
-                end.error,
-                end.question
+                end.error
             ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )

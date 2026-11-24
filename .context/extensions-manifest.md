@@ -34,7 +34,7 @@ command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
 `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`,
 `oxplow:oxplow/metric?metric=acme.todos`.
-Storage (`v_contribution.uri`, `v_extension_run.contribution`,
+Storage (`v_contribution.uri`, `v_contribution_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
 keys and the desktop carry that string; every contribution kind in
 `KINDS` is a resource of oxplow (`oxplow/page`, `oxplow/command`, …) whose
@@ -82,7 +82,7 @@ collector and instance credentials and extension secrets (keychain
 accounts). Everything oxplow ships is in `oxplow`, so a user sees
 `v_oxplow_struggle` and `oxplow/collectors`
 whichever shipped extension declares them, and a piece moves between
-foundation, bundled and the holder without a stored or shown name
+foundation and bundled without a stored or shown name
 changing. `oxplow` is the only namespace extensions share
 (`refuse_shared_namespaces` refuses any other, `check_namespace` keeps
 `oxplow` to what ships). Sharing one shares its names, so its extensions
@@ -314,7 +314,7 @@ validates authorized complete reads against the declaration. Reset uses
 Annotations supply registry metadata: `x-category`, `x-ui`, `x-order`,
 `x-secret`, `x-mask` and `x-atomic`; any other `x-` key is refused. `x-mask:
 { prefix: 8, suffix: 4 }` on a secret says how many characters of each end an
-agent reading it sees (`sk_live_••••WXYZ`; each end 0–8, both required; the
+agent reading it sees (`tk_demo_••••WXYZ`; each end 0–8, both required; the
 ends show only when they are at most a third of the value; default the last 4). A category that `x-category` names (the
 namespace when none) can be declared beside the schema:
 `categories: { review: { title: Review, description: …, order: 85 } }`; core's
@@ -439,7 +439,7 @@ with fixed diagnostics before payload access.
 
 Native commands may declare `scope: state.read`, `op: snapshot` to read their own
 namespace. This read returns null when absent or `{stamp, values}` when present;
-it has read access and its result is not copied into command audit. State remains absent from
+it has read access and its result is not copied into command run records. State remains absent from
 SQL datasets. Scripts may declare `needs: [state.read]` and call
 `scope("state.read", {"scope": "project", "area": "state"})`; collectors, fact
 collectors, effects and policies use a separate owned read for each call, with
@@ -523,7 +523,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - sharing: `oxplow.extension.share` / `unshare` move a source in or out
 >     of git, and a teammate deploys it in their checkout ("Sources and
 >     deployments": boot deploys nothing);
->   - Explore Data (oxplow-bundled's custom page, with Save as Page);
+>   - Save as Page for shown views and table presentations;
 >   - **bundled extensions** (compiled in, read-only, reserved names).
 >     `oxplow-bundled` holds the request review packet and the analytics
 >     pages; core works with it disabled;
@@ -632,6 +632,7 @@ context:     [...]   # text for the agent's context, sent once then on change (`
 test_conventions: [...] # what makes a test (`{ id, languages?, paths?, containers?, functions?, assertions?, skips? }`): globs, name patterns, regexes; see language-support.md "Test conventions"
 datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<namespace>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one; `open: true` lets other extensions' datasets add rows to it, `adds_to: <namespace>/<name>` adds this one's rows to an open one (semantic-layer.md "Open datasets") (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 run_patterns: [...] # command substrings that mark a shell call as a test or analysis run (`{ id?, kind: test | analysis, patterns: [..] }`; `id` defaults to the kind, so extensions sharing a namespace, oxplow's language packs, name theirs: `rust-test`); see collection.md "Ingestion"
+links: [...]        # text that is a link (`{ id, pattern, uri }`: a param pattern without `^…$`, matched as a whole word; a `https://` or oxplow URI with `{{match}}`, the match percent-encoded): the terminal and markdown draw each match as a link with Open In ▸ (`link_rules.rs`, `linkRules.ts`; usability.md "Open In ▸ on every path and URL"); tested with `when: { link_text }`
 file_kinds: [...]   # what kind of file a path is, by glob (`{ id?, kind, globs: [..], label? }`; `id` as for `run_patterns`: `rust-lockfile`): `dependency-manifest`, `lockfile`, `test-harness`, `ci`, `lint-config`, `generated`, `vendored`, `migration`, `sensitive`, or any lowercase-dashed name; read as `v_file_kind_rule`, matched with `glob_match` (semantic-layer.md "Datasets")
 datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<namespace>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")

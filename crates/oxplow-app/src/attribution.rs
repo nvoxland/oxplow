@@ -75,8 +75,7 @@ pub fn classify_window_attribution(spec: &MetricSpec) -> AttributionFamily {
 }
 
 /// Operational metric namespaces (tokens, cost, cycle-time, redo-rate, nudges) —
-/// thread+window facts, never per-file gauges. The oxplow-bundled
-/// `metric-deltas` advisory skips the same prefixes in its SQL.
+/// thread+window facts, never per-file gauges.
 pub fn is_operational_metric_key(key: &str) -> bool {
     key.starts_with("agent.") || key.starts_with("request.") || key.starts_with("task.")
 }

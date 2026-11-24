@@ -15,7 +15,15 @@ loaders:
       FROM v_context_item c
       WHERE CASE WHEN EXISTS (SELECT 1 FROM v_context_basket n WHERE n.next_thread_id = :thread_id AND n.items > 0)
                  THEN c.basket_id = (SELECT n.id FROM v_context_basket n WHERE n.next_thread_id = :thread_id)
-                 ELSE c.thread_id = :thread_id END
+                 ELSE c.thread_id = :thread_id AND c.held_at IS NULL END
+      ORDER BY c.added_at, c.id
+  held:
+    sql: |
+      SELECT c.id, c.kind,
+             coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
+             c.source_uri, substr(c.text, 1, 200) AS preview, c.note, c.added_at
+      FROM v_context_item c
+      WHERE c.thread_id = :thread_id AND c.held_at IS NOT NULL
       ORDER BY c.added_at, c.id
   baskets:
     sql: |
@@ -73,6 +81,38 @@ view:
         label: Note
         help: What you want the agent to do about it. Leave it empty to remove the note.
       row: true
+    - id: remove
+      label: Remove
+      command: oxplow.context.remove
+      input:
+        item: '{{row.id}}'
+      row: true
+  - id: held
+    title: Held
+    from: held
+    viz: table
+    columns:
+    - key: what
+      label: Collected
+      link:
+        kind: page
+        from: source_uri
+    - key: preview
+      label: Text
+    - key: note
+      label: Note
+    - key: added_at
+      label: Added
+      format: relative
+      width: 110
+    empty: Nothing held. What you put back into This Thread waits here, held, will not send, until you press Send Next.
+    actions:
+    - id: send-held
+      label: Send Next
+      help: Send what is held here with this thread's next prompt.
+      command: oxplow.context.send_next
+      input:
+        thread: thr{{param.thread_id}}
     - id: remove
       label: Remove
       command: oxplow.context.remove

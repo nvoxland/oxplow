@@ -2020,7 +2020,9 @@ impl MetricsService {
     /// collector its extension declares, and deciding what it does against
     /// what it declares, within its extension's permissions.
     fn collector_run(&self, collector: &FactCollector, parent: &RunContext) -> RunContext {
-        self.collector_run_in(collector, parent, Mode::External)
+        let run = self.collector_run_in(collector, parent, Mode::External);
+        parent.track_child(&run);
+        run
     }
 
     fn collector_run_in(
@@ -2039,7 +2041,20 @@ impl MetricsService {
             .extensions_cache
             .unpinned(root, "a run is parented to its collector's declaration");
         let Some(ext) = extensions.iter().find(|e| e.name == collector.extension) else {
-            return parent.child(None, mode);
+            return parent.child(
+                Some(oxplow_domain::run::ContributionRef {
+                    id: oxplow_domain::contribution::ContributionId::new(
+                        &collector.owner,
+                        oxplow_domain::contribution::ContributionKind::Collector,
+                        &collector.key,
+                    ),
+                    extension: collector.extension.clone(),
+                    version: None,
+                    generation: None,
+                    deployment: None,
+                }),
+                mode,
+            );
         };
         // It holds no catalog generation while it runs: it belongs to its
         // extension's version, rechecked at each host call and at publication.
@@ -2341,27 +2356,6 @@ impl MetricsService {
             FactRun::Failed(e) => ("error", 0, Some(e.clone())),
             FactRun::Skipped => return,
         };
-        // The contribution failure policy (P7.C2): the third failure in a row
-        // disables it.
-        let health = log.health();
-        let key = crate::collector_runner::contribution_key(&c.owner, &c.key);
-        let counted = match &error {
-            None => {
-                health
-                    .succeeded(
-                        &key,
-                        Some(std::time::Duration::from_millis(elapsed_ms.max(0) as u64)),
-                    )
-                    .await
-            }
-            // Stopped (cancelled, or its extension changed or was revoked): the
-            // run says nothing of the collector's health.
-            Some(_) if this_run.cancel().is_cancelled() => Ok(()),
-            Some(e) => health.failed(&key, e).await.map(|_| ()),
-        };
-        if let Err(e) = counted {
-            tracing::warn!(key = %c.key, error = %e, "fact collector: recording its health failed");
-        }
         let trigger = match ctx.trigger {
             "manual" => "manual",
             _ => "on",
@@ -2379,7 +2373,8 @@ impl MetricsService {
                     facts,
                     elapsed_ms,
                     error,
-                    run: Some(this_run),
+                    run: this_run,
+                    unmeasured_cost: false,
                 },
                 capture,
             )
@@ -3730,7 +3725,7 @@ mod tests {
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT status, error FROM collector_run WHERE id = 'repo.bare'",
+                    "SELECT r.outcome, r.error FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id WHERE p.id = 'repo.bare'",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -3738,7 +3733,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(status, "error");
+        assert_eq!(status, "failed");
         assert!(
             error
                 .as_deref()
@@ -3797,7 +3792,7 @@ mod tests {
         svc.db
             .read(move |c| {
                 let (status, error) = c.query_row(
-                    "SELECT status, error FROM collector_run WHERE id = ?1",
+                    "SELECT r.outcome, r.error FROM collector_checkpoint p JOIN contribution_run r ON r.run_id = p.last_run_id WHERE p.id = ?1",
                     [&id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -3821,7 +3816,7 @@ mod tests {
     async fn a_fact_for_an_undefined_measure_fails_the_run_naming_it() {
         let (svc, dir) = fixture().await;
         let (status, error, facts) = run_one_fact(&svc, &dir, "nope", "repo.nope.count", "").await;
-        assert_eq!(status, "error");
+        assert_eq!(status, "failed");
         assert!(
             error
                 .as_deref()
@@ -3842,7 +3837,7 @@ mod tests {
         crate::test_fixtures::activate_with_problems(&svc).await;
         // Its collector runs before the measure is declared: a failed run.
         let (status, _, _) = run_one_fact(&svc, &dir, "lines", "repo.lines.count", "").await;
-        assert_eq!(status, "error");
+        assert_eq!(status, "failed");
         // The extension then declares the measure: the next generation seeds
         // it and the run records.
         let (status, error, facts) = run_one_fact(

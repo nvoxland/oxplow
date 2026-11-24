@@ -8,37 +8,28 @@ first, and why?" It shows up on three pages:
 - a **request's diff** (what an agent request changed, start snapshot to
   end, or to the working tree while it's still running).
 
-Each of those pages shows the change's files. Below that sits the
-**Change Analysis** section, a grid of pages from
-an extension. It doesn't ship with oxplow right now, so the pages show just their
-file lists (see [Pages](pages.md)).
+Each of those pages shows the change's files. Below that sits a one-line
+**Review** brief with a link to the **Review** page. oxplow-bundled
+provides both (see [Pages](pages.md)).
 
 ## What's in it
 
-- **Summary.** Files added / modified / deleted, total +/-, how many
-  test files changed, and the test-to-code line ratio.
-- **Look Here First.** The files ranked by a review-priority score,
-  each with its reasons ("complexity +14 across 3 fns", "212 lines
-  touched"). The score multiplies its factors, so one hot signal
-  (a long new function, a complexity spike) puts a file at the top.
-- **Churn.** A treemap of changed lines per file, grouped by
-  architectural zone. A 40-file branch reads as "mostly the store
-  layer, one config edit" instead of a wall of paths. Zones come from
-  the `zones:` block in `.oxplow/project.yaml`; ask your agent to set
-  them up (it sets them with the `oxplow.config.set` command on `zones`).
-- **Function Changes.** Functions added, deleted, or modified outside
-  tests, with the complexity and length deltas and how many lines
-  changed inside each. Click one to open the diff at that function.
-- **Test Changes.** The test files the change touched.
-- **Co-change Surprises.** Files that usually change together with
-  others that didn't change here, and files that had been untouched
-  for a long time. Both are worth a second look before review.
-- **Duplication.** Blocks in the changed files that duplicate code
-  elsewhere. Click one to see the two copies side by side. This scan
-  runs in the background, so it can show up a few seconds after the
-  rest.
-- **New Cross-zone Imports.** Imports the change added from one zone
-  into another -- the "is this reaching into the wrong layer?" check.
+The Review page lists what the change was asked to do, then:
+
+- **Look Here.** The files with a high or medium signal, worst first,
+  then by how much each changed. Open a row to see each signal and its
+  line.
+- **By Area.** How many signals each area gave (tests, verification,
+  dependencies, code, scope, history), with links to deeper pages.
+- **Signals.** Every signal of the change in one table. Narrow it by
+  area, severity or source.
+- **Tests.** What the change did to its tests, and what checked it.
+  Read it to tell a weakened test from one that was only moved.
+- **Code.** Which functions grew, which public API moved and which
+  blocks were copied from elsewhere.
+
+There are no architectural zones. A project that wants its own layers
+can add them as a dataset in its own extension.
 
 Every file and function links to its diff between the change's two
 sides.

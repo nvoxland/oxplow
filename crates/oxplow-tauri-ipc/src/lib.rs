@@ -50,8 +50,10 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "list_recent_projects",
     "listen_for_oauth_redirect",
     "open_external_url",
+    "open_path",
     "open_project",
     "remove_recent_project",
+    "reveal_path",
     "set_native_menu",
     "setup_project",
     "stop_oauth_redirect",
@@ -190,7 +192,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::read_event_content,
             commands::generated::list_agent_statuses,
             // config
-            commands::generated::get_config,
             commands::generated::get_workspace_context,
             commands::generated::run_command,
             commands::generated::command_open_after,
@@ -219,6 +220,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // webview
             commands::webview::open_external_url,
             commands::webview::clipboard_read_text,
+            commands::os_open::reveal_path,
+            commands::os_open::open_path,
             // lsp
             commands::generated::list_installed_lsp_packages,
             commands::generated::lsp_request,
@@ -227,6 +230,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::respond_lsp_apply_edit,
             // terminal
             commands::terminal::open_terminal_session,
+            commands::terminal::restart_agent_terminal,
             // terminal sessions
             commands::generated::close_terminal_session,
             commands::generated::terminal_session_cwd,

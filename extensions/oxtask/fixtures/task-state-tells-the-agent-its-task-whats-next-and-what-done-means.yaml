@@ -4,6 +4,7 @@
 # definition of done. Another thread's work is not in it.
 requires: [oxplow-bundled, oxtask]
 given:
+  - { command: oxtask.tasks.set_workflow, input: { workflow: agent_tracks } }
   - { command: oxtask.task.create, input: { title: Fix login, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress } }

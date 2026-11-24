@@ -1,0 +1,113 @@
+title: Remote Branches
+description: Remote-tracking branches, their latest commits, and how they compare with the stream’s branch.
+icon: git-branch
+category: Git
+keywords: remote fetch push pull tracking upstream ahead behind
+needs: [vcs]
+params:
+- name: stream_id
+  label: Stream
+- name: remote
+  type: choice
+  role: filter
+  label: Remote
+  default: ''
+  options_from: '#remotes_filter'
+- name: q
+  type: search
+  role: filter
+  label: Find branch or commit
+see_also:
+- { page: oxplow/git-dashboard, params: { stream_id: { param: stream_id } } }
+- { page: oxplow/merge-readiness, params: { stream_id: { param: stream_id } } }
+loaders:
+  row:
+    sql: |
+      SELECT s.branch, b.head_sha, b.upstream, b.ahead, b.behind
+      FROM v_stream s
+      LEFT JOIN v_branch b ON b.kind = 'local' AND b.name = s.branch
+      WHERE s.id = :stream_id AND s.archived_at IS NULL
+  remotes_filter:
+    sql: |
+      SELECT '' AS value, 'All remotes' AS label
+      UNION ALL
+      SELECT DISTINCT remote AS value, remote AS label
+      FROM v_branch WHERE kind = 'remote' AND remote IS NOT NULL
+      ORDER BY value
+  remotes:
+    sql: |
+      WITH divergence AS (
+        SELECT head, ahead, behind, merge_base
+        FROM v_branch_divergence WHERE base = :branch
+      ), comparisons AS (
+        SELECT b.remote || '/' || b.name AS short_name, b.remote, b.name AS remote_branch, b.head_sha,
+               :branch AS local_branch,
+               COALESCE(b.remote || '/' || b.name = :upstream, 0) AS tracking,
+               CASE WHEN d.head IS NOT NULL THEN d.ahead
+                    WHEN b.head_sha = :local_sha THEN 0
+                    WHEN b.remote || '/' || b.name = :upstream THEN :upstream_behind END AS remote_ahead,
+               CASE WHEN d.head IS NOT NULL THEN d.behind
+                    WHEN b.head_sha = :local_sha THEN 0
+                    WHEN b.remote || '/' || b.name = :upstream THEN :upstream_ahead END AS remote_behind,
+               d.head IS NOT NULL AND d.merge_base IS NULL AS unrelated
+        FROM v_branch b
+        LEFT JOIN divergence d ON d.head = b.remote || '/' || b.name
+        WHERE b.kind = 'remote' AND b.remote IS NOT NULL AND b.name <> 'HEAD'
+          AND (:remote = '' OR b.remote = :remote)
+      )
+      SELECT a.*, c.subject, c.uri AS commit_uri, c.committed_at,
+             CASE
+               WHEN unrelated THEN 'Unrelated histories'
+               WHEN remote_ahead IS NULL THEN 'Comparison unavailable'
+               WHEN remote_ahead = 0 AND remote_behind = 0 THEN 'In sync'
+               WHEN remote_ahead > 0 AND remote_behind > 0 THEN 'Diverged'
+               WHEN remote_ahead > 0 THEN 'Remote is ahead'
+               ELSE 'Local branch is ahead'
+             END AS status,
+             CASE WHEN tracking THEN 'Tracks this remote branch' END AS upstream_status,
+             CASE WHEN local_branch IS NOT NULL THEN
+               uri('oxplow/page', 'page', 'oxplow/branch-commits', 'base', local_branch,
+                   'head', short_name, 'stream_id', :stream_id) END AS comparison_uri,
+             CASE WHEN a.head_sha IS NOT NULL THEN 'Open in History Graph' END AS graph_label,
+             CASE WHEN a.head_sha IS NOT NULL THEN
+               uri_view(uri('oxplow/page', 'page', 'oxplow/git-history',
+                            'stream_id', :stream_id, 'head_sha', a.head_sha),
+                        'reveal_sha', a.head_sha) END AS graph_uri,
+             COALESCE(NOT unrelated AND remote_ahead > 0, 0) AS can_pull,
+             COALESCE(NOT unrelated AND remote_behind > 0 AND remote_ahead = 0, 0) AS can_push
+      FROM comparisons a LEFT JOIN v_commit c ON c.sha = a.head_sha
+      WHERE :q IS NULL OR instr(lower(short_name), lower(:q)) > 0 OR instr(lower(c.subject), lower(:q)) > 0
+      ORDER BY c.committed_at DESC, short_name
+    params:
+      branch: { from: row.branch }
+      local_sha: { from: row.head_sha }
+      upstream: { from: row.upstream }
+      upstream_ahead: { from: row.ahead }
+      upstream_behind: { from: row.behind }
+view:
+  id: remotes
+  from: remotes
+  viz: sections
+  sections: { title: short_name, id: short_name, link: comparison_uri }
+  columns:
+  - { key: subject, label: Latest commit, when: commit_uri, link: { kind: page, from: commit_uri } }
+  - { key: committed_at, label: Committed, when: committed_at, format: relative }
+  - { key: status, label: Compared with this stream }
+  - { key: remote_ahead, label: Commits only on remote, format: integer }
+  - { key: remote_behind, label: Commits only on local branch, format: integer }
+  - { key: upstream_status, label: Upstream, when: tracking }
+  - { key: graph_label, label: History, when: graph_uri, link: { kind: page, from: graph_uri } }
+  empty: No remote branches match these filters.
+  actions:
+  - id: pull
+    label: Pull into this stream
+    command: oxplow.vcs.pull
+    row: true
+    when: can_pull
+    input: { stream: 'str{{param.stream_id}}', remote: '{{row.remote}}', branch: '{{row.remote_branch}}' }
+  - id: push
+    label: Push this stream to this branch
+    command: oxplow.vcs.push
+    row: true
+    when: can_push
+    input: { stream: 'str{{param.stream_id}}', remote: '{{row.remote}}', branch: '{{row.remote_branch}}' }

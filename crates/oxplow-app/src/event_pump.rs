@@ -56,6 +56,7 @@ use tokio::sync::Notify;
 /// effect or collector itself.
 pub const CORE_CONSUMERS: &[&str] = &[
     "advisories.post_tool",
+    "advisories.post_tool.immediate",
     "advisories.turn_end",
     "agent.context_changes",
     "capabilities.agent_text",
@@ -164,6 +165,7 @@ struct AsyncSlot {
     consumer: Arc<dyn AsyncEventConsumer>,
     lock: tokio::sync::Mutex<()>,
     notify: Notify,
+    checkpoint_changed: Notify,
 }
 
 /// How long the loop sleeps between unprompted runs.
@@ -209,6 +211,7 @@ impl EventPump {
             consumer,
             lock: tokio::sync::Mutex::new(()),
             notify: Notify::new(),
+            checkpoint_changed: Notify::new(),
         });
         self.async_consumers.write().push(slot.clone());
         if let Some(pump) = self.spawned.get().and_then(std::sync::Weak::upgrade) {
@@ -240,6 +243,47 @@ impl EventPump {
     }
 
     pub async fn settle(self: &Arc<Self>, consumers: &[&str], timeout: Duration) -> bool {
+        self.settle_inner(consumers, timeout).await
+    }
+
+    /// Wait for the background consumers to pass this hook's event.
+    /// Later arrivals and other consumers are outside this wait.
+    pub(crate) async fn wait_for_hook_event(
+        &self,
+        consumer: &str,
+        seq: i64,
+        timeout: Duration,
+    ) -> bool {
+        let Some(slot) = self
+            .async_slots()
+            .into_iter()
+            .find(|s| s.consumer.name() == consumer)
+        else {
+            return false;
+        };
+        let wait = async {
+            loop {
+                // Subscribe before the read so a concurrent checkpoint can't
+                // pass between the read and the start of the wait.
+                let mut changed = std::pin::pin!(slot.checkpoint_changed.notified());
+                changed.as_mut().enable();
+                if self.log.checkpoint(consumer.to_owned()).await? >= seq {
+                    return Ok::<_, DomainError>(());
+                }
+                changed.await;
+            }
+        };
+        match tokio::time::timeout(timeout, wait).await {
+            Ok(Ok(())) => true,
+            Ok(Err(err)) => {
+                tracing::warn!(%err, "event pump: hook checkpoint read failed");
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    async fn settle_inner(self: &Arc<Self>, consumers: &[&str], timeout: Duration) -> bool {
         let pump = self.clone();
         let slots: Vec<Arc<AsyncSlot>> = self
             .async_slots()
@@ -375,12 +419,19 @@ impl EventPump {
                             // order); the next run tries it again.
                             report.deferred += 1;
                             self.checkpoint_skipped(consumer, skipped_to).await?;
+                            if skipped_to.is_some() {
+                                slot.checkpoint_changed.notify_waiters();
+                            }
                             break 'consumer;
                         }
                     }
                     skipped_to = None;
+                    slot.checkpoint_changed.notify_waiters();
                 }
                 self.checkpoint_skipped(consumer, skipped_to).await?;
+                if skipped_to.is_some() {
+                    slot.checkpoint_changed.notify_waiters();
+                }
             }
         }
         Ok(report)
@@ -1260,6 +1311,44 @@ mod tests {
                 .await,
             "400 ms each, side by side, fits in 700 ms"
         );
+    }
+
+    #[tokio::test]
+    async fn a_hook_waits_for_its_checkpoint_without_waiting_for_a_later_event() {
+        struct PauseLater(Notify);
+        #[async_trait::async_trait]
+        impl AsyncEventConsumer for PauseLater {
+            fn name(&self) -> &'static str {
+                "pause_later"
+            }
+            fn handles(&self, _: &str) -> bool {
+                true
+            }
+            async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
+                if event.envelope.payload["key"] == "later" {
+                    self.0.notified().await;
+                }
+                Ok(())
+            }
+        }
+        let (db, store) = setup().await;
+        let pump = Arc::new(EventPump::new(db, store.clone(), Vec::new()));
+        let consumer = Arc::new(PauseLater(Notify::new()));
+        pump.register_async(consumer.clone());
+        let seq = store.append(config_changed("target")).await.unwrap();
+        let later = store.append(config_changed("later")).await.unwrap();
+        let task = pump.clone().spawn();
+        assert!(
+            pump.wait_for_hook_event("pause_later", seq, Duration::from_secs(3))
+                .await
+        );
+        assert_eq!(store.checkpoint("pause_later".into()).await.unwrap(), seq);
+        consumer.0.notify_one();
+        assert!(
+            pump.wait_for_hook_event("pause_later", later, Duration::from_secs(3))
+                .await
+        );
+        task.abort();
     }
 
     #[tokio::test]

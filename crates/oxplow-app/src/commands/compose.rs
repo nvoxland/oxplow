@@ -5,7 +5,7 @@
 //!
 //! - Every call runs in the transaction (a `Tx` command, a composite whose
 //!   calls all do): one run in one transaction (`steps::run_composed`) —
-//!   all or nothing, one audit row and `command.executed` with the
+//!   all or nothing, one command run row and `command.executed` with the
 //!   children's events caused by it, undone by the inverses of the
 //!   children that changed something, reversed.
 //! - Any call leaves it (an `External` command, `task.*` on another
@@ -122,7 +122,7 @@ pub struct Compose {
     pub compose: Arc<Composer>,
     /// Called after all its steps landed (an extension script's `finish`).
     pub finish: Option<Arc<Finisher>>,
-    /// Native API result: keep child details in audit, return only the finished value.
+    /// Native API result: keep child details in the run record, return only the finished value.
     pub(crate) transparent_result: bool,
 }
 
@@ -165,7 +165,7 @@ pub struct SequenceCall {
 }
 
 /// `SequenceInput`'s schema, with its example input: renaming two threads,
-/// one audited run.
+/// one recorded run.
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
@@ -190,13 +190,13 @@ fn sequence_schema() -> Value {
 }
 
 /// `oxplow.command.sequence`'s spec: also what an extension effect's run is
-/// audited as (`effect_triggers`).
+/// recorded as (`effect_triggers`).
 pub fn sequence_spec() -> CommandSpec {
     CommandSpec {
         output_schema: None,
         id: SEQUENCE.into(),
         summary: "Run several commands as one, each one's own policy and confirmation \
-                  checked before any runs; the run has one audit row. In oxplow's own \
+                  checked before any runs; the run has one command run row. In oxplow's own \
                   records they run in one transaction and undo together; when one goes to \
                   an external system they run in order, each landing as it runs, with no undo."
             .into(),
@@ -249,12 +249,10 @@ mod tests {
     use oxplow_domain::Actor;
     use serde_json::json;
 
-    /// Two thread commands as one run by a person: the sequence runs them
-    /// in one transaction — one audit row naming the sequence with the
-    /// children in its result, one `command.executed`, and one undo that
-    /// reverses both.
+    /// A sequence records its parent and child runs in one transaction.
+    /// The parent has the execution event and an inverse for both children.
     #[tokio::test]
-    async fn a_sequence_of_commands_is_one_audited_run() {
+    async fn a_sequence_records_its_child_runs_and_undoes_them_together() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let thread = fx.thread.to_string();
         let before = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
@@ -281,16 +279,28 @@ mod tests {
             "a sequence in one transaction undoes"
         );
 
-        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+        let sequence_id = out.command_run_id.unwrap();
+        let runs = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(20)
             .await
             .unwrap();
-        let ok: Vec<_> = audits
-            .iter()
-            .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
-            .collect();
-        assert_eq!(ok.len(), 1, "{audits:?}");
-        assert_eq!(ok[0].command, SEQUENCE);
+        assert_eq!(runs.len(), 3, "{runs:?}");
+        for run in &runs {
+            assert_eq!(
+                run.outcome,
+                oxplow_domain::events::schema::CommandOutcome::Ok
+            );
+            if run.id == sequence_id {
+                assert_eq!(run.command, SEQUENCE);
+                assert_eq!(run.event_id, out.event_id);
+                assert_eq!(run.inverse, out.inverse);
+            } else {
+                assert_eq!(run.command, "oxplow.thread.rename");
+                assert!(run.event_id.is_none());
+                assert!(run.inverse.is_none());
+            }
+        }
+        assert!(runs.iter().any(|run| run.id == sequence_id));
 
         let events = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
         let executed = events
@@ -301,7 +311,7 @@ mod tests {
 
         fx.svc
             .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .undo(&Actor::Human, sequence_id, false)
             .await
             .unwrap();
         let undone = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
@@ -317,7 +327,7 @@ mod secret_recording_tests {
     use oxplow_domain::{Actor, Envelope};
     use serde_json::json;
 
-    const MARKER: &str = "secret-audit-marker-do-not-record";
+    const MARKER: &str = "secret-record-marker-do-not-record";
 
     fn spec(id: &str, atomicity: Atomicity) -> CommandSpec {
         let mut spec = sequence_spec();
@@ -350,11 +360,14 @@ mod secret_recording_tests {
     }
 
     async fn assert_no_secret_history(svc: &crate::Services) {
-        let audits = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+        let command_runs = oxplow_db::SqliteCommandRunStore::new(svc.db.clone())
             .list_recent(100)
             .await
             .unwrap();
-        assert!(!format!("{audits:?}").contains(MARKER), "{audits:?}");
+        assert!(
+            !format!("{command_runs:?}").contains(MARKER),
+            "{command_runs:?}"
+        );
         let events = svc.event_log_store.read_after(0, 1000).await.unwrap();
         assert!(!format!("{events:?}").contains(MARKER));
         assert!(!events
@@ -364,7 +377,7 @@ mod secret_recording_tests {
     }
 
     /// The authorized read stays useful, while arbitrary transformations of
-    /// its value cannot enter child audit inputs, results, events or undo.
+    /// its value cannot enter child run inputs, results, events or undo.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_secret_read_derived_composite_keeps_values_out_of_history() {
         for external in [false, true] {

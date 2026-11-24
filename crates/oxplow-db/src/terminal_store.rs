@@ -22,9 +22,12 @@ pub struct Terminal {
     #[specta(type = oxplow_domain::JsNumber)]
     pub position: i64,
     pub created_at: Timestamp,
+    /// Where its shell starts: relative to the stream's worktree, or
+    /// absolute; none is the worktree.
+    pub dir: Option<String>,
 }
 
-const COLS: &str = "id, stream_id, title, position, created_at";
+const COLS: &str = "id, stream_id, title, position, created_at, dir";
 
 fn row_to_terminal(row: &rusqlite::Row<'_>) -> rusqlite::Result<Terminal> {
     let map_err = |e: DomainError| {
@@ -36,6 +39,7 @@ fn row_to_terminal(row: &rusqlite::Row<'_>) -> rusqlite::Result<Terminal> {
         title: row.get(2)?,
         position: row.get(3)?,
         created_at: string_to_ts(&row.get::<_, String>(4)?).map_err(map_err)?,
+        dir: row.get(5)?,
     })
 }
 
@@ -99,11 +103,12 @@ pub fn next_title<'a>(titles: impl IntoIterator<Item = &'a str>) -> String {
 }
 
 /// A new terminal at the end of `stream`'s, titled `title` or the next
-/// "Terminal N".
+/// "Terminal N", its shell starting at `dir` (none: the worktree).
 pub fn open_tx(
     conn: &Connection,
     stream: StreamId,
     title: Option<&str>,
+    dir: Option<&str>,
 ) -> Result<Terminal, DomainError> {
     let existing = for_stream_tx(conn, stream)?;
     let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
@@ -116,12 +121,13 @@ pub fn open_tx(
         .max()
         .map_or(0, |p| p + 1);
     conn.execute(
-        "INSERT INTO terminal (stream_id, title, position, created_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO terminal (stream_id, title, position, created_at, dir) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             stream.value(),
             title,
             position,
-            ts_to_string(Timestamp::now())
+            ts_to_string(Timestamp::now()),
+            dir.map(str::trim).filter(|d| !d.is_empty())
         ],
     )
     .map_err(map_sql_err)?;
@@ -160,5 +166,28 @@ mod tests {
             "Terminal 4"
         );
         assert_eq!(next_title(["a", "b", "c"]), "Terminal 4");
+    }
+
+    /// A terminal opened at a directory keeps it (Open In ▸ Terminal);
+    /// one opened without starts in the worktree (no `dir`).
+    #[tokio::test]
+    async fn a_terminal_keeps_the_directory_it_was_opened_at() {
+        let db = Database::in_memory();
+        let (at_dir, plain) = db
+            .transaction(|c| {
+                c.execute(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                     VALUES (1, 'primary', 's', 'main', 'refs/heads/main', 'local', '/w', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+                let at_dir = open_tx(c, StreamId::new(1), None, Some("src/lib"))?;
+                let plain = open_tx(c, StreamId::new(1), None, None)?;
+                Ok((at_dir, plain))
+            })
+            .await
+            .unwrap();
+        assert_eq!(at_dir.dir.as_deref(), Some("src/lib"));
+        assert_eq!(plain.dir, None);
     }
 }

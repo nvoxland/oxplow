@@ -38,6 +38,10 @@ pub struct OpenInput {
     /// Its title; left out, the next "Terminal N".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The directory its shell starts in: relative to the worktree, or
+    /// absolute (Open In ▸ Terminal). Left out, the worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -71,6 +75,31 @@ fn own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// An agent's terminal starts inside its stream's worktree: `dir` is a
+/// relative path with no `..`. A person's may start anywhere.
+fn inside_worktree(ctx: &TxCtx<'_>, dir: &str) -> Result<(), CommandError> {
+    if agent_scope(ctx)?.is_none() {
+        return Ok(());
+    }
+    let path = std::path::Path::new(dir);
+    let inside = !path.is_absolute()
+        && path.components().all(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        });
+    if inside {
+        Ok(())
+    } else {
+        Err(CommandError::Denied {
+            reason: format!(
+                "an agent's terminal starts inside its stream's worktree: `{dir}` is outside it"
+            ),
+        })
+    }
+}
+
 fn event<T: oxplow_domain::EventType>(
     ctx: &TxCtx<'_>,
     stream: StreamId,
@@ -82,8 +111,8 @@ fn event<T: oxplow_domain::EventType>(
     event.with_subject([terminal_uri(terminal)])
 }
 
-/// `terminal.open { stream, title? }`: a shell at the end of the stream's
-/// terminals; answers `{ id, uri }`. Undone by closing it.
+/// `terminal.open { stream, title?, dir? }`: a shell at the end of the
+/// stream's terminals, started in `dir` (none: the worktree); answers `{ id, uri }`. Undone by closing it.
 pub fn open_op() -> Op {
     Op::new(
         "terminals.write",
@@ -98,11 +127,19 @@ pub fn open_op() -> Op {
                 "/stream",
             )?;
             own_stream(ctx, stream)?;
+            if let Some(dir) = &input.dir {
+                inside_worktree(ctx, dir)?;
+            }
             oxplow_db::stream_store::get_tx(ctx.conn, stream)
                 .map_err(sql)?
                 .filter(|s| s.archived_at.is_none())
                 .ok_or_else(|| invalid("/stream", format!("no stream `{stream}`")))?;
-            let made = open_tx(ctx.conn, stream, input.title.as_deref())?;
+            let made = open_tx(
+                ctx.conn,
+                stream,
+                input.title.as_deref(),
+                input.dir.as_deref(),
+            )?;
             Ok(HandlerOutput {
                 result: json!({ "id": made.id.to_string(), "uri": terminal_uri(made.id), "title": made.title }),
                 events: vec![event::<TerminalOpened>(
@@ -358,6 +395,47 @@ mod tests {
         .await
         .unwrap_err();
         assert!(missing.to_string().contains("str9999"), "{missing}");
+    }
+
+    /// A terminal opens at a directory: a person's anywhere, an agent's
+    /// only inside its stream's worktree (a relative path, no `..`).
+    #[tokio::test]
+    async fn an_agent_opens_a_terminal_only_inside_its_worktree() {
+        let fx = services_with_thread().await;
+        let stream = stream_id(&fx).await;
+        for dir in ["/tmp", "../other", "src/../../x"] {
+            let refused = run(
+                &fx,
+                &agent(&fx),
+                OPEN,
+                json!({ "stream": stream, "dir": dir }),
+                false,
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(refused, CommandError::Denied { .. }),
+                "{dir}: {refused:?}"
+            );
+        }
+        run(
+            &fx,
+            &agent(&fx),
+            OPEN,
+            json!({ "stream": stream, "dir": "src" }),
+            false,
+        )
+        .await
+        .unwrap();
+        run(
+            &fx,
+            &Actor::Human,
+            OPEN,
+            json!({ "stream": stream, "dir": "/tmp" }),
+            false,
+        )
+        .await
+        .unwrap();
     }
 
     /// Closing ends the shell the registry keeps under the terminal's URI

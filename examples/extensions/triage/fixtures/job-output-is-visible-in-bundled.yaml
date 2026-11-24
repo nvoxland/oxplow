@@ -1,0 +1,35 @@
+when: { page: oxplow/job-runs }
+model:
+  replies:
+    - { toolCalls: [{ name: todos_in_file, arguments: { path: src/lib.rs } }] }
+    - "The job has finished."
+steps:
+  - when:
+      job: summarize
+      intentKey: visible-job-output
+      request:
+        schemaVersion: 1
+        role: summarize
+        messages:
+          - { role: user, parts: [{ type: text, text: "Check src/lib.rs for TODOs." }] }
+    expect: { state: succeeded }
+  - expect:
+      loaders:
+        job_runs:
+          rows:
+            - { intent_key: visible-job-output, state: succeeded, attempt: 1, rounds: 2, tool_calls: 1, can_cancel: 0 }
+    bind:
+      job_uri: loaders.job_runs.rows[0].uri
+  - when: { page: oxplow/job-run-output, params: { uri: "$job_uri" } }
+    expect:
+      loaders:
+        job_details:
+          rows:
+            - { state: succeeded, attempt: 1, run_uri: "$any" }
+        job_run_output:
+          rows:
+            - { attempt: 1, kind: tool_call, content: 'todos_in_file {"path":"src/lib.rs"}' }
+            - { attempt: 1, kind: usage }
+            - { attempt: 1, kind: tool_result }
+            - { attempt: 1, kind: text, content: The job has finished. }
+            - { attempt: 1, kind: usage }

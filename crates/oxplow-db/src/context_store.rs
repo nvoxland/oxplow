@@ -84,6 +84,10 @@ pub struct ContextItem {
     /// What the person wants done about it, in their words.
     pub note: Option<String>,
     pub added_at: String,
+    /// When Put Back returned it to the thread's own basket, held: the
+    /// thread's next prompt doesn't carry it until Send Next on This Thread
+    /// ([`release_held_tx`]). None: not held.
+    pub held_at: Option<String>,
 }
 
 impl ContextItem {
@@ -165,6 +169,7 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextItem> {
         around: row.get("around")?,
         note: row.get("note")?,
         added_at: row.get("added_at")?,
+        held_at: row.get("held_at")?,
     })
 }
 
@@ -180,6 +185,16 @@ fn row_to_basket(row: &rusqlite::Row<'_>) -> rusqlite::Result<NamedBasket> {
 /// Add an item to `basket`: a page when it has only a `source_uri`, a piece
 /// of text when it has `text`. Its id.
 pub fn add_tx(conn: &Connection, basket: Basket, item: &NewItem) -> Result<i64, DomainError> {
+    insert_tx(conn, basket, item, &ts_to_string(Timestamp::now()))
+}
+
+/// [`add_tx`] with the time it was added (Put Back keeps the first one).
+fn insert_tx(
+    conn: &Connection,
+    basket: Basket,
+    item: &NewItem,
+    added_at: &str,
+) -> Result<i64, DomainError> {
     let kind = match (&item.source_uri, &item.text) {
         (_, Some(t)) if !t.trim().is_empty() => ContextKind::Text,
         (Some(u), None) if !u.trim().is_empty() => ContextKind::Page,
@@ -203,7 +218,7 @@ pub fn add_tx(conn: &Connection, basket: Basket, item: &NewItem) -> Result<i64, 
             item.text,
             item.around,
             item.note,
-            ts_to_string(Timestamp::now())
+            added_at
         ],
     )
     .map_err(map_sql_err)?;
@@ -247,8 +262,8 @@ pub fn set_note_tx(
     Ok(Some(before))
 }
 
-/// Move item `id` into `basket`; what it was, `None` when there is no such
-/// item.
+/// Move item `id` into `basket`, dropping its hold; what it was, `None`
+/// when there is no such item.
 pub fn move_tx(
     conn: &Connection,
     id: i64,
@@ -257,9 +272,13 @@ pub fn move_tx(
     let Some(before) = get_tx(conn, id)? else {
         return Ok(None);
     };
+    if before.basket() == basket {
+        return Ok(Some(before));
+    }
     let (thread_id, basket_id) = basket.columns();
+    // The hold is about the thread's own basket: a move drops it.
     conn.execute(
-        "UPDATE context_item SET thread_id = ?2, basket_id = ?3 WHERE id = ?1",
+        "UPDATE context_item SET thread_id = ?2, basket_id = ?3, held_at = NULL WHERE id = ?1",
         params![id, thread_id, basket_id],
     )
     .map_err(map_sql_err)?;
@@ -296,8 +315,9 @@ pub fn clear_tx(conn: &Connection, basket: Basket) -> Result<Vec<ContextItem>, D
     Ok(before)
 }
 
-/// A basket's name as kept: trimmed, 1 to [`NAME_MAX`] characters, and not
-/// the thread's own basket's.
+/// A basket's name as kept: trimmed, 1 to [`NAME_MAX`] characters, not
+/// the thread's own basket's, and not starting with `@` (the app's marks
+/// for This Thread and a new basket share the names' space).
 pub fn basket_name(raw: &str) -> Result<String, DomainError> {
     let name = raw.trim();
     if name.is_empty() {
@@ -307,6 +327,11 @@ pub fn basket_name(raw: &str) -> Result<String, DomainError> {
         return Err(DomainError::Invalid(format!(
             "a basket's name is at most {NAME_MAX} characters"
         )));
+    }
+    if name.starts_with('@') {
+        return Err(DomainError::Invalid(
+            "a basket's name may not start with \"@\"".into(),
+        ));
     }
     if name.eq_ignore_ascii_case(THREAD_BASKET) {
         return Err(DomainError::Invalid(format!(
@@ -478,7 +503,7 @@ pub fn set_next_tx(
 
 /// What `thread`'s next prompt would carry, oldest first: the items of the
 /// named basket set next for it, or — with none set, or that one empty — its
-/// own.
+/// own that are not held (put back: [`put_back_tx`]).
 pub fn waiting_for_thread_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -493,7 +518,7 @@ pub fn waiting_for_thread_tx(
                                      JOIN context_basket nb ON nb.id = n.basket_id
                                     WHERE nb.next_thread_id = ?1)
                      THEN b.next_thread_id = ?1
-                     ELSE c.thread_id = ?1 END
+                     ELSE c.thread_id = ?1 AND c.held_at IS NULL END
           ORDER BY c.added_at, c.id",
     )
     .and_then(|mut stmt| {
@@ -620,6 +645,8 @@ pub struct SentItem {
     /// The named basket it came from; none: the thread's own.
     pub basket_name: Option<String>,
     pub item: NewItem,
+    /// When it was first added to a basket.
+    pub added_at: String,
     pub sent_at: String,
 }
 
@@ -640,6 +667,7 @@ pub fn sent_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<SentItem>, Dom
                         around: row.get("around")?,
                         note: row.get("note")?,
                     },
+                    added_at: row.get("added_at")?,
                     sent_at: row.get("sent_at")?,
                 })
             })?
@@ -649,10 +677,12 @@ pub fn sent_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<SentItem>, Dom
 }
 
 /// Put `thread`'s last send back: each item to the basket it came from (a
-/// named basket by name, made again when it was deleted), with its note. It
-/// does not choose what goes next: the thread still sends its own until the
-/// person picks again. The copy is gone after. The
-/// new items' ids, in order; empty when there was nothing to put back.
+/// named basket by name, made again when it was deleted), with its note and
+/// the time it was first added. It does not choose what goes next: an item
+/// back in the thread's own basket is **held**, so the next prompt doesn't
+/// carry it until Send Next on This Thread ([`release_held_tx`]); a named
+/// basket goes only when it is chosen. The copy is gone after. The new
+/// items' ids, in order; empty when there was nothing to put back.
 pub fn put_back_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<i64>, DomainError> {
     let sent = sent_tx(conn, thread)?;
     let mut ids = Vec::new();
@@ -661,7 +691,11 @@ pub fn put_back_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<i64>, Doma
             Some(name) => Basket::Named(ensure_basket_tx(conn, name)?.0.id),
             None => Basket::Thread(thread),
         };
-        ids.push(add_tx(conn, basket, &s.item)?);
+        let id = insert_tx(conn, basket, &s.item, &s.added_at)?;
+        if matches!(basket, Basket::Thread(_)) {
+            hold_tx(conn, &[id])?;
+        }
+        ids.push(id);
     }
     conn.execute(
         "DELETE FROM context_sent_item WHERE thread_id = ?1",
@@ -669,6 +703,38 @@ pub fn put_back_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<i64>, Doma
     )
     .map_err(map_sql_err)?;
     Ok(ids)
+}
+
+/// Release `thread`'s held items (Send Next on This Thread), so its next
+/// prompt carries them; their ids, oldest first.
+pub fn release_held_tx(conn: &Connection, thread: ThreadId) -> Result<Vec<i64>, DomainError> {
+    let held: Vec<i64> = items_tx(conn, Basket::Thread(thread))?
+        .into_iter()
+        .filter(|i| i.held_at.is_some())
+        .map(|i| i.id)
+        .collect();
+    conn.execute(
+        "UPDATE context_item SET held_at = NULL WHERE thread_id = ?1 AND held_at IS NOT NULL",
+        params![thread.value()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(held)
+}
+
+/// Hold the thread-basket items `ids` (what undoing a release does): the
+/// next prompt doesn't carry them. An item in a named basket, or gone, is
+/// left alone.
+pub fn hold_tx(conn: &Connection, ids: &[i64]) -> Result<(), DomainError> {
+    let now = ts_to_string(Timestamp::now());
+    for id in ids {
+        conn.execute(
+            "UPDATE context_item SET held_at = ?2
+              WHERE id = ?1 AND thread_id IS NOT NULL AND held_at IS NULL",
+            params![id, now],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -787,6 +853,9 @@ mod tests {
             "",
             "   ",
             "this thread",
+            "@thread",
+            " @new",
+            "@Auth",
             &"x".repeat(NAME_MAX + 1),
             "AUTH RESEARCH",
         ] {
@@ -807,6 +876,14 @@ mod tests {
             .transaction(move |tx| rename_basket_tx(tx, other.id, "Auth Research"))
             .await;
         assert!(taken.is_err());
+        let marked = db
+            .transaction(move |tx| rename_basket_tx(tx, other.id, "@thread"))
+            .await;
+        assert!(marked.is_err(), "a name may not start with @");
+        assert!(db
+            .transaction(|tx| create_basket_tx(tx, "Mail @home"))
+            .await
+            .is_ok());
         let before = db
             .transaction(move |tx| rename_basket_tx(tx, other.id, "Release notes"))
             .await
@@ -1133,6 +1210,117 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(None, Some("oxplow:oxplow/commit?sha=c".to_string()))]
         );
+    }
+
+    /// Put Back into the thread's own basket holds the items: the next
+    /// prompt carries nothing, an add doesn't release them (only the new
+    /// item goes), and Send Next on This Thread (`release_held_tx`) does.
+    /// The items keep the time they were first added.
+    #[tokio::test]
+    async fn put_back_into_the_threads_own_basket_holds_until_send_next() {
+        let (db, thread, _) = with_threads().await;
+        let first = db
+            .transaction(move |tx| {
+                let first = add_tx(
+                    tx,
+                    Basket::Thread(thread),
+                    &page("oxplow:oxplow/commit?sha=a"),
+                )?;
+                tx.execute(
+                    "UPDATE context_item SET added_at = '2026-01-02T00:00:00Z' WHERE id = ?1",
+                    params![first],
+                )
+                .map_err(map_sql_err)?;
+                take_delivered_tx(tx, thread, None, &[first])?;
+                Ok(first)
+            })
+            .await
+            .unwrap();
+        let back = db
+            .transaction(move |tx| put_back_tx(tx, thread))
+            .await
+            .unwrap();
+        assert_eq!(back.len(), 1);
+        let item = db
+            .read({
+                let id = back[0];
+                move |c| get_tx(c, id)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(item.id, first);
+        assert!(item.held_at.is_some(), "put back is held: {item:?}");
+        assert_eq!(
+            item.added_at, "2026-01-02T00:00:00Z",
+            "keeps when it was added"
+        );
+        let sends = |db: &Database| {
+            let db = db.clone();
+            async move {
+                db.read(move |c| waiting_for_thread_tx(c, thread))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|w| w.item.id)
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert!(
+            sends(&db).await.is_empty(),
+            "held: the next prompt carries nothing"
+        );
+
+        // A new item goes alone; the held one stays held.
+        let fresh = db
+            .transaction(move |tx| {
+                add_tx(
+                    tx,
+                    Basket::Thread(thread),
+                    &page("oxplow:oxplow/commit?sha=b"),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(sends(&db).await, [fresh]);
+
+        // Send Next on This Thread releases it.
+        let released = db
+            .transaction(move |tx| release_held_tx(tx, thread))
+            .await
+            .unwrap();
+        assert_eq!(released, [back[0]]);
+        assert_eq!(sends(&db).await, [back[0], fresh]);
+
+        // Holding again (what undoing the release does).
+        db.transaction(move |tx| hold_tx(tx, &released))
+            .await
+            .unwrap();
+        assert_eq!(sends(&db).await, [fresh]);
+    }
+
+    /// A move to another basket drops the hold: it is only about the
+    /// thread's own basket.
+    #[tokio::test]
+    async fn a_move_drops_the_hold() {
+        let (db, thread, _) = with_threads().await;
+        let (id, before) = db
+            .transaction(move |tx| {
+                let basket = create_basket_tx(tx, "Auth")?.id;
+                let id = add_tx(
+                    tx,
+                    Basket::Thread(thread),
+                    &page("oxplow:oxplow/commit?sha=a"),
+                )?;
+                hold_tx(tx, &[id])?;
+                let before = move_tx(tx, id, Basket::Named(basket))?.unwrap();
+                Ok((id, before))
+            })
+            .await
+            .unwrap();
+        assert!(before.held_at.is_some());
+        let now = db.read(move |c| get_tx(c, id)).await.unwrap().unwrap();
+        assert_eq!(now.held_at, None);
     }
 
     /// A thread's own items go with it; a basket set next for it stays, set for none.

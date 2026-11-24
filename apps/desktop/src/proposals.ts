@@ -52,10 +52,10 @@ export interface Proposal {
   decision: string;
   /** When it was decided or superseded. */
   decidedAt: string | null;
-  /** The approving run's audit row: none while an approved one still
+  /** The approving command run ID: none while an approved one still
    *  runs (an External command is claimed `approved` first, and goes back
    *  to `pending` if the run fails). */
-  auditId: number | null;
+  commandRunId: number | null;
 }
 
 /** How a card shows a proposal. */
@@ -98,7 +98,7 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
     // A read of the pending ones needn't select it.
     decision: String(at(row, "decision") ?? "pending"),
     decidedAt: at(row, "decided_at") == null ? null : String(at(row, "decided_at")),
-    auditId: at(row, "audit_id") == null ? null : Number(at(row, "audit_id")),
+    commandRunId: at(row, "command_run_id") == null ? null : Number(at(row, "command_run_id")),
   }));
 }
 
@@ -110,7 +110,7 @@ export async function readPendingProposals(): Promise<{ proposals: Proposal[]; r
   const res = await querySql(
     `SELECT id, uri, created_at, command, input, actor_kind, actor_id, thread_id, ${THREAD_TITLE}, key, preview, dry_run
        FROM v_command_proposal p
-       WHERE decision = 'pending' OR (decision = 'approved' AND audit_id IS NULL)
+       WHERE decision = 'pending' OR (decision = 'approved' AND command_run_id IS NULL)
        ORDER BY id DESC`,
     [],
     1_000,
@@ -196,7 +196,7 @@ export async function decide(p: Proposal, approve: boolean): Promise<void> {
 }
 
 const COLUMNS =
-  "id, uri, created_at, command, input, actor_kind, actor_id, thread_id, (SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title, key, preview, dry_run, decision, decided_at, audit_id";
+  "id, uri, created_at, command, input, actor_kind, actor_id, thread_id, (SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title, key, preview, dry_run, decision, decided_at, command_run_id";
 
 /** A thread's proposals, newest first — pending and decided — and what
  *  was read. */

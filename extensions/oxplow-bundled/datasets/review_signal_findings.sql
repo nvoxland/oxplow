@@ -6,12 +6,23 @@
 -- headed at an older snapshot still has the findings it had then. A change
 -- headed at a commit has no snapshot to read them at and gets analyzer
 -- findings only.
-WITH facts AS (
-  SELECT cf.change_id, cf.path, cf.line, cf.rule, cf.severity, cf.detail, cf.measure_key, cf.subject
+-- A fact is at its `line`, or, for a fact per file (the packs' idiom
+-- collectors: one count per file, so the metric cube stays small), at each
+-- line its `detail` lists (`{"lines": [3, 17]}`).
+WITH located AS (
+  SELECT cf.change_id, cf.path, coalesce(cf.line, l.value) AS line, cf.rule, cf.severity,
+         CASE WHEN cf.line IS NULL AND json_valid(cf.detail) THEN NULL ELSE cf.detail END AS detail,
+         cf.measure_key, cf.subject
   FROM ref('change_fact') cf
-  JOIN ref('change_hunk') hk ON hk.change_id = cf.change_id AND hk.path = cf.path
-   AND cf.line BETWEEN hk.head_start AND hk.head_end
-  WHERE cf.line IS NOT NULL AND (cf.rule IS NOT NULL OR cf.severity IS NOT NULL)
+  LEFT JOIN json_each(CASE WHEN cf.line IS NULL AND json_valid(cf.detail) THEN cf.detail END, '$.lines') l
+  WHERE cf.rule IS NOT NULL OR cf.severity IS NOT NULL
+),
+facts AS (
+  SELECT located.*
+  FROM located
+  JOIN ref('change_hunk') hk ON hk.change_id = located.change_id AND hk.path = located.path
+   AND located.line BETWEEN hk.head_start AND hk.head_end
+  WHERE located.line IS NOT NULL
 ),
 analysis AS (
   SELECT c.id AS change_id, o.payload_json,

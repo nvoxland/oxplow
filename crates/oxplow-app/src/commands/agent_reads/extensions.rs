@@ -207,7 +207,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(report.audit_id.is_none());
+        assert!(report.command_run_id.is_none());
         // It ran in the calling stream's worktree, not the primary's.
         assert_eq!(
             report.result["root"],
@@ -286,7 +286,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(report.audit_id.is_none());
+        assert!(report.command_run_id.is_none());
         let r = &report.result;
         assert_eq!(r["draft"], json!(true), "{r}");
         assert_eq!(r["checkout"], json!(elsewhere.path().to_string_lossy()));

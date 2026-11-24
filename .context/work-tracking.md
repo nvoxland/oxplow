@@ -139,19 +139,8 @@ gates"). It is made visible, all of it bundled over existing datasets
   (`v_turn_file` over those requests' turns, only a `claimed` or `sole`
   file: one two concurrent turns could each have changed is no evidence),
   and epics whose open children sit on different threads.
-- The advisory **`shared-files`** (turn end, to the person, once per pair
-  of threads): requests on different threads, running or lately finished,
-  changed the same file (`v_turn_file` of their turns, `claimed` or
-  `sole`) within `sharedFiles.windowMinutes`
-  (default 60). It names both threads and the files. Either thread's turn
-  end can raise it; an Alert already raised for the pair (its text opens
-  with the pair, `v_agent_nudge`) silences the other, so a long overlap
-  alerts once.
-- The advisory **`shared-files-agent`** (turn end, to the agent, once per
-  thread): another thread's request also changed the files; it says to
-  check what that thread is doing before duplicating its work.
 
-None refuses anything. Work moving from one thread to another uses each
+Work moving from one thread to another uses each
 harness's own messaging ([agent-model.md](./agent-model.md) "Native
 messaging"); oxplow keeps no record of it.
 
@@ -164,8 +153,8 @@ messaging"); oxplow keeps no record of it.
 - Nothing the agent must call to close work. A request ends when its
   turns do; its last turn's final message is the summary.
 - "Waiting on you" is derived (a pending question or plan approval, the
-  Notification hook's permission prompt, a final message ending in a
-  question), not declared; the next prompt clears it. It's the thread's
+  Notification hook's permission prompt, a Codex approval wait), not
+  declared, and never read from how the agent words its reply; the next prompt clears it. It's the thread's
   logged `agent.status.changed`, read as `v_agent_status`.
 
 ## Hints
@@ -213,15 +202,13 @@ whole alternative review built that way.
 | Per-request test outcome and time to green | oxplow-foundation's test-outcome collector | metric specs over its facts |
 | Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled datasets and pages | `changeInterest.*`, `coChange.*`; the rest fork |
 | Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
-| Advisories (15-file uncommitted, threshold crossed, landed in progress, two threads on one file) | oxplow-bundled advisories | `largeUncommitted.files`, `sharedFiles.windowMinutes`; the rest fork |
 
 **What stays in core, and why.** These are collection's own mechanics
 or operational limits, not a view of what good work is:
 
 - Which shell commands are test or analysis runs (built-in patterns plus
   `testing.runPatterns`), and the report freshness window.
-- The report-less-run nudge: collection telling the agent its run wrote
-  no report it could read.
+- The missing-report notice tells the person why a run has no readable report.
 - Which paths and functions are tests, and the assertion and skip counting
   (`test_conventions`, declared by extensions: language-support.md "Test
   conventions"): conventions the change analysis records as columns.
@@ -236,9 +223,7 @@ so the constants are settings, not forks. oxplow-bundled has `changeInterest.*`
 (weights and the long-function cut-off), `coChange.*` (pair threshold,
 window, per-commit file cap, dormant days) and `struggle.*`, set with
 `oxplow.settings.write` (foundation's, over the `oxplow` namespace's one
-configuration). The holder (`extensions-bundled.md`) has
-`largeUncommitted.files` and `sharedFiles.windowMinutes`, set with
-`oxplow.advisory_policy.write`. All default to today's values. A metric's `target` / `warnAt` / `failAt` stay
+configuration). A metric's `target` / `warnAt` / `failAt` stay
 tunable from `project.yaml`.
 
 **Gaps.** The complexity and length cut-offs of the metric specs and the

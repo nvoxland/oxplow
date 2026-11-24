@@ -2070,7 +2070,7 @@ skills:
 
     /// oxtask's task skills (`next-task`, `track-work`, `work-tasks`) are
     /// offered while the task model has a live store, as oxtask's workflow
-    /// setting says; with the workflow off none of them is.
+    /// setting says; with the workflow off (the default) none of them is.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_task_skills_follow_the_task_workflow() {
         let fx = crate::test_fixtures::services_developing_oxplow().await;
@@ -2097,7 +2097,7 @@ skills:
             names.sort();
             names
         };
-        assert_eq!(offered().await, ["next-task", "track-work"], "the default");
+        assert!(offered().await.is_empty(), "the default is off");
         let extensions = fx
             .svc
             .extension_catalog
@@ -2110,6 +2110,7 @@ skills:
         )
         .unwrap();
         for (workflow, skills) in [
+            ("agent_tracks", vec!["next-task", "track-work"]),
             ("person_files", vec!["next-task", "work-tasks"]),
             ("custom", vec!["next-task"]),
             ("off", vec![]),

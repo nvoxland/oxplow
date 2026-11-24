@@ -279,7 +279,7 @@ async fn extension_reads_use_the_services_global_directory_and_fake_secrets() {
         "{:?}",
         fx.svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(1000)
             .await
             .unwrap()

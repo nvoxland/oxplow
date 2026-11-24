@@ -368,7 +368,7 @@ left out; `summarize` or `decide` otherwise) and optional
   - Tests: each kind against a local stand-in for its API
     (`oxplow_ai_fake::mock`, `mock_sse`), pinning the request shape and the
     stream, in `crates/oxplow-ai-rig/src/tests.rs`; a streaming tool-call
-    job end to end in `extension_jobs_tests`.
+    job end to end in `job_runs_tests`.
 - Two operations: `complete` (text, optionally JSON) and `decide` (typed
   questions: `noul` → probability, `choice` → choice + probabilities,
   `score` → level index + probabilities). Non-Jev models answer `decide`
@@ -386,14 +386,16 @@ left out; `summarize` or `decide` otherwise) and optional
   *number* of model calls an extension may make was considered with
   scoped grants (2026-10-10) and left out for now: a grant says only
   whether a contribution may call a model, and each run's calls are
-  counted (`v_extension_run.ai_calls`, `v_ai_call.run_id`).
+  counted (`v_contribution_run.ai_calls`, `v_ai_call.run_id`).
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
   (role, provider, model, caller, tokens, latency, ok, error, and
-  `run_id` — the extension run that made it, V48), so AI usage is itself
-  queryable in the [semantic layer](./semantic-layer.md). An `AiCompute`
+  `run_id` when the caller supplies it). AI usage is queryable in the
+  [semantic layer](./semantic-layer.md). An `AiCompute`
   computation takes a `Caller { name, run }` (a bare name converts to
-  one with no run); a collector's `CollectorOracle` names its run and
-  counts each call on it (`extension_run.ai_calls`).
+  one with no run). Collectors, job rounds and the agent's AI commands
+  pass the contribution run's ID and count the request on that run
+  (`contribution_run.ai_calls`). The agent's call still names its thread
+  as the caller. A cached result reuses the original model call's record.
 - **Every call keeps what it was asked and answered** (V41): the request
   as `AiService` hands it to the provider — `ModelRequest::Complete {
   system, prompt, json }` or `Decide { state, questions }`, its `body()`

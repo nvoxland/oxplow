@@ -74,7 +74,7 @@ saying the id it names.
 |---|---|
 | `thread`, `from_thread`, `to_thread`, `stream`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `comment` | the prefixed id: `thr3`, `str1`, `trn4`, `req2`, `ses2`, `not3`, `cmt5` |
 | `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
-| `event`, `job_run` | the UUID |
+| `event`, `job_run`, `contribution_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
 | `commit`, vcs.head.moved `from` / `to` | the sha |
 | `record.read` `record` | the row's URI (`oxplow:oxplow/knowledge?id=…&store=…`) |

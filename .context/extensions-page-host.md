@@ -276,11 +276,15 @@ the user guide is `docs/guide/pages.md`.
       `#` as any page's. Its rail doesn't draw `uri` (the page is the
       URI), and another value of a URI param opens that URI
       (`withRenderedParams`, pushed).
-  - **Panels**: `panels: [{ id, title, icon?, scope: project | stream |
+  - **Panels**: `panels: [{ id, title, icon?, data_scope: project | stream |
     thread, body, badge?, open?, collapsed?, count?, dock? }]` put a page in
     the left nav (with `dock: true` it goes in the bottom dock instead: an
     icon with the count as its badge that opens the body above the bar,
-    and the rail does not draw it). `body`, `badge`, `collapsed` and
+    and the rail does not draw it). `data_scope` is which data it shows —
+    the project's, or the selected stream's or thread's (its pages declare
+    `stream_id` / `thread_id`) — not where it shows: that is the person's
+    layout. (Bare `scope` is a permission, `.context/extensions.md`.)
+    `body`, `badge`, `collapsed` and
     `count` name **pages of the same extension, by slug**. `open`, a
     `page` URI, is the page its header opens — a core page it summarizes;
     absent, the body page. `collapsed` is the
@@ -425,7 +429,7 @@ the user guide is `docs/guide/pages.md`.
       agent from MCP `oxplow_run_page_action` (which never confirms). The
       bus applies the agent policy through `on_behalf_of`. A command that
       asks (`confirm`) asks only a person; a page action an agent pressed
-      runs without asking. The audit records the page's URI as its source
+      runs without asking. the command run record holds the page's URI as its source
       (V114 added the `page` actor kind).
     - **The command runs after the read.** An action, a form submit and
       a component's invoke are resolved under one pinned catalog

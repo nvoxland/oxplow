@@ -10,7 +10,7 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [lints]
 workspace = true

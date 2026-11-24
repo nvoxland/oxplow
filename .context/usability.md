@@ -309,7 +309,7 @@ markdown itself, nor edits it in a `<textarea>`.
   component or core screen keeps its own error state for a command, and
   an extension needs no error code: a component draws only a field error.
   The record is `recordOpError` / `reportOpError` (`opErrors.ts`) as
-  `oxplow.ui.report_error` (with the failed run's audit row, which the
+  `oxplow.ui.report_error` (with the failed run's command run record, which the
   daemon's error names, and an approval's proposal), and the dataset
   `v_op_error` — the client keeps
   nothing, so the list survives a reload and the agent reads the same rows
@@ -341,16 +341,6 @@ markdown itself, nor edits it in a `<textarea>`.
   destructive, so they are on right-click** like the other row actions,
   and a row action that adds a permission asks inline, where the person
   clicked.
-- **The Extensions page shows each extension's last run.** One line under
-  the row from `v_extension_run` (`latest = 1` per contribution): the **worst
-  current warning** (denied, then stale, then failed; the newest of equals) so a
-  failing contribution isn't hidden behind another's later ok run, else the
-  most recent run: "Last run: ok · collector pull · <when>".
-  Failed, denied and stale are in the warning color (`--severity-medium`) and
-  say why — a failed or stale run's `error`, a denied run's refusing decision
-  from `decisions` ("host evil.example: it isn't in the grant"). An extension
-  that has never run shows no line. `lastRuns` in `extensionRowModel.ts`; the
-  line re-reads when a run commits (`useRerunOnChange` on the read's datasets).
 - **The Extensions page says what each script is given.** Under the
   row, one muted line per Starlark script that has services: its name, then
   the service titles ("Collector triage — Read the captured tree · Ask a
@@ -632,7 +622,8 @@ Any link that resolves to a page — knowledge page, task, file, directory, comm
 supports the browser conventions: **Cmd/Ctrl-click or middle-click opens
 it in a new tab**, plain click navigates in place. The right-click menu
 carries the same pair (Open / Open in new tab) so the gesture is
-discoverable without knowing the modifier.
+discoverable without knowing the modifier. Opening it outside oxplow
+is the menu's Open In ▸ (below).
 
 The rule that keeps this honest: every page-bearing link resolves
 through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call
@@ -642,6 +633,47 @@ how it drifted before — task links honoured the modifier while file,
 directory and commit links silently ignored it. A new link kind
 gets the behaviour by being added to `linkRef`, not by growing
 another branch.
+
+## Open In ▸ on every path and URL
+
+Every right-click menu of something the window knows as a file, a
+directory or a web URL has one **Open In ▸** submenu: a markdown link,
+a page's file or directory tab, the page ☰ menu, the editor, a stream
+row in the Navigator, a project row in the launcher, and a page's row
+that names a file, a directory or a web URL (`rowOpenInRef`: a `file`
+link, a `page` link to one, or a `diff-at` link whose newer side is the
+working copy, as the changes lists have). In the terminal, it is for the path or
+URL under the pointer ([terminal.md](./terminal.md)). One builder makes it, `openInMenu` /
+`openInForRef` / `openInForPath` in `apps/desktop/src/openIn.ts`. A new
+surface calls it and adds nothing of its own.
+
+| Target | Items |
+|---|---|
+| A file on disk | Reveal in Finder (Show in Explorer, Show in File Manager), Default App, Terminal (its folder) |
+| A directory on disk | Reveal in Finder (…), Terminal |
+| A web URL | Browser, Oxplow (the web tab, when the allowlist takes it) |
+
+- **Only what applies shows.** Reveal and Default App need the files on
+  this machine (`filesAreLocal()`; not over a manual connect or in a
+  plain browser). A file at another revision or on another filesystem is
+  not on disk. Terminal opens in this window's stream, so another
+  stream's row and the launcher have none. With no item left there is no
+  submenu.
+- **The OS names the file manager** (`platform.ts` `revealLabel`).
+- **The shell does the OS part** (`reveal_path`, `open_path`):
+  Default App never runs a program.
+- **Terminal** runs `oxplow.terminal.open { stream, dir }` and shows the
+  new terminal.
+- A failure goes to the error toast (`recordOpError`).
+- A tab builds its Open In as its menu opens (`CenterTab.menuAtOpen`), so
+  it reads the window as it is then.
+- **Extensions add links.** `links:` (a pattern and a URI) make text a
+  link in the terminal and markdown, with the same menu
+  ([extensions-manifest.md](./extensions-manifest.md) `links`).
+- **Extensions add their own.** A command about the link whose `ui.group`
+  is `Open In` joins after oxplow's items (`withLinkOffers`; the link's
+  other commands keep their own groups): [extensions-slots.md](./extensions-slots.md)
+  "Links: `url` and `path`".
 
 ## A page changes its own view, it doesn't open itself
 
@@ -1140,6 +1172,12 @@ its right-click menu.
   file-drop events (and then reconcile both).
 - **Highlight the drop target** (dashed border + accent glow) whenever
   a compatible drag enters it. Clear the highlight on leave/drop.
+- **Never change the page during `dragstart`.** WebKit (macOS's window)
+  cancels a drag whose DOM changes in its `dragstart` (it ends at once and
+  the press becomes a text selection); Chromium doesn't, so only a WebKit
+  run shows it. Show drop targets a tick later (the rail's group dividers:
+  `setTimeout(…, 0)`). And **cancel `dragenter` as well as `dragover`** on
+  a drop target: Safari accepts a drop only where both were.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. **Every internal MIME
   lives in `apps/desktop/src/dragMimes.ts`** — `RAIL_SECTION_DRAG_MIME`
@@ -1389,8 +1427,8 @@ or opening a page from it hides it; widening the window resets it (`NarrowRail`)
 - A page body has the same 24 px gutter with a Details pane or without (`PAGE_GUTTER_PX` in `tabs/Page.tsx`).
 - A section keeps its gap above whatever came before it, including inside an embedded page that follows a table or tree. Only the page's first section starts flush (`oxplow-kit.css`, "Sections stack apart").
 
-- **A list of things shows a name and one line, not the paragraph.** A catalog row (Explore Data's
-  rail, Settings → Data's entities) says a thing's first sentence; the whole description is on the
+- **A list of things shows a name and one line, not the paragraph.** A catalog row (Catalog’s
+  dataset list, Settings → Data’s entities) says a thing's first sentence; the whole description is on the
   thing's own page (or in its expansion).
 
 - **A list, table, tree or custom component that is all of its page fills the page's height** (`PageTree`

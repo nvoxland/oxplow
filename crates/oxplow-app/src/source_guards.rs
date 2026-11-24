@@ -573,7 +573,7 @@ fn is_test_double(name: &str) -> bool {
 /// workspace crate reaches one through a normal or build edge of the
 /// **resolved** graph (`cargo metadata`), however its manifest spells
 /// the dependency (a `[dependencies.x]` table, a renamed `package =`, the
-/// workspace-hack).
+/// unified-deps crate).
 #[test]
 fn no_test_double_is_a_production_dependency() {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -731,6 +731,7 @@ fn no_tmux_in_the_app() {
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
+    ("crates/oxplow-app/src/commands/mod.rs", "\"oxplow-foundation\"", "the recorded owner of native commands in the oxplow namespace"),
     ("crates/oxplow-domain/src/capability.rs", "== \"oxplow\"", "the reserved provider id"),
     // The same reservation for filesystems: no extension's filesystem id
     // falls in `oxplow:`, the namespace of oxplow's own.

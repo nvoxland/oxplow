@@ -1,0 +1,19 @@
+when: { page: catalog }
+expect:
+  loaders:
+    data:
+      rows:
+        contains:
+          - view: v_agent_conversation
+            description: Every agent harness's saved conversations begun in a stream's worktree — started in oxplow or outside it — most recent first per harness, up to 50 each.
+            definition: oxplow:oxplow/dataset?dataset=agent_conversation#oxplow.renderer=oxplow/dataset-definition
+  text:
+    contains:
+      - "| v_agent_conversation | core | Every agent harness's saved conversations begun in a stream's worktree — started in oxplow or outside it — most recent first per harness, up to 50 each. |"
+steps:
+  - when: { page: data-catalog, params: { dataset: request } }
+    expect:
+      text:
+        contains:
+          - "One row per request: who started it and when"
+          - "Its files come with the turns' changes. [relationships: "

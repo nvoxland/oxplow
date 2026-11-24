@@ -21,6 +21,7 @@ import {
   selectThread,
   recordUsage,
   switchStream,
+  runCommand,
   runCommandInBackground,
   commandOpenAfter,
   type ThreadMark,
@@ -29,8 +30,9 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, type GoRow } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
 import { GoMenuFeed } from "./components/Panels/GoMenuFeed.js";
+import { RailMenuFeed, type RailMenu } from "./components/Panels/RailMenuFeed.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -65,7 +67,7 @@ import { PageNavigationContext, type PageNavigation, type TabEditing } from "./t
 import type { PageAction } from "./kit/actions.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
-import type { BookmarkScope } from "./tabs/bookmarks.js";
+import type { VisibilityScope } from "./visibilityScope.js";
 import { reconcileSessionTabs, storedSessionIsStale } from "./tabs/sessionTabs.js";
 import { newThreadOpening } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
@@ -81,9 +83,10 @@ import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
 import { openHandlerFor, type OpenHandlers } from "./tabs/openHandlers.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
+import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
-import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt, pageTabRef, terminalRef } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
@@ -141,7 +144,9 @@ import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
+import { openInBrowser, openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
 import { startRecordStores } from "./recordStoresLoader.js";
+import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -737,6 +742,9 @@ export function App() {
   // The window's context keys: what a command's `when` reads
   // (`oxplow_domain::when::CONTEXT_KEYS`; `.context/commands.md`).
   const treeDirty = useTreeDirty(stream?.id);
+  // The agent terminals a pane shows running: Restart Terminal is offered
+  // for these only (an ended pane has Start Again).
+  const liveTerminals = useLiveTerminals();
   const whenContext = useMemo<WhenContext>(
     () => ({
       streamShown: !!stream,
@@ -745,6 +753,7 @@ export function App() {
       fileShown: shownFilePath !== null,
       pageDirty: !!centerActive && !!dirtyTabs[centerActive],
       pageKind: centerActive ? kindForTabId(centerActive) : "",
+      agentTerminalLive: liveTerminals.has((centerActive && refFromTabId(centerActive)?.id) || ""),
       vcsEnabled: !!workspaceContext.vcsEnabled,
       treeDirty,
       shellAvailable: shellAvailable(),
@@ -753,7 +762,7 @@ export function App() {
         .map((h) => h.id)
         .join(","),
     }),
-    [centerActive, dirtyTabs, harnesses, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
+    [centerActive, dirtyTabs, harnesses, liveTerminals, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error
@@ -824,7 +833,7 @@ export function App() {
         const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
         if (local) {
           return local
-            .then(({ result }): CommandOutcome => ({ result, audit_id: null, event_id: null, inverse: null }))
+            .then(({ result }): CommandOutcome => ({ result, command_run_id: null, event_id: null, inverse: null }))
             .catch((e: unknown) => {
               recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
               return null;
@@ -850,7 +859,13 @@ export function App() {
   }, [offerCtx, offerDeps]);
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
-  const menuGroups = useMemo(() => buildMenuBar(offers), [offers]);
+  // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
+  // the layout's provider, hands them up as the layout changes).
+  const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
+  const menuGroups = useMemo(
+    () => [...buildMenuBar(offers), viewMenu(railMenu.panels, railMenu.toggle)],
+    [offers, railMenu],
+  );
   // The stars the thread sees (a page's star says where it is starred).
   const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
   // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
@@ -1139,19 +1154,42 @@ export function App() {
 
   /**
    * Open an http(s) URL as an in-app sandboxed external-url tab.
-   * Validates through the scheme allowlist; rejected URLs are routed to
-   * the OS browser via window.open (which the main process turns into a
-   * shell.openExternal call) so the user still gets to follow the link
-   * even if it can't be embedded.
+   * Validates through the scheme allowlist; a URL it refuses opens in
+   * the system browser, so the person still gets to follow the link.
    */
   const handleOpenExternalUrl = useCallback((rawUrl: string) => {
     const verdict = classifyExternalUrl(rawUrl);
     if (!verdict.ok) {
-      window.open(rawUrl, "_blank", "noopener,noreferrer");
+      openInBrowser(rawUrl);
       return;
     }
     handleOpenPageRef.current?.(externalUrlRef(verdict.url));
   }, []);
+
+  // Open In ▸ (`openIn.ts`): the stream's worktree, oxplow's web tab, and a
+  // new terminal at a directory, shown once it is open.
+  useEffect(() => {
+    if (!stream) return;
+    const streamId = stream.id;
+    setOpenInHost({
+      worktree: stream.worktree_path,
+      openInApp: (url) => handleOpenExternalUrl(url),
+      openRef: (ref) => {
+        const tab = refFromTabId(ref);
+        if (tab) handleOpenPageRef.current?.(tab);
+      },
+      openTerminalAt: (dir) =>
+        void runCommand("oxplow.terminal.open", { stream: streamId, dir })
+          .then(({ result }) => {
+            // The Terminal page picks its shell by title, in its view: the
+            // one tab shows the new terminal.
+            const title = (result as { title?: string } | null)?.title;
+            handleOpenPageRef.current?.(title ? pageTabRef("terminal", undefined, { terminal: title }) : terminalRef());
+          })
+          .catch((e: unknown) => recordOpError({ label: "Open a terminal", message: e instanceof Error ? e.message : String(e) })),
+    });
+    return () => setOpenInHost(null);
+  }, [stream, handleOpenExternalUrl]);
 
   /** Open the commit page for a wikilink-resolved commit SHA. */
   const handleOpenCommit = useCallback((sha: string) => {
@@ -1547,6 +1585,16 @@ export function App() {
           return { opened: plan.page?.id ?? null, stream: plan.streamId };
         },
       },
+      "agent_terminal.write": {
+        restart: async (input, ctx) => {
+          if (ctx.actor !== "human") throw new Error("Only a person can restart an agent terminal.");
+          const requested = (input as { uri?: string } | null)?.uri;
+          const uri = requested ?? effectiveCenterActive;
+          if (typeOf(uri) !== "oxplow/agent_session") throw new Error("No agent terminal is selected.");
+          await desktopBridge().restartAgentTerminal(uri);
+          return null;
+        },
+      },
       // It fills the shown thread's agent input, unsent.
       "agent_input.write": {
         draft: (input) => {
@@ -1590,7 +1638,7 @@ export function App() {
     // getFileSession / mutateFileSession are plain functions over the
     // session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
+  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, effectiveCenterActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);
   windowHandlersRef.current = windowHandlers;
 
@@ -1808,7 +1856,7 @@ export function App() {
       const stored = isCurrent ? currentEntry(sessionTab).from : undefined;
       const origin: Origin | null = stored ? resolvedOrigin(stored, liveItemsOf(liveItems, slot, stored), ref) : null;
       const innerRender = tab.render;
-      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
+      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.visibilityScope ?? null;
       const elsewhere = bookmarkScope === null ? bookmarkedElsewhere(bookmarks, ref) : null;
       const registeredTitle = pageTitles[tabId] ?? (isCurrent ? currentEntry(sessionTab).title : undefined);
       const navValue: PageNavigation = {
@@ -1847,15 +1895,15 @@ export function App() {
         setTabActions: isCurrent ? actionsSetterFor(tabId) : undefined,
         ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
         bookmark: {
-          scope: bookmarkScope,
-          other: elsewhere ? { scope: elsewhere.scope } : null,
+          visibilityScope: bookmarkScope,
+          other: elsewhere ? { visibilityScope: elsewhere.visibilityScope } : null,
           updateOther: elsewhere
             ? () => {
                 moveBookmark({ threadId: selectedThreadId, streamId: stream?.id ?? null }, elsewhere, ref, registeredTitle ?? tab.label).catch((e: unknown) =>
                   recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
               }
             : undefined,
-          toggle: (scope: BookmarkScope) => {
+          toggle: (scope: VisibilityScope) => {
             const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
             const write = bookmarkScope === scope
               ? removeBookmark(viewer, ref.id)
@@ -1912,6 +1960,15 @@ export function App() {
           ...pageActions.map((a) => ({ id: a.id, label: a.label, enabled: !a.disabled, run: () => void a.run() })),
         ];
       }
+      // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`).
+      tab.menuAtOpen = () => {
+        const elsewhere = openInForRef(ref.id);
+        return withLinkOffers(elsewhere ? [elsewhere] : [], ref.id).then((items) =>
+          // The tab's page menu has the ref's other commands; the tab adds
+          // only its Open In ▸.
+          items.filter((i) => i.id === "open-in"),
+        );
+      };
       // An agent session's tab: its harness's logo and its status dot.
       if (typeOf(ref.id) === "oxplow/agent_session") {
         const sessionId = paramOf(ref.id, "id") ?? "";
@@ -1921,6 +1978,15 @@ export function App() {
         tab.agentStatus = status?.status ?? "waiting";
         tab.question = status?.question;
         tab.icon = session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined;
+        tab.contextMenu = [
+          ...(tab.contextMenu ?? []),
+          {
+            id: "agent_terminal.restart",
+            label: "Restart Terminal",
+            enabled: liveTerminals.has(ref.id),
+            run: () => void offerDeps.run("Restart Terminal", "oxplow.agent_terminal.restart", { uri: ref.id }),
+          },
+        ];
         if (session && !registeredTitle) tab.label = session.displayName || sessionLabel(harnesses, session);
       }
       tab.render = () => (
@@ -1940,6 +2006,7 @@ export function App() {
     agentThreadStatus,
     selectedThreadSessions,
     sessionStatuses,
+    liveTerminals,
     harnesses,
     openTerminalPath,
     effectiveCenterActive,
@@ -1962,6 +2029,7 @@ export function App() {
     dirtyTabs,
     editingSetterFor,
     tabActions,
+    offerDeps,
     actionsSetterFor,
     openTab,
     bookmarks,
@@ -1976,7 +2044,10 @@ export function App() {
     // One owner of every extension panel's runs, read by the rail, the
     // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    {/* The viewer's left-nav layout, read by the rail and View ▸ Sidebar Panels. */}
+    <PanelLayoutProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
     <GoMenuFeed onRows={setGoRows} />
+    <RailMenuFeed onChange={setRailMenu} />
     {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
       const live = currentEntry(t).from?.live;
       return live ? (
@@ -2141,6 +2212,7 @@ export function App() {
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
+    </PanelLayoutProvider>
     </PanelRunsProvider>
   );
 }

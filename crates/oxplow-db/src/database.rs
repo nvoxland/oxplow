@@ -2084,10 +2084,12 @@ mod tests {
             "once_mark",
             "snapshot_op",
             "event_log",
-            "extension_run",
+            "contribution_run",
         ] {
+            let columns = columns(table);
+            assert!(!columns.is_empty(), "missing table {table}");
             assert!(
-                !columns(table).contains(&"effort_id".to_string()),
+                !columns.iter().any(|column| column == "effort_id"),
                 "{table}"
             );
         }
@@ -2244,14 +2246,14 @@ mod tests {
         embedded::migrations::runner().run(&mut conn).unwrap();
         let has_via: bool = conn
             .query_row(
-                "SELECT count(*) > 0 FROM pragma_table_info('command_audit') WHERE name = 'via'",
+                "SELECT count(*) > 0 FROM pragma_table_info('command_run') WHERE name = 'via'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert!(!has_via);
         let rows: i64 = conn
-            .query_row("SELECT count(*) FROM command_audit", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM command_run", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 1);
     }
@@ -2357,7 +2359,7 @@ mod tests {
             0
         );
         assert_eq!(count("SELECT count(*) FROM event_log"), 1);
-        assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
+        assert_eq!(count("SELECT count(*) FROM command_run"), 1);
     }
 
     /// V60 lets a language be a contribution that is turned off, and keeps
@@ -2392,6 +2394,249 @@ mod tests {
             .query_row("SELECT count(*) FROM contribution_health", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 2, "the earlier row is kept");
+    }
+
+    #[test]
+    fn migrates_contribution_run_actor_and_resolvable_parent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(62))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO extension_run
+              (run_id, parent_run_id, extension, contribution, kind, actor_kind, actor,
+               agent_session_id, mode, started_at, finished_at, outcome,
+               wall_ms, cpu_ms, peak_bytes, ai_calls, scopes_json, decisions_json)
+             VALUES ('root', 'absent', 'acme', 'acme.sync', 'collector', 'agent', 'agent:thr3',
+                     7, 'external', 'start', 'end', 'ok', 3, 2, 1, 0, '{}', '[]'),
+                    ('child', 'root', 'acme', 'acme.check', 'command', 'system', 'system',
+                     NULL, 'pure', 'start', 'end', 'denied', 3, 2, 1, 0, '{}', '[]');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        assert!(conn
+            .query_row(
+                "SELECT actor_kind = 'agent' AND actor_id = 'thr3' AND session_id = 7
+                    AND parent_run_id IS NULL AND cpu_ms = 2
+             FROM contribution_run WHERE run_id = 'root'",
+                [],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert!(conn
+            .query_row(
+                "SELECT actor_kind = 'system' AND actor_id IS NULL AND parent_run_id = 'root'
+                    AND outcome = 'denied'
+             FROM contribution_run WHERE run_id = 'child'",
+                [],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn command_run_migration_pairs_every_audit_and_command_run() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(63))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO contribution_run
+                 (run_id, extension, contribution, kind, actor_kind, started_at,
+                  finished_at, outcome, cpu_ms, mode)
+             VALUES
+                 ('existing', 'example', 'oxplow:oxplow/command?command=example.item.write',
+                  'command', 'agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'failed', 10, 'external'),
+                 ('effect', 'example', 'oxplow:oxplow/effect?effect=example/react',
+                  'effect', 'effect', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'ok', 20, 'external'),
+                 ('read', 'example', 'oxplow:oxplow/command?command=example.item.read',
+                  'command', 'human', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'ok', 2, 'pure');
+             INSERT INTO command_audit
+                 (id, at, command, actor_kind, actor_id, input_json, outcome, run_id, undone_by, event_id)
+             VALUES
+                 (1, '2026-01-01T00:00:01Z', 'example.item.write', 'agent', 'thr1', '{}', 'invalid', 'existing', NULL, NULL),
+                 (2, '2026-01-01T00:00:01Z', 'example.item.write', 'effect', 'example/react', '{}', 'ok', 'effect', 3, 'event'),
+                 (3, '2026-01-01T00:00:01Z', 'example.item.undo', 'human', NULL, '{}', 'ok', 'missing', NULL, NULL);
+             UPDATE sqlite_sequence SET seq = 50 WHERE name = 'command_audit';",
+        ).unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
+        assert_eq!(count("SELECT count(*) FROM command_run"), 4);
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM command_run a JOIN contribution_run r USING (run_id)
+                           WHERE a.id = 1 AND r.run_id = 'existing' AND r.outcome = 'invalid'
+                             AND r.actor_id = 'thr1' AND r.cpu_ms = 10"
+            ),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM command_run a JOIN contribution_run r USING (run_id)
+                           WHERE a.id = 2 AND r.parent_run_id = 'effect' AND r.kind = 'command'
+                             AND r.outcome = 'ok' AND r.cpu_ms IS NULL AND a.event_id = 'event' AND a.undone_by = 3"), 1);
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM command_run a JOIN contribution_run r USING (run_id)
+                           WHERE a.id = 3 AND r.parent_run_id IS NULL AND r.cpu_ms IS NULL"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM command_run
+                           WHERE id > 50 AND run_id = 'read' AND input_json IS NULL"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn command_run_names_migration_keeps_event_links_and_expiry() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(67))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO event_log (seq, id, type, v, at, source, subject, payload, cause, payload_expired_at)
+             VALUES
+                 (8, 'ran', 'command.executed', 5, 'at', 'human', '[]', json_object('audit_id', 41), NULL, NULL),
+                 (9, 'approved', 'command.approved', 2, 'at', 'human', '[]',
+                     json_object('audit_id', 41, 'proposal', 3), 'ran', NULL),
+                 (10, 'failed', 'ui.op_failed', 2, 'at', 'human', '[]',
+                     json_object('audit_id', 42, 'proposal', 4), NULL, NULL),
+                 (11, 'expired', 'ui.op_failed', 1, 'at', 'human', '[]', '{}', NULL, 'expired');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let mut query = conn
+            .prepare(
+                "SELECT seq, id, v, payload, cause, payload_expired_at
+                 FROM event_log ORDER BY seq",
+            )
+            .unwrap();
+        let mut events = query.query([]).unwrap();
+        for (seq, id, version, payload, cause, expired) in [
+            (
+                8,
+                "ran",
+                6,
+                serde_json::json!({"command_run_id": 41}),
+                None,
+                None,
+            ),
+            (
+                9,
+                "approved",
+                3,
+                serde_json::json!({"command_run_id": 41, "proposal": 3}),
+                Some("ran"),
+                None,
+            ),
+            (
+                10,
+                "failed",
+                3,
+                serde_json::json!({"command_run_id": 42, "proposal": 4}),
+                None,
+                None,
+            ),
+            (
+                11,
+                "expired",
+                3,
+                serde_json::json!({}),
+                None,
+                Some("expired"),
+            ),
+        ] {
+            let row = events.next().unwrap().unwrap();
+            assert_eq!(row.get::<_, i64>(0).unwrap(), seq);
+            assert_eq!(row.get::<_, String>(1).unwrap(), id);
+            assert_eq!(row.get::<_, i64>(2).unwrap(), version);
+            let saved = row.get::<_, String>(3).unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
+                payload
+            );
+            assert_eq!(row.get::<_, Option<String>>(4).unwrap().as_deref(), cause);
+            assert_eq!(row.get::<_, Option<String>>(5).unwrap().as_deref(), expired);
+        }
+        assert!(events.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn job_attempt_migration_keeps_the_context_fence_and_its_origin() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(66))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO contribution_run
+                (run_id, extension, contribution, kind, actor_kind, mode, started_at, finished_at, outcome)
+             VALUES ('01234567-89ab-7def-8123-456789abcdef', 'core', 'command', 'command',
+                     'system', 'transactional', 'start', 'end', 'ok');
+             INSERT INTO extension_job
+                (id, contribution_id, operation, invoker, run_id, intent_key, replay_policy,
+                 state, attempt, fence, lease_until_ms, created_at_ms, updated_at_ms, revision, request_json)
+             VALUES ('job', 'oxplow:oxplow/job?job=acme/review', 'model', 'human',
+                     '01234567-89ab-7def-8123-456789abcdef', 'key', 'never', 'running', 1, 1, 200, 0, 100, 2, '{}');
+             INSERT INTO extension_job
+                (id, contribution_id, package_version, operation, invoker, run_id, intent_key, replay_policy,
+                 state, attempt, fence, created_at_ms, updated_at_ms, revision, request_json)
+             VALUES ('queued', 'oxplow:oxplow/job?job=acme/review', '1.0', 'model', 'human',
+                     '01234567-89ab-7def-8123-456789abcdef', 'queued', 'never', 'queued', 0, 0, 0, 0, 1, '{}');
+             INSERT INTO contribution
+                (id, extension, kind, local, origin, runs_on_json, needs_json, after_json, file, namespace)
+             VALUES ('oxplow:oxplow/job?job=acme/review', 'acme-models', 'job', 'review', 'declared',
+                     '{}', '[]', '[]', 'extension.yaml', 'acme');
+             INSERT INTO extension_job_attempt
+                (job_id, attempt, fence, started_at_ms, lease_until_ms)
+             VALUES ('job', 1, 1, 100, 200);
+             INSERT INTO extension_job_output
+                (job_id, attempt, fence, seq, kind, at_ms, content_json)
+             VALUES ('job', 1, 1, 1, 'text', 150, '{}');",
+        )
+        .unwrap();
+        with_foreign_keys_off(&mut conn, |conn| {
+            embedded::migrations::runner().run(conn).unwrap();
+            Ok(true)
+        })
+        .unwrap();
+        let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM job_run_attempt a JOIN contribution_run r USING (run_id)
+              JOIN job_run j ON j.id = a.job_id
+              WHERE r.parent_run_id = j.queued_by_run_id AND r.kind = 'job' AND r.outcome IS NULL
+                AND a.fence = 1 AND a.lease_until_ms = 200",
+            ),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM job_run_output"), 1);
+        let refused = conn
+            .execute_batch(
+                "INSERT INTO job_run_context (job_id, originating_run_id, context_json)
+                 VALUES ('job', 'fedcba98-7654-7321-8123-456789abcdef',
+                         '{\"schema_version\":1,\"originating_run_id\":\"fedcba98-7654-7321-8123-456789abcdef\"}');",
+            )
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("job run context origin"),
+            "{refused}"
+        );
+        crate::sql_functions::register(&conn).unwrap();
+        crate::datasets::compile_core(&mut conn).unwrap();
+        let queued: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT extension, version, run_id FROM v_job_run WHERE id = 'queued'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(queued, ("acme-models".into(), "1.0".into(), None));
     }
 
     /// V54 adds the change_hunk table, which goes with its change.
@@ -2529,7 +2774,7 @@ mod tests {
             0
         );
         assert_eq!(count("SELECT count(*) FROM event_log"), 1);
-        assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
+        assert_eq!(count("SELECT count(*) FROM command_run"), 1);
     }
 
     /// V47 moves the waiting context items into `context_item`, each with
@@ -3275,7 +3520,7 @@ mod tests {
             "event_log",
             "event_consumer_checkpoint",
             "event_dead_letter",
-            "command_audit",
+            "command_run",
             // V47 — the context baskets.
             "context_basket",
             "context_item",

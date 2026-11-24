@@ -590,13 +590,13 @@
     code;
     field;
     details;
-    auditId;
-    constructor(message, code, field = null, details = [], auditId = null) {
+    commandRunId;
+    constructor(message, code, field = null, details = [], commandRunId = null) {
       super(message);
       this.code = code;
       this.field = field;
       this.details = details;
-      this.auditId = auditId;
+      this.commandRunId = commandRunId;
       this.name = "IpcCallError";
     }
   }

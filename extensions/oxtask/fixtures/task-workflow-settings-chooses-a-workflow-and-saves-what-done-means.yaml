@@ -8,7 +8,7 @@ expect:
     settings:
       rows:
         - { key: oxtask.tasks.definitionOfDone, value: '""', origin: default }
-        - { key: oxtask.tasks.workflow, value: '"agent_tracks"', origin: default }
+        - { key: oxtask.tasks.workflow, value: '"off"', origin: default }
 steps:
   - given:
       - { command: oxplow.config.set, input: { key: oxtask.tasks.workflow, value: person_files, level: project } }

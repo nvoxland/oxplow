@@ -111,7 +111,7 @@ impl Prepared {
             } => run_page_point(svc, actor, &point, &context, command.as_deref(), confirmed).await,
             Prepared::Open(uri) => Ok(CommandOutcome {
                 result: serde_json::json!({ "opened": uri }),
-                audit_id: None,
+                command_run_id: None,
                 event_id: None,
                 inverse: None,
             }),
@@ -824,7 +824,7 @@ async fn run_page_point(
         }
         None => Ok(CommandOutcome {
             result: serde_json::json!({ "skipped": format!("nothing answers `{point}` for this item") }),
-            audit_id: None,
+            command_run_id: None,
             event_id: None,
             inverse: None,
         }),
@@ -1280,7 +1280,7 @@ view:
         svc.db
             .read(|c| {
                 c.query_row(
-                    "SELECT actor_kind, actor_id FROM command_audit ORDER BY id DESC LIMIT 1",
+                    "SELECT actor_kind, actor_id FROM v_command_run WHERE changed = 1 ORDER BY id DESC LIMIT 1",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -1425,7 +1425,7 @@ view:
             .as_str()
             .unwrap()
             .contains("nothing answers `acme/item.finish`"));
-        assert_eq!(skipped.audit_id, None);
+        assert_eq!(skipped.command_run_id, None);
         assert_ne!(mark(&fx.svc, fx.thread).await, "green");
 
         let (fx, _root) = point_page_fixture(&["item.finish", "item.also"]).await;
@@ -1728,7 +1728,7 @@ view:
     }
 
     /// A page acts as its presser and no more: one an agent pressed may run
-    /// what the agent may, which is every command, and the audit names the
+    /// what the agent may, which is every command, and the command run names the
     /// page and the agent's thread that pressed it.
     #[tokio::test]
     async fn a_page_grants_no_power() {
@@ -1743,8 +1743,8 @@ view:
         let audit = fx
             .svc
             .commands
-            .audit_store()
-            .get(out.audit_id.unwrap())
+            .command_run_store()
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -2396,8 +2396,8 @@ view:
         let audit = fx
             .svc
             .commands
-            .audit_store()
-            .get(out.audit_id.unwrap())
+            .command_run_store()
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();

@@ -254,6 +254,12 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         );
         out.push(d);
     }
+    for (i, l) in ext.links.iter().enumerate() {
+        let mut d = new(ContributionKind::Link, &l.id, RunsOn::Query);
+        d.source = item("links", i);
+        d.description = Some(format!("`{}` → {}", l.pattern, l.uri));
+        out.push(d);
+    }
     for (i, l) in ext.languages.iter().enumerate() {
         let mut d = new(ContributionKind::Language, &l.decl.id, RunsOn::Query);
         d.source = item("languages", i);
@@ -687,6 +693,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::TestConvention => ext.test_conventions.retain(|x| x.id != local),
         ContributionKind::Language => ext.languages.retain(|x| x.decl.id != local),
         ContributionKind::FileKind => ext.file_kinds.retain(|k| k.id != local),
+        ContributionKind::Link => ext.links.retain(|l| l.id != local),
         ContributionKind::RunPattern => ext.run_patterns.retain(|r| r.id != local),
         ContributionKind::Implementation => {
             let global = c.global.as_str();
@@ -734,7 +741,7 @@ mod tests {
             "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
              datasets:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    fields:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
-             panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
+             panels:\n  - {{ id: inbox, title: Inbox, data_scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
              ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/thread, placement: ref-chip, label: title }}\n"

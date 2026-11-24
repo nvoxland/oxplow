@@ -1,0 +1,22 @@
+# The Context page: what Put Back returned to This Thread is held. It is not
+# in the next prompt but under Held, and Send Next there releases it to go
+# with the next prompt.
+given:
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=problems", label: Problems, held: true } }
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=git-history", label: History } }
+when: { page: oxplow/context, params: { thread_id: 1 } }
+expect:
+  loaders:
+    next:
+      rows:
+        - { what: History, basket: This Thread }
+    held:
+      rows:
+        - { what: Problems }
+steps:
+  - press: { action: send-held, node: held }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        next: { rows: 2 }
+        held: { rows: 0 }

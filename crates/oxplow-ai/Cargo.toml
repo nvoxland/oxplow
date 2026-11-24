@@ -19,7 +19,7 @@ reqwest = { workspace = true, features = ["json"] }
 oxplow-domain = { workspace = true }
 keyring = "4.2"
 keyring-core = "1.0"
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

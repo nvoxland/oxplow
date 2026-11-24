@@ -1,8 +1,8 @@
-# Go To lists the thread's bookmarks with the scope each is at, its recent
+# Go To lists the thread's bookmarks with the visibility scope each is at, its recent
 # pages (newest first, once each, no agent sessions) and the stream's most
-# visited. A bookmark's menu moves it to another scope, or removes it.
+# visited. A bookmark's menu moves it to another visibility scope, or removes it.
 given:
-  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, scope: thread, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, visibility_scope: thread, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/page?page=settings", kind: settings, label: Settings, thread: thr1 } }
@@ -12,7 +12,7 @@ expect:
   loaders:
     bookmarks:
       rows:
-        - { title: Git, scope: thread }
+        - { title: Git, visibility_scope: thread }
     recent:
       rows:
         - { uri: "oxplow:oxplow/page?page=settings" }
@@ -25,12 +25,12 @@ steps:
   - press:
       action: to-stream
       node: bookmarks
-      row: { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", scope: thread, thread: thr1 }
+      row: { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", visibility_scope: thread, thread: thr1 }
     expect: { ok: true }
-  - expect: { loaders: { bookmarks: { rows: [{ title: Git, scope: stream }] } } }
+  - expect: { loaders: { bookmarks: { rows: [{ title: Git, visibility_scope: stream }] } } }
   - press:
       action: remove
       node: bookmarks
-      row: { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", scope: stream, thread: thr1 }
+      row: { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", visibility_scope: stream, thread: thr1 }
     expect: { ok: true }
   - expect: { loaders: { bookmarks: { rows: 0 } } }

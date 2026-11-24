@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 
-import { deliveryAlert, lettersFromResult, reactionsFromResult } from "./delivery.js";
+import * as api from "./api.js";
+import { deliveryAlert, lettersFromResult, readFailedReactions } from "./delivery.js";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
@@ -32,24 +33,45 @@ test("the Alerts row counts the undelivered events, or isn't there", () => {
   expect(deliveryAlert(5)).toBe("5 events couldn't be delivered");
 });
 
-// P9.D4: an effect's reaction that failed (its latest attempt) waits for a
-// person — unless (P10) it is sent again by itself, which it says.
-test("failed reactions read from v_effect_run, and say what failed on what", () => {
-  const rows = {
-    columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type", "retry_at"],
-    rows: [["acme/mark-done", "e1", 41, 1, "interrupted: a step outside oxplow may have run", "task.state_changed", null]],
+test("readFailedReactions reads the latest retryable attempts and keeps their outcomes", async () => {
+  const result = {
+    columns: ["effect", "event_id", "event_seq", "attempt", "outcome", "reason", "event_type", "retry_at"],
+    rows: [
+      ["acme/mark-done", "e2", 42, 2, "interrupted", "A step outside oxplow may have run", "task.state_changed", null],
+      ["acme/assign", "e1", 41, 1, "denied", "Missing grant", "task.state_changed", null],
+    ],
     truncated: false,
     reads: { datasets: ["v_effect_run", "v_event"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult;
-  const [r] = reactionsFromResult(rows);
-  expect(r).toEqual({
-    effect: "acme/mark-done",
-    eventId: "e1",
-    eventSeq: 41,
-    attempt: 1,
-    reason: "interrupted: a step outside oxplow may have run",
-    eventType: "task.state_changed",
-    retryAt: null,
-  });
+  const query = spyOn(api, "querySql").mockResolvedValue(result);
+  try {
+    const { reactions, reads } = await readFailedReactions();
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE r.latest = 1 AND r.retryable = 1"), [], 200);
+    expect(reactions).toEqual([
+      {
+        effect: "acme/mark-done",
+        eventId: "e2",
+        eventSeq: 42,
+        attempt: 2,
+        outcome: "interrupted",
+        reason: "A step outside oxplow may have run",
+        eventType: "task.state_changed",
+        retryAt: null,
+      },
+      {
+        effect: "acme/assign",
+        eventId: "e1",
+        eventSeq: 41,
+        attempt: 1,
+        outcome: "denied",
+        reason: "Missing grant",
+        eventType: "task.state_changed",
+        retryAt: null,
+      },
+    ]);
+    expect(reads).toEqual(result.reads);
+  } finally {
+    query.mockRestore();
+  }
 });

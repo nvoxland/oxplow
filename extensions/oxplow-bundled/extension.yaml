@@ -1,7 +1,7 @@
 manifest: 2
 name: oxplow-bundled
 namespace: oxplow
-description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings, the Work board, the Knowledge pages, the Dashboards and Usage pages, and the code metrics with the Metrics list and Duplicated Code so far; the rest moves here from oxplow-bundled-todo one piece at a time.
+description: Oxplow's optional built-in features, including change review, code metrics, the Work board, Knowledge, Dashboards, Usage, Job Runs and Agent Interface.
 engine: ">=0.7"
 # Its `tasks` skill (reading the task model) is written to the agent's runtime.
 permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields', 'commands:oxplow.tasks.assign']
@@ -12,11 +12,19 @@ intent:
   purpose: >-
     Hold the optional features oxplow ships once each has been cleaned up. So
     far that is the review and analysis datasets, their settings, the Work
-    panel and board, the Knowledge pages, the Dashboards index and Usage, the
-    code metrics with the Metrics list and Duplicated Code, and their event
+    panel and board, the Knowledge pages, the Dashboards index, Usage, Job Runs,
+    Agent Interface, Merge Readiness, Remote Branches, the code metrics with
+    the Metrics list and Duplicated Code, and their event
     types and commands. Their names come from the
     `oxplow` namespace, so they stay when a piece moves between extensions.
   origin: null
+  examples:
+    - name: data-effect-backfill-says-what-bundled-effect-would-do
+      input: { part: oxplow/data-effect-backfill, params: { effect: oxplow/assign-on-start } }
+      expect: a bundled effect's backfill says there is nothing to catch up on
+    - name: management-data-area-lists-bundled-effects
+      input: { page: oxplow/management, params: { area: data } }
+      expect: Manage services → Data lists the effects declared by Bundled
 datasets:
   - name: change_interest
     version: 1
@@ -256,35 +264,35 @@ datasets:
       - { name: why, type: "", doc: "The evidence." }
       - { name: uri, type: "", doc: "NULL." }
   - name: review_signal_unused
-    version: 1
+    version: 2
     adds_to: oxplow/review_signal
-    description: "The change review's unused-code signal: a function the change removed the last call to (`medium`). A text search over the head tree finds no other mention, so it says \"possibly\". Rows come from the `oxplow.review.unused` check, which runs when the change's analysis is stored."
+    description: "The change review's unused-code signal: a function the change removed the last call to (`medium`). A text search over the head tree finds no other mention, so it says \"possibly\". And one `too-large-to-check` row (`info`, no path) per change with files whose changed lines are past the 2 MB the check reads, so it never read them (v2). Rows come from the `oxplow.review.unused` check, which runs when the change's analysis is stored."
     fields:
       - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
       - { name: source, type: "", doc: "This dataset, `oxplow/review_signal_unused`." }
       - { name: area, type: "", doc: "`code`." }
-      - { name: signal, type: TEXT, doc: "`possibly-unused`." }
-      - { name: severity, type: "", doc: "`medium`." }
-      - { name: path, type: TEXT, doc: "The file that defines the function." }
-      - { name: line, type: INTEGER, doc: "Where it is defined." }
+      - { name: signal, type: TEXT, doc: "`possibly-unused`, or `too-large-to-check` (v2)." }
+      - { name: severity, type: "", doc: "`medium`; `info` for `too-large-to-check`." }
+      - { name: path, type: TEXT, doc: "The file that defines the function; NULL for `too-large-to-check` (its `why` names the files)." }
+      - { name: line, type: INTEGER, doc: "Where it is defined; NULL for `too-large-to-check`." }
       - { name: end_line, type: "", doc: "NULL." }
       - { name: title, type: TEXT, doc: "One line for a list." }
       - { name: why, type: TEXT, doc: "The evidence: where the last call was removed." }
       - { name: uri, type: TEXT, doc: "The function's symbol." }
   - name: review_check
-    version: 1
-    description: "Where each review check stands for each analysed change: one row per change and per check (a collector on `change.analyzed`). `pending` until the check has run for the change's latest analysis, `failed` when that run failed, else `ok`. The Review page shows a pending check as still running."
+    version: 3
+    description: "Where each review check stands for each analysed change: one row per change and per check (a collector on `change.analyzed`), read from the check's own run for that change (the run the change's latest analysis event caused), never another change's. `pending` while that run is live, or while there is none and the check hasn't handled the change's event yet; `failed` when it failed, `ok` otherwise; with no run, `off` when the check is disabled, else `not_run` when the check has handled a later event (it was off then, or the run was swept), so it never will. The Review page shows a pending check as still running and a not_run one as did not run."
     fields:
       - { name: change_id, type: INT, doc: "The change (v_change.id)." }
       - { name: collector, type: TEXT, doc: "The check, `<namespace>/<id>`." }
       - { name: collector_uri, type: TEXT, doc: "The check's collector URI (`v_collector.uri`)." }
-      - { name: state, type: TEXT, doc: "`pending`, `failed` or `ok`." }
-      - { name: last_run_at, type: TEXT, doc: "When the check last ran (any change); NULL when it never ran." }
+      - { name: state, type: TEXT, doc: "`pending`, `failed`, `ok`, `off` (v2) or `not_run` (v3)." }
+      - { name: last_run_at, type: TEXT, doc: "When the check's run for this change's latest analysis finished; NULL before it has (v2: this change's run, not the check's latest)." }
       - { name: error, type: TEXT, doc: "Why its last run failed, when `state` is `failed`." }
   - name: review_signal_findings
-    version: 1
+    version: 3
     adds_to: oxplow/review_signal
-    description: "The change review's lint signals: facts with a rule or a severity on a line the change touched (the language packs' idiom collectors, a project's own fact collectors; read for a change headed at the working tree or its stream's latest snapshot, since facts are the current tree's), and a request's analyzer findings on changed lines. A fact's severity maps error → `high`, info/note → `info`, else `medium`."
+    description: "The change review's lint signals: facts with a rule or a severity on a line the change touched (the language packs' idiom collectors, a project's own fact collectors; read as of the change's head snapshot, so a change headed at an older snapshot has the findings it had then, and one headed at a commit gets analyzer findings only), and a request's analyzer findings on changed lines. A fact's severity maps error → `high`, info/note → `info`, else `medium`."
     fields:
       - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
       - { name: source, type: "", doc: "This dataset." }
@@ -292,7 +300,7 @@ datasets:
       - { name: signal, type: "", doc: "`lint-<rule or measure>` or `analyzer-<rule>`." }
       - { name: severity, type: "", doc: "`high`, `medium` or `info`." }
       - { name: path, type: BLOB, doc: "The file, or NULL for the whole change." }
-      - { name: line, type: BLOB, doc: "The line, or NULL." }
+      - { name: line, type: "", doc: "The line, or NULL." }
       - { name: end_line, type: "", doc: "NULL." }
       - { name: title, type: "", doc: "One line for a list." }
       - { name: why, type: "", doc: "The evidence." }
@@ -716,6 +724,7 @@ ui:
   # A task's page shows the agent's tokens on it and what another
   # thread shares with it.
   mounts:
+    - { page: history-graph, at: vcs.history.graph, version: 2 }
     # The request summary's tasks (foundation's page reads no task).
     - { page: request-tasks, at: oxplow/request-summary.sections, position: { after: request }, title: Tasks }
     - { page: contribution-repair, at: oxplow/contribution-health.repair }
@@ -730,8 +739,6 @@ ui:
     - { page: change-review-brief, at: oxplow/diff-view.sections, position: { after: header } }
     - { page: change-review-brief, at: oxplow/commit.sections, position: { after: detail } }
     - { page: change-review-brief, at: oxplow/uncommitted-changes.sections, position: { after: clean } }
-    # Above a file's diff: the files it usually changes with, left alone here.
-    - { page: file-co-change, at: oxplow/diff.file-header }
     - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: struggled, at: oxplow/diff-view.sections }
 configuration:
@@ -826,6 +833,9 @@ commands:
     needs: [sql.read]
     access: write
 custom_components:
+  - id: history-graph
+    title: Git History
+    description: Switch between a commit list and a graph of the same history.
   # The Work board: the tasks as cards in a column per stage, its own
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
   - id: board
@@ -839,10 +849,10 @@ panels:
   # What the thread is working on: its open task (with its epic), the
   # items assigned to it next, and what it finished; collapsed, the task.
   # Its header has no count, and opens the Work board.
-  - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=work' }
+  - { id: work, title: Work, icon: list-checks, data_scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=work' }
   # What is assigned to the person: their open tasks, counted; the header
   # opens the Assigned to you page. Project-wide, so the thread is not a param.
-  - { id: assigned, title: Assigned to you, icon: user, scope: project, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
+  - { id: assigned, title: Assigned to you, icon: user, data_scope: project, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
 # What the agent reads about the task model, while it has a live store.
 skills:
   - { name: tasks, file: skills/tasks/SKILL.md, needs: [model:oxplow/task_record] }

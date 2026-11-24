@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 
 import type { Stream, Thread, ThreadState } from "../api.js";
 import { requestNavigatorMenu, requestNavigatorOpen } from "../navigator-bus.js";
+import { setOpenInHost } from "../openIn.js";
 import { Navigator } from "./Navigator.js";
 
 afterEach(cleanup);
@@ -44,10 +45,11 @@ function renderNavigator(opts?: {
   onSwitchStream?: (streamId: string) => void;
   onSelectThread?: (streamId: string, threadId: string) => void;
   onRenameThread?: (threadId: string, title: string) => void;
+  streams?: Stream[];
 }) {
   return render(
     <Navigator
-      streams={[STREAM]}
+      streams={opts?.streams ?? [STREAM]}
       currentStreamId="str1"
       threadStates={THREAD_STATES}
       streamStatuses={{}}
@@ -565,4 +567,18 @@ test("the panel keeps the strip's tab, gap and bar, and repeats them after the t
   expect(gap.style.borderBottomColor).toBe("var(--text-muted)");
   expect(gap.style.boxSizing).toBe("border-box");
   expect(other.style.borderBottomWidth).toBe("");
+});
+
+test("a stream's menu has Open In ▸ Terminal for this window's stream", () => {
+  const opened: string[] = [];
+  setOpenInHost({ worktree: "/w", openInApp: () => {}, openTerminalAt: (d) => opened.push(d) });
+  try {
+    const { getByTestId } = renderNavigator({ streams: [{ ...STREAM, worktree_path: "/w" } as Stream] });
+    fireEvent.contextMenu(getByTestId("navigator-strip-stream-str1"));
+    fireEvent.click(getByTestId("menu-item-open-in"));
+    fireEvent.click(getByTestId("menu-item-open-in.terminal"));
+    expect(opened).toEqual(["/w"]);
+  } finally {
+    setOpenInHost(null);
+  }
 });

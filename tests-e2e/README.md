@@ -218,12 +218,3 @@ expensive.
 
 Still unmeasured: interaction cost (typing, scrolling a large diff, metric
 pages against real data volume) and anything WKWebView-specific.
-
-## Specs that wait in a holder
-
-The specs of pages that live in the turned-off holder extension under
-`.oxplow/extensions/`
-(Timeline, Explore Data, the history graph, the Dashboards
-index) are in its
-`e2e-specs/` folder, outside the suite. They come back with
-their page.

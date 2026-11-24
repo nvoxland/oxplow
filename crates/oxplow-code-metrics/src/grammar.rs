@@ -31,12 +31,6 @@ fn engine() -> &'static wasmtime::Engine {
 /// store is dropped when it moves, since a store only ever fills.
 static LOADED: AtomicU64 = AtomicU64::new(0);
 
-/// How many distinct grammars this process has loaded.
-#[cfg(test)]
-pub(crate) fn loaded_count() -> u64 {
-    LOADED.load(Ordering::SeqCst)
-}
-
 /// A 64-bit FNV-1a of the module's bytes, and its length: the key a loaded
 /// grammar is kept under.
 fn content_key(bytes: &[u8]) -> (u64, usize) {

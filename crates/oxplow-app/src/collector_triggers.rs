@@ -460,7 +460,7 @@ mod tests {
             json!([["on", "ok", ev.envelope.id.to_string()]])
         );
         assert_eq!(
-            rows(&fx.svc, "SELECT last_event_id FROM v_collector_run").await,
+            rows(&fx.svc, "SELECT last_event_id FROM v_collector_checkpoint").await,
             json!([[ev.seq]])
         );
     }
@@ -538,7 +538,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let script = "def transform(input):\n    out = []\n    for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"]):\n        for h in f[\"hunks\"]:\n            for l in h[\"added\"]:\n                out.append({\"ev\": l[\"line\"], \"what\": \"+\" + l[\"text\"]})\n            for l in h[\"removed\"]:\n                out.append({\"ev\": 100 + l[\"line\"], \"what\": \"-\" + l[\"text\"]})\n    return {\"entities\": {\"line\": out}}\n";
+        let script = "def transform(input):\n    out = []\n    for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"])[\"files\"]:\n        for h in f[\"hunks\"]:\n            for l in h[\"added\"]:\n                out.append({\"ev\": l[\"line\"], \"what\": \"+\" + l[\"text\"]})\n            for l in h[\"removed\"]:\n                out.append({\"ev\": 100 + l[\"line\"], \"what\": \"-\" + l[\"text\"]})\n    return {\"entities\": {\"line\": out}}\n";
         let collector = |needs: &str| {
             format!(
                 "  - id: lines\n    runtime: starlark\n    entry: lines.star\n    on: [change.analyzed]\n    sync: upsert\n{needs}    entities:\n      - {{ name: line, key: ev, columns: {{ ev: int, what: text }} }}\n"
@@ -595,7 +595,7 @@ mod tests {
         // A re-run replaces this change's rows without a scoped replace: the
         // script reads the entity's old keys with `sql.read` and tombstones
         // the ones it no longer produces.
-        let again = "def transform(input):\n    old = scope(\"sql.read\", {\"sql\": \"SELECT ev FROM v_work_line\"})\n    out = [{\"ev\": l[\"line\"], \"what\": l[\"text\"]} for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"]) for h in f[\"hunks\"] for l in h[\"added\"] if l[\"line\"] != 2]\n    keep = [r[\"ev\"] for r in out]\n    return {\"entities\": {\"line\": out}, \"deleted\": {\"line\": [r[\"ev\"] for r in old if r[\"ev\"] not in keep]}}\n";
+        let again = "def transform(input):\n    old = scope(\"sql.read\", {\"sql\": \"SELECT ev FROM v_work_line\"})\n    out = [{\"ev\": l[\"line\"], \"what\": l[\"text\"]} for f in change_diff(input[\"event\"][\"payload\"][\"change_id\"], paths = [\"a.txt\"])[\"files\"] for h in f[\"hunks\"] for l in h[\"added\"] if l[\"line\"] != 2]\n    keep = [r[\"ev\"] for r in out]\n    return {\"entities\": {\"line\": out}, \"deleted\": {\"line\": [r[\"ev\"] for r in old if r[\"ev\"] not in keep]}}\n";
         std::fs::write(
             fx.svc
                 .layout
@@ -812,10 +812,10 @@ mod tests {
         assert_eq!(
             rows(
                 &fx.svc,
-                "SELECT id, status FROM v_collector_run ORDER BY id"
+                "SELECT id, outcome FROM v_collector_run ORDER BY id"
             )
             .await,
-            json!([["broken", "error"], ["seen", "ok"]])
+            json!([["broken", "failed"], ["seen", "ok"]])
         );
         assert_eq!(
             rows(&fx.svc, "SELECT json_extract(payload, '$.status') FROM v_event WHERE type = 'collector.synced' ORDER BY seq").await,
@@ -1090,8 +1090,12 @@ mod tests {
                 "{says}"
             );
             assert_eq!(
-                rows(svc, "SELECT status FROM v_collector_run WHERE id = 'prs'").await,
-                json!([["error"]]),
+                rows(
+                    svc,
+                    "SELECT outcome FROM v_collector_run WHERE id = 'prs' AND latest = 1"
+                )
+                .await,
+                json!([["failed"]]),
                 "{says}"
             );
             // Nothing was stored.
@@ -1162,7 +1166,7 @@ mod tests {
         );
         let guarded = rows(
             svc,
-            "SELECT status, error FROM v_collector_run WHERE id = 'pong'",
+            "SELECT outcome, error FROM v_collector_run WHERE id = 'pong' AND latest = 1",
         )
         .await;
         assert_eq!(guarded[0][0], json!("skipped"), "{guarded}");
@@ -1214,7 +1218,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT status, last_event_id FROM v_collector_run WHERE id = 'ping'"
+                "SELECT r.outcome, p.last_event_id FROM v_collector_checkpoint p JOIN v_collector_run r ON r.run_id = p.last_run_id WHERE p.id = 'ping'"
             )
             .await,
             json!([["skipped", chained.seq]])

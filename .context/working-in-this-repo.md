@@ -53,6 +53,13 @@ Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD.
 
+## Prompt budget
+
+Keep this repository’s instructions in `AGENTS.md` and the linked
+`.context/` sections. Project config can add a harness prompt when it serves
+a distinct purpose. Shipped preambles carry the minimum needed to use the
+integration. Feature instructions are available on demand.
+
 ## Tracking work
 
 oxplow infers the work ([work-tracking.md](./work-tracking.md)): it groups
@@ -73,10 +80,6 @@ you spot but won't do now (the backlog is the durable record; a reply
 is not). A redo of something just shipped reopens its item rather than
 filing "fix what I just did".
 
-**Asking the user a question.** When your reply needs the user's
-answer, end it with the question itself. A final message that ends in
-a question shows the thread as waiting on them (`.context/work-tracking.md`
-"No gates"), until their next prompt.
 
 ### Agent coordination
 
@@ -174,7 +177,7 @@ is opened; an option a command doesn't take is refused (both used to
 become a task's title — tasks named `--help`).
 
 The `knowledge` commands run on a command bus over the project's
-database (validation, audit and events as the app writes them; the acting
+database (validation, the command run record and events as the app writes them; the acting
 thread is `$OXPLOW_THREAD_ID` or `--thread`), on a bus that checks nothing
 active. The database is opened as it is (`Database::open_existing`: no
 migrating, no dataset recompile under the running app; refused at another
@@ -636,7 +639,7 @@ resolved different sets (tokio with or without `test-util`, seven
 serde_json variants…). Every switch rebuilt the graph under new hashes
 and kept every copy — 85 GB of `target/debug` was about five builds of
 duplicates, and rebuilds were slow for the same reason. The
-**`oxplow-workspace-hack`** crate (managed by
+**`oxplow-unified-deps`** crate (managed by
 [cargo-hakari](https://docs.rs/cargo-hakari), config
 `.config/hakari.toml`) pins the union: every core crate depends on it,
 so any subset builds the same artifacts, and an alternating build is a
@@ -644,13 +647,13 @@ no-op. Build-script (host) dependencies keep their own features
 (`unify-target-host = "none"`), so the app never ships what only a build
 script asked for.
 
-What the hack leaves out, and why:
+What the unified-deps crate leaves out, and why:
 
 - **The providers stay out.** `oxplow-provider-{fake,mcp}`,
   `oxplow-provider-protocol` and the crates they're built from
   (`oxplow-domain`, `oxplow-script`, `oxplow-code-dup`,
   `oxplow-code-metrics`, `oxplow-coverage`) are traversal-excluded and
-  don't depend on the hack: a provider ships as its own binary
+  don't depend on the unified-deps crate: a provider ships as its own binary
   (built with `-p`) and is built from its
   own dependencies only. Their second copy inside a workspace build is
   small.
@@ -660,7 +663,7 @@ What the hack leaves out, and why:
   `scripts/check-headless-graph.sh` (in CI) fails if the daemon,
   `oxplow-rpc` or a provider reaches any of them.
 
-What the hack still adds to every core crate, the daemon included, is
+What the unified-deps crate still adds to every core crate, the daemon included, is
 features of crates they already build, unified so builds don't churn:
 tokio's `test-util` (test APIs only); reqwest's `system-proxy` and
 rustls's `ring` provider, which Tauri's updater turns on (so the daemon
@@ -671,7 +674,7 @@ aws-lc-rs).
   features), run `cargo hakari generate` (and `cargo hakari manage-deps`
   for a new crate). A new crate the providers are built from goes in
   `traversal-excludes`; a new crate only Tauri pulls in, in
-  `final-excludes`. CI fails when the hack is stale (`cargo hakari
+  `final-excludes`. CI fails when the unified-deps crate is stale (`cargo hakari
   generate --diff`). Install with `cargo install cargo-hakari --locked`.
 - **A workspace crate never takes a feature only tests turn on**: hakari
   covers third-party crates only, so a `test-support`-style feature on

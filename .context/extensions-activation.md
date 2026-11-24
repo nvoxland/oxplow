@@ -11,10 +11,13 @@ Every contribution that runs — an external provider instance, a collector, an 
 in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
 `{ namespace, kind, contribution }`):
 
-- **Counting.** A failed run or call counts; a good one starts the count
-  over. A refused input, a denied permission, or a cancel isn't a failure.
+- **Counting.** A failed run or call counts. A successful one starts the
+  count over. A collector or effect's store applies its health update in
+  the transaction that finishes its run. Providers update health through
+  their own call path. A refusal, denial or cancellation leaves the failure
+  count alone.
 - **Disabling.** The third failure in a row disables it on this machine
-  and logs `contribution.disabled@1` (the row and the event commit together). A
+  and logs `contribution.disabled@1` in that same transaction. A
   provider instance stops. A disabled collector doesn't run: the
   scheduler, the `collector.triggers` consumer and the snapshot sweep skip
   it, and `oxplow.collector.sync` refuses it with its reason (`Invalid` at

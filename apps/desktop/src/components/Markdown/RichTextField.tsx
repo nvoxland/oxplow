@@ -8,7 +8,8 @@ import { addToContext } from "../../contextBasket.js";
 import { SelectionToolbar } from "./SelectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
-import { followLink, linkMenu, type OpenRef } from "./links.js";
+import { followLink, linkMenu, linkOffersRef, type OpenRef } from "./links.js";
+import { withLinkOffers } from "../../openIn.js";
 import { refLinkOf } from "./markdownLinks.js";
 import { pastedLink, type RefLink } from "./refPaste.js";
 import { linkTarget } from "../../uri/uri.js";
@@ -305,8 +306,9 @@ export function RichTextField({
 
     // On a link: the viewer's link menu first.
     const href = targetEl?.closest?.("a")?.getAttribute("href") ?? null;
+    const link = href ? linkMenu(href, open) : [];
     const items: MenuItem[] = [
-      ...(href ? linkMenu(href, open) : []),
+      ...link,
       {
         id: "cut",
         label: "Cut",
@@ -342,7 +344,17 @@ export function RichTextField({
         run: () => void addToContext({ uri: contextUri, text }),
       });
     }
-    setMenu({ x: event.clientX, y: event.clientY, items });
+    const at = { x: event.clientX, y: event.clientY };
+    setMenu({ ...at, items });
+    // The extensions' commands about the link join as they arrive
+    // (`withLinkOffers`), on the menu still open at the same place.
+    if (href) {
+      const own = items.slice(link.length);
+      void withLinkOffers(link, linkOffersRef(href)).then((merged) => {
+        if (merged === link) return;
+        setMenu((m) => (m && m.x === at.x && m.y === at.y ? { ...m, items: [...merged, ...own] } : m));
+      });
+    }
   };
 
   const wrapperStyle: CSSProperties = {

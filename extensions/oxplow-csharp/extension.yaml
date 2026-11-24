@@ -69,8 +69,8 @@ skills:
   - { name: csharp-setup, file: skills/csharp-setup/SKILL.md }
 collectors:
   # Its idiom metrics: each counts what the tree has, on by default while the pack is on.
-  - { id: oxplow.csharp.empty_catch, doc: "Finds each empty `catch` block in C# files, one fact per hit at its line.", runtime: starlark, entry: collectors/csharp/empty_catch.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.csharp.blocking_async_calls, doc: "Finds each blocking call on async code (`.Result`, `.Wait()`) in C# files, one fact per hit at its line.", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.empty_catch, doc: "Finds each empty `catch` block in C# files, one fact per file with the lines of its hits.", runtime: starlark, entry: collectors/csharp/empty_catch.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.blocking_async_calls, doc: "Finds each blocking call on async code (`.Result`, `.Wait()`) in C# files, one fact per file with the lines of its hits.", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
 metrics:
   - { key: oxplow.csharp.empty_catch, title: "empty catch blocks", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'empty_catch')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Empty `catch` blocks that swallow exceptions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.empty_catch }
   - { key: oxplow.csharp.blocking_async_calls, title: "blocking async calls (.Result / .Wait())", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'blocking_async')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Blocking calls on async code (`.Result` / `.Wait()`).", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.blocking_async_calls }

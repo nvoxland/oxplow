@@ -27,15 +27,15 @@ use oxplow_domain::{DomainError, StoredEvent};
 use crate::advisories::AdvisoryDeps;
 use crate::collection::{CollectionService, RunCause};
 use crate::event_pump::AsyncEventConsumer;
-use crate::extension::extensions::AdvisoryOn;
 
 pub const COLLECTION: &str = "collection";
 pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";
+pub const IMMEDIATE_ADVISORIES: &str = "advisories.post_tool.immediate";
 pub const RUN_REPORTS: &str = "collection.run_reports";
 
 /// The run `event` finished, with when it started: its cause, the tool
 /// call's `agent.tool.requested`, when there is one.
-async fn cause_of(db: &Database, event: &StoredEvent) -> Result<RunCause, DomainError> {
+pub(crate) async fn cause_of(db: &Database, event: &StoredEvent) -> Result<RunCause, DomainError> {
     let started = match event.envelope.cause.clone() {
         Some(id) => db
             .read(move |tx| oxplow_db::event_log_store::get_tx(tx, &id))
@@ -117,18 +117,29 @@ impl AsyncEventConsumer for RunReportsConsumer {
 
 pub struct PostToolAdvisories {
     pub deps: AdvisoryDeps,
+    pub after_collection: bool,
 }
 
 #[async_trait]
 impl AsyncEventConsumer for PostToolAdvisories {
     fn name(&self) -> &'static str {
-        POST_TOOL_ADVISORIES
+        if self.after_collection {
+            POST_TOOL_ADVISORIES
+        } else {
+            IMMEDIATE_ADVISORIES
+        }
     }
 
     /// An advisory reads what collection recorded for the same run
     /// (`v_test_run`), so it sees the run only after collection.
     fn after(&self) -> Vec<String> {
-        vec![COLLECTION.to_string()]
+        if self.after_collection {
+            // Keep the existing consumer's checkpoint as a barrier for all
+            // post-tool advisories for extensions that depend on it.
+            vec![COLLECTION.to_string(), IMMEDIATE_ADVISORIES.to_string()]
+        } else {
+            Vec::new()
+        }
     }
 
     fn handles(&self, event_type: &str) -> bool {
@@ -137,13 +148,8 @@ impl AsyncEventConsumer for PostToolAdvisories {
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         if let Some(thread) = event.envelope.anchors.thread_id {
-            crate::advisories::for_thread(
-                &self.deps,
-                &thread,
-                AdvisoryOn::PostToolUse,
-                Some(&cause_of(&self.deps.db, event).await?),
-            )
-            .await;
+            crate::advisories::for_tool_event(&self.deps, &thread, event, self.after_collection)
+                .await?;
         }
         Ok(())
     }
@@ -283,10 +289,10 @@ mod tests {
         );
     }
 
-    /// A report-less run's nudge reaches the agent through the hook
-    /// response once; one that misses its hook goes out on the next.
+    /// The report notice is for the person. A late agent nudge reaches
+    /// the agent through its next hook response, once.
     #[tokio::test]
-    async fn nudges_are_delivered_once_by_thread() {
+    async fn hook_only_delivers_agent_nudges_once_by_thread() {
         let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.config.write().unwrap().testing.command = Some("bun run test:collect".into());
@@ -295,27 +301,32 @@ mod tests {
             .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
             .await
             .unwrap();
-        svc.hook_ingest
+        let event = svc
+            .hook_ingest
             .ingest(hook(f.thread, HookKind::PostToolUse, bash("bun test")))
             .await
             .unwrap();
-        let first = svc
-            .agent_context
-            .post_tool_context(svc, &f.thread, None)
-            .await;
-        assert!(
-            first
-                .as_deref()
-                .is_some_and(|m| m.contains("bun run test:collect")),
-            "{first:?}"
-        );
+        assert!(event.finished_tool_seq.is_some());
         assert_eq!(
             svc.agent_context
-                .post_tool_context(svc, &f.thread, None)
+                .post_tool_context(svc, &f.thread, None, event.finished_tool_seq)
                 .await,
             None,
-            "delivered once"
+            "the hook carries no person notice"
         );
+        svc.event_pump
+            .settle(&[super::COLLECTION], std::time::Duration::from_secs(5))
+            .await;
+        let notices = svc
+            .nudge_store
+            .list_for_thread(&f.thread.to_string())
+            .await
+            .unwrap();
+        assert!(notices.iter().any(|notice| {
+            notice.kind == "report-less-run"
+                && notice.audience == oxplow_db::Audience::Person
+                && notice.message.contains("bun run test:collect")
+        }));
         // A nudge written after its hook answered goes out on the next hook.
         svc.collection
             .persist_nudge(
@@ -326,10 +337,136 @@ mod tests {
             .await;
         assert_eq!(
             svc.agent_context
-                .post_tool_context(svc, &f.thread, None)
+                .post_tool_context(svc, &f.thread, None, None)
                 .await
                 .as_deref(),
             Some("a late nudge")
         );
+        assert_eq!(
+            svc.agent_context
+                .post_tool_context(svc, &f.thread, None, None)
+                .await,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn immediate_and_collection_ordered_advisories_process_the_same_tool_event() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        let path = f._dir.path().join(".oxplow/extensions/guide");
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(
+            path.join("extension.yaml"),
+            r#"
+manifest: 2
+name: guide
+intent: { purpose: test }
+permissions: [agent.write, sql.read]
+advisories:
+  - id: immediate
+    on: post-tool-use
+    after_collection: false
+    once_per: turn
+    query: SELECT 'Immediate' AS message
+  - id: collected
+    on: post-tool-use
+    once_per: turn
+    query: SELECT 'Saw test results' AS message FROM v_test_run WHERE turn_id = :turn_id
+"#,
+        )
+        .unwrap();
+        crate::test_fixtures::activate(svc).await;
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        let event = svc
+            .hook_ingest
+            .ingest(hook(f.thread, HookKind::PostToolUse, bash("cargo test")))
+            .await
+            .unwrap();
+        let seq = event.finished_tool_seq.unwrap();
+        let timeout = std::time::Duration::from_secs(5);
+        // Let the background consumers run as they do in a managed session.
+        let background = svc.event_pump.clone().spawn();
+        assert!(
+            svc.event_pump
+                .wait_for_hook_event(super::IMMEDIATE_ADVISORIES, seq, timeout)
+                .await
+        );
+        let text = svc
+            .agent_context
+            .post_tool_context(svc, &f.thread, None, Some(seq))
+            .await
+            .unwrap();
+        assert!(
+            text.contains("Immediate") && text.contains("Saw test results"),
+            "{text}"
+        );
+        assert_eq!(
+            svc.agent_context
+                .post_tool_context(svc, &f.thread, None, None)
+                .await,
+            None
+        );
+        background.abort();
+    }
+
+    #[tokio::test]
+    async fn claude_post_edit_hook_respects_the_oxtask_opt_in() {
+        use oxplow_domain::Actor;
+
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_test_writer()
+            .finish();
+        let _trace = tracing::subscriber::set_default(subscriber);
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        let background = svc.event_pump.clone().spawn();
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        for (workflow, path) in [
+            ("off", "one.txt"),
+            ("agent_tracks", "two.txt"),
+            ("agent_tracks", "three.txt"),
+        ] {
+            svc.commands
+                .run(
+                    &Actor::Human,
+                    "oxtask.tasks.set_workflow",
+                    json!({"workflow": workflow}),
+                    true,
+                )
+                .await
+                .unwrap();
+            let event = svc
+                .hook_ingest
+                .ingest(hook(
+                    f.thread,
+                    HookKind::PostToolUse,
+                    json!({
+                        "tool_name": "Edit", "tool_input": { "file_path": path },
+                        "tool_response": { "success": true }
+                    }),
+                ))
+                .await
+                .unwrap();
+            let text = svc
+                .agent_context
+                .post_tool_context(svc, &f.thread, Some("claude"), event.finished_tool_seq)
+                .await;
+            if path == "two.txt" {
+                assert!(
+                    text.is_some_and(|text| text.contains("no task is in progress on this thread"))
+                );
+            } else {
+                assert_eq!(text, None);
+            }
+        }
+        background.abort();
     }
 }

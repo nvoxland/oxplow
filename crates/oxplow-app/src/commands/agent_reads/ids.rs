@@ -22,6 +22,23 @@ where
     F: Fn(Arc<Services>, Actor, T) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Result<HandlerOutput, CommandError>> + Send + 'static,
 {
+    read_op_with_invocation(scope, name, services, move |svc, invocation, input| {
+        run(svc, invocation.actor().clone(), input)
+    })
+}
+
+/// A read operation that needs its run as well as its actor.
+pub(super) fn read_op_with_invocation<T, F, Fut>(
+    scope: &str,
+    name: &str,
+    services: ServicesSlot,
+    run: F,
+) -> Op
+where
+    T: DeserializeOwned + JsonSchema + 'static,
+    F: Fn(Arc<Services>, Invocation, T) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<HandlerOutput, CommandError>> + Send + 'static,
+{
     let run = Arc::new(run);
     Op::new(
         scope,
@@ -33,7 +50,7 @@ where
             let run = run.clone();
             Box::pin(async move {
                 let input: T = parse(input)?;
-                run(services.get()?, invocation.actor().clone(), input).await
+                run(services.get()?, invocation, input).await
             })
         })),
     )

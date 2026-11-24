@@ -1,0 +1,39 @@
+given:
+  - files: { shared.txt: "base\n" }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [shared.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: clean/topic, create: true } }
+  - files: { clean.txt: "new\n" }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [clean.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Add a new file } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: main, create: false } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: overlap, create: true } }
+  - files: { shared.txt: "feature\n" }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [shared.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Edit shared file on feature } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: main, create: false } }
+  - files: { shared.txt: "main\n" }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [shared.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Edit shared file on main } }
+when: { page: merge-readiness, params: { stream_id: 1 } }
+expect:
+  loaders:
+    readiness:
+      rows:
+        - { branch: overlap, base: main, ahead: 1, behind: 1, status: Potential conflicts, overlap_count: 1, overlaps: '[{"text":"shared.txt"}]', can_merge: 0 }
+        - { branch: clean/topic, base: main, ahead: 1, behind: 1, status: No overlapping files, overlap_count: 0, can_merge: 1 }
+steps:
+  - params: { show: risk }
+    expect:
+      loaders:
+        readiness: { rows: [{ branch: overlap }] }
+  - when: { page: branch-commits, params: { base: main, head: overlap, stream_id: '1' } }
+    expect:
+      loaders:
+        incoming: { rows: [{ subject: Edit shared file on feature }] }
+        outgoing: { rows: [{ subject: Edit shared file on main }] }
+  - press: { action: merge, node: readiness, row: { branch: clean/topic } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        readiness: { rows: [{ branch: overlap, can_merge: 0 }] }

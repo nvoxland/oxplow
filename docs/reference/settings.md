@@ -291,9 +291,9 @@ collectors:
 `oxplow:junit`, `oxplow:lcov`, `oxplow:cobertura`, `oxplow:jacoco`,
 `oxplow:clippy` and `oxplow:eslint`. Coverage numbers come only from
 oxplow parsing the report, never from the agent, so they stay
-trustworthy. Each collector's last run shows in Settings → Data; one
-whose report fails to parse three times in a row is turned off until
-you turn it back on.
+trustworthy. Settings → Data shows each collector's last outcome. Open
+a collector's data page to see its recent runs and parse errors. Three
+consecutive parse failures disable the collector until you enable it again.
 
 #### A report format with no bundled parser
 
@@ -328,8 +328,8 @@ hosts (`network`), credentials (`secrets`), models (`ai`), and so on. You
 approve them when you deploy the extension (Settings → Extensions), and a
 deploy that adds a permission asks again. `process` is declared, not
 confined: a program reads and writes files as you, and its network is
-confined only on macOS. Every run is recorded in `v_extension_run`, with
-what each permission decided.
+confined only on macOS. `v_contribution_run` shows recorded contribution
+runs and their permission decisions.
 
 Ask the agent for the details: the `oxplow-collection` skill covers host
 helpers, the exact output schemas and a worked example.

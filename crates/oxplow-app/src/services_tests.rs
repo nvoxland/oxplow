@@ -51,7 +51,7 @@ async fn decided(svc: &Services, contribution: &str) -> Value {
         .db
         .read(move |c| {
             c.query_row(
-                "SELECT decisions_json FROM extension_run WHERE contribution = ?1",
+                "SELECT decisions_json FROM contribution_run WHERE contribution = ?1",
                 [&contribution],
                 |r| r.get(0),
             )

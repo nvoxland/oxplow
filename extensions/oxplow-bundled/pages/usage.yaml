@@ -17,6 +17,8 @@ answers:
   params: { range: 7d }
 - question: Which pages do I open most?
   params: { range: 30d }
+see_also:
+- { page: oxplow/agent-interface, params: { range: { param: range } } }
 # "Fresh" tokens are the ones a turn paid for in full: input, output and
 # cache writes. Cache reads are counted apart: they are most of a long
 # session's prompt and cost a fraction of the rest, so a sum with them reads

@@ -84,16 +84,17 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
 
 ## Jobs
 
-A **job** is what an extension declares (`job:<namespace>/<id>`); a **job
-run** is one execution of it (`job_run:<id>`, a row of `v_job_run`). A job
-is model work an extension asks for that runs outside any
-transaction and outlives a restart (`operation: ai.complete_typed`). It
+A **job** is what an extension declares (`job:<namespace>/<id>`). Each
+enqueued job has a `job_run:<id>` URI and a row in `v_job_run`. It keeps
+its own state machine across retries. Each claimed attempt has a separate
+`contribution_run` row. A job is model work an extension asks for that runs
+outside any transaction and outlives a restart (`operation: ai.complete_typed`). It
 streams its reply as it comes, may call tools the extension declares,
 can be cancelled mid-reply, and says how it ended with an event. The
-declaration is `extensions/jobs.rs`; intent, snapshot, cancel and the
-end event `extension_jobs.rs`; what runs `extension_job_runner.rs`;
-claiming, supervising and publishing `extension_job_dispatch.rs`,
-`extension_job_scheduler.rs` and `extension_job_authority.rs`.
+declaration is in `extensions/jobs.rs`. The run service is in `job_runs.rs`
+and the worker is in `job_run_runner.rs`. Claiming, supervision and authority
+are handled by `job_run_dispatch.rs`, `job_run_scheduler.rs` and
+`job_run_authority.rs`.
 
 ```yaml
 jobs:
@@ -146,11 +147,14 @@ commands:
 - **Running.** The scheduler (four at a time, polling each second)
   claims a queued job, resolves its authority afresh — the declaration
   and permissions as they are now, the thread's open-thread gate (a Write-scope need must be bound to an open thread: `JobExecution.needs_thread`) — and runs it
-  as `Actor::Job` (`job:<id>:<attempt>:<fence>`) on a run of its own,
-  linked to the run that asked. Each model round streams on the role
+  as `Actor::Job` (`job:<id>:<attempt>:<fence>`). Claiming begins the
+  attempt's run and links it to the run that enqueued the job when that
+  parent was recorded. Closing the attempt records its outcome in the
+  same transaction. Lease recovery closes the run as `interrupted`.
+  Each model round streams on the role
   (`AiCompute::stream_typed`, a recorded computation: the same request
   reads its recorded answer, replayed at once). What comes is the
-  attempt's **output** (`extension_job_output`, `v_job_run_output`): text
+  attempt's **output** (`job_run_output`, `v_job_run_output`): text
   coalesced into a row every 100 ms (or 4 KiB), each tool call and what
   it answered, each round's usage. Each write is its own short
   transaction — none is held while the dataset writes — and the table
@@ -190,7 +194,7 @@ commands:
   later. The lease is 30 s, renewed every 10 s: an attempt whose lease
   ran out (oxplow stopped) is fenced when recovery finds it. A `never`
   job then ends `interrupted`. An `idempotent` one is queued again in
-  the same transaction (`extension_job_dispatch::requeue_tx`,
+  the same transaction (`job_run_dispatch::requeue_tx`,
   `JobEvent::RetryInterrupted`), so it is never seen `interrupted`, and
   runs as its next attempt, up to `MAX_ATTEMPTS` (3) in all; the third
   cut-off is final. On the new attempt a round that had finished reads
@@ -209,7 +213,7 @@ commands:
 - **A job belongs to its extension's deployment, not to a catalog
   generation.** Its owner is the extension, its package version, the
   job's contract `version` and the deployment's hash
-  (`JobOwner.deployment`, `extension_job.deployment_hash`); nothing records
+  (`JobOwner.deployment`, `job_run.deployment_hash`); nothing records
   the generation it was queued under, so another extension's change
   neither strands a queued job nor stops a running one. A redeploy of its
   own extension is another deployment whatever its version says (a
@@ -245,7 +249,11 @@ commands:
   enabled and declaration checks. `oxplow.collector.sync` is an `External`
   command, which the bus runs after releasing its pin (`.context/commands.md`),
   and an effect's `handle` no longer pins the whole event: its script runs
-  unpinned and the commands it composes pin per command. Pinned by
+  unpinned and the commands it composes pin per command. Its attempt is
+  recorded in `effect_run` with the outcome and timestamps on the linked
+  `contribution_run`. A proposal records a `skipped` run and sets the
+  attempt's `proposal_id`. Both rows stay in the database to prevent
+  replaying an event already handled. Pinned by
   `an_activation_does_not_wait_for_a_running_collector`,
   `a_collector_does_not_publish_across_a_change_to_its_extension`,
   `a_collector_does_not_publish_after_its_extension_is_disabled` and
@@ -263,8 +271,8 @@ commands:
   repeat of an intent it already has is not a new one). No database
   transaction is held while a model streams (`Database::write_transactions_open`
   is zero where a model is streaming, asserted in the tests). These are
-  pinned in `extension_job_hardening_tests.rs` and
-  `extension_job_crash_tests.rs`.
+  pinned in `job_run_hardening_tests.rs` and
+  `job_run_crash_tests.rs`.
 - **The replay decision.** An `idempotent` job cut off by a crash or a lost
   lease runs again, up to three attempts in all; a `never` job (the default)
   ends `interrupted` and is never run again on its own. Either way the
@@ -293,12 +301,17 @@ commands:
   cause the job was asked with. It carries no request or result: an
   effect reads the result with `scope("jobs.read", { job_run })` and writes
   what it says (the triage example's `publish-summary`).
-- **Seeing job runs.** `v_job_run` (state, attempt, rounds, tool calls,
-  tokens so far, its `uri`) and `v_job_run_output` are published datasets, so
-  a page or component over them follows a run live. oxplow-bundled's **Job
-  Runs** page (Activity) lists the running and the last day's, with Cancel;
-  a row opens its **Job Run Output**. A job run acts as `Actor::Job`, its
-  source the run's URI (`job_run:<id>`); attempt and fence are on the row.
+- **Seeing job runs.** `v_job_run` publishes each enqueued job with
+  `queued_at`, its current state and shared run fields for the current
+  attempt. Before its first claim, the only shared fields available are
+  the declaring extension and package version. A succeeded job's
+  attempt has outcome `ok`. `rounds` counts completed rounds from
+  streamed usage rows. `ai_calls` comes from the attempt's run.
+  `v_job_run_output` follows the streamed output live.
+  Bundled's **Job Runs** page lists the queue and recent jobs. The row menu
+  offers Cancel job while the job can still be stopped. A row's job run link
+  opens **Job Run Output** (`oxplow/job_run`), including the transcript across
+  attempts and a link to the latest attempt's shared **Run details**.
 - **What a job can't do**: drive an agent session, ask a person (a
   command that needs confirmation is refused, never proposed), write
   (its tools read), run core's commands, or call a model its extension's
@@ -316,7 +329,7 @@ the built-in roles `default | summarize | decide` (optional:
 only: the person binds `<namespace>/<id>` to a dataset, else the fallback
 role's dataset serves it; `features` are what a bound dataset must support.
 The extension names it by its bare id — a job request's `role`
-(`extension_jobs::enqueue` qualifies it and stores `<namespace>/<id>`, refusing
+(`job_runs::enqueue` qualifies it and stores `<namespace>/<id>`, refusing
 a name the extension doesn't declare), a collector's `role=` (qualified
 with the run's extension by `CollectorOracle`). `ai_profiles::profiles_of`
 feeds `AiService::set_profiles` from the catalog; resolution, features
@@ -330,14 +343,21 @@ declares (`profile_warnings`, a person's `restrict:`).
 
 `change_diff(change_id, paths=None)` (`tree.read`, so the collector declares
 `needs: [tree.read]` and its extension holds `files.read`) returns the changed
-lines of an analysed change: `[{path, status, hunks: [{head_start, head_end,
-base_start, base_end, head_after, added: [{line, text}], removed: [{line,
-text}]}]}]`, the ranges of `v_change_hunk` with the text of their lines. The
-files are the change's stored ones (`v_change_file`, so a request's own files),
-limited to `paths`; each side is read through `Trees` as the analyzer reads it
-(`change_diff.rs`). A call reads at most 200 files and 2 MB of text; past
-either it fails naming the limit (it never truncates), and `paths` asks for
-fewer. The worker asks its host across the line (`CallKind::ChangeDiff`), as
+lines of an analysed change: `{files: [{path, status, hunks: [{head_start,
+head_end, base_start, base_end, head_after, added: [{line, text}], removed:
+[{line, text}]}]}], rest: [path], too_large: [path]}`, the ranges of
+`v_change_hunk` with the text of their lines. The files are the change's stored
+ones (`v_change_file`, so a request's own files), limited to `paths`; each side
+is read through `Trees` as the analyzer reads it (`change_diff.rs`). A call
+returns at most 200 files and 2 MB of line text (the `added` and `removed`
+lines it returns, not the files' sizes, so a one-line change to a large file
+is one line). The files past either limit are `rest`, in path order: the script
+loops, asking again with `paths = rest` until it is empty
+(`collectors/review/unused.star` does). A file whose own lines are past 2 MB
+is `too_large`, never returned, so each call makes progress; a script says
+which files it skipped (`unused.star` writes a "N files too large to check"
+signal). A file is never
+truncated, and a limit is never an error a script can't catch. The worker asks its host across the line (`CallKind::ChangeDiff`), as
 an `ai_*` call does.
 
 A change-triggered entity collector replaces its rows for one change without a
@@ -410,7 +430,7 @@ collectors:
   service's ([extensions-permissions.md](./extensions-permissions.md) "Store
   services").
 - Every derived (Starlark, jaq) collector run, whatever its trigger, gets
-  `x["cursor"]`: the cursor the last successful run returned (`collector_run.cursor_json`),
+  `x["cursor"]`, the cursor the last successful run returned (`collector_checkpoint.cursor_json`),
   `null` before one did. An exec collector's stdin has the same keys
   (`trigger`, `changed`, `cursor`, `event`). A run may return `"cursor"` and
   `"models"` / `"fields"` ([models.md](./models.md) "The output").
@@ -442,8 +462,8 @@ starts over, which is what makes `start` run on boot, enable and deploy; one
 whose extension is off has no task and its triggers are dropped (`fire`
 checks again just before a run). Each task runs its collector through
 `run_collector` as the system, one run at a time; triggers that pile up behind
-a run fold into one (files merge). A run that fails is logged, keeps the
-cursor (the failed `collector_run` row leaves `cursor_json` as it was).
+a run fold into one (files merge). A failed run is logged and keeps
+the previous cursor in `collector_checkpoint`.
 
 **No change is lost.** The rule: when in doubt, run `start`, the full
 reconcile.

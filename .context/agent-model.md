@@ -104,7 +104,7 @@ harness only delivers them.
 
 | Piece | What | Where it comes from |
 |---|---|---|
-| Preamble | How to work in oxplow: turns are observed and tracking work as tasks is the active tracker's skill's business, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <task uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
+| Preamble | Four lines: oxplow observes work in the background, use your normal project workflow, read oxplow URIs in the person's message with `oxplow_read`, and see the `oxplow-runtime` skill for commands and project data | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-knowledge`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' (one with `when:` only while its extension's setting holds it, `extensions-commands.md` "Skills") | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`, which reads the settings that offer skills) |
 | Slash commands | Core's (`configure`, `new-metric`, `note`: keep what was just worked out as a knowledge page) and the active extensions' | Same |
@@ -293,8 +293,10 @@ lines to read further. A captured file's row comes from
 `oxplow.snapshot.restore_file`, which writes
 into that row's stream's worktree.
 
-**Commands.** Every write is a command through `run_command { id, input
-}`. `list_commands` with no arguments is an index of `{ id, summary }`;
+**Commands.** Every write is a command through `run_command { id, input }`.
+A completed call returns `{ result, command_run_id, event_id, inverse? }`.
+When present, `command_run_id` names the integer `v_command_run.id`.
+`list_commands` with no arguments is an index of `{ id, summary }`;
 with `id` or `prefix` (`oxtask.task.`) it gives each command's
 `input_schema`, an `example` input, whether a person `confirm`s it and
 whether it's `undoable` ([commands.md](./commands.md) "Exposure to
@@ -399,6 +401,11 @@ the control-plane endpoints with the session's bearer, the identity env,
 the assembled system prompt, the session's resume id, the agent text, the
 harness's config, `HOME` (local streams only) and the program search
 path. A harness never touches the database.
+
+Restart Terminal replaces the agent session's PTY through this same
+launch path. It reads the saved binding after the old process exits,
+so stopping the TUI leaves the session's conversation intact. See
+[Terminal](./terminal.md#when-a-session-ends-or-goes-away).
 
 **What a harness implements.** `AgentHarness` requires what every harness
 answers: `id`, `title`, `launch`, `tool_use` (its calls in
@@ -967,16 +974,26 @@ deletes it).
 There is no delivered history: the turn's links and the transcript are the
 record. Only the last send is kept, so the person can **Put Back**
 (`oxplow.context.put_back`) what they did not mean to send: each item, with
-its note, returns to its basket (a deleted named basket made again); it
-chooses nothing to go next, so the next message doesn't send it straight
-away. An agent may run it for its own thread (the only basket command it
+its note and the time it was first added, returns to its basket (a deleted
+named basket made again); it chooses nothing to go next, so the next
+message doesn't send it straight away. A named basket goes only when it is
+chosen; an item back in the thread's own basket is **held**
+(`context_item.held_at`, V74): the own-basket branch of
+`waiting_for_thread_tx` skips it, an add doesn't release it, and only
+**Send Next on This Thread** (`send_next` with no `basket`,
+`release_held_tx`) does, so it goes with the next prompt; undoing that
+holds it again (`send_next`'s `hold`), and undoing a `remove`, `clear` or
+`move` of a held item keeps the hold (`add`'s and `move`'s `held`; a move
+itself drops it). An agent may run it for its own thread (the only basket command it
 may), when the person says something went by mistake. Claude Code and opencode get it at prompt submit. Codex gets it by
-injection while no turn runs (`context.add`, `move` and `send_next` wake
-`context_watch`), so with two agents in a thread an idle Codex can take
+injection while no turn runs (`context.add`, `move`, `send_next` and
+`put_back` wake `context_watch`; a held put-back changes nothing, so it
+injects nothing), so with two agents in a thread an idle Codex can take
 the baskets before the agent the person prompts. The baskets are the
 person's: an agent's `context.*` run is refused, but it can read
 `v_context_item` and `v_context_basket` ("look at my Auth basket"). Pinned
-by `the_context_basket_reaches_the_next_prompt_once` and
+by `the_context_basket_reaches_the_next_prompt_once`,
+`a_put_back_waits_until_send_next_on_this_thread` and
 `a_basket_sent_next_replaces_the_threads_own_for_one_prompt`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
@@ -1156,8 +1173,8 @@ thread are told apart.
 - **In process.** The Codex observer and the UI's interrupt build envelopes
   directly, naming the session.
 - **The actor carries its session.** An MCP call's actor is
-  `Actor::Agent { session_id, thread_id, stream_id }`; its audit row
-  records the session (`command_audit.session_id`) and its events are
+  `Actor::Agent { session_id, thread_id, stream_id }`; its contribution run
+  records the session (`contribution_run.session_id`) and its events are
   anchored to it (`Actor::anchors()`). `source` stays `agent:thr<n>`.
 - A hook's harness is the bearer's, so even a timed-out hook is answered
   in its harness's shape.
@@ -1299,7 +1316,7 @@ more than the stream would even when it's sometimes wrong.
   it open), `session_closed` (oxplow closed the agent session), `restart`
   (oxplow's recovery). A Stop whose harness names no outcome is `completed`. `answer` is only ever the agent's own words: NULL
   when it said nothing (an old turn whose end left no trace is
-  `unknown`). A finished turn whose final message ends in a question **stores that question** (`agent_turn.question`, its last line: `ending_question`, the one reading the thread's waiting status uses too). A Stop also reports **what the turn left running**
+  `unknown`). A Stop also reports **what the turn left running**
   (`TurnRun.left_running`: Claude Code's Stop `background_tasks`, the
   running ones, `{ id, kind, description }` with the id its report back
   names), carried on its `agent.turn.ended` and recorded as jobs
@@ -1453,8 +1470,8 @@ A Stop is never refused ([work-tracking.md](./work-tracking.md) "No
 gates"). The ingest closes the turn, keeps `last_assistant_message` as the
 turn's `answer` (each harness's source in "Per-harness delivery";
 `hook_ingest::LAST_ASSISTANT_MESSAGE`), takes the turn-end snapshot, sets
-the status — `AwaitingUser` when the final message ends in a question,
-keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary is its last turn's answer.
+the status — `Idle`, however the final message is worded (a question at
+the end of a reply is not a wait), keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary is its last turn's answer.
 
 ### Subagents
 
@@ -2144,6 +2161,10 @@ the rows through `v_token_usage`: the bundled `task-tokens` page
 (`oxplow/task-detail.sections` slot), foundation's Thread activity (per
 turn) and the usage pages. Tables: [data-model.md](./data-model.md).
 
+MCP initialization briefly describes how to query data, run commands
+and open pages. Tool availability is separate from how the agent chooses
+to answer the person.
+
 ### Collection command and skill
 
 The `configure` command (`crates/oxplow-agent-text/assets/configure.md`;
@@ -2152,25 +2173,28 @@ project's test tooling to write standard-format reports at stable paths,
 then records the `testing:` block in `.oxplow/project.yaml` and one report
 collector per report in the project's extension
 (`.oxplow/extensions/project/extension.yaml`). The `oxplow-collection`
-skill loads when running tests, on questions about coverage, and on
-`configure`; it tells the agent never to parse or report coverage itself,
-because oxplow parses the report. The ingestion side is
-[collection.md](./collection.md). When the PostToolUse path sees a test
-run whose configured report wasn't refreshed, it leaves a one-shot nudge
-steering the agent to the report-emitting command
-([collection.md](./collection.md) "Report-less-run nudge").
+skill describes how report collection works when the project wants it.
+A missing report can leave a one-shot notice for the person in Alerts.
+The integration makes the project's test commands available through
+configuration. Repository guidance can describe when to use them.
+[Collection](./collection.md)
 
 ### Nudge persistence
 
-The nudges — the report-less-run nudge and any advisory hit (kind
-`<namespace>/<advisory id>`), whatever its trigger — are written by pump
-reactors (`collection`, `advisories.post_tool` in
+The notices and advisory hits (kind
+`<namespace>/<advisory id>`) are written by pump
+reactors (`collection`, `advisories.post_tool` and `advisories.post_tool.immediate` in
 `post_tool_reactors.rs`; prompt and turn-end advisories too) to the
 `agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`) with
 the kind, message, trigger, turn and **cause** (the event, so a
-redelivered event can't fire the same kind twice). **The persisted nudge
-is the delivery:** `post_tool_context` settles the two post-tool reactors
-(up to 2.5 s), then takes the thread's undelivered nudges
+redelivered event can't fire the same kind twice). Missing-report notices
+use the person audience. For agent-directed advisories,
+`post_tool_context` checks the active agent advisories and waits only when
+one can respond to the recorded tool event. It watches the matching consumer's
+checkpoint through that event, up to 2.5 s. The ordinary advisory consumer
+still follows collection. Advisories declared `after_collection: false`
+can respond after the tool call is projected. Collection and person-facing
+notices run in the background. The hook takes the thread's undelivered nudges
 (`take_for_agent`, which stamps `delivered_at`; oxplow's own kinds before
 advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
 `prompt_context` takes them the same way. One that lands after its hook
@@ -2181,6 +2205,38 @@ are durable** (`claim_once`, per request or thread): the report-less
 nudge fires once per request, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
 nudges page ("Agent Nudges", `oxplow/changes.sections` slot).
+
+### Measuring context and hook overhead
+
+For a dev sample, quit the running app and use this command.
+
+```sh
+RUST_LOG='info,rmcp=warn,oxplow::agent_overhead=debug' bun run run:dev
+```
+
+Filter `.oxplow/logs/daemon.*.log` for `oxplow::agent_overhead`. This
+target is off at the default log level. Records carry byte counts, timings
+in microseconds, and routing labels such as harness and reactor name.
+They carry no prompt, tool, or context contents.
+
+- `launch_prompt` measures assembled launch text and its contributing
+  sections. `mcp_instructions` measures the instructions advertised
+  during MCP initialization, where the harness can be unknown.
+- `prompt_context` measures context prepared by the prompt hook, with
+  separate costs for session context, changed extension context, the
+  context basket, advisories, and reading pending nudges.
+  `prompt_commit` records the bytes marked for delivery and the time spent
+  updating delivery bookkeeping. The terminal hook does this before writing
+  its response. The chat host does it after accepting the context.
+- `post_tool_context` measures advisory eligibility, time waiting for the
+  selected consumer, time reading pending nudges, and returned bytes.
+  `waited_for` identifies the consumer when the hook waited. `settled=false`
+  means its checkpoint did not reach the tool event within the hook's wait.
+
+Total `bytes` fields use the returned UTF-8 text. Section lengths can
+differ from the total because the total includes formatting and trimming.
+Harness-owned instructions, tool schemas, and model token counts are
+outside these measurements.
 
 ### Observe conformance
 

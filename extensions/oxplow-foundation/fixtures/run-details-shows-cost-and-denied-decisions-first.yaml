@@ -1,0 +1,45 @@
+given:
+  - observe:
+      run:
+        extension: acme
+        contribution: pull
+        outcome: denied
+        wall_ms: 248
+        cpu_ms: 32
+        peak_bytes: 4096
+        ai_calls: 2
+        scopes: { sql.read: 3 }
+        decisions:
+          - { need: scope, name: sql.read, decision: allowed }
+          - { need: host, name: denied.example, decision: denied, reason: missing grant }
+  - command: oxplow.sql.query
+    input: { sql: "SELECT run_id, uri FROM v_contribution_run WHERE extension = 'acme'" }
+    bind: run
+when: { part: run-details, params: { run_id: "$run.rows[0][0]" } }
+expect:
+  loaders:
+    cost:
+      rows:
+        - { wall_ms: 248, cpu_ms: 32, peak_bytes: 4096, ai_calls: 2 }
+    scopes:
+      rows:
+        - { scope: sql.read, calls: 3 }
+    decisions:
+      rows:
+        - { need: host, name: denied.example, decision: denied, reason: missing grant }
+        - { need: scope, name: sql.read, decision: allowed, reason: null }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "$run.rows[0][1]" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow/contribution-run, default: true }
+  - when: { page: contribution-run, params: { uri: "$run.rows[0][1]" } }
+    expect:
+      loaders:
+        run-details/cost:
+          rows:
+            - { wall_ms: 248, cpu_ms: 32, peak_bytes: 4096, ai_calls: 2 }

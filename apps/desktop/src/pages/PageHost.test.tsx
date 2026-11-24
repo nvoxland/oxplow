@@ -95,7 +95,7 @@ test("a whole-page action presses on the run, asking first when its command does
   const press: RunPageAction = async (...args) => {
     calls.push(args);
     if (!args[7]) throw new IpcCallError("Archive needs confirmation", "NEEDS_CONFIRMATION", null, []);
-    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: null, event_id: null, inverse: null } as never;
   };
   const { runs } = fakePageRuns(tablePage({ actions: [fakeAction({ id: "archive", label: "Archive" })] }));
   const { findByTestId, queryByTestId } = render(
@@ -149,7 +149,7 @@ test("an `open` page action is offered by `when` and opens the URI the press ans
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    return { result: { opened: "oxplow:oxplow/file?path=a.rs" }, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: { opened: "oxplow:oxplow/file?path=a.rs" }, command_run_id: null, event_id: null, inverse: null } as never;
   };
   const open = fakeAction({ id: "current", label: "Open current version", command: null, open: "current_uri", when: "current_uri", oneRow: true });
   const withRow = (uri: string | null) => {
@@ -181,7 +181,7 @@ test("a whole-page form action opens its form from page_action_form and submits 
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(["press", ...args]);
-    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+    return { result: null, command_run_id: null, event_id: null, inverse: null } as never;
   };
   const command = {
     id: "acme.add",

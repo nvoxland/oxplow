@@ -166,7 +166,7 @@ impl Project {
     async fn run_status(&self) -> (String, Option<String>) {
         let rows = self
             .rows(&format!(
-                "SELECT status, error FROM v_collector_run WHERE owner = '{NAMESPACE}' AND id = '{COLLECTOR}'"
+                "SELECT outcome, error FROM v_collector_run WHERE owner = '{NAMESPACE}' AND id = '{COLLECTOR}' AND latest = 1"
             ))
             .await;
         let row = rows.first().expect("the collector ran");
@@ -635,7 +635,7 @@ async fn a_collector_that_breaks_its_declarations_fails_with_the_documented_erro
         let report = p.baseline().await;
         assert_eq!(report.failed, [COLLECTOR], "{says}: {report:?}");
         let (status, error) = p.run_status().await;
-        assert_eq!(status, "error", "{says}");
+        assert_eq!(status, "failed", "{says}");
         let error = error.expect("the run says why");
         assert!(error.contains(says), "want `{says}` in `{error}`");
         // Nothing half-recorded: the metric has no facts.

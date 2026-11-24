@@ -50,6 +50,7 @@ async function jev(): Promise<{ url: string; close(): Promise<void> }> {
 
 /** Put the example into `daemon`'s project and deploy it. */
 async function install(daemon: Daemon) {
+  await run(daemon, "oxplow.extension.enable", { name: "oxplow-rust" });
   await installExample(daemon, "triage");
 }
 

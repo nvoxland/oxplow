@@ -162,6 +162,8 @@ pub struct IngestOutcome {
     /// The harness of the agent session the hook came from (its registry
     /// key): what renders the answer. `None` when no session claims it.
     pub harness: Option<String>,
+    /// The finished tool event this hook appended, if any.
+    pub finished_tool_seq: Option<i64>,
 }
 
 /// What the transaction decided, applied after it commits.
@@ -175,6 +177,7 @@ struct Applied {
     opened_turn: bool,
     closed_turn: Option<AgentTurnId>,
     status: Option<(AgentStatusState, Option<String>)>,
+    finished_tool_seq: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -273,6 +276,7 @@ impl HookIngestService {
         // `v_event` / `v_agent_turn` on the commit's `DatasetsChanged`.
         outcome.closed_turn = applied.closed_turn;
         outcome.harness = applied.harness.clone();
+        outcome.finished_tool_seq = applied.finished_tool_seq;
         match applied.status {
             Some((state, detail)) => self.announce(thread, applied.session, state, detail).await,
             None => {
@@ -811,7 +815,10 @@ fn record_tx(
             let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
-                log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
+                let seq = log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
+                if env.kind == HookKind::PostToolUse {
+                    applied.finished_tool_seq = seq;
+                }
                 // A call that started a background job opens its record: the
                 // turn that made the call started it, as the harness reports.
                 if let Some(job) = &tool.started_job {
@@ -904,10 +911,6 @@ fn record_tx(
                     .as_ref()
                     .and_then(|r| r.left_running.as_deref()),
                 error: env.turn_run.as_ref().and_then(|r| r.error.as_deref()),
-                // Only a turn that finished can have ended on a question.
-                question: (outcome == TurnOutcome::Completed)
-                    .then(|| ending_question(answer))
-                    .flatten(),
                 ..TurnEnd::new(now, outcome)
             };
             // What the turn left running are jobs: one no hook showed was
@@ -941,7 +944,7 @@ fn record_tx(
                 // work: the session is still working.
                 (AgentStatusState::Running, None)
             } else {
-                stop_status(answer)
+                (AgentStatusState::Idle, None)
             });
         }
         HookKind::SessionEnd => {
@@ -1031,26 +1034,6 @@ fn record_tx(
     }
     applied.status = status;
     Ok(applied)
-}
-
-/// The question a final message ended on: its last line, when the message
-/// ends in a question mark. The turn stores it (`agent_turn.question`) and
-/// the thread's status waits on it.
-pub fn ending_question(answer: Option<&str>) -> Option<&str> {
-    answer
-        .map(str::trim)
-        .filter(|a| a.ends_with('?'))
-        .and_then(|a| a.lines().map(str::trim).rfind(|l| !l.is_empty()))
-}
-
-/// A Stop parks the thread on the person when the agent's final message
-/// ends in a question — its last line is the detail — else it goes idle.
-/// The next prompt moves it on.
-fn stop_status(answer: Option<&str>) -> (AgentStatusState, Option<String>) {
-    match ending_question(answer) {
-        Some(question) => (AgentStatusState::AwaitingUser, Some(question.to_string())),
-        None => (AgentStatusState::Idle, None),
-    }
 }
 
 /// What a call that waits on the person asks: its question, or that a
@@ -1460,7 +1443,7 @@ fn log_tool_tx(
     env: &HookEnvelope,
     tool: &ToolUse,
     session: Option<&str>,
-) -> Result<(), DomainError> {
+) -> Result<Option<i64>, DomainError> {
     let recorded = crate::tool_calls::recorded(tool, &row.worktree);
     let content = |value: &Option<serde_json::Value>| -> Result<Option<ContentRef>, DomainError> {
         match value {
@@ -1551,13 +1534,14 @@ fn log_tool_tx(
     };
     let turn = anchors.turn_id.map(AgentTurnId::new);
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
-    let first = append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    let seq = oxplow_db::event_log_store::append_unique_seq_tx(conn, ev.vocabulary, &envelope)?;
     // A message the call sends to another session, so its receipt can be
     // matched to this turn: once per call (a re-posted hook records
     // nothing), only when the policy let it run, and only with something to
     // match on.
     let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
-    if let (true, true, HookKind::PreToolUse, Some(sent)) = (first, allowed, env.kind, &tool.sent) {
+    if let (Some(_), true, HookKind::PreToolUse, Some(sent)) = (seq, allowed, env.kind, &tool.sent)
+    {
         if !sent.text.trim().is_empty() {
             agent_message_store::record_sent_tx(
                 conn,
@@ -1574,7 +1558,7 @@ fn log_tool_tx(
             )?;
         }
     }
-    Ok(())
+    Ok(seq)
 }
 
 #[cfg(test)]
@@ -1641,16 +1625,6 @@ mod tests {
             EventBus::new(),
         );
         (svc, t.id)
-    }
-
-    /// A new service over the same database: a restarted daemon.
-    fn restarted(svc: &HookIngestService) -> HookIngestService {
-        HookIngestService::new(
-            svc.db.clone(),
-            svc.vocabulary.clone(),
-            svc.project_dir.clone(),
-            EventBus::new(),
-        )
     }
 
     #[tokio::test]
@@ -3173,8 +3147,8 @@ mod tests {
     }
 
     /// The person's Escape only interrupts a turn that's running: with
-    /// none open (the agent asked a question and stopped, and Escape closed
-    /// a menu) it changes nothing, so the thread still waits on them.
+    /// none open (the agent stopped, and Escape closed a menu) it changes
+    /// nothing, so the thread stays idle rather than stopped.
     #[tokio::test]
     async fn an_interrupt_with_no_open_turn_changes_nothing() {
         let (svc, tid) = fixture().await;
@@ -3206,7 +3180,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             status(&svc, tid).await.unwrap().state,
-            AgentStatusState::AwaitingUser
+            AgentStatusState::Idle
         );
         let ended = of_type(&logged(&svc).await, "agent.turn.ended").len();
         let out = svc
@@ -3216,8 +3190,8 @@ mod tests {
         assert_eq!(out.closed_turn, None);
         assert_eq!(
             status(&svc, tid).await.unwrap().state,
-            AgentStatusState::AwaitingUser,
-            "still waiting on the person"
+            AgentStatusState::Idle,
+            "still idle"
         );
         assert_eq!(
             of_type(&logged(&svc).await, "agent.turn.ended").len(),
@@ -3451,11 +3425,11 @@ mod tests {
         assert_eq!(of_type(&logged(&svc).await, "agent.session.ended").len(), 2);
     }
 
-    /// A turn whose final message ends in a question waits on the person,
-    /// the question as the detail, across a restart; the next prompt
-    /// moves it on.
+    /// How a final message is worded never parks the thread: one that ends
+    /// in a question goes idle like any other. Only a question or plan put
+    /// to the person, or a permission prompt, waits on them.
     #[tokio::test]
-    async fn a_final_question_waits_on_the_person() {
+    async fn a_final_message_ending_in_a_question_does_not_wait() {
         let (svc, tid) = fixture().await;
         svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
             .await
@@ -3468,29 +3442,9 @@ mod tests {
         ))
         .await
         .unwrap();
-        let svc = restarted(&svc);
         let s = status(&svc, tid).await.unwrap();
-        assert_eq!(s.state, AgentStatusState::AwaitingUser);
-        assert_eq!(s.detail.as_deref(), Some("Should I also fix the lexer?"));
-        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
-            .await
-            .unwrap();
-        assert_eq!(
-            status(&svc, tid).await.unwrap().state,
-            AgentStatusState::Running
-        );
-        svc.ingest(hook(
-            HookKind::Stop,
-            tid,
-            None,
-            json!({ "last_assistant_message": "All done." }),
-        ))
-        .await
-        .unwrap();
-        assert_eq!(
-            status(&svc, tid).await.unwrap().state,
-            AgentStatusState::Idle
-        );
+        assert_eq!(s.state, AgentStatusState::Idle);
+        assert_eq!(s.detail, None);
     }
 
     /// A question or plan the agent puts to the person (AskUserQuestion,
@@ -4309,55 +4263,6 @@ mod tests {
         assert!(targets.iter().any(|t| t.contains("def5678")));
     }
 
-    /// A turn stores the question its final message ended on, from the
-    /// same reading that parks the thread on the person: a finished turn
-    /// ending in a question keeps its last line; one that doesn't, or an
-    /// interrupted one, keeps none.
-    #[tokio::test]
-    async fn a_turn_records_the_question_it_ended_on() {
-        let (svc, tid) = fixture().await;
-        for (end, said) in [
-            (HookKind::Stop, "Done.\nShould I also update the docs?"),
-            (HookKind::Stop, "All done."),
-            (HookKind::Interrupt, ""),
-        ] {
-            svc.ingest(hook(
-                HookKind::UserPromptSubmit,
-                tid,
-                Some("h1"),
-                json!({"prompt": "go"}),
-            ))
-            .await
-            .unwrap();
-            svc.ingest(hook(
-                end,
-                tid,
-                Some("h1"),
-                json!({"last_assistant_message": said}),
-            ))
-            .await
-            .unwrap();
-        }
-        let questions: Vec<Option<String>> = svc
-            .db
-            .read(|c| {
-                let mut stmt = c
-                    .prepare("SELECT question FROM v_agent_turn ORDER BY id")
-                    .map_err(oxplow_db::map_sql_err)?;
-                let rows = stmt
-                    .query_map([], |r| r.get(0))
-                    .map_err(oxplow_db::map_sql_err)?;
-                rows.collect::<Result<Vec<_>, _>>()
-                    .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            questions,
-            vec![Some("Should I also update the docs?".into()), None, None]
-        );
-    }
-
     /// A turn's activity counts its compactions, the prompts delivered in
     /// it and how many a person typed: a job's report opens a turn the
     /// person then prompts into.
@@ -4862,8 +4767,8 @@ mod tests {
 
     /// A request's state is read live from its turns and jobs: running
     /// while a turn is open, waiting on its own work while a job it started
-    /// has not reported, waiting on the person when its last turn ended on a
-    /// question, else finished; its totals count its turns.
+    /// has not reported, waiting on the person while a question is put to
+    /// them, else finished; its totals count its turns.
     #[tokio::test]
     async fn a_requests_state_and_totals_are_read_from_its_turns() {
         let (svc, tid) = fixture().await;
@@ -4927,10 +4832,23 @@ mod tests {
         })
         .await
         .unwrap();
+        let ask = |kind: HookKind| {
+            hook(
+                kind,
+                tid,
+                Some("h1"),
+                json!({ "tool_name": "AskUserQuestion",
+                        "tool_input": { "questions": [{ "question": "Should I commit?" }] } }),
+            )
+        };
+        svc.ingest(ask(HookKind::PreToolUse)).await.unwrap();
+        assert_eq!(state().await, vec![("waiting_on_person".to_string(), 2)]);
+        svc.ingest(ask(HookKind::PostToolUse)).await.unwrap();
         svc.ingest(said("Built it.\nShould I commit?"))
             .await
             .unwrap();
-        assert_eq!(state().await, vec![("waiting_on_person".to_string(), 2)]);
+        // A final message ending in a question is not a wait.
+        assert_eq!(state().await, vec![("finished".to_string(), 2)]);
         svc.ingest(hook(
             HookKind::UserPromptSubmit,
             tid,

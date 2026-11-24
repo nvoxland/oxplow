@@ -15,8 +15,6 @@
 
 KINDS = ["function", "method", "constructor", "macro"]
 MOST_NAMES = 50
-# Files per `change_diff` call: well under its 200-file and 2 MB limits.
-BATCH = 40
 
 def call_names(text):
     """The names called on a line: an identifier right before `(`."""
@@ -33,9 +31,12 @@ def transform(input):
     })
 
     # The files whose removed lines can hold a call: some lines removed, in
-    # a language a pack parses, not generated, vendored or a lockfile. Read
-    # in batches, since one `change_diff` call returns at most 200 files and
-    # 2 MB of text.
+    # a language a pack parses, not generated, vendored or a lockfile. One
+    # `change_diff` call returns the files that fit its limits and names the
+    # rest, so it is asked again for those (each call reads at least one
+    # file or sets one aside as too large, so it ends). A file whose own
+    # changed lines are past the call's limit is never read: the check says
+    # so in one row for the change, never skips it in silence.
     paths = [
         r["path"]
         for r in scope("sql.read", {
@@ -45,8 +46,15 @@ def transform(input):
         if language_of(r["path"]) != None
     ]
     diffs = []
-    for at in range(0, len(paths), BATCH):
-        diffs.extend(change_diff(change_id, paths = paths[at:at + BATCH]))
+    too_large = []
+    todo = paths
+    for _ in range(len(paths)):
+        if not todo:
+            break
+        got = change_diff(change_id, paths = todo)
+        diffs.extend(got["files"])
+        too_large.extend(got["too_large"])
+        todo = got["rest"]
 
     # Each name once, with where its call was removed.
     removed = {}
@@ -107,6 +115,22 @@ def transform(input):
             "title": "Possibly unused now: %s" % name,
             "why": "The change removed the last call to %s (%s); no other mention was found (a text search)." % (name, removed[name]),
             "uri": first["uri"],
+        })
+
+    if too_large:
+        rows.append({
+            "id": "%d|||too-large-to-check" % change_id,
+            "change_id": change_id,
+            "path": None,
+            "line": None,
+            "signal": "too-large-to-check",
+            "title": "%d file%s too large to check" % (len(too_large), "" if len(too_large) == 1 else "s"),
+            "why": "%s changed lines are past the 2 MB the unused check reads, so %s checked: %s." % (
+                "Its" if len(too_large) == 1 else "Their",
+                "it wasn't" if len(too_large) == 1 else "they weren't",
+                ", ".join(too_large),
+            ),
+            "uri": None,
         })
 
     keep = [r["id"] for r in rows]

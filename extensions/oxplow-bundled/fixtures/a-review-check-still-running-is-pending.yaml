@@ -1,0 +1,17 @@
+# A review check whose run for a change's latest analysis has started and
+# not finished is pending: the Review page shows it as still running.
+requires: [oxplow-rust]
+given:
+  - { files: { "src/lib.rs": "pub fn run() -> u32 {\n    1\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { files: { "src/lib.rs": "pub fn run() -> u32 {\n    2\n}\n" } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/lib.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Change }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Change } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+  # The change is analysed again; the check runs again for it, and is still going.
+  - observe: { event: { type: change.analyzed, v: 1, payload: { change_id: 1, kind: commit, target: $change.rev, stream_id: 1, phase: files }, anchors: { stream_id: str1 } } }
+  - observe: { run: { extension: oxplow-bundled, contribution: oxplow.review.unused, live: true, caused_by: change.analyzed } }
+when: { sql: "SELECT change_id, state, last_run_at FROM v_oxplow_review_check" }
+expect: { rows: [{ change_id: 1, state: pending, last_run_at: null }] }

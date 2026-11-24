@@ -58,34 +58,69 @@ impl AgentContext {
         state.last_extension_context.remove(session_id);
     }
 
-    /// What the agent hears after a tool call: the thread's undelivered
-    /// nudges (collection and post-tool advisories). The recording itself is the pump's
-    /// (`tool_call_reactors`, `post_tool_reactors`, P3.5–P3.6): this waits
-    /// up to [`POST_TOOL_SETTLE`] for the two reactors that write nudges,
-    /// then takes whatever is undelivered — a nudge that lands after the
-    /// window goes out on the thread's next tool call instead of being lost.
-    /// Collection nudges come before advisories.
-    /// Nothing for a session whose harness can't carry context after a
-    /// tool call (`tool_context`): its nudges wait for a prompt.
+    /// Deliver queued agent nudges. Wait only for an eligible advisory's
+    /// consumer to reach the event this hook just logged.
     pub async fn post_tool_context(
         &self,
         svc: &Services,
         thread_id: &ThreadId,
         harness: Option<&str>,
+        finished_tool_seq: Option<i64>,
     ) -> Option<String> {
+        use crate::extension::extensions::{AdvisoryAudience, AdvisoryOn};
+        use crate::post_tool_reactors::{IMMEDIATE_ADVISORIES, POST_TOOL_ADVISORIES};
+
+        let mut timer = crate::agent_overhead::Timer::start();
         if !carries(svc, harness, TOOL_CONTEXT) {
             return None;
         }
-        svc.event_pump
-            .settle(
-                &[
-                    crate::post_tool_reactors::COLLECTION,
-                    crate::post_tool_reactors::POST_TOOL_ADVISORIES,
-                ],
-                POST_TOOL_SETTLE,
-            )
-            .await;
-        undelivered(svc, thread_id).await
+        let harness = harness.unwrap_or("unknown");
+        let wait = svc
+            .sql
+            .read_generation(async {
+                finished_tool_seq.and_then(|seq| {
+                    let deps = svc.advisory_deps();
+                    let mut consumer = None;
+                    crate::advisories::visit_eligible(
+                        &deps,
+                        AdvisoryOn::PostToolUse,
+                        |a| a.audience == AdvisoryAudience::Agent,
+                        |_, advisories| {
+                            if advisories.iter().any(|a| a.after_collection) {
+                                consumer = Some(POST_TOOL_ADVISORIES);
+                            } else if consumer.is_none() {
+                                consumer = Some(IMMEDIATE_ADVISORIES);
+                            }
+                        },
+                    );
+                    consumer.map(|consumer| (consumer, seq))
+                })
+            })
+            .await
+            .unwrap_or_default();
+        let eligibility_us = timer.lap_us();
+        let settled = if let Some((consumer, seq)) = wait {
+            svc.event_pump
+                .wait_for_hook_event(consumer, seq, POST_TOOL_SETTLE)
+                .await
+        } else {
+            true
+        };
+        let reactor_wait_us = timer.lap_us();
+        let text = undelivered(svc, thread_id).await;
+        tracing::debug!(
+            target: "oxplow::agent_overhead",
+            stage = "post_tool_context",
+            harness,
+            bytes = text.as_ref().map_or(0, String::len),
+            eligibility_us,
+            waited_for = wait.map(|(consumer, _)| consumer),
+            reactor_wait_us,
+            settled,
+            nudge_read_us = timer.lap_us(),
+            elapsed_us = timer.elapsed_us(),
+        );
+        text
     }
 
     /// Context for a human's prompt in agent session `agent_session` (its
@@ -125,9 +160,11 @@ impl AgentContext {
         agent_session: Option<AgentSessionId>,
         harness: Option<&str>,
     ) -> Option<PendingContext> {
+        let mut timer = crate::agent_overhead::Timer::start();
         if !carries(svc, harness, PROMPT_CONTEXT) {
             return None;
         }
+        let harness = harness.unwrap_or("unknown");
         let mut pending = PendingContext {
             text: String::new(),
             baselines: Vec::new(),
@@ -136,6 +173,7 @@ impl AgentContext {
             basket: Vec::new(),
             agent_session,
             thread: Some(*thread_id),
+            overhead_harness: timer.enabled().then(|| harness.to_owned()),
         };
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id, agent_session)
@@ -143,11 +181,13 @@ impl AgentContext {
         if let (Some(key), Some(block)) = (session_id, &ctx_block) {
             pending.baselines.push((key.to_string(), block.clone()));
         }
+        let session_us = timer.lap_us();
         // What the extensions say the agent should know now, each block
         // once, then when it changes.
         let extension_blocks = self
             .changed_extension_contexts(svc, thread_id, session_id)
             .await;
+        let extension_count = extension_blocks.len();
         if let Some(key) = session_id {
             pending.contexts = extension_blocks
                 .iter()
@@ -161,10 +201,12 @@ impl AgentContext {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         });
+        let extension_us = timer.lap_us();
         let basket_block = context_basket(svc, *thread_id).await;
         if let Some((_, ids)) = &basket_block {
             pending.basket = ids.clone();
         }
+        let basket_us = timer.lap_us();
         // Prompt advisories land as nudges beside any a turn's end or a
         // late tool call left; the prompt carries them all.
         crate::advisories::for_thread(
@@ -174,20 +216,43 @@ impl AgentContext {
             None,
         )
         .await;
+        let advisory_us = timer.lap_us();
         let advisory_block = waiting_nudges(svc, thread_id).await;
         if let Some((_, ids)) = &advisory_block {
             pending.nudges = ids.clone();
         }
-        let combined: String = [
+        let nudge_read_us = timer.lap_us();
+        let sections = [
             ctx_block,
             extension_block,
             basket_block.map(|(text, _)| text),
             advisory_block.map(|(text, _)| text),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("\n\n");
+        ];
+        let [session_bytes, extension_bytes, basket_bytes, nudge_bytes] = sections
+            .each_ref()
+            .map(|section| section.as_ref().map_or(0, String::len));
+        let combined = sections
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        tracing::debug!(
+            target: "oxplow::agent_overhead",
+            stage = "prompt_context",
+            harness,
+            bytes = combined.len(),
+            session_bytes,
+            session_us,
+            extension_bytes,
+            extension_count,
+            extension_us,
+            basket_bytes,
+            basket_us,
+            advisory_us,
+            nudge_bytes,
+            nudge_read_us,
+            elapsed_us = timer.elapsed_us(),
+        );
         if combined.is_empty() {
             return None;
         }
@@ -199,6 +264,7 @@ impl AgentContext {
     /// blocks as sent, take the context items it carried, and mark its
     /// nudges delivered.
     pub async fn commit(&self, svc: &Services, built: PendingContext) {
+        let timer = crate::agent_overhead::Timer::start();
         {
             let mut state = self.state.lock();
             for (key, block) in built.baselines {
@@ -231,6 +297,15 @@ impl AgentContext {
             if let Err(err) = svc.nudge_store.mark_delivered(built.nudges).await {
                 warn!(?err, "marking the delivered nudges failed");
             }
+        }
+        if let Some(harness) = built.overhead_harness {
+            tracing::debug!(
+                target: "oxplow::agent_overhead",
+                stage = "prompt_commit",
+                harness = harness.as_str(),
+                bytes = built.text.len(),
+                elapsed_us = timer.elapsed_us(),
+            );
         }
     }
 
@@ -385,6 +460,7 @@ pub struct PendingContext {
     agent_session: Option<AgentSessionId>,
     /// The thread it was built for (none for a double in tests).
     thread: Option<ThreadId>,
+    overhead_harness: Option<String>,
 }
 
 impl PendingContext {
@@ -399,6 +475,7 @@ impl PendingContext {
             basket: Vec::new(),
             agent_session: None,
             thread: None,
+            overhead_harness: None,
         }
     }
 }
@@ -1030,6 +1107,59 @@ mod tests {
         assert!(!again.contains("<context-basket>"), "{again}");
     }
 
+    /// What was put back into This Thread waits, held: the next prompt
+    /// doesn't carry it (an item added since goes alone) until Send Next on
+    /// This Thread; then the prompt after carries it once.
+    #[tokio::test]
+    async fn a_put_back_waits_until_send_next_on_this_thread() {
+        use crate::commands::context_basket::{ADD, PUT_BACK, SEND_NEXT};
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &*fx.svc;
+        let session = crate::test_fixtures::open_session(svc, fx.thread).await;
+        let thread = fx.thread.to_string();
+        let run = |name: &'static str, input: serde_json::Value| async move {
+            svc.commands
+                .run(&Actor::Human, name, input, false)
+                .await
+                .unwrap()
+        };
+        run(
+            ADD,
+            serde_json::json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=abc" }),
+        )
+        .await;
+        let ctx = AgentContext::default();
+        let prompt = || async {
+            ctx.prompt_context(svc, &fx.thread, Some("s1"), Some(session), None)
+                .await
+                .unwrap_or_default()
+        };
+        assert!(prompt().await.contains("sha=abc"));
+
+        run(PUT_BACK, serde_json::json!({ "thread": thread })).await;
+        assert!(
+            !prompt().await.contains("<context-basket>"),
+            "put back is held"
+        );
+        run(
+            ADD,
+            serde_json::json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=new" }),
+        )
+        .await;
+        let with_new = prompt().await;
+        assert!(with_new.contains("sha=new"), "{with_new}");
+        assert!(!with_new.contains("sha=abc"), "still held: {with_new}");
+
+        run(SEND_NEXT, serde_json::json!({ "thread": thread })).await;
+        let released = prompt().await;
+        assert!(
+            released.contains("1. [oxplow uri oxplow:oxplow/commit?sha=abc]"),
+            "{released}"
+        );
+        assert!(!prompt().await.contains("<context-basket>"), "once");
+    }
+
     /// A named basket set to go next replaces the thread's own for one
     /// prompt, under its name; the prompt empties it and the thread sends
     /// its own again, the basket kept.
@@ -1115,6 +1245,7 @@ mod tests {
                 around: None,
                 note: note.map(Into::into),
                 added_at: "2026-11-18T00:00:00Z".into(),
+                held_at: None,
             },
             basket: None,
             stream: Some(oxplow_db::context_store::ItemStream {

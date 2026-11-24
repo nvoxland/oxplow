@@ -14,10 +14,10 @@ use std::time::Duration;
 use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 
-use crate::extension::extension_job_stream_tests::{
+use crate::extension::extension_private_state_tests::{declare, write, write_state, CONFIGURATION};
+use crate::extension::job_run_stream_tests::{
     ask, completions, fixture_idle, reply, rows as job_rows, until, MANIFEST,
 };
-use crate::extension::extension_private_state_tests::{declare, write, write_state, CONFIGURATION};
 use crate::test_fixtures::lifecycle::{
     booted, log_thread_closed, page, problem, readable, CONFIGURATION_V2,
 };

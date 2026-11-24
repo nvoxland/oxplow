@@ -77,7 +77,9 @@ If a message carried a basket you did not mean to send, press **Put Back** on
 the right of the Context panel's bar ("Sent 2 items from basket 1 · Put Back").
 The items return to the basket they came from, with their notes. Put Back
 doesn't choose that basket to send next, so your next message won't carry it
-unless you press Send Next. You can also just tell the agent "put that back". Only the last send can be put back: the next
+unless you press Send Next. Items that go back to This Thread are held: each
+says "held, will not send", and they wait until you press Send Next on This
+Thread. Adding something new doesn't send them. You can also just tell the agent "put that back". Only the last send can be put back: the next
 message replaces it.
 
 ## What the agent gets

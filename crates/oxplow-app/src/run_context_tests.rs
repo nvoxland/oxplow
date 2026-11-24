@@ -1,9 +1,9 @@
 //! Every run of extension code is recorded once, as itself
-//! (`.context/extensions-permissions.md` "The run context", `v_extension_run`): one
+//! (`.context/extensions-permissions.md` "The run context", `v_contribution_run`): one
 //! event reaches an `on:` collector and an effect; a person runs the
 //! collector and the extension's command. Each run names its contribution,
 //! the actor the host chose, what caused it and where, and the records
-//! that already existed (`collector_run`, `effect_run`, `command_audit`)
+//! that already existed (`collector_run`, `effect_run`, `command_run`)
 //! point at it.
 
 use std::path::Path;
@@ -91,7 +91,7 @@ async fn rows(svc: &Services, sql: &str) -> Vec<Vec<Value>> {
         .unwrap()
 }
 
-/// Each run is one `extension_run` row: its contribution at its version
+/// Each run is one `contribution_run` row: its contribution at its version
 /// and generation, the actor its host chose, its cause and anchors; the
 /// rows that already recorded it name it.
 #[tokio::test(flavor = "multi_thread")]
@@ -126,9 +126,9 @@ async fn every_run_is_recorded_once_as_itself() {
     .unwrap();
     let collector = rows(
         svc,
-        "SELECT r.version, r.generation, r.actor, r.cause_event_id, r.thread_id, r.outcome,
-                r.kind, (SELECT run_id FROM collector_run WHERE owner = 'acme' AND id = 'star') = r.run_id
-           FROM extension_run r WHERE r.contribution = 'oxplow:oxplow/collector?collector=acme/star'",
+        "SELECT r.version, r.generation, r.actor_kind, r.cause_event_id, r.thread_id, r.outcome,
+                r.kind, (SELECT last_run_id FROM collector_checkpoint WHERE owner = 'acme' AND id = 'star') = r.run_id
+           FROM contribution_run r WHERE r.contribution = 'oxplow:oxplow/collector?collector=acme/star'",
     )
     .await;
     assert_eq!(
@@ -178,16 +178,18 @@ async fn every_run_is_recorded_once_as_itself() {
     .unwrap();
     let effect = rows(
         svc,
-        "SELECT r.actor, r.cause_event_id, r.outcome,
+        "SELECT r.actor_kind, r.actor_id, r.cause_event_id, r.outcome,
                 (SELECT count(*) FROM effect_run e WHERE e.run_id = r.run_id),
-                (SELECT count(*) FROM command_audit a WHERE a.run_id = r.run_id)
-           FROM extension_run r WHERE r.contribution = 'oxplow:oxplow/effect?effect=acme/note'",
+                (SELECT count(*) FROM command_run a JOIN contribution_run child USING (run_id)
+                  WHERE child.parent_run_id = r.run_id AND child.kind = 'command')
+           FROM contribution_run r WHERE r.contribution = 'oxplow:oxplow/effect?effect=acme/note'",
     )
     .await;
     assert_eq!(
         effect,
         vec![vec![
-            json!("effect:acme/note"),
+            json!("effect"),
+            json!("acme/note"),
             json!(second.envelope.id.to_string()),
             json!("ok"),
             json!(1),
@@ -195,7 +197,7 @@ async fn every_run_is_recorded_once_as_itself() {
         ]]
     );
 
-    // A person runs the collector: its run is nested in theirs.
+    // The collector is a child of the command that started it.
     svc.commands
         .run(
             &Actor::Human,
@@ -207,14 +209,16 @@ async fn every_run_is_recorded_once_as_itself() {
         .unwrap();
     let nested = rows(
         svc,
-        "SELECT r.actor, a.command FROM extension_run r
-           JOIN command_audit a ON a.run_id = r.parent_run_id
-          WHERE r.contribution = 'oxplow:oxplow/collector?collector=acme/star' AND r.parent_run_id IS NOT NULL",
+        "SELECT r.actor_kind, p.contribution FROM contribution_run r JOIN contribution_run p ON p.run_id = r.parent_run_id
+          WHERE r.contribution = 'oxplow:oxplow/collector?collector=acme/star' AND r.actor_kind = 'human'",
     )
     .await;
     assert_eq!(
         nested,
-        vec![vec![json!("human"), json!(crate::collector_runner::SYNC)]]
+        vec![vec![
+            json!("human"),
+            json!("oxplow:oxplow/command?command=oxplow.collector.sync")
+        ]]
     );
 
     // A person runs the extension's command: the command's run, audited
@@ -225,8 +229,8 @@ async fn every_run_is_recorded_once_as_itself() {
         .unwrap();
     let command = rows(
         svc,
-        "SELECT r.actor, r.kind, r.outcome, a.command FROM extension_run r
-           JOIN command_audit a ON a.run_id = r.run_id
+        "SELECT r.actor_kind, r.kind, r.outcome, a.command FROM contribution_run r
+           JOIN command_run a ON a.run_id = r.run_id
           WHERE r.contribution = 'oxplow:oxplow/command?command=acme.note.write'",
     )
     .await;
@@ -289,7 +293,7 @@ async fn a_run_records_what_its_grant_decided() {
     .unwrap();
     let decided = rows(
         svc,
-        "SELECT decisions_json FROM extension_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/gh'",
+        "SELECT decisions_json FROM contribution_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/gh'",
     )
     .await;
     let decided: Value = serde_json::from_str(decided[0][0].as_str().unwrap()).unwrap();
@@ -319,7 +323,7 @@ async fn a_run_records_what_its_grant_decided() {
         .unwrap();
     let decided = rows(
         svc,
-        "SELECT decisions_json FROM extension_run WHERE contribution = 'oxplow:oxplow/command?command=acme.note.count'",
+        "SELECT decisions_json FROM contribution_run WHERE contribution = 'oxplow:oxplow/command?command=acme.note.count'",
     )
     .await;
     let decided: Value = serde_json::from_str(decided[0][0].as_str().unwrap()).unwrap();

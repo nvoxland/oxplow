@@ -26,10 +26,11 @@ interface FormProps {
 
 /** A shown view (a page file on `oxplow:temp`) becomes a knowledge page
  *  or an extension page: its YAML is read from the file first. */
-export function SaveTempViewForm({ file, streamId, ...form }: FormProps & {
+export function SaveTempViewForm({ file, streamId, transform, ...form }: FormProps & {
   /** The view's file name on `oxplow:temp` (`<id>.yaml`). */
   file: string;
   streamId: string | null;
+  transform?(yaml: string): string;
 }) {
   const read = useContext(SaveViewSourceContext) ?? readTemp;
   const [source, setSource] = useState<{ yaml: string } | { error: string } | null>(null);
@@ -41,8 +42,14 @@ export function SaveTempViewForm({ file, streamId, ...form }: FormProps & {
     );
     return () => { live = false; };
   }, [read, streamId, file]);
-  if (source && "yaml" in source) return <SaveViewForm {...form} specYaml={source.yaml} />;
-  const failed = source && "error" in source ? source.error : null;
+  let failed = source && "error" in source ? source.error : null;
+  if (source && "yaml" in source) {
+    try {
+      return <SaveViewForm {...form} specYaml={transform?.(source.yaml) ?? source.yaml} />;
+    } catch (error) {
+      failed = error instanceof Error ? error.message : String(error);
+    }
+  }
   return (
     <div className="ox-form" data-testid="save-view-form">
       {failed ? <div className="ox-error" role="alert">{failed}</div> : <Loading what="the view" />}

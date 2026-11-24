@@ -1,15 +1,19 @@
 /**
  * What a link in markdown does, the same in the viewer and the editor:
  * a click opens it (Cmd/Ctrl-click or middle-click in a new tab), and a
- * right-click offers Open, Open in new tab and a Copy of what it names.
+ * right-click offers Open, Open in new tab, Open In ▸ (the browser, the
+ * file manager, a terminal: `openIn.ts`) and a Copy of what it names.
  * A page link opens through the page's navigation (`openRef`); a web
  * link opens in the app's web page when the allowlist takes it, else in
- * the browser.
+ * the system browser.
  */
 import { classifyExternalUrl } from "../../external-url-allowlist.js";
 import type { MenuItem } from "../../menu.js";
 import type { NavigateOptions } from "../../tabs/PageNavigationContext.js";
 import { externalUrlRef } from "../../tabs/pageRefs.js";
+import { openInBrowser, openInForRef, openInForWorktreePath, withLinkOffers } from "../../openIn.js";
+import { WORKING } from "../../revision.js";
+import { fileUri, parseUri } from "../../uri/uri.js";
 import { recordLabel, recordOf } from "../../recordStores.js";
 import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
 
@@ -24,7 +28,7 @@ export function openExternal(href: string, open: OpenRef, newTab = true): void {
     open(externalUrlRef(verdict.url).id, { newTab });
     return;
   }
-  window.open(href, "_blank", "noopener,noreferrer");
+  openInBrowser(href);
 }
 
 /** Follow `href` as a click does. False when it isn't a link to follow
@@ -58,10 +62,9 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
   const parsed = parseMarkdownLink(href, base);
   if (parsed.kind === "external") {
     const items: MenuItem[] = [];
-    if (open && classifyExternalUrl(href).ok) {
-      items.push({ id: "open-in-app", label: "Open in app", enabled: true, run: () => openExternal(href, open) });
-    }
-    items.push({ id: "open-ext", label: "Open in browser", enabled: true, run: () => void window.open(href, "_blank", "noopener,noreferrer") });
+    const elsewhere = /^https?:\/\//i.test(href) ? openInForRef(href) : null;
+    if (elsewhere) items.push(elsewhere);
+    else items.push({ id: "open-ext", label: "Open in browser", enabled: true, run: () => openInBrowser(href) });
     items.push(copy("copy", "Copy link", href));
     return items;
   }
@@ -75,9 +78,16 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
       : [];
   switch (parsed.kind) {
     case "file":
-    case "directory":
+    case "directory": {
+      // Only the working copy on the local filesystem is on disk: a URI
+      // href says so itself (`localTarget`), a relative one by what it
+      // resolved to.
+      const onDisk = parsed.kind === "file" && (parsed.version ?? WORKING) === WORKING && !parsed.filesystem;
+      const elsewhere = parseUri(href) ? openInForRef(href) : onDisk ? openInForWorktreePath("file", parsed.path) : null;
+      if (elsewhere) items.push(elsewhere);
       items.push(copy("copy-path", "Copy path", parsed.path));
       break;
+    }
     case "commit":
       items.push(copy("copy-sha", "Copy SHA", parsed.sha));
       break;
@@ -87,4 +97,20 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
       break;
   }
   return items;
+}
+
+/** The ref the daemon is asked about for a link to `href` (its commands,
+ *  `withLinkOffers`): a web URL, an oxplow URI, or the file a relative link
+ *  resolves to. Null for anything else. */
+export function linkOffersRef(href: string, base: string | null = null): string | null {
+  if (/^https?:\/\//i.test(href)) return href;
+  if (parseUri(href)) return href;
+  const parsed = parseMarkdownLink(href, base);
+  return parsed.kind === "file" ? fileUri(parsed.path) : null;
+}
+
+/** A link's right-click menu as it opens: `linkMenu`, with the extensions'
+ *  commands about the link (`withLinkOffers`). */
+export function linkMenuAtOpen(href: string, open: OpenRef, base: string | null = null): Promise<MenuItem[]> {
+  return withLinkOffers(linkMenu(href, open, base), linkOffersRef(href, base));
 }

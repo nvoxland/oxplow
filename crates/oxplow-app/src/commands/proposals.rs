@@ -11,8 +11,8 @@ impl CommandBus {
     /// (`Actor::proposes`) is kept for a person instead: dry-run (a `Tx` handler, confirmed, in a rolled-back
     /// transaction — what it would have done; an `External` one never
     /// runs), then the proposal and `command.proposed` in one transaction,
-    /// and `Proposed`. A dry run that fails is the run's failure, audited
-    /// like one. No audit row for a proposal: nothing ran.
+    /// and `Proposed`. A dry run that fails is the run's failure, recorded
+    /// like one. No command run row for a proposal: nothing ran.
     pub(super) async fn unconfirmed(
         &self,
         run_ctx: &RunContext,
@@ -49,7 +49,7 @@ impl CommandBus {
         // Proposals retain replayable inputs in a published read dataset.
         // An operation's private fields must never enter that storage. A
         // direct confirmed human invocation can use the ordinary redacted
-        // audit path; unattended callers cannot retain a payload for approval.
+        // command run path; unattended callers cannot retain a payload for approval.
         if private_configuration
             || spec
                 .unrecorded
@@ -59,7 +59,7 @@ impl CommandBus {
             let error = CommandError::Denied {
                 reason: "private command input requires a direct confirmed invocation".into(),
             };
-            self.audit_only(
+            self.record_unapplied(
                 run_ctx,
                 spec,
                 &input,
@@ -78,8 +78,14 @@ impl CommandBus {
                             CommandError::Denied { .. } => Outcome::Denied,
                             _ => Outcome::Error,
                         };
-                        self.audit_only(run_ctx, spec, &input, recorded, Some(err.to_string()))
-                            .await;
+                        self.record_unapplied(
+                            run_ctx,
+                            spec,
+                            &input,
+                            recorded,
+                            Some(err.to_string()),
+                        )
+                        .await;
                         return err;
                     }
                 }
@@ -94,7 +100,7 @@ impl CommandBus {
             let error = CommandError::Denied {
                 reason: "private configuration requires a direct confirmed invocation".into(),
             };
-            self.audit_only(
+            self.record_unapplied(
                 run_ctx,
                 spec,
                 &input,
@@ -120,7 +126,7 @@ impl CommandBus {
             preview.destructive,
         );
         let effect = match &origin {
-            RunOrigin::Effect(key, _) => Some(key.clone()),
+            RunOrigin::Effect(key, _, run) => Some((key.clone(), run.clone())),
             _ => None,
         };
         let stored = self
@@ -143,18 +149,20 @@ impl CommandBus {
                 .with_subject([proposal_uri(inserted.id), command_uri(&row.command)]);
                 append_tx(tx, &vocabulary.current(), &proposed)?;
                 // An effect's reaction ends here: a person decides the rest.
-                if let Some(key) = &effect {
+                if let Some((key, run)) = &effect {
                     crate::effects::finished_tx(
                         tx,
                         &vocabulary.current(),
                         key,
                         &oxplow_db::effect_run_store::Finished {
-                            state: oxplow_db::effect_run_store::RunState::Proposed,
+                            outcome: oxplow_domain::run::Outcome::Skipped,
                             reason: None,
-                            audit_id: None,
+                            command_run_id: None,
                             proposal_id: Some(inserted.id),
                         },
+                        Some(run),
                         Some(proposed.id.clone()),
+                        false,
                     )?;
                 }
                 Ok((inserted.id, supersedes))
@@ -221,7 +229,7 @@ impl CommandBus {
 
     /// A person approves proposal `id`: its command runs as them,
     /// confirmed, through the whole pipeline, and the proposal is marked
-    /// approved with the run's audit row (and `command.approved` logged) in
+    /// approved with the run's command run row (and `command.approved` logged) in
     /// the run's own transaction. A run that fails leaves it pending.
     /// Approving is a person's only.
     pub async fn approve(&self, actor: &Actor, id: i64) -> Result<CommandOutcome, CommandError> {
@@ -304,10 +312,10 @@ pub(super) fn log_approved_tx(
 ) -> Result<(), oxplow_domain::DomainError> {
     let approved = Envelope::typed::<CommandApproved>(
         actor.source(),
-        &CommandApprovedV2 {
+        &CommandApprovedV3 {
             proposal: id,
             command: spec.id.clone(),
-            audit_id: recorded.audit_id,
+            command_run_id: recorded.command_run_id,
         },
     )
     .with_subject([proposal_uri(id), command_uri(&spec.id)])
@@ -399,10 +407,10 @@ mod secret_tests {
             .await
             .unwrap();
         assert!(proposals.is_empty());
-        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+        let command_runs = oxplow_db::SqliteCommandRunStore::new(fx.svc.db.clone())
             .list_recent(100)
             .await
             .unwrap();
-        assert!(!format!("{audits:?}").contains("rehearsal-secret-marker"));
+        assert!(!format!("{command_runs:?}").contains("rehearsal-secret-marker"));
     }
 }

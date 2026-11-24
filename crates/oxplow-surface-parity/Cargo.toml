@@ -24,4 +24,4 @@ tokio = { workspace = true }
 tauri-specta = { workspace = true }
 
 [dependencies]
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }

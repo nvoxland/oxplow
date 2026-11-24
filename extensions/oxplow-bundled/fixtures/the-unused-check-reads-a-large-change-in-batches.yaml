@@ -1,6 +1,7 @@
-# The unused check reads a large change's diff in batches: a change of more
+# The unused check reads a large change's diff in rounds: a change of more
 # files than one `change_diff` call returns (here 211) still gets its signal,
-# not a failed check.
+# not a failed check. The call names the files past its limit (`rest`) and
+# the script asks again for those.
 requires: [oxplow-rust]
 # (The symbols step takes a placeholder snapshot; the one with the text comes after it.)
 given:

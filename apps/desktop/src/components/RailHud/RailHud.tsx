@@ -1,32 +1,24 @@
 import { iconFor } from "../../icons.js";
 import type { ReactNode } from "react";
+import { Fragment } from "react";
 import { useAppPreference } from "../../prefs/remembered.js";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Minimize2 } from "lucide-react";
+import { Layers, MessageSquare, Minimize2 } from "lucide-react";
 import type { TabRef } from "../../tabs/tabState.js";
-import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
-import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
-import {
-  extensionPanelId,
-  panelOpenRef,
-  hidePanel,
-  layoutSync,
-  movePanelBeside,
-  resolveLayout,
-  revealPanel,
-  setCollapsed,
-  showPanel,
-  type LayoutEdit,
-  type LayoutSync,
-} from "../Panels/panelLayout.js";
+import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
+import { extensionPanelId, panelOpenRef } from "../Panels/panelLayout.js";
+import { usePanelLayout } from "../Panels/PanelLayoutContext.js";
+import type { PanelGroup } from "../Panels/panelLayout.js";
+import { visibilityScopeLabel } from "../../visibilityScope.js";
+import { railPanelItems } from "../../menuBar.js";
+import { useDragAutoScroll } from "./dragAutoScroll.js";
 import { type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
-import { recordOpError } from "../../opErrors.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 import { OpenPageLink } from "../../kit/OpenPageLink.js";
 
@@ -59,6 +51,7 @@ interface RailSectionsValue {
     onDragEnd(): void;
   };
   dropZone(id: RailSectionId): {
+    onDragEnter(e: React.DragEvent): void;
     onDragOver(e: React.DragEvent): void;
     onDragLeave(): void;
     onDrop(e: React.DragEvent): void;
@@ -66,62 +59,67 @@ interface RailSectionsValue {
   /** Which edge of `id` the insertion line should draw on (before/after),
    *  or null when this section isn't the current drop target. */
   dropSide(id: RailSectionId): "before" | "after" | null;
-  /** Take the panel out of the nav (the Add Panel menu brings it back). */
+  /** Take the panel out of the nav (View ▸ Sidebar Panels brings it back). */
   hide(id: RailSectionId): void;
+  /** The group a shown panel is in: this thread's, this stream's, the project's. */
+  groupOf(id: RailSectionId): PanelGroup | undefined;
+  /** The groups the viewer has. */
+  groups: PanelGroup[];
+  /** Move the panel to the end of `group` (Show in). */
+  moveToGroup(id: RailSectionId, group: PanelGroup): void;
 }
 
 const RailSectionsContext = createContext<RailSectionsValue | null>(null);
 
-/** Owns the person's panel layout (`panel_layout`, through
- *  `get_panel_layout` / `set_panel_layout`: order, hidden, collapsed) and
- *  the in-flight drag state, for the panels `available` now. Exposes what
+/** The in-flight drag state over the viewer's layout (`usePanelLayout`,
+ *  the person's order, groups and collapsed panels). Exposes what
  *  `RailSection` needs through context. */
-function useRailSections(available: string[]): {
+function useRailSections(): {
   value: RailSectionsValue;
+  /** Shown panels per group, top to bottom. */
+  groups: Record<PanelGroup, RailSectionId[]>;
+  /** The viewer's groups, top to bottom. */
+  groupList: PanelGroup[];
+  /** A panel is being dragged: the groups' dividers and the Remove zone show. */
+  dragging: boolean;
+  /** A group's divider, or the Remove zone (`null`), as a drop target. */
+  groupDrop(group: PanelGroup | null): {
+    onDragEnter(e: React.DragEvent): void;
+    onDragOver(e: React.DragEvent): void;
+    onDragLeave(): void;
+    onDrop(e: React.DragEvent): void;
+  };
+  /** The divider or zone a drag is over now (`"remove"` for the zone). */
+  groupDropTarget: PanelGroup | "remove" | null;
   order: RailSectionId[];
   hidden: RailSectionId[];
   /** The stored layout has arrived: what shows is the person's layout. */
   loaded: boolean;
   show(id: RailSectionId): void;
-  reveal(id: RailSectionId): void;
 } {
-  const [stored, setStored] = useState<PanelPlacement[]>([]);
+  const panels = usePanelLayout();
+  const { layout } = panels;
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
-  // Kept in step with `panel_layout` by `layoutSync`: an
-  // edit before the load is replayed on it, a failed load saves nothing,
-  // saves land in order.
-  const [layoutLoaded, setLayoutLoaded] = useState(false);
-  const sync = useRef<LayoutSync | null>(null);
-  useEffect(() => {
-    const s = layoutSync({
-      load: getPanelLayout,
-      save: setPanelLayout,
-      show: setStored,
-      ready: () => setLayoutLoaded(true),
-      failed: (label, e) => recordOpError({ label, message: e instanceof Error ? e.message : String(e) }),
-    });
-    sync.current = s;
-    return () => {
-      s.close();
-      sync.current = null;
-    };
+  const [groupDropTarget, setGroupDropTarget] = useState<PanelGroup | "remove" | null>(null);
+  // The dividers and the Remove zone come in a tick after the drag starts:
+  // WebKit (macOS's window) cancels a drag whose page changes during
+  // `dragstart`, and the press becomes a text selection.
+  const [showGroups, setShowGroups] = useState(false);
+  const groupsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endDrag = useCallback(() => {
+    if (groupsTimer.current !== null) clearTimeout(groupsTimer.current);
+    groupsTimer.current = null;
+    setDraggingId(null);
+    setDropTarget(null);
+    setGroupDropTarget(null);
+    setShowGroups(false);
   }, []);
-  const layout = useMemo(() => resolveLayout(available, stored), [available, stored]);
-
-  const edit = useCallback((change: LayoutEdit) => sync.current?.edit(change), []);
+  useEffect(() => () => {
+    if (groupsTimer.current !== null) clearTimeout(groupsTimer.current);
+  }, []);
 
   const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
-  const collapse = useCallback(
-    (id: RailSectionId, collapsed: boolean) => edit((base) => setCollapsed(available, base, id, collapsed)),
-    [available, edit],
-  );
-  const hide = useCallback((id: RailSectionId) => edit((base) => hidePanel(available, base, id)), [available, edit]);
-  const show = useCallback((id: RailSectionId) => edit((base) => showPanel(available, base, id)), [available, edit]);
-  const reveal = useCallback(
-    (id: RailSectionId) => edit((base) => revealPanel(available, base, id)),
-    [available, edit],
-  );
 
   const dragHandle = useCallback((id: RailSectionId) => ({
     draggable: true as const,
@@ -129,18 +127,49 @@ function useRailSections(available: string[]): {
       e.dataTransfer.setData(RAIL_SECTION_DRAG_MIME, id);
       e.dataTransfer.effectAllowed = "move";
       setDraggingId(id);
+      if (groupsTimer.current !== null) clearTimeout(groupsTimer.current);
+      groupsTimer.current = setTimeout(() => {
+        groupsTimer.current = null;
+        setShowGroups(true);
+      }, 0);
     },
-    onDragEnd() {
-      setDraggingId(null);
-      setDropTarget(null);
-    },
-  }), []);
+    onDragEnd: endDrag,
+  }), [endDrag]);
 
-  const dropZone = useCallback((id: RailSectionId) => ({
-    onDragOver(e: React.DragEvent) {
-      // Only react to our own section drag. Accept it everywhere (even
-      // over the dragged section itself) so the insertion line tracks the
-      // cursor and the cursor resolves to "move" (not the "+" copy icon).
+  const groupDrop = useCallback((group: PanelGroup | null) => {
+    // Safari accepts a drop only where `dragenter` was cancelled too.
+    const accept = (e: React.DragEvent) => {
+      if (!draggingId) return;
+      if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const target = group ?? "remove";
+      if (groupDropTarget !== target) setGroupDropTarget(target);
+      if (dropTarget) setDropTarget(null);
+    };
+    return {
+    onDragEnter: accept,
+    onDragOver: accept,
+    onDragLeave() {
+      if (groupDropTarget === (group ?? "remove")) setGroupDropTarget(null);
+    },
+    onDrop(e: React.DragEvent) {
+      e.preventDefault();
+      const sourceId = e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId;
+      endDrag();
+      if (!sourceId) return;
+      if (group) panels.moveToGroup(sourceId, group);
+      else panels.hide(sourceId);
+    },
+    };
+  }, [draggingId, dropTarget, groupDropTarget, panels, endDrag]);
+
+  const dropZone = useCallback((id: RailSectionId) => {
+    // Only react to our own section drag. Accept it everywhere (even over
+    // the dragged section itself) so the insertion line tracks the cursor
+    // and the cursor resolves to "move" (not the "+" copy icon). Safari
+    // accepts a drop only where `dragenter` was cancelled too.
+    const accept = (e: React.DragEvent) => {
       if (!draggingId) return;
       if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
       e.preventDefault();
@@ -148,21 +177,25 @@ function useRailSections(available: string[]): {
       const rect = e.currentTarget.getBoundingClientRect();
       const side: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
       if (dropTarget?.id !== id || dropTarget.side !== side) setDropTarget({ id, side });
-    },
+      if (groupDropTarget) setGroupDropTarget(null);
+    };
+    return {
+    onDragEnter: accept,
+    onDragOver: accept,
     onDragLeave() {
       if (dropTarget?.id === id) setDropTarget(null);
     },
     onDrop(e: React.DragEvent) {
       e.preventDefault();
       const sourceId = e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId;
-      setDraggingId(null);
-      setDropTarget(null);
+      endDrag();
       if (!sourceId || sourceId === id) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const side = e.clientY >= rect.top + rect.height / 2 ? "after" : "before";
-      edit((base) => movePanelBeside(available, base, sourceId, id, side));
+      panels.moveBeside(sourceId, id, side);
     },
-  }), [draggingId, dropTarget, available, edit]);
+    };
+  }, [draggingId, dropTarget, groupDropTarget, panels, endDrag]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
@@ -171,10 +204,31 @@ function useRailSections(available: string[]): {
   );
 
   const value = useMemo<RailSectionsValue>(
-    () => ({ isExpanded, setCollapsed: collapse, dragHandle, dropZone, dropSide, hide }),
-    [isExpanded, collapse, dragHandle, dropZone, dropSide, hide],
+    () => ({
+      isExpanded,
+      setCollapsed: panels.setCollapsed,
+      dragHandle,
+      dropZone,
+      dropSide,
+      hide: panels.hide,
+      groupOf: (id) => layout.groupOf.get(id),
+      groups: panels.groups,
+      moveToGroup: panels.moveToGroup,
+    }),
+    [isExpanded, panels, layout, dragHandle, dropZone, dropSide],
   );
-  return { value, order: layout.order, hidden: layout.hidden, loaded: layoutLoaded, show, reveal };
+  return {
+    value,
+    groups: layout.groups,
+    groupList: panels.groups,
+    dragging: draggingId !== null && showGroups,
+    groupDrop,
+    groupDropTarget,
+    order: layout.order,
+    hidden: layout.hidden,
+    loaded: panels.loaded,
+    show: panels.show,
+  };
 }
 
 /** Uniform section: drag handle + chevron + title (+ optional count and
@@ -226,6 +280,8 @@ function RailSection({
   }, [filled]);
   const headerMenu = useContextMenu();
   const side = ctx ? ctx.dropSide(id) : null;
+  const group = ctx?.groupOf(id);
+  const shownIn = group === "thread" || group === "stream" ? group : null;
   const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-primary)";
   return (
     // Wrapper holds the inter-pane margin + drop-zone and (unlike the card)
@@ -293,7 +349,22 @@ function RailSection({
         }}
         onContextMenu={(e) =>
           ctx
-            ? headerMenu.open(e, [{ id: "hide-panel", label: "Hide Panel", enabled: true, run: () => ctx.hide(id) }])
+            ? headerMenu.open(e, [
+                {
+                  id: "panel.show-in",
+                  label: "Show in",
+                  enabled: true,
+                  submenuHeader: "Where this panel shows: this thread, every thread of this stream, or every thread.",
+                  submenu: ctx.groups.map((group) => ({
+                    id: `panel.show-in.${group}`,
+                    label: visibilityScopeLabel(group),
+                    enabled: true,
+                    checked: ctx.groupOf(id) === group,
+                    run: () => ctx.moveToGroup(id, group),
+                  })),
+                },
+                { id: "hide-panel", label: "Hide Panel", enabled: true, run: () => ctx.hide(id) },
+              ])
             : undefined
         }
       >
@@ -344,6 +415,15 @@ function RailSection({
             {filled ? <Minimize2 size={12} aria-hidden /> : expanded ? "▾" : "▸"}
           </span>
           <span>{title}</span>
+          {shownIn ? (
+            <span
+              data-testid={`rail-section-shown-in-${id}`}
+              title={shownIn === "thread" ? "Only in this thread" : "Only in this stream"}
+              style={{ display: "inline-flex", color: "var(--text-muted)" }}
+            >
+              {shownIn === "thread" ? <MessageSquare size={11} aria-hidden /> : <Layers size={11} aria-hidden />}
+            </span>
+          ) : null}
           {count != null && count > 0 ? (
             <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500 }}>{count}</span>
           ) : null}
@@ -385,10 +465,12 @@ export function RailHud({
   const { panels: allPanels, runs: panelRuns } = usePanelRuns();
   // A dock panel lives in the dock, not the rail.
   const extPanels = useMemo(() => allPanels.filter((p) => !p.dock), [allPanels]);
-  const available = useMemo(() => extPanels.map(extensionPanelId), [extPanels]);
-  const sections = useRailSections(available);
+  const sections = useRailSections();
+  const panelLayout = usePanelLayout();
+  // A drag near the rail's top or bottom scrolls it, to reach what's out of view.
+  const panelsBox = useRef<HTMLDivElement | null>(null);
+  useDragAutoScroll(panelsBox, sections.dragging);
   const addMenu = useContextMenu();
-  const titleOf = (id: string) => extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
   // The panel grown to the whole rail ("+N more"), if any: the window's
   // state only, never the person's layout. One at a time; gone with it.
   const [filledWanted, setFilled] = useState<RailSectionId | null>(null);
@@ -441,29 +523,94 @@ export function RailHud({
         fill(null);
       }}
     >
-      <div style={{ flex: 1, overflow: filled ? "hidden" : "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div
+        ref={panelsBox}
+        data-testid="rail-panels"
+        // A right-click on the rail's own space (not a panel) lists every
+        // panel, checked when shown: View ▸ Sidebar Panels's list.
+        onContextMenu={(e) => {
+          if (e.target !== e.currentTarget || filled !== null) return;
+          addMenu.open(e, railPanelItems(panelLayout.entries, panelLayout.toggle));
+        }}
+        style={{ flex: 1, overflow: filled ? "hidden" : "auto", display: "flex", flexDirection: "column", minHeight: 0 }}
+      >
         <RailSectionsContext.Provider value={sections.value}>
-          {sections.order.map((id) => renderSection(id))}
+          {sections.groupList.map((group) => (
+            <Fragment key={group}>
+              {sections.dragging ? (
+                <GroupDivider
+                  group={group}
+                  over={sections.groupDropTarget === group}
+                  {...sections.groupDrop(group)}
+                />
+              ) : null}
+              {sections.groups[group].map((id) => renderSection(id))}
+            </Fragment>
+          ))}
+          {sections.dragging ? (
+            <div
+              data-testid="rail-remove-zone"
+              {...sections.groupDrop(null)}
+              style={{
+                margin: "2px 6px 6px",
+                padding: "10px 6px",
+                textAlign: "center",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                borderRadius: 6,
+                border: `1px dashed ${sections.groupDropTarget === "remove" ? "var(--accent)" : "var(--border-subtle)"}`,
+                boxShadow: sections.groupDropTarget === "remove" ? "0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent)" : undefined,
+              }}
+            >
+              Remove from the rail
+            </div>
+          ) : null}
         </RailSectionsContext.Provider>
-        {sections.hidden.length > 0 && filled === null ? (
-          <button
-            type="button"
-            data-testid="rail-add-panel"
-            onClick={(e) =>
-              addMenu.open(
-                e,
-                sections.hidden.map((id) => ({ id: `show-${id}`, label: titleOf(id), enabled: true, run: () => sections.show(id) })),
-              )
-            }
-            style={{ margin: "0 6px 6px", background: "none", border: "1px dashed var(--border-subtle)", borderRadius: 6, padding: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
-          >
-            + Add Panel
-          </button>
-        ) : null}
         {addMenu.menu}
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
+  );
+}
+
+/** A group's divider while a panel is dragged: its name, and a drop
+ *  target that moves the panel to the group's end. */
+function GroupDivider({
+  group,
+  over,
+  ...drop
+}: {
+  group: PanelGroup;
+  over: boolean;
+  onDragEnter(e: React.DragEvent): void;
+  onDragOver(e: React.DragEvent): void;
+  onDragLeave(): void;
+  onDrop(e: React.DragEvent): void;
+}) {
+  return (
+    <div
+      data-testid={`rail-group-divider-${group}`}
+      {...drop}
+      style={{
+        margin: "0 6px 6px",
+        padding: "4px 6px",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 10,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+        color: over ? "var(--accent-fg)" : "var(--text-muted)",
+        borderRadius: 6,
+        border: `1px dashed ${over ? "var(--accent)" : "transparent"}`,
+        boxShadow: over ? "0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent)" : undefined,
+      }}
+    >
+      <span style={{ flex: 1, height: 1, background: "var(--border-subtle)" }} />
+      {visibilityScopeLabel(group)}
+      <span style={{ flex: 1, height: 1, background: "var(--border-subtle)" }} />
+    </div>
   );
 }
 

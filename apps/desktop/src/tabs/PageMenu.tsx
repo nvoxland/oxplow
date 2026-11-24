@@ -17,6 +17,7 @@ import type { PageAction } from "../kit/actions.js";
 import type { MenuPosition } from "../menu.js";
 import { pageMenuItems, type OpenWithProps, type PagePanel } from "./pageMenuItems.js";
 import type { TabRef } from "./tabState.js";
+import { mergeOpenInOffers, openInForRef } from "../openIn.js";
 
 export interface PageMenuProps {
   actions?: readonly PageAction[];
@@ -48,14 +49,19 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
   const button = useRef<HTMLButtonElement | null>(null);
   const boxRef = usePopoverDismiss<HTMLDivElement>(panel !== null, () => setPanel(null));
 
+  // Open In ▸ for the page's file, directory or web URL, with the
+  // extensions' commands in the Open In group (`openIn.ts`).
+  const own = ask ? openInForRef(ask.ref) : null;
+  const opened = ask ? mergeOpenInOffers(own ? [own] : [], offers) : { items: [], rest: offers };
   const items = pageMenuItems({
     actions,
     context: ask
       ? { add: () => void addToContext({ uri: ask.ref, label }) }
       : undefined,
-    commands: ask ? offers : undefined,
+    commands: ask ? opened.rest : undefined,
     openWith,
     seeAlso,
+    openIn: opened.items[0] ?? null,
     backlinks: backlinks?.count,
     outbound: outbound?.count,
     pin: pin ? { disabledReason: pin.disabledReason } : undefined,

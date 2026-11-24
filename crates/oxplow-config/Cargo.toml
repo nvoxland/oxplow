@@ -19,7 +19,7 @@ tracing = { workspace = true }
 dirs = "7"
 fs2 = "0.4"
 jsonschema = { version = "0.58", default-features = false }
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

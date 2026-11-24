@@ -15,6 +15,7 @@ import { LspMirror } from "../editor/lspMirror.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
 import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
+import { openInForPath } from "../openIn.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
 import { editorContextEntry } from "../agent-context-ref.js";
@@ -491,6 +492,11 @@ export function EditorPane({
       enabled: !!filePath,
       run: () => (filePath ? navigator.clipboard.writeText(filePath) : undefined),
     },
+    // The file outside oxplow: the file manager, its default app, a
+    // terminal in its folder (`openIn.ts`).
+    ...[filePath ? openInForPath("file", `${stream.worktree_path.replace(/\/+$/, "")}/${filePath}`) : null].filter(
+      (item): item is MenuItem => item !== null,
+    ),
     {
       id: "editor.annotate-blame",
       label: blame && blame.path === filePath ? "Hide Blame" : "Annotate with Blame",

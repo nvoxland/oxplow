@@ -20,8 +20,7 @@
 ///                          appended to the tool's result, which the model
 ///                          reads)
 ///   event session.idle  -> Stop         (closes the turn; never refused;
-///                          carries the agent's last message, so a reply
-///                          ending in a question sets waiting, and its
+///                          carries the agent's last message and its
 ///                          `model` / `variant` / `tokens`)
 ///   event session.compacted
 ///                       -> PostCompact  (the session's context was

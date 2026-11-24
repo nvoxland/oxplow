@@ -1,0 +1,55 @@
+title: Job Run Output
+description: The streamed model text, tool calls and results, and token counts from each attempt of an extension job.
+icon: activity
+for: oxplow/job_run
+default: true
+params:
+- name: uri
+  label: Job run
+see_also:
+- { page: oxplow/job-runs }
+loaders:
+  job_details:
+    sql: |
+      SELECT id, job, intent_key, state, queued_at, attempt,
+             CASE WHEN run_id IS NOT NULL THEN uri('oxplow/contribution_run', 'id', run_id) END AS run_uri,
+             CASE WHEN cancellation_requested AND state = 'running' THEN 'Stopping'
+                  ELSE state END AS status
+      FROM v_job_run
+      WHERE uri = :uri
+  job_run_output:
+    sql: |
+      SELECT attempt, seq, at, kind,
+             CASE kind
+               WHEN 'text' THEN text
+               WHEN 'tool_call' THEN json_extract(data, '$.name') || ' ' || (data -> '$.arguments')
+               WHEN 'tool_result' THEN COALESCE('Error: ' || json_extract(data, '$.error'), data -> '$.result')
+               WHEN 'usage' THEN printf('%d in, %d out', json_extract(data, '$.inputTokens'),
+                                        json_extract(data, '$.outputTokens'))
+             END AS content
+      FROM v_job_run_output
+      WHERE job_id IN (SELECT id FROM job_details)
+      ORDER BY attempt, seq
+view:
+  stack:
+  - id: job_details
+    title: Job
+    from: job_details
+    viz: detail
+    columns:
+    - { key: intent_key, label: About }
+    - { key: job, label: Job definition, link: { kind: page, from: job } }
+    - { key: status, label: State }
+    - { key: queued_at, label: Queued, format: datetime }
+    - { key: attempt, label: Latest attempt, when: run_uri, link: { kind: page, from: run_uri } }
+    empty: This job could not be found.
+  - id: job_run_output
+    title: Output
+    from: job_run_output
+    viz: table
+    columns:
+    - { key: attempt, label: Attempt }
+    - { key: at, label: At, format: datetime }
+    - { key: kind, label: Kind }
+    - { key: content, label: Content }
+    empty: No output has been recorded.

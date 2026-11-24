@@ -24,23 +24,13 @@ use serde::Deserialize;
 
 use crate::commands::{Handler, HandlerOutput, Invocation};
 
-/// Failures in a row that disable a contribution.
-pub const FAILURES_TO_DISABLE: i64 = 3;
+pub use store::{Verdict, FAILURES_TO_DISABLE};
 /// The command a person runs to enable a disabled contribution again.
 pub const ENABLE: &str = "oxplow.contribution.enable";
 /// The command a person runs to enable every disabled contribution again.
 pub const ENABLE_ALL: &str = "oxplow.contribution.enable_all";
 /// What a disable is logged as.
 const SOURCE: &str = "system:extensions";
-
-/// What a counted failure means.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Verdict {
-    /// Try again later: `failures` in a row so far.
-    Backoff { failures: i64 },
-    /// It's off now, for this reason (logged as `contribution.disabled@1`).
-    Disabled { reason: String },
-}
 
 /// The policy over `contribution_health`. A cheap handle: clone it.
 #[derive(Clone)]
@@ -92,27 +82,7 @@ impl ContributionHealth {
         let (key, error, vocabulary) = (key.clone(), error.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
-                let at = now();
-                let failures = store::failed_tx(tx, &key, &error, &at)?;
-                let already = store::get_tx(tx, &key)?.is_some_and(|r| r.state == "disabled");
-                if already {
-                    return Ok(Verdict::Disabled {
-                        reason: store::get_tx(tx, &key)?
-                            .and_then(|r| r.reason)
-                            .unwrap_or_default(),
-                    });
-                }
-                if failures < FAILURES_TO_DISABLE {
-                    return Ok(Verdict::Backoff { failures });
-                }
-                let reason = format!("{failures} failures in a row; the last: {error}");
-                store::disable_tx(tx, &key, &reason, &at)?;
-                oxplow_db::event_log_store::append_tx(
-                    tx,
-                    &vocabulary.current(),
-                    &disabled_event(&key, &reason),
-                )?;
-                Ok(Verdict::Disabled { reason })
+                store::count_failure_tx(tx, &vocabulary.current(), &key, &error, &now())
             })
             .await
     }

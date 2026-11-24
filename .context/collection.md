@@ -80,8 +80,8 @@ section for the column.
   ```
   **Listed in Settings → Data → Collectors** beside the extensions' (owner
   `project`, the project's own extension, as `v_collector_state` lists every
-  extension's): each with its trigger ("after a test run"), last run
-  (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
+  extension's): each with its trigger ("after a test run"), last run in
+  `v_collector`, why failures turned it off with **Enable Again**, and **Sync
   Now** (`oxplow.collector.sync { collector: "project/<id>" }`). A report collector with a
   bundled parser needs no permission (the loader doesn't look for an
   `oxplow:` entry file). An own extension's `exec` program needs
@@ -96,8 +96,10 @@ section for the column.
   are skipped and logged (`winning_collectors`). A disabled collector claims
   no path: its read says it is disabled and the next one reads the report.
   Every collector is readable as `v_collector` (trigger, `enabled`, `state`
-  `disabled`/`failing`/`never_run`/`ok`, last run and its error; a plain view over
-  `contribution`, `collector_run` and `contribution_health`).
+  `disabled`/`failing`/`never_run`/`ok`, `last_outcome`, last run time and
+  error). It joins the collector's checkpoint to its last finished
+  `contribution_run` and reads its health from `contribution_health`.
+  The collector's data page lists its recent runs from `v_collector_run`.
   `CollectionService` reads report collectors from the extension
   catalog (`with_extensions`, `report_collectors(root)`,
   `is_report_collector(owner, id)`).
@@ -195,13 +197,14 @@ hook + MCP wiring):
   the turn the tool call ran in, so its request. It then runs **every** report collector whose `on_run`
   is that kind of run and whose report the run wrote (its mtime inside the
   run's freshness window) — `read_run_reports` in `collection.rs`, each
-  through `read_report`: a disabled collector or a
-  report that isn't there runs nothing; anything that ran is the
-  collector's run (`collector_run` + `collector.synced`, through the
-  collector runner's `RunLog`, deduped per detected run) and counts toward
-  its health — the third failed parse in a row disables it (P7.C2,
-  `contribution_health`); an `exec` parser whose extension lacks
-  `process.run` doesn't load, so it doesn't run. A test run only reads `on_run: test`
+  through `read_report`. A parse records a `contribution_run` under the
+  declaring extension, a `collector_run` detail row, the collector's
+  checkpoint and a `collector.synced@2` event through `RunLog`, deduped
+  per detected run. It records elapsed wall time. CPU time, peak
+  memory and AI call count are NULL. The third failed parse in a row
+  disables the collector (`contribution_health`). Disabled collectors
+  and missing reports produce no parse. An `exec` parser whose
+  extension lacks `process.run` fails to load. A test run only reads `on_run: test`
   collectors, an analyzer run only `on_run: analysis` ones. What they
   parsed merges by kind (`RunReports`): JUnit reports into one
   suite/case tree embedded in the `test-run` payload (`suites`) — the
@@ -252,13 +255,13 @@ hook + MCP wiring):
   `oxplow.test.record_run` command and a by-hand `oxplow.collector.sync` of a report
   collector log them too, anchored
   to the thread (in the collector's transaction: they're `External`, so their
-  events aren't caused by the run's `command.executed`). The hook waits ≤2.5 s for the `collection` and
-  `advisories.post_tool` consumers (`EventPump::settle`; the advisories
-  consumer declares `after: [collection]`, so it sees a run only once
-  collection has recorded it — an advisory reading `v_request_observation`
-  judges the run's own coverage) and then returns the thread's
-  **undelivered** nudges; one that
-  lands later goes out on the thread's next tool call.
+  events aren't caused by the run's `command.executed`). Collection runs
+  in the background. A hook waits up to 2.5 seconds for an eligible
+  agent-facing advisory's consumer to checkpoint the current tool event.
+  Post-tool advisories follow collection by default, so they can read
+  the current run. An advisory with `after_collection: false` reads the
+  tool projection independently. A nudge that lands later can be delivered
+  by the next tool or prompt hook.
   **The legs are isolated and coverage retries:** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
   failure can't kill the legs after it), and the coverage leg retries once
@@ -415,35 +418,13 @@ stream) — `request_analysis` with its span and a signature of what it read
 `v_request_observation`) — by the `request_analysis` asset over the cube,
 `turn_file`, `metric_spec` and `agent_turn`. Due: of the requests with a turn running or ended in the last day, one with none stored or whose stored signature differs from its inputs now (a run reported late, a file captured after the turn closed, its end take landing); older requests keep what they have and are analyzed when asked for. A finished request's file gauges are read at its snapshots: a scan that names its snapshot is placed by it (the baseline at or before the start take, the current at or before the end take, whose scan lands after the last turn ended).
 
-## Report-less-run nudge (PostToolUse)
+## Missing report notices
 
-When the PostToolUse hook detects a test run but no configured report
-was refreshed by it (the agent ran `bun test` instead of the
-report-emitting `bun run test:collect`, for example), the `collection`
-reactor persists a one-shot nudge, which the thread's next tool-hook
-response delivers (`take_undelivered`; see Nudge persistence). The nudge names the project's
-own `fastCommand` when declared, else its `testing.command` — only one:
-which tests to run, and whether to pay for the full run with coverage,
-is the agent's call, and a nudge naming the full run as "the closing
-run" kept agents running it on every commit after nothing required it.
-It says the run wrote none of the reports the project's report
-collectors read when there are some but no `command`, or routes to
-`/oxplow:configure` when the project reads no reports at all. It never
-repeats the agent's command back (the agent just wrote it; heredoc edit
-scripts made that kilobytes).
-When a collector **should** have read a report but didn't count — its
-parse failed, or it is disabled — the nudge
-says that instead, collector by collector (`RunReports::unread`,
-`unread_reports_message`): running the tests again wouldn't help,
-and the reasons name what a person must do. A coverage collector that
-didn't count also leaves the lost coverage's `failed` capture.
-
-**Tool-agnostic design:** the hook never encodes tool→command knowledge.
-It keys only on (1) "was this a test run?" (substring match against
-the extensions' `run_patterns:` + `runPatterns`) and (2) "did a report collector read a
-report this run wrote?" (its mtime inside the run's freshness window). The tool-specific command it
-names comes entirely from the project's config, so it works for any
-test tool, current or future.
+A detected test run can complete without producing a report Oxplow reads.
+When report collection is configured, a missing or unreadable report may
+leave one notice per request in Alerts. The notice names the configured
+report command or the collector's reader error. Report collection and
+notice delivery are independent of the agent's testing decisions.
 
 **What isn't a test run.** The command is split into sub-commands on
 shell operators; a sub-command led by a read-only executable (`grep`,
@@ -481,23 +462,12 @@ general-purpose tool must not make.
 
 ## Nudge persistence
 
-PostToolUse nudges (report-less-run, and post-tool-use advisories) are
-**persisted**
-as well as returned to the agent, so a reviewer can see "what oxplow told the
-agent in this request" after the fact, and the persisted row is what delivers it
-(the next tool-hook response takes the thread's undelivered nudges). When `on_shell_run` decides to
-return a nudge, it also calls `persist_nudge` (best-effort — a write error is
-logged via `tracing::warn!` and swallowed, never failing the hook), which
-records a row in the `agent_nudge` table tagged with `kind`
-(`report-less-run` / `<namespace>/<advisory id>`), the message, and the trigger (the
-bash command); a view of `v_agent_nudge` re-runs on `DatasetsChanged`. Persistence sits **after** the
-durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
-stored. The store
-(`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the
-`v_agent_nudge` view and the oxplow-bundled nudges page are
-covered in [data-model.md](./data-model.md),
-[ipc-and-stores.md](./ipc-and-stores.md), and
-[agent-model.md](./agent-model.md) (Nudge persistence).
+Advisories and missing-report notices are persisted in `agent_nudge`.
+Agent-directed advisories can be delivered through a tool hook.
+Missing-report notices use the person audience and appear in Alerts.
+They are recorded after the durable dedup gate, so a repeated trigger
+does not add another notice.
+
 
 ## Adding a new observation kind
 

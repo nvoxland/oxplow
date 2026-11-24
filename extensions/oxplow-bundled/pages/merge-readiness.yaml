@@ -1,0 +1,69 @@
+title: Merge Readiness
+description: Local branches with commits the default branch lacks, and files changed on both sides.
+icon: git-branch
+category: Git
+keywords: merge review integration conflict overlap default branch
+needs: [vcs]
+params:
+- name: stream_id
+  label: Stream
+- name: show
+  type: choice
+  role: filter
+  label: Show
+  default: all
+  options: [{ value: all, label: All candidates }, { value: risk, label: Needs review }]
+see_also:
+- { page: oxplow/git-dashboard, params: { stream_id: { param: stream_id } } }
+- { page: oxplow/remote-branches, params: { stream_id: { param: stream_id } } }
+loaders:
+  row:
+    sql: |
+      SELECT branch FROM v_stream WHERE id = :stream_id AND archived_at IS NULL
+  readiness:
+    sql: |
+      SELECT d.head AS branch, d.base, d.ahead, d.behind,
+             CASE WHEN d.merge_base IS NULL THEN 'Unrelated histories'
+                  WHEN d.readiness = 'conflict' THEN 'Potential conflicts'
+                  ELSE 'No overlapping files' END AS status,
+             CASE WHEN d.merge_base IS NULL OR d.readiness = 'conflict' THEN 'warning' ELSE 'success' END AS tone,
+             json_array_length(d.overlapping_files) AS overlap_count,
+             (SELECT json_group_array(json_object('text', value))
+                FROM (SELECT value FROM json_each(d.overlapping_files) LIMIT 8)) AS overlaps,
+             uri('oxplow/page', 'page', 'oxplow/branch-commits', 'base', d.base,
+                 'head', d.head, 'stream_id', d.stream_id) AS comparison_uri,
+             CASE WHEN b.head_sha IS NOT NULL THEN 'Open in History Graph' END AS graph_label,
+             CASE WHEN b.head_sha IS NOT NULL THEN
+               uri_view(uri('oxplow/page', 'page', 'oxplow/git-history',
+                            'stream_id', d.stream_id, 'head_sha', b.head_sha),
+                        'reveal_sha', b.head_sha) END AS graph_uri,
+             d.readiness = 'clean' AND d.merge_base IS NOT NULL
+                 AND COALESCE(:branch = d.base, 0) AS can_merge
+      FROM v_branch_divergence d
+      LEFT JOIN v_branch b ON b.kind = 'local' AND b.name = d.head
+      WHERE d.ahead > 0 AND d.head <> d.base
+        AND (:show = 'all' OR d.merge_base IS NULL OR d.readiness = 'conflict')
+      ORDER BY d.merge_base IS NULL DESC, (d.readiness = 'conflict') DESC, d.head
+    params:
+      branch: { from: row.branch }
+view:
+  id: readiness
+  from: readiness
+  viz: sections
+  sections: { title: branch, id: branch, link: comparison_uri }
+  columns:
+  - { key: base, label: Merge into }
+  - { key: status, label: Readiness, tone: tone, format: badge }
+  - { key: ahead, label: Commits the default branch lacks, format: integer }
+  - { key: behind, label: Commits this branch lacks, format: integer }
+  - { key: overlap_count, label: Files changed on both sides, format: integer }
+  - { key: overlaps, label: Overlapping paths, format: items, when: overlap_count }
+  - { key: graph_label, label: History, when: graph_uri, link: { kind: page, from: graph_uri } }
+  empty: No branches need review with this filter.
+  actions:
+  - id: merge
+    label: Merge into the default branch
+    command: oxplow.vcs.merge
+    row: true
+    when: can_merge
+    input: { stream: 'str{{param.stream_id}}', rev: 'refs/heads/{{row.branch}}' }

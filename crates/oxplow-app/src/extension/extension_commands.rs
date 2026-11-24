@@ -77,8 +77,9 @@ pub struct ExtensionCommand {
     /// it needs active, as core's commands declare them
     /// (`oxplow_domain::capability::check_need`).
     pub needs: Vec<String>,
-    /// How a person meets it (label, group, …), as core's commands do.
-    pub ui: Option<oxplow_domain::CommandUi>,
+    /// How a person meets it (label, group, …), as core's commands do
+    /// (boxed, as theirs is).
+    pub ui: Option<Box<oxplow_domain::CommandUi>>,
     /// Stable: the commands of an extension that ships with oxplow are;
     /// any other's are experimental.
     pub stable: bool,
@@ -511,7 +512,10 @@ fn command_of(
     for need in &f.needs {
         oxplow_domain::capability::check_need(need).map_err(at_name)?;
     }
-    if let Some((field, message)) = f.ui.as_ref().and_then(|ui| ui.problem()) {
+    if let Some((field, message)) = f.ui.as_ref().and_then(|ui| {
+        ui.problem()
+            .or_else(|| crate::commands::ref_commands::link_filter_problem(ui))
+    }) {
         return Err(at_name(format!("`{field}`: {message}")));
     }
     let handlers = [f.entry.is_some(), f.scope.is_some(), f.provider.is_some()];
@@ -624,6 +628,21 @@ fn command_of(
             )
         }
     };
+    // `about_if` is a function of the command's own script.
+    if let Some(func) = f.ui.as_ref().and_then(|ui| ui.about_if.as_deref()) {
+        let CommandHandler::Script { entry, script } = &handler else {
+            return Err(at_name(format!(
+                "`/ui/about_if`: `{func}` is a function of the command's script: give it `entry:`"
+            )));
+        };
+        let defs = oxplow_script::runtime::top_level_defs(entry, script)
+            .map_err(|e| at_name(format!("entry `{entry}` {e}")))?;
+        if !defs.iter().any(|d| d == func) {
+            return Err(at_name(format!(
+                "`/ui/about_if`: entry `{entry}` defines no `{func}`"
+            )));
+        }
+    }
     if f.examples.len() > MAX_EXAMPLES {
         return Err(at_name(format!(
             "declares {} examples; a command has at most {MAX_EXAMPLES} examples",
@@ -680,7 +699,7 @@ fn command_of(
         access,
         job: f.job,
         needs: f.needs,
-        ui: f.ui,
+        ui: f.ui.map(Box::new),
         stable,
         examples: f
             .examples
@@ -1185,7 +1204,7 @@ fn run_script_fn(
 /// (`commands/compose.rs`) whose composer reads its `input` rows on the
 /// run's connection, runs the script and returns what it composes. The bus
 /// runs that in one transaction when every call can (each child's
-/// a job's tools, policy and confirmation; one audit row; the reversed children
+/// a job's tools, policy and confirmation; one command run record; the reversed children
 /// undo it), or as steps when one leaves it — a `task.*` call on
 /// another provider's item (P7 review). Pure, so the bus may
 /// compose more than once.
@@ -2898,11 +2917,11 @@ mod tests {
         let kept = out.inverse.clone().expect("the run is undoable");
         assert_eq!(kept.name, "oxplow.probe.rename");
         assert_eq!(kept.input, json!({ "thread": r, "title": "todo" }));
-        let audit = out.audit_id.unwrap();
+        let audit = out.command_run_id.unwrap();
         let row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(audit)
             .await
             .unwrap()
@@ -2919,13 +2938,13 @@ mod tests {
         let row = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .get(audit)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(
-            row.undone_by, undo.audit_id,
+            row.undone_by, undo.command_run_id,
             "the undo is its own audited run"
         );
     }
@@ -2951,8 +2970,8 @@ mod tests {
         let row = fx
             .svc
             .commands
-            .audit_store()
-            .get(out.audit_id.unwrap())
+            .command_run_store()
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -2960,7 +2979,7 @@ mod tests {
         let err = fx
             .svc
             .commands
-            .undo(&agent(&fx), out.audit_id.unwrap(), false)
+            .undo(&agent(&fx), out.command_run_id.unwrap(), false)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not undoable"), "{err}");
@@ -2987,7 +3006,7 @@ mod tests {
         let before = fx
             .svc
             .commands
-            .audit_store()
+            .command_run_store()
             .list_recent(50)
             .await
             .unwrap()
@@ -3010,7 +3029,13 @@ mod tests {
                 && said.contains("drop `inverse`"),
             "{said}"
         );
-        let after = fx.svc.commands.audit_store().list_recent(50).await.unwrap();
+        let after = fx
+            .svc
+            .commands
+            .command_run_store()
+            .list_recent(50)
+            .await
+            .unwrap();
         assert!(
             after
                 .iter()
@@ -3149,8 +3174,8 @@ def finish(x):
         let row = fx
             .svc
             .commands
-            .audit_store()
-            .get(out.audit_id.unwrap())
+            .command_run_store()
+            .get(out.command_run_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -3405,7 +3430,13 @@ def finish(x):
                 && said.contains("Nothing ran"),
             "{said}"
         );
-        let after = fx.svc.commands.audit_store().list_recent(50).await.unwrap();
+        let after = fx
+            .svc
+            .commands
+            .command_run_store()
+            .list_recent(50)
+            .await
+            .unwrap();
         assert!(
             after
                 .iter()
@@ -3687,12 +3718,18 @@ def finish(x):
         // The probe wrote "done" first; the rename after it read the title
         // before either ran.
         assert_eq!(title(&fx).await, format!("{before} (reviewed)"));
-        let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
+        let audits = fx
+            .svc
+            .commands
+            .command_run_store()
+            .list_recent(10)
+            .await
+            .unwrap();
         let ok: Vec<_> = audits
             .iter()
             .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
             .collect();
-        assert_eq!(ok.len(), 1, "one audit row for the run");
+        assert_eq!(ok.len(), 3, "one row for the composer and each child");
         assert_eq!(ok[0].command, "my_review.review.finish");
         assert_eq!(
             ok[0].scopes,
@@ -3785,12 +3822,12 @@ def finish(x):
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "uri": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": fx.thread.to_string() }),
+                json!({ "uri": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "visibility_scope": "project", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
             .unwrap();
-        assert_eq!(out.result["scope"], json!("project"));
+        assert_eq!(out.result["visibility_scope"], json!("project"));
 
         // A replacement that doesn't stage is rejected whole: the old
         // command stays as it was, and the problem is reported.
@@ -3908,7 +3945,7 @@ def finish(x):
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let out = run().await.unwrap();
         assert_eq!(out.result["result"]["n"], json!(1));
-        assert_eq!(out.audit_id, None, "a read isn't recorded");
+        assert_eq!(out.command_run_id, None, "a read isn't recorded");
 
         with_count(&format!(
             "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.thread.rename\", \"input\": {{\"thread\": \"{}\", \"title\": \"done\"}}}}]}}\n",

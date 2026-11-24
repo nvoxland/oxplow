@@ -126,6 +126,11 @@ impl ClientHost {
         op: &str,
         input: Value,
     ) -> Result<Value, CommandError> {
+        if scope == "agent_terminal.write" && !matches!(actor, Actor::Human) {
+            return Err(CommandError::Denied {
+                reason: "only a person can restart an agent terminal".into(),
+            });
+        }
         let refused = |message: String| CommandError::Unavailable {
             message,
             retry_after_ms: None,
@@ -292,6 +297,13 @@ pub struct QuickOpenInput {
     pub query: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RestartTerminalInput {
+    /// The agent session URI, or the session the window shows.
+    pub uri: Option<String>,
+}
+
 /// The window's operations, run through `host` when the daemon runs them.
 pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
     // An agent's in its own thread; a person's anywhere.
@@ -317,6 +329,12 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         "window.show",
         "quick_open",
         schema::<QuickOpenInput>(),
+    ));
+    ops.push(ClientHost::op(
+        host,
+        "agent_terminal.write",
+        "restart",
+        schema::<RestartTerminalInput>(),
     ));
     // Takes the person to a ref: open to an agent, which is how it shows them
     // what it found.
@@ -463,7 +481,7 @@ mod tests {
         assert_eq!(input, json!({ "uri": "oxplow:oxplow/file?path=src/a.rs" }));
         assert!(answered);
         assert_eq!(out.result, json!({ "open": true }));
-        assert_eq!(out.audit_id, None);
+        assert_eq!(out.command_run_id, None);
     }
 
     /// An agent runs `oxplow.window.navigate`: the window gets the ref (and
@@ -520,7 +538,7 @@ mod tests {
             out.result,
             json!({ "opened": "oxplow:oxplow/file?path=src/auth.rs", "stream": "str2" })
         );
-        assert_eq!(out.audit_id, None);
+        assert_eq!(out.command_run_id, None);
     }
 
     /// No window, one that doesn't host it, one that doesn't answer, an

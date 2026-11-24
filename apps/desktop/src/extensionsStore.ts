@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { listExtensions, onRemoteReconnect, subscribeOxplowEvents, type Extension } from "./api.js";
 import { recordOpError } from "./opErrors.js";
 import { extensionsChanged } from "./viz/rerun.js";
+import { rulesOf } from "./linkRules.js";
 
 /**
  * The loaded extensions — the main worktree's, the same in every stream —
@@ -64,4 +65,17 @@ function subscribe(listener: () => void): () => void {
  *  re-rendering when they reload. */
 export function useExtensions(): Extension[] | null {
   return useSyncExternalStore(subscribe, () => value);
+}
+
+/** The live extensions now, outside React (a terminal's link scan): what
+ *  the window's `useExtensions` readers keep loaded; null until then. */
+export function extensionsNow(): Extension[] | null {
+  return value;
+}
+
+/** The enabled extensions' `links:` rules, as a JSON key (`linkRules.ts`
+ *  `rulesOf`): a reader re-renders only when the rules change, not on
+ *  every reload of the list. */
+export function useLinkRulesKey(): string {
+  return useSyncExternalStore(subscribe, () => JSON.stringify(rulesOf(value)));
 }

@@ -221,3 +221,26 @@ test("only the shown tab is mounted; another mounts when first shown and stays m
   expect(view.queryByTestId("probe-b")).not.toBeNull();
   expect(view.queryByTestId("probe-c")).toBeNull();
 });
+
+test("a tab's entries built as its menu opens come after its own", () => {
+  let built = 0;
+  const tabs: CenterTab[] = [
+    {
+      id: "oxplow:oxplow/file?path=a.ts",
+      label: "a.ts",
+      closable: true,
+      render: () => null,
+      contextMenu: [{ id: "own", label: "Own", enabled: true }],
+      menuAtOpen: () => {
+        built += 1;
+        return [{ id: "open-in", label: "Open In", enabled: true, submenu: [{ id: "x", label: "Terminal", enabled: true }] }];
+      },
+    },
+  ];
+  const { getByTestId } = render(<CenterTabs tabs={tabs} activeId={tabs[0]!.id} onActivate={() => {}} onReorder={() => {}} />);
+  expect(built).toBe(0);
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=a.ts"), { clientX: 10, clientY: 10 });
+  expect(built).toBe(1);
+  expect(getByTestId("menu-item-own")).toBeTruthy();
+  expect(getByTestId("menu-item-open-in")).toBeTruthy();
+});

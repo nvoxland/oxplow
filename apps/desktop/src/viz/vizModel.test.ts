@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, rowOpenInRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -823,5 +823,26 @@ describe("actionOptionsOf", () => {
         { value: "done", label: "done", group: null },
       ],
     });
+  });
+});
+
+// A row's Open In ▸ is for the file, directory or web page it names: a
+// file or directory link, a web URL, or the working copy's side of a diff.
+describe("rowOpenInRef", () => {
+  const col = (key: string, link: object) => ({ key, link }) as unknown as VizConfig["columns"][number];
+  test("a file link names its file", () => {
+    const v = viz({ columns: [col("path", { kind: "file" })] });
+    expect(rowOpenInRef(v, ["path"], ["src/a.ts"])).toBe("oxplow:oxplow/file?path=src/a.ts");
+  });
+  test("a page link to a directory, or a web URL, names it", () => {
+    const v = viz({ columns: [col("target", { kind: "page" })] });
+    expect(rowOpenInRef(v, ["target"], ["oxplow:oxplow/dir?path=src"])).toBe("oxplow:oxplow/dir?path=src");
+    expect(rowOpenInRef(v, ["target"], ["https://example.com/x"])).toBe("https://example.com/x");
+    expect(rowOpenInRef(v, ["target"], ["oxplow:oxplow/task?provider=p&id=1"])).toBeNull();
+  });
+  test("a diff to the working copy names the file; one between commits names nothing", () => {
+    const v = viz({ columns: [col("path", { kind: "diff-at", base: "base", head: "head" })] });
+    expect(rowOpenInRef(v, ["path", "base", "head"], ["src/a.ts", "git:HEAD", "working"])).toBe("oxplow:oxplow/file?path=src/a.ts");
+    expect(rowOpenInRef(v, ["path", "base", "head"], ["src/a.ts", "git:abc", "git:def"])).toBeNull();
   });
 });

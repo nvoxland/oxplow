@@ -59,7 +59,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   );
   writeFileSync(
     join(dir, "effects", "note.star"),
-    'def transform(x):\n    p = x["event"]["payload"]\n    if "state" not in p.get("changed", []) or "state" in (p.get("before") or {}):\n        return {"skip": "not a filing"}\n    rows = scope("sql.read", {"sql": "SELECT \'str\' || id AS stream FROM v_stream LIMIT 1", "params": {}})\n    return {"commands": [{"name": "oxplow.bookmark.set", "input": {"uri": p["uri"], "page_kind": "oxplow/task", "label": "Noted late.", "scope": "stream", "stream": rows[0]["stream"]}}]}\n',
+    'def transform(x):\n    p = x["event"]["payload"]\n    if "state" not in p.get("changed", []) or "state" in (p.get("before") or {}):\n        return {"skip": "not a filing"}\n    rows = scope("sql.read", {"sql": "SELECT \'str\' || id AS stream FROM v_stream LIMIT 1", "params": {}})\n    return {"commands": [{"name": "oxplow.bookmark.set", "input": {"uri": p["uri"], "page_kind": "oxplow/task", "label": "Noted late.", "visibility_scope": "stream", "stream": rows[0]["stream"]}}]}\n',
   );
   await deploy(daemon, "late");
   const late = async () =>

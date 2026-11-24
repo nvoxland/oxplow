@@ -413,10 +413,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     // ---- config ----
     ui(
-        "get_config",
-        "the renderer's whole config; an agent reads keys with `oxplow.config.list_keys`",
-    ),
-    ui(
         "get_workspace_context",
         "the window's project path and VCS state, for the shell",
     ),
@@ -496,6 +492,10 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "terminate_terminal_session",
+        "the person's terminal: never an automation API",
+    ),
+    ui(
+        "restart_agent_terminal",
         "the person's terminal: never an automation API",
     ),
     ui(

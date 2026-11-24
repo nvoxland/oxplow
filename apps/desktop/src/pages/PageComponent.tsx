@@ -5,7 +5,7 @@
 /// (`pageData`: every loader's rows by name, the params, its props) and
 /// told when they change. Inside a stack it is a section at its content's
 /// height; a page whose `view:` is one component node *is* that component
-/// (`ComponentPage`, Explore Data and Timeline): it fills the page, says
+/// (`ComponentPage`, for example the Work board): it fills the page, says
 /// the page's title and actions (`setTitle`, `setActions`, drawn by core),
 /// shares the tab's view and may hand the page an inline page to draw under
 /// it (`showView`, `ShownView`), the page's `rail:` drawn in the rail as
@@ -273,7 +273,7 @@ export function ShownView({
     <div data-testid="custom-page-spec" style={specStyle}>
       {state.run && onOpenPage ? (
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: 8 }}>
-          <button type="button" data-testid="explore-save-open" onClick={() => setSaving(true)}>Save as Page</button>
+          <button type="button" data-testid="shown-view-save-open" onClick={() => setSaving(true)}>Save as Page</button>
         </div>
       ) : null}
       {saving && state.run && onOpenPage ? <SaveViewForm kind="page" specYaml={specYaml} initialTitle={state.run.page.title} onClose={() => setSaving(false)} onSaved={(uri) => onOpenPage({ id: uri })} /> : null}
@@ -281,7 +281,8 @@ export function ShownView({
       {state.run ? (
         // Its nodes are its own page's: nothing in the host lands on them.
         <NodeRegistryContext.Provider value={null}>
-          <PageTree run={state.run} runId={state.runId} streamId={streamId} onOpenPage={onOpenPage} />
+          <PageTree run={state.run} runId={state.runId} streamId={streamId} onOpenPage={onOpenPage}
+            showAs={{ inlineYaml: specYaml, onSaved: onOpenPage ? (uri) => onOpenPage({ id: uri }) : undefined }} />
         </NodeRegistryContext.Provider>
       ) : null}
     </div>

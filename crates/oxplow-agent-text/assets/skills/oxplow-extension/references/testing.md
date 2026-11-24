@@ -102,6 +102,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | advisory | `{ advisory: <id>, thread? }` | `{ lines: [text] }` |
 | action_point | `{ action_point: <id \| name>, context? } (what a named action point offers)` | `{ draws: none \| button \| menu, commands?: [ids] }` |
 | item_commands | `{ item_commands: <uri> } (the commands about an item, its store filter applied)` | `{ commands: [ids] }` |
+| link_text | `{ link_text: <text> } (the links the extension's `links:` make in the text)` | `{ links: [{ text, uri }] }` |
 | context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | language | `{ language: <id>, path, body } (the file `body` at `path`, read as that language)` | `{ symbols?: [{ kind, id, name, container, line }], functions?: [{ name, id, complexity, length, parameter_count, visibility, has_doc, start_line }], imports?: [{ module, kind, line }] }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
@@ -198,7 +199,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      example that makes data gets an oxplow of its own: no fixture sees
      another's data, so a fixture makes everything it reads. Every kind
      below takes `given:` and `steps:` the same way; a step of a kind
-     that isn't a page is `{ when?, expect }`, its `when` keys over the
+     that isn't a page is `{ given }` or `{ when?, expect }`, never both
+     (one with both is an error: split it in two), its `when` keys over the
      fixture's (`when: { payload: { .. } }` changes just the payload). A
      step's `when` that names another kind or page runs that instead:
      `- when: { sql: "SELECT …" }` reads what an event or command did,
@@ -229,8 +231,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      change: { kind?, target, files?: [{ path, status?, additions?,
      deletions?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
-     complexity_delta?, … }] } } }` (what the change analysis stored for a
-     change: `kind` is `commit` by default; the datasets over a change read it, and the
+     complexity_delta?, … }], analyzed_files? } } }` (what the change analysis stored for a
+     change: `kind` is `commit` by default, `analyzed_files` how many of its files the
+     analysis read, all by default; the datasets over a change read it, and the
      materialized datasets that read the commit index need a step of their
      own to fill), `{ observe: { test_run: { at?, cases?: [{ name,
      status }], asserted_failed? } } }` (a test run: a
@@ -240,8 +243,14 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
      col? }] } } }` (what a language server reported for a file),
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
-     (the definitions the index read from it), ``{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
-     (a finished run of an extension's code), `{ observe: { health: { namespace, contribution,
+     (the definitions the index read from it), `{ observe: { run: { extension,
+     contribution, kind?, version?, outcome?, error?, days_ago?, wall_ms?,
+     cpu_ms?, peak_bytes?, ai_calls?, scopes?, decisions?, live?, caused_by? } } }`
+     (a contribution run, left unfinished with `live: true`; `caused_by:
+     <event type>` makes it the run for the latest logged event of that type; `scopes` maps
+     scope names to call counts and `decisions` takes entries such as
+     `{ need: scope, name: sql.read, decision: denied, reason: missing grant }`),
+     `{ observe: { health: { namespace, contribution,
      kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
      thread?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
      hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,
@@ -324,7 +333,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      off in a fixture, but a store command's own write is observed when the
      command runs; any other run needs a step. Make the
      project files it follows in `given:` first — `- { files: { "<path>":
-     "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes
+     "<body>" } }` writes them (`"<path>": { repeat: "<text>", times: n }`
+     writes a large one without spelling it out), `- { remove_files: ["<path>"] }` removes
      them, `- { rename_files: [{ from, to }] }` moves them (paths from the
      project root; with `root: "agent:claude"` or `root: home` on the step,
      from that folder root, the test's own and never the person's). A store that follows its own SQLite file

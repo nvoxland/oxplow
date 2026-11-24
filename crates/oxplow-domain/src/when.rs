@@ -40,6 +40,11 @@ pub struct ContextKey {
 /// `windowContext`), sorted.
 pub const CONTEXT_KEYS: &[ContextKey] = &[
     ContextKey {
+        name: "agentTerminalLive",
+        kind: KeyKind::Bool,
+        doc: "The page shown is an agent session whose terminal pane has a running process (an ended one shows Start Again instead).",
+    },
+    ContextKey {
         name: "enabledAgents",
         kind: KeyKind::Str,
         doc: "The agent harnesses the project enables, by key, comma-joined in priority order (`claude,codex`): a command for one says `enabledAgents =~ /(^|,)claude(,|$)/`.",

@@ -30,6 +30,7 @@ pub mod implementations;
 pub mod imports;
 pub mod jobs;
 pub(crate) mod languages;
+pub mod link_rules;
 pub mod manifest_v2;
 pub mod public_contracts;
 pub mod replacements;
@@ -172,6 +173,15 @@ pub struct Advisory {
     /// The capabilities (or features) it needs; without them it doesn't
     /// run.
     pub needs: Vec<String>,
+    #[serde(default)]
+    pub when: Option<config_schema::ConfigCondition>,
+    /// Post-tool advisories read collection results unless they opt out.
+    #[serde(default = "after_collection_default")]
+    pub after_collection: bool,
+}
+
+fn after_collection_default() -> bool {
+    true
 }
 
 /// An advisory as written in `extension.yaml`.
@@ -189,6 +199,10 @@ struct AdvisoryFile {
     audience: AdvisoryAudience,
     #[serde(default)]
     needs: Vec<String>,
+    #[serde(default)]
+    when: Option<config_schema::ConfigCondition>,
+    #[serde(default = "after_collection_default")]
+    after_collection: bool,
 }
 
 /// Where a mount goes among a page's parts: `start`, `end` (the default),
@@ -254,13 +268,15 @@ pub enum TileSize {
     Full,
 }
 
-/// What a left-nav panel is bound to: the project, the current stream, or
-/// the current thread — which of `stream_id` / `thread_id` its viz nodes get.
+/// Which data a left-nav panel shows (`data_scope`): the project's, the
+/// current stream's, or the current thread's — which of `stream_id` /
+/// `thread_id` its pages get. Not where it shows: that is the person's
+/// layout (`VisibilityScope`).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum PanelScope {
+pub enum PanelDataScope {
     Project,
     Stream,
     Thread,
@@ -277,7 +293,7 @@ pub struct ExtensionPanel {
     pub extension: String,
     pub title: String,
     pub icon: Option<String>,
-    pub scope: PanelScope,
+    pub data_scope: PanelDataScope,
     /// The body viz (`<extension>/<slug>`).
     pub body: String,
     /// The badge viz, which declares an `alert`.
@@ -300,7 +316,7 @@ pub struct ExtensionPanel {
 }
 
 /// The schemes a page may render besides oxplow's resources: a web page.
-pub const RENDERED_SCHEMES: &[&str] = &["https", "http"];
+pub const RENDERED_SCHEMES: &[&str] = oxplow_domain::commands::WEB_SCHEMES;
 
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
 /// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.
@@ -331,7 +347,7 @@ struct PanelFile {
     title: String,
     #[serde(default)]
     icon: Option<String>,
-    scope: PanelScope,
+    data_scope: PanelDataScope,
     body: String,
     #[serde(default)]
     badge: Option<String>,
@@ -415,6 +431,9 @@ pub struct Extension {
     /// The kinds of file it names by glob (`file_kinds:`; valid ones —
     /// invalid ones are in `errors`).
     pub file_kinds: Vec<file_kinds::FileKindDecl>,
+    /// The text it makes links of (`links:`; valid ones — invalid ones are
+    /// in `errors`): the terminal and markdown match them.
+    pub links: Vec<link_rules::LinkRuleDecl>,
     /// What makes a file, container or function a test, and what counts as
     /// an assertion or a skip (`test_conventions:`; valid ones — invalid
     /// ones are in `errors`).
@@ -1842,6 +1861,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         languages: Vec::new(),
         run_patterns: Vec::new(),
         file_kinds: Vec::new(),
+        links: Vec::new(),
         test_conventions: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
@@ -2074,6 +2094,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = m.file_kinds.as_ref() {
             let (declared, errors) = file_kinds::parse_file_kinds(v, man, &manifest);
             ext.file_kinds = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.links.as_ref() {
+            let (declared, errors) = link_rules::parse_links(v, man, &manifest);
+            ext.links = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.test_conventions.as_ref() {
@@ -2396,6 +2421,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 heading: a.heading,
                 audience: a.audience,
                 needs: a.needs,
+                when: a.when,
+                after_collection: a.after_collection,
             }) {
                 Ok(a)
                     if a.needs
@@ -2432,7 +2459,20 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         ),
                     ))
                 }
-                Ok(a) => ext.advisories.push(a),
+                Ok(a) => {
+                    if let Some((code, why)) = a
+                        .when
+                        .as_ref()
+                        .and_then(|w| w.problem(ext.configuration.as_ref()))
+                    {
+                        ext.errors.push(
+                            at(code, man, line_under(&manifest, "advisories", &a.id), why)
+                                .contribution(format!("{}/{}", ext.namespace, a.id)),
+                        );
+                    } else {
+                        ext.advisories.push(a);
+                    }
+                }
                 Err(e) => ext.errors.push(at(
                     "advisory.invalid",
                     man,
@@ -3398,7 +3438,7 @@ fn renderer_problem(
 
 /// Check the manifest's `panels:` against the extension's viz nodes: a panel
 /// id is kebab-case and unique, its viz nodes exist, a badge declares an
-/// `alert`, and a `stream` / `thread` scope's viz nodes declare `stream_id` /
+/// `alert`, and a `stream` / `thread` data scope's viz nodes declare `stream_id` /
 /// `thread_id` (what the nav binds). Each error names the entry's index.
 fn parse_panels(
     extension: &str,
@@ -3415,7 +3455,7 @@ fn parse_panels(
         let p = match serde_yaml::from_value::<PanelFile>(v.clone()) {
             Ok(p) => p,
             Err(e) => {
-                errors.push((Some(i), format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open?, collapsed?, count?, dock? }}`)")));
+                errors.push((Some(i), format!("panels: {e} (a panel is `{{ id, title, icon?, data_scope: project | stream | thread, body, badge?, open?, collapsed?, count?, dock? }}`)")));
                 continue;
             }
         };
@@ -3434,10 +3474,10 @@ fn parse_panels(
             errors.push(err("declared twice".into()));
             continue;
         }
-        let needs = match p.scope {
-            PanelScope::Project => None,
-            PanelScope::Stream => Some("stream_id"),
-            PanelScope::Thread => Some("thread_id"),
+        let needs = match p.data_scope {
+            PanelDataScope::Project => None,
+            PanelDataScope::Stream => Some("stream_id"),
+            PanelDataScope::Thread => Some("thread_id"),
         };
         let mut ok = true;
         if let Some(open) = &p.open {
@@ -3482,7 +3522,7 @@ fn parse_panels(
             if let Some(param) = needs {
                 if !page.params.iter().any(|pp| pp.name == param) {
                     errors.push(err(format!(
-                        "a panel scoped to a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
+                        "a panel whose data_scope is a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
                     )));
                     ok = false;
                 }
@@ -3494,7 +3534,7 @@ fn parse_panels(
                 extension: extension.to_string(),
                 title: p.title,
                 icon: p.icon,
-                scope: p.scope,
+                data_scope: p.data_scope,
                 body: format!("{namespace}/{}", p.body),
                 badge: p.badge.map(|b| format!("{namespace}/{b}")),
                 open: p.open,
@@ -3842,6 +3882,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.contexts.clear();
     ext.run_patterns.clear();
     ext.file_kinds.clear();
+    ext.links.clear();
     ext.test_conventions.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
@@ -7675,7 +7716,7 @@ commands:
             ("queries/q.yaml", query),
             (
                 "extension.yaml",
-                "manifest: 2\nname: x\nintent:\n  purpose: test\npanels:\n  - { id: one, title: One, scope: stream, body: body, count: body-page }\n  - { id: two, title: Two, scope: stream, body: body-page, count: count }\nui:\n  mounts:\n    - { page: mounted, at: oxplow/commit.sections }\n    - { page: q, at: oxplow/commit.sections }\n",
+                "manifest: 2\nname: x\nintent:\n  purpose: test\npanels:\n  - { id: one, title: One, data_scope: stream, body: body, count: body-page }\n  - { id: two, title: Two, data_scope: stream, body: body-page, count: count }\nui:\n  mounts:\n    - { page: mounted, at: oxplow/commit.sections }\n    - { page: q, at: oxplow/commit.sections }\n",
             ),
         ]);
         let errs = shown_errors(&ext);
@@ -9716,7 +9757,7 @@ commands:
         ];
         let (_d, ext) = load_x(
             &pages,
-            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: prs, title: PRs, icon: git-pull-request, scope: stream, body: open, badge: count }\n",
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: prs, title: PRs, icon: git-pull-request, data_scope: stream, body: open, badge: count }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
@@ -9726,7 +9767,7 @@ commands:
                 extension: "x".into(),
                 title: "PRs".into(),
                 icon: Some("git-pull-request".into()),
-                scope: PanelScope::Stream,
+                data_scope: PanelDataScope::Stream,
                 body: "x/open".into(),
                 badge: Some("x/count".into()),
                 open: None,
@@ -9739,7 +9780,7 @@ commands:
         // as the Context panel opens the Context page); without one, its body page.
         let (_d, ext) = load_x(
             &pages,
-            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'oxplow:oxplow/page?page=problems' }\n",
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, data_scope: project, body: quiet, open: 'oxplow:oxplow/page?page=problems' }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
@@ -9748,28 +9789,31 @@ commands:
         );
         for (panel, says) in [
             (
-                "{ id: a, title: A, scope: project, body: quiet, open: problems }",
+                "{ id: a, title: A, data_scope: project, body: quiet, open: problems }",
                 "`open` must be a page URI",
             ),
             (
-                "{ id: a, title: A, scope: project, body: quiet, open: 'task:1' }",
+                "{ id: a, title: A, data_scope: project, body: quiet, open: 'task:1' }",
                 "`open` must be a page URI",
             ),
             (
-                "{ id: a, title: A, scope: project, body: nope }",
+                "{ id: a, title: A, data_scope: project, body: nope }",
                 "its body `nope` isn't one of this extension's pages or parts",
             ),
             (
-                "{ id: a, title: A, scope: project, body: quiet, badge: quiet }",
+                "{ id: a, title: A, data_scope: project, body: quiet, badge: quiet }",
                 "declares no `badge` or `alert`",
             ),
             (
-                "{ id: a, title: A, scope: thread, body: open }",
+                "{ id: a, title: A, data_scope: thread, body: open }",
                 "page `open` must declare it in `params`",
             ),
-            ("{ id: a, title: A, scope: galaxy, body: open }", "scope"),
             (
-                "{ id: Bad Id, title: A, scope: project, body: quiet }",
+                "{ id: a, title: A, data_scope: galaxy, body: open }",
+                "data_scope",
+            ),
+            (
+                "{ id: Bad Id, title: A, data_scope: project, body: quiet }",
                 "panel id",
             ),
         ] {
@@ -9792,7 +9836,7 @@ commands:
         let quiet = viz_page("", "SELECT 1", "");
         let (_d, ext) = load_x(
             &[("quiet", &quiet)],
-            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: d, title: D, scope: project, body: quiet, dock: true }\n  - { id: r, title: R, scope: project, body: quiet }\n",
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: d, title: D, data_scope: project, body: quiet, dock: true }\n  - { id: r, title: R, data_scope: project, body: quiet }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert!(ext.panels[0].dock);
@@ -9821,26 +9865,26 @@ commands:
         ];
         let (_d, ext) = load_x(
             &pages,
-            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: w, title: W, scope: stream, body: open, collapsed: line, count: n }\n",
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: w, title: W, data_scope: stream, body: open, collapsed: line, count: n }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.panels[0].collapsed.as_deref(), Some("x/line"));
         assert_eq!(ext.panels[0].count.as_deref(), Some("x/n"));
         for (panel, says) in [
             (
-                "{ id: a, title: A, scope: project, body: quiet, collapsed: nope }",
+                "{ id: a, title: A, data_scope: project, body: quiet, collapsed: nope }",
                 "its collapsed `nope` isn't one of this extension's pages or parts",
             ),
             (
-                "{ id: a, title: A, scope: project, body: quiet, count: nope }",
+                "{ id: a, title: A, data_scope: project, body: quiet, count: nope }",
                 "its count `nope` isn't one of this extension's pages or parts",
             ),
             (
-                "{ id: a, title: A, scope: stream, body: open, collapsed: quiet }",
+                "{ id: a, title: A, data_scope: stream, body: open, collapsed: quiet }",
                 "page `quiet` must declare it in `params`",
             ),
             (
-                "{ id: a, title: A, scope: stream, body: open, count: quiet }",
+                "{ id: a, title: A, data_scope: stream, body: open, count: quiet }",
                 "page `quiet` must declare it in `params`",
             ),
         ] {

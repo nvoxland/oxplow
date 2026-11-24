@@ -587,7 +587,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn secret_settings_share_the_api_without_plaintext_or_audit_values() {
+    async fn secret_settings_share_the_api_without_plaintext_or_run_values() {
         let (dir, target, bus) = setup();
         bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.openai.baseUrl","value":"https://example.test/v1","level":"project"}), false).await.unwrap();
         let key = crate::ai_service::provider_key_setting("openai");
@@ -626,12 +626,12 @@ mod tests {
                 .unwrap_or_default()
                 .contains(marker));
         }
-        let audits = bus.db.read(|conn| {
-            let mut stmt = conn.prepare("SELECT coalesce(input_json,'') || coalesce(result_json,'') || coalesce(inverse_json,'') FROM command_audit").map_err(oxplow_db::map_sql_err)?;
+        let command_runs = bus.db.read(|conn| {
+            let mut stmt = conn.prepare("SELECT coalesce(input_json,'') || coalesce(result_json,'') || coalesce(inverse_json,'') FROM command_run").map_err(oxplow_db::map_sql_err)?;
             let rows = stmt.query_map([], |row| row.get::<_,String>(0)).map_err(oxplow_db::map_sql_err)?;
             rows.collect::<Result<Vec<_>,_>>().map_err(oxplow_db::map_sql_err)
         }).await.unwrap();
-        assert!(audits.iter().all(|row| !row.contains(marker)));
+        assert!(command_runs.iter().all(|row| !row.contains(marker)));
         // Changing a destination cannot carry an existing token to that host.
         bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.openai.baseUrl","value":"https://other.test/v1","level":"project"}), false).await.unwrap();
         assert!(bus

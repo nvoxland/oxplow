@@ -505,8 +505,13 @@ invoked as a separate binary, never linked as a library.
   `readiness` is `AlreadyIntegrated` (head has no commits beyond base),
   `Clean` (ahead, no overlap), or `Conflict` (ahead, overlap). Any lookup
   failure degrades to `AlreadyIntegrated` zeros so a bad row never
-  breaks a page: oxplow-bundled's Merge Readiness composes one row per
-  branch ahead (`v_branch_divergence`).
+  breaks a page. Bundled's **Merge Readiness** lists local branches with
+  commits the default branch lacks (`v_branch_divergence`) and offers a
+  filter for potential conflicts. A branch shows paths changed on both sides
+  and opens **Commits Between Branches**, which links the commits unique to
+  each side (`v_commit_between`) and links to **Branch divergence**. The row
+  menu offers Merge only from the target stream
+  when the comparison finds a common ancestor and no overlapping files.
 - `tree_at_commit(repo, rev)` / `diff_commits(repo, a, b)`
   (`src/tree.rs`, behind `Vcs::files_at` / `diff`) — a libgit2 tree walk
   yielding `path -> blob oid`, run through the **shared**
@@ -514,15 +519,23 @@ invoked as a separate binary, never linked as a library.
   `SqliteSnapshotStore::diff_snapshots` uses for snapshots), so two
   commits or two snapshots diff through one comparison. It's a
   content-identity diff; **rename detection is intentionally not done**.
-- `recent_remote_branches` wraps `git for-each-ref
-  --sort=-committerdate refs/remotes` (filters out `<remote>/HEAD`) for
-  the dashboard's recent-remote-branches card.
+- Bundled's **Remote Branches** lists remote-tracking refs from `v_branch`,
+  omits each remote's symbolic `HEAD`, and sorts by tip commit time. You can
+  filter by remote or search branch names and commit subjects. Each row links
+  to its tip and to Commits Between Branches against the current stream's branch.
+  These three pages also link to Git History with the relevant commit revealed.
+  Bundled's Git History component opens those links in Graph view. It uses the
+  branch tip as the history root where available, including for remote refs.
 - `oxplow.vcs.push` / `oxplow.vcs.pull` with `remote` + `branch` push the current
   branch to `<remote>/<branch>` (`git push <remote> HEAD:refs/heads/<branch>`,
   a refspec push that never touches another working dir) and pull
   `<remote>/<branch>` into it (fetch, then merge; a failed fetch
-  short-circuits the merge). The dashboard's remote-branches card runs
-  both.
+  short-circuits the merge). The Remote Branches row menu offers Pull when the
+  remote has incoming commits and Push when only the local branch has commits
+  to send. Git checks the refs again when it runs the command. A push that
+  names `branch` asks a person first, as a merge does (the push op's
+  `with_confirm_for`, `a_push_to_a_named_remote_branch_asks_first`); a push
+  to the branch's own upstream (the Git menu's Push Changes) doesn't.
 - `remove_workspace` is `git worktree remove --force` then `git worktree
   prune`: a removal that fails (a directory already gone, a locked
   worktree) leaves a stale admin entry in `.git/worktrees/` that a later
