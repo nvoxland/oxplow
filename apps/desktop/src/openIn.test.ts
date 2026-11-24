@@ -117,3 +117,13 @@ test("a path inside the worktree is asked about as its file or directory URI; on
     setOpenInHost(null);
   }
 });
+
+test("an extension's Git commands join its Git ▸, its Open In ones Open In ▸", async () => {
+  const entry = (id: string, group: string) => ({ id, group, label: id, run: () => {}, searchKey: id });
+  const got = await withLinkOffers([{ id: "copy", label: "Copy path", enabled: true }], "https://x.io", async () => [
+    entry("Blame in Tool", "Git"),
+    entry("Tool", "Open In"),
+    entry("Other", "Acme"),
+  ]);
+  expect(got.map((i) => (i.separator ? "—" : i.label))).toEqual(["Copy path", "Open In", "Git", "—", "Acme"]);
+});

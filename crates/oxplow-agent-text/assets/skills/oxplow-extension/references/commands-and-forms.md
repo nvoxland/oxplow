@@ -24,6 +24,9 @@
   stops at `/`). It gets `{ uri }`: the URL, or the file's URI. Test it
   with a fixture `when: { item_commands: "https://…" }` →
   `expect: { commands: [<ids>] }`.
+- **A command on a file's Git ▸** (beside oxplow's blame, history, diff,
+  compare and rollback) is the same, with `group: Git` and `about:
+  oxplow/file` (or `oxplow/dir`).
 - **Deciding with your own logic:** `ui.about_if: <function>` names a
   function of the command's `entry:` script. It gets `{ uri, kind, url?,
   path? }` for each link that passes `accepts` and returns `True` where

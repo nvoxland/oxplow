@@ -31,6 +31,8 @@ export interface BlameState {
   blameLineHeight: number;
   /// Toggle the overlay for the current file (fetch on, clear off).
   toggleBlame: () => void;
+  /// Show the overlay for the current file, unless it is shown.
+  openBlame: () => void;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -114,5 +116,11 @@ export function useBlame(opts: {
     return undefined;
   }, [blame, monacoReady]);
 
-  return { blame, blameScrollTop, blameLineHeight, toggleBlame };
+  /** Show the blame, unless it is shown (`#blame=1`). */
+  function openBlame() {
+    if (!filePath || (blame && blame.path === filePath)) return;
+    void refreshBlame(filePath);
+  }
+
+  return { blame, blameScrollTop, blameLineHeight, toggleBlame, openBlame };
 }

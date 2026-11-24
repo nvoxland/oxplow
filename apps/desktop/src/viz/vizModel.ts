@@ -24,7 +24,7 @@ import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, knowled
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { fileUri, knowledgeOf, parseUri, requestUri, typeOf } from "../uri/uri.js";
+import { fileUri, knowledgeOf, paramOf, parseUri, requestUri, typeOf } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -600,6 +600,10 @@ export function rowOpenInRef(viz: VizConfig, columns: string[], row: SqlCell[]):
         if (/^https?:\/\//i.test(s)) return s;
         const type = typeOf(s);
         if (type === "oxplow/file" || type === "oxplow/dir") return s;
+        // A diff of a file to the working copy (a changes or compare
+        // view's row): that file.
+        const path = paramOf(s, "path");
+        if (type === "oxplow/page" && paramOf(s, "page") === "diff" && paramOf(s, "right") === WORKING && path) return fileUri(path);
         break;
       }
       case "diff-at": {
@@ -1077,11 +1081,20 @@ export function diffRow(viz: VizConfig, result: SqlQueryResult): DiffSpec | null
 
 /** `editor` viz: the working tree's file the first row names and the line
  *  it lands on (its `lines`' start); null when the row names no file. */
-export function editorRow(viz: VizConfig, result: SqlQueryResult): { path: string; filesystem: string | null; line: number | null } | null {
+export function editorRow(
+  viz: VizConfig,
+  result: SqlQueryResult,
+): { path: string; filesystem: string | null; line: number | null; blame: boolean } | null {
   const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
   const path = at(viz.editor?.path);
   if (typeof path !== "string" || !path) return null;
-  return { path, filesystem: nonEmpty(at(viz.editor?.filesystem)), line: parseLines(at(viz.editor?.lines))?.start ?? null };
+  const blame = at(viz.editor?.blame);
+  return {
+    path,
+    filesystem: nonEmpty(at(viz.editor?.filesystem)),
+    line: parseLines(at(viz.editor?.lines))?.start ?? null,
+    blame: blame !== null && blame !== undefined && blame !== "" && blame !== 0 && blame !== "0" && blame !== false,
+  };
 }
 
 /** `embed` viz: the web page the first row names; null when it names none. */

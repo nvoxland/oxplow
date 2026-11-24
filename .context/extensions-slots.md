@@ -422,9 +422,10 @@ about files or directories (`oxplow/file`, `oxplow/dir`) narrows them by
 `ref_commands::link_filter_problem` one that can't compile, where the
 command registers. `ref_commands` checks both (`link_accepted`). A
 command whose `ui.group` is **`Open In`** joins the Open In ▸ of a link to
-its item (`withLinkOffers` / `mergeOpenInOffers`, `openIn.ts`): a markdown
-link, a page row that names a file, a tab, the page ☰, the terminal's
-path or URL. Its other groups stay their own submenus. A fixture tests it
+its item, and one whose group is **`Git`** a file's or folder's Git ▸
+(`withLinkOffers` / `mergeGroupOffers`, `openIn.ts`): a markdown link, a
+page row that names a file, a tab, the page ☰, the terminal's path or URL.
+Its other groups stay their own submenus. A fixture tests it
 with `when: { item_commands: <url or file URI> }`.
 
 **Custom logic: `about_if`.** What a pattern or glob can't say, the

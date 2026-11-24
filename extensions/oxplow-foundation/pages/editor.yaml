@@ -13,10 +13,13 @@ params:
 - name: filesystem
 - name: lines
   role: view
+# `#blame=1`: opened with its git blame shown (Git ▸ Annotate with Git Blame).
+- name: blame
+  role: view
 loaders:
   editor:
     sql: |
-      SELECT :path AS path, :filesystem AS filesystem, :lines AS lines
+      SELECT :path AS path, :filesystem AS filesystem, :lines AS lines, :blame AS blame
   # The file's folder: its path up to the last slash (none at the root).
   folder:
     sql: |
@@ -34,6 +37,7 @@ view:
     path: path
     filesystem: filesystem
     lines: lines
+    blame: blame
 see_also:
   - { page: oxplow/file-history, params: { path: { param: path } } }
   - { from: folder }

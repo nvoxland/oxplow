@@ -729,6 +729,10 @@ pub struct VizEditor {
     /// A column holding `12` (or `12-40`: its start): the line revealed.
     #[serde(default)]
     pub lines: Option<String>,
+    /// A column that, truthy, opens the file with its git blame shown
+    /// (Git ▸ Annotate with Git Blame from outside the editor).
+    #[serde(default)]
+    pub blame: Option<String>,
 }
 
 /// `diff` viz: the first row's file, between two revisions, at full size.

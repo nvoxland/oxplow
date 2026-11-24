@@ -578,6 +578,16 @@ nested git repos and parent-dir lookups are explicitly refused (see
 secondary worktrees so oxplow won't try to nest its own worktrees inside
 another tool's checkout.
 
+## A file's Git ▸
+
+A file's or folder's right-click menu has Git ▸ (blame, history, diff,
+Compare with…, Rollback…, Add to .gitignore): only what git does with that
+path. [usability.md](./usability.md) "Git ▸ on every file and folder" has
+the items, when each shows and the two dialogs. The Directory page's
+tree has no git row actions of its own any more; its rows get Git ▸ like
+any file. A changes or compare view's row links a diff, and
+`rowOpenInRef` names that diff's file.
+
 ## UI commit affordance
 
 The Uncommitted Changes page has an inline message box over

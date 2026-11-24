@@ -96,8 +96,9 @@ caught via `editor.onContextMenu`, which:
 Menu items live in a per-render `MenuItem[]` array — `Cut`, `Copy`,
 `Paste` (via `navigator.clipboard` + `editor.executeEdits`), `Save`,
 `Find`, `Go to Definition`, `Format Document`, `Copy Path`, Open In ▸
-(the file outside oxplow: `openIn.ts`),
-`Annotate with Git Blame`, `Compare with Clipboard`, and Add Selection to Context (Add File to Context with no
+(the file outside oxplow: `openIn.ts`), Git ▸ (`gitMenu.ts`, read as
+the menu opens; its Annotate with Git Blame toggles the overlay here),
+`Compare with Clipboard`, and Add Selection to Context (Add File to Context with no
 selection; `editorContextEntry`). Items are gated on `enabled` based on
 file path, language LSP support and selection presence. The right-click handler
 `preventDefault`s the native event (and the editor container has a
@@ -112,9 +113,12 @@ submenu flip-up logic; never re-implement that per-call site.
 The blame *state machine* — fetch, gutter scroll/line-height sync,
 clear-on-file-change, and refresh-on-save — lives in
 `apps/desktop/src/components/useBlame.ts` (a hook EditorPane mounts,
-returning `{ blame, blameScrollTop, blameLineHeight, toggleBlame }`).
-EditorPane renders the `BlameOverlay` from that state and wires the
-"Annotate with Blame" menu item to `toggleBlame`. (`useMonacoEditor` was
+returning `{ blame, blameScrollTop, blameLineHeight, toggleBlame, openBlame }`).
+EditorPane renders the `BlameOverlay` from that state and wires Git ▸'s
+"Annotate with Git Blame" to `toggleBlame`. From outside the editor the
+item opens the file with the view param `#blame=1` (`editor.yaml`'s
+`blame` param, the editor viz's `blame` column, `editorRow`), and
+EditorPane calls `openBlame` once Monaco is up. (`useMonacoEditor` was
 intentionally NOT extracted: the editor-setup effect is the component's
 core and is tightly coupled to its menu / focus-push /
 LSP-provider wiring — a hook would need ~8 injected callbacks and read

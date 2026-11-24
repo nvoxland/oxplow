@@ -43,6 +43,8 @@ export interface PageMenuSource {
   seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
   /** Open In ▸ for the page's file, directory or web URL (`openIn.ts`). */
   openIn?: MenuItem | null;
+  /** Git ▸ for the page's file or folder (`gitMenu.ts`). */
+  git?: MenuItem | null;
   /** The page can be pinned; with a reason, not now. */
   pin?: { disabledReason?: string | null };
   openPanel(panel: PagePanel): void;
@@ -101,6 +103,7 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
     });
   }
   if (source.openIn) standard.push(source.openIn);
+  if (source.git) standard.push(source.git);
   sections.push(standard);
 
   // The page's and its extensions' own, sorted by label: an action or a

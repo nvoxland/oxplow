@@ -8332,6 +8332,7 @@ commands:
                 path: Some("p".into()),
                 filesystem: None,
                 lines: Some("l".into()),
+                blame: None,
             })
         );
         assert!(e.fills);

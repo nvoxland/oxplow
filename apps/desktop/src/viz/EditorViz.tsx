@@ -19,7 +19,13 @@ import { diffRef, fileRefAt, gitCommitRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { useVizStream } from "./VizStream.js";
 
-export function EditorViz({ row, onOpenPage }: { row: { path: string; filesystem?: string | null; line: number | null } | null; onOpenPage?(ref: TabRef): void }) {
+export function EditorViz({
+  row,
+  onOpenPage,
+}: {
+  row: { path: string; filesystem?: string | null; line: number | null; blame?: boolean } | null;
+  onOpenPage?(ref: TabRef): void;
+}) {
   const stream = useVizStream();
   const nav = useOptionalPageNavigation();
   // The editor edits only the local working tree; a page that accepts a
@@ -75,6 +81,7 @@ export function EditorViz({ row, onOpenPage }: { row: { path: string; filesystem
         stream={stream}
         filePath={path}
         line={row?.line ?? null}
+        blame={row?.blame ?? false}
         onSave={save}
         findRef={findRef}
         onNavigateToLocation={(target) => open(fileRefAt(target.path, target.line))}

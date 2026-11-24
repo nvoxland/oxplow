@@ -15,7 +15,9 @@ import { LspMirror } from "../editor/lspMirror.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
 import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
+import { gitItemFor } from "../gitMenu.js";
 import { openInForPath } from "../openIn.js";
+import { fileUri } from "../uri/uri.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
 import { editorContextEntry } from "../agent-context-ref.js";
@@ -30,6 +32,8 @@ interface Props {
   filePath: string;
   /** The line it lands on once the file shows (`#lines=`). */
   line: number | null;
+  /** Show its git blame once it shows (`#blame=1`: Git ▸ Annotate). */
+  blame?: boolean;
   onSave(): void;
   /** Open another file at a line (Go to Definition). */
   onNavigateToLocation(target: EditorNavigationTarget): void;
@@ -46,6 +50,7 @@ export function EditorPane({
   stream,
   filePath,
   line,
+  blame: blameAsked = false,
   onSave,
   onNavigateToLocation,
   onRevealCommit,
@@ -127,7 +132,7 @@ export function EditorPane({
 
   // Blame overlay (merged local+git attribution + gutter scroll sync +
   // refresh-on-save) lives in useBlame; the overlay is rendered below.
-  const { blame, blameScrollTop, blameLineHeight, toggleBlame } = useBlame({
+  const { blame, blameScrollTop, blameLineHeight, toggleBlame, openBlame } = useBlame({
     editorRef,
     monacoRef,
     monacoReady,
@@ -410,6 +415,36 @@ export function EditorPane({
     onNavigateRef.current(target);
   }
 
+  // Opened with its blame shown (`#blame=1`): once the editor is up.
+  useEffect(() => {
+    if (blameAsked && monacoReady) openBlame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blameAsked, monacoReady, filePath]);
+
+  // Git ▸ for the file (`gitMenu.ts`), read as the menu opens; its
+  // Annotate toggles the blame here.
+  const [gitItem, setGitItem] = useState<MenuItem | null>(null);
+  useEffect(() => {
+    if (!contextMenu || !filePath) return;
+    let live = true;
+    setGitItem(null);
+    void gitItemFor(fileUri(filePath)).then((item) => {
+      if (live) setGitItem(item);
+    });
+    return () => {
+      live = false;
+    };
+  }, [contextMenu, filePath]);
+  const blameShown = !!blame && blame.path === filePath;
+  const gitHere: MenuItem | null = gitItem
+    ? {
+        ...gitItem,
+        submenu: gitItem.submenu?.map((i) =>
+          i.id === "git.blame" ? { ...i, label: blameShown ? "Hide Git Blame" : "Annotate with Git Blame", run: () => toggleBlame() } : i,
+        ),
+      }
+    : null;
+
   const contextMenuItems: MenuItem[] = [
     {
       id: "editor.cut",
@@ -497,12 +532,8 @@ export function EditorPane({
     ...[filePath ? openInForPath("file", `${stream.worktree_path.replace(/\/+$/, "")}/${filePath}`) : null].filter(
       (item): item is MenuItem => item !== null,
     ),
-    {
-      id: "editor.annotate-blame",
-      label: blame && blame.path === filePath ? "Hide Blame" : "Annotate with Blame",
-      enabled: !!filePath,
-      run: () => toggleBlame(),
-    },
+    // Git ▸: blame, history, diff, compare, rollback for this file.
+    ...(gitHere ? [gitHere] : []),
     {
       id: "editor.compare-clipboard",
       label: "Compare with Clipboard",

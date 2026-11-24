@@ -14,10 +14,11 @@ import { useRefOffers } from "../components/refCommands.js";
 import type { CommandEntry } from "../components/quickOpenResults.js";
 import { usePopoverDismiss } from "../components/usePopoverDismiss.js";
 import type { PageAction } from "../kit/actions.js";
-import type { MenuPosition } from "../menu.js";
+import type { MenuItem, MenuPosition } from "../menu.js";
 import { pageMenuItems, type OpenWithProps, type PagePanel } from "./pageMenuItems.js";
 import type { TabRef } from "./tabState.js";
-import { mergeOpenInOffers, openInForRef } from "../openIn.js";
+import { gitItemFor } from "../gitMenu.js";
+import { mergeGroupOffers, openInForRef } from "../openIn.js";
 
 export interface PageMenuProps {
   actions?: readonly PageAction[];
@@ -45,14 +46,19 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
   // The commands about the page's ref that apply now: asked when the menu
   // opens (the page's state may have changed since it last did).
   const [offers, setOffers] = useState<CommandEntry[]>([]);
+  // Git ▸ for a file's or folder's page, read with the offers.
+  const [git, setGit] = useState<MenuItem | null>(null);
   const [panel, setPanel] = useState<PagePanel | null>(null);
   const button = useRef<HTMLButtonElement | null>(null);
   const boxRef = usePopoverDismiss<HTMLDivElement>(panel !== null, () => setPanel(null));
 
-  // Open In ▸ for the page's file, directory or web URL, with the
-  // extensions' commands in the Open In group (`openIn.ts`).
+  // Open In ▸ for the page's file, directory or web URL, and Git ▸ for a
+  // file's or folder's, with the extensions' commands in those groups
+  // (`openIn.ts`, `gitMenu.ts`).
   const own = ask ? openInForRef(ask.ref) : null;
-  const opened = ask ? mergeOpenInOffers(own ? [own] : [], offers) : { items: [], rest: offers };
+  const opened = ask
+    ? mergeGroupOffers([own, git].filter((i): i is MenuItem => i !== null), offers)
+    : { items: [], rest: offers };
   const items = pageMenuItems({
     actions,
     context: ask
@@ -61,7 +67,8 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
     commands: ask ? opened.rest : undefined,
     openWith,
     seeAlso,
-    openIn: opened.items[0] ?? null,
+    openIn: opened.items.find((i) => i.id === "open-in") ?? null,
+    git: opened.items.find((i) => i.id === "git") ?? null,
     backlinks: backlinks?.count,
     outbound: outbound?.count,
     pin: pin ? { disabledReason: pin.disabledReason } : undefined,
@@ -69,7 +76,11 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
   });
   const openAt = async (position: MenuPosition) => {
     setPanel(null);
-    if (ask) setOffers(await offersFor(ask.ref));
+    if (ask) {
+      const [found, gitItem] = await Promise.all([offersFor(ask.ref), gitItemFor(ask.ref)]);
+      setOffers(found);
+      setGit(gitItem);
+    }
     setAt(position);
   };
   if (openAtRef) openAtRef.current = items.length === 0 ? null : (position) => void openAt(position);

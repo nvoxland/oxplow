@@ -6929,6 +6929,11 @@ export type VizEditor = {
 	filesystem?: string | null,
 	/**  A column holding `12` (or `12-40`: its start): the line revealed. */
 	lines?: string | null,
+	/**
+	 *  A column that, truthy, opens the file with its git blame shown
+	 *  (Git ▸ Annotate with Git Blame from outside the editor).
+	 */
+	blame?: string | null,
 };
 
 /**  `embed` viz: the web page the first row names. */
