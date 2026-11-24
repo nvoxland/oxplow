@@ -423,7 +423,7 @@ impl JobRuns {
         activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
         commands: Arc<crate::commands::CommandBus>,
     ) -> JobRunDispatcher {
-        self.tools.bind(commands);
+        self.tools.bind(&commands);
         let grants = Arc::new(DeclaredJobGrants::new(
             self.catalog.clone(),
             self.root.clone(),

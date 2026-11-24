@@ -817,6 +817,7 @@ resources:
             assets.clone(),
             svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            svc.stopping(),
         );
         assert_eq!(found(svc, "widget", &["12"]).await.len(), 1);
         let hit = svc
@@ -875,6 +876,7 @@ resources:
             assets.clone(),
             svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            svc.stopping(),
         );
         assert_eq!(
             found(svc, "widget", &["12"]).await,
@@ -1186,6 +1188,7 @@ mod core_tests {
             assets.clone(),
             svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            svc.stopping(),
         );
         assets
     }

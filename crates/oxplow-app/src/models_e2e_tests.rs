@@ -80,6 +80,7 @@ async fn a_script_sets_its_own_field_on_a_stores_item() {
         assets.clone(),
         fx.svc.event_pump.clone(),
         crate::pages::open_runs::PageRuns::default(),
+        fx.svc.stopping(),
     );
     assets.sync_search_kinds().await.unwrap();
     let mut hits = Vec::new();

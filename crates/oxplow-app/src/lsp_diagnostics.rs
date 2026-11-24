@@ -355,6 +355,7 @@ mod tests {
             svc.assets.clone(),
             svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            svc.stopping(),
         );
         spawn(svc.clone());
         let uri =

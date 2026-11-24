@@ -313,7 +313,8 @@ pub fn announced_after(event: &OxplowEvent) -> Option<OxplowEvent> {
 
 /// Follow the database's changes — datasets, metric samples, assets, and
 /// new events for the pump (a commit that logged one wakes it, whoever
-/// made it) — for the life of the process.
+/// made it) — until `stopping` (the services' [`crate::Services::stopping`]):
+/// the loop holds the database, so only that ends it.
 pub fn spawn(
     db: Database,
     watermarks: Arc<DatasetWatermarks>,
@@ -321,6 +322,7 @@ pub fn spawn(
     assets: crate::assets::Assets,
     pump: Arc<crate::event_pump::EventPump>,
     page_runs: crate::pages::open_runs::PageRuns,
+    stopping: tokio_util::sync::CancellationToken,
 ) {
     let mut rx = db.subscribe_changes();
     tokio::spawn(async move {
@@ -339,7 +341,11 @@ pub fn spawn(
             CaptureListener::default()
         });
         loop {
-            let changed = match rx.recv().await {
+            let received = tokio::select! {
+                _ = stopping.cancelled() => return,
+                received = rx.recv() => received,
+            };
+            let changed = match received {
                 Ok(tables) => Changed::Tables(tables),
                 // Missed some: anything may have changed — the registry
                 // too, whose change re-registers assets.
@@ -404,6 +410,7 @@ mod tests {
             crate::assets::Assets::new(f.svc.db.clone(), crate::assets::COALESCE),
             f.svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            f.svc.stopping(),
         );
         tokio::task::yield_now().await;
         f.svc
@@ -529,6 +536,7 @@ mod tests {
             assets.clone(),
             f.svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            f.svc.stopping(),
         );
         assets.register(Arc::new(crate::metric_cube::MetricCubeBuilder::new(
             (*f.svc.fact_store).clone(),
@@ -667,6 +675,7 @@ mod tests {
             assets,
             f.svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            f.svc.stopping(),
         );
         let titles = || async {
             f.svc
@@ -879,6 +888,7 @@ mod tests {
             crate::assets::Assets::new(f.svc.db.clone(), crate::assets::COALESCE),
             f.svc.event_pump.clone(),
             crate::pages::open_runs::PageRuns::default(),
+            f.svc.stopping(),
         );
         tokio::task::yield_now().await;
         f.svc
