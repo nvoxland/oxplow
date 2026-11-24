@@ -1353,6 +1353,37 @@ async fn a_composed_core_command_keeps_its_effect_senders_authority() {
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
 }
 
+/// A native command no extension declares is core's, whatever its id: an
+/// `oxplow.` id doesn't make it foundation's (a declared one is its
+/// extension's, through its contribution).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_native_command_no_extension_declares_is_cores() {
+    let (db, bus) = composing_bus();
+    for id in ["oxplow.kv.native", "acme.kv.native"] {
+        bus.register(Command::new(kv_spec(id, Confirm::Never), kv_set()).unwrap())
+            .unwrap();
+        let run = bus
+            .run(&Actor::Human, id, json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap()
+            .command_run_id
+            .unwrap();
+        let owner: String = db
+            .read(move |conn| {
+                conn.query_row(
+                    "SELECT r.extension FROM contribution_run r
+                       JOIN command_run c ON c.run_id = r.run_id WHERE c.id = ?1",
+                    [run],
+                    |row| row.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(owner, "core", "{id}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn summing_root_command_runs_counts_each_childs_cpu_once() {
     let (db, bus) = composing_bus();

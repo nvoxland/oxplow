@@ -587,8 +587,9 @@ selected date range and harness. It reports invalid, denied and failed runs
 separately, and its Not OK rate includes every recorded outcome other than
 `ok`. Command Errors groups recurring messages and links to shared Run details.
 
-Native commands registered in the `oxplow.*` namespace record
-`oxplow-foundation` as their owner. An external handler receives the
+A command's run records the extension whose manifest declares it (through
+its contribution, as `v_command` lists it); a native command no extension
+declares records `core`, whatever its id. An external handler receives the
 command's own run context so model calls and child operations can link to it.
 
 `CommandBus::undo(actor, command_run_id, confirmed)` loads the command detail and its shared run. It refuses a

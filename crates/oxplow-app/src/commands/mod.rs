@@ -451,12 +451,9 @@ impl Command {
                         oxplow_domain::contribution::ContributionKind::Command,
                         &self.spec.id,
                     ),
-                    extension: if self.spec.id.starts_with("oxplow.") {
-                        "oxplow-foundation"
-                    } else {
-                        "core"
-                    }
-                    .into(),
+                    // A declared command runs as its extension's (above);
+                    // one no extension declares is core's.
+                    extension: "core".into(),
                     version: None,
                     generation: None,
                     deployment: None,
