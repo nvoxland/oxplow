@@ -23,6 +23,7 @@ import {
   switchStream,
   runCommand,
   runCommandInBackground,
+  openInSystemBrowser,
   commandOpenAfter,
   type ThreadMark,
   type ThreadState,
@@ -1575,6 +1576,20 @@ export function App() {
           if (!find) throw new Error("nothing to find in on the page shown");
           find();
           return null;
+        },
+        // Past the window (the daemon refuses an agent): the person's
+        // browser, their clipboard.
+        open_url: async (input) => {
+          const url = (input as { url?: unknown } | null)?.url;
+          if (typeof url !== "string") throw new Error("`url` is a web address");
+          await openInSystemBrowser(url);
+          return null;
+        },
+        copy_text: async (input) => {
+          const text = (input as { text?: unknown } | null)?.text;
+          if (typeof text !== "string") throw new Error("`text` is the text to copy");
+          await navigator.clipboard.writeText(text);
+          return { copied: text.length };
         },
         quick_open: (input) => {
           if (!stream) throw new Error("no stream is shown");

@@ -265,6 +265,14 @@ pub struct VcsWorkspace {
     pub is_main: bool,
 }
 
+/// One remote of the repository: its name and where it fetches from
+/// (`v_vcs_remote`; a forge link is built from it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct VcsRemote {
+    pub name: String,
+    pub url: String,
+}
+
 /// What kind of working copy a directory is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Checkout {
@@ -540,6 +548,8 @@ pub trait Vcs: Send + Sync {
         from: &str,
     ) -> Result<(), VcsError>;
     async fn list_workspaces(&self, repo: &Path) -> Result<Vec<VcsWorkspace>, VcsError>;
+    /// The repository's remotes, by name (none for a provider without).
+    async fn list_remotes(&self, repo: &Path) -> Result<Vec<VcsRemote>, VcsError>;
     /// Remove the working copy at `at` (uncommitted changes and all) and
     /// forget it. Removing one already gone just forgets it.
     async fn remove_workspace(&self, repo: &Path, at: &Path) -> Result<(), VcsError>;

@@ -218,6 +218,58 @@ impl ClientHost {
             })),
         )
     }
+
+    /// [`ClientHost::op`] that only a person (or a page or script acting
+    /// for one) runs: it reaches past the window, into the person's own
+    /// browser or clipboard, which an agent never does for them.
+    pub fn person_op(
+        host: &Arc<ClientHost>,
+        scope: &'static str,
+        op: &'static str,
+        input_schema: Value,
+    ) -> Op {
+        let host = host.clone();
+        Op::new(
+            scope,
+            op,
+            input_schema,
+            false,
+            Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
+                let host = host.clone();
+                Box::pin(async move {
+                    if matches!(invocation.actor(), Actor::Agent { .. }) {
+                        return Err(CommandError::Denied {
+                            reason: format!(
+                                "`{scope}` `{op}` reaches the person's own browser or clipboard: a person's, not an agent's"
+                            ),
+                        });
+                    }
+                    let result = host.call(invocation.actor(), scope, op, input).await?;
+                    Ok(HandlerOutput {
+                        result,
+                        ..HandlerOutput::default()
+                    })
+                })
+            })),
+        )
+    }
+}
+
+/// `window.show` `open_url`'s input: an http(s) URL, opened in the
+/// person's own browser.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenUrlInput {
+    /// `https://…` or `http://…`.
+    pub url: String,
+}
+
+/// `window.show` `copy_text`'s input: the text put on the person's
+/// clipboard.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyTextInput {
+    pub text: String,
 }
 
 /// `tabs.write`'s operations' input: the tab (its id, `oxplow:oxplow/file?path=src/a.rs`,
@@ -343,6 +395,20 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         "window.show",
         "navigate",
         schema::<NavigateInput>(),
+    ));
+    // Past the window, the person's own browser and clipboard (a page's
+    // Open In ▸ GitHub, Copy Revision Link): a person's.
+    ops.push(ClientHost::person_op(
+        host,
+        "window.show",
+        "open_url",
+        schema::<OpenUrlInput>(),
+    ));
+    ops.push(ClientHost::person_op(
+        host,
+        "window.show",
+        "copy_text",
+        schema::<CopyTextInput>(),
     ));
     // A person's, through a page too: oxplow never types for the agent.
     ops.push(ClientHost::op(
@@ -539,6 +605,74 @@ mod tests {
             json!({ "opened": "oxplow:oxplow/file?path=src/auth.rs", "stream": "str2" })
         );
         assert_eq!(out.command_run_id, None);
+    }
+
+    /// Opening a web page in the person's browser or putting text on their
+    /// clipboard is a person's (or a page's): the window does it; an agent
+    /// is refused before any window is asked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_browser_and_the_clipboard_are_a_persons() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let mut seen = fx.svc.events.subscribe_ui();
+        fx.svc
+            .client_host
+            .register("w1", vec!["window.show".into()]);
+        let host = fx.svc.client_host.clone();
+        let window = tokio::spawn(async move {
+            let mut asked = Vec::new();
+            while asked.len() < 2 {
+                if let OxplowEvent::ClientCall { id, op, input, .. } = seen.recv().await.unwrap() {
+                    asked.push((op.clone(), input.0.clone()));
+                    host.answer("w1", &id, Ok(json!(null)));
+                }
+            }
+            asked
+        });
+        for (id, input) in [
+            (
+                "oxplow.window.open_url",
+                json!({ "url": "https://example.com/a" }),
+            ),
+            (
+                "oxplow.window.copy_text",
+                json!({ "text": "https://example.com/a" }),
+            ),
+        ] {
+            fx.svc
+                .commands
+                .run(&Actor::Human, id, input.clone(), false)
+                .await
+                .unwrap();
+            let agent = Actor::Agent {
+                session_id: None,
+                thread_id: Some(fx.thread),
+                stream_id: None,
+            };
+            let refused = fx
+                .svc
+                .commands
+                .run(&agent, id, input, false)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(refused, CommandError::Denied { .. }),
+                "{id}: {refused:?}"
+            );
+        }
+        let asked = window.await.unwrap();
+        assert_eq!(
+            asked,
+            vec![
+                (
+                    "open_url".to_string(),
+                    json!({ "url": "https://example.com/a" })
+                ),
+                (
+                    "copy_text".to_string(),
+                    json!({ "text": "https://example.com/a" })
+                ),
+            ]
+        );
     }
 
     /// No window, one that doesn't host it, one that doesn't answer, an

@@ -39234,5 +39234,24 @@
         "id"
       ]
     }
+  },
+  "vcs_remote": {
+    "1": {
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The remote's name (`origin`)."
+        },
+        {
+          "name": "url",
+          "type": "TEXT",
+          "doc": "Where it fetches from."
+        }
+      ],
+      "key": [
+        "name"
+      ]
+    }
   }
 }

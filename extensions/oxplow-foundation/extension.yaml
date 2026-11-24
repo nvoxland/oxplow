@@ -1888,6 +1888,16 @@ commands:
     op: quick_open
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
     example: {}
+  - name: window.open_url
+    summary: "Open an http(s) `url` in the person's own browser (a page's Open In ▸, an extension's link). A person's: an agent is refused."
+    scope: window.show
+    op: open_url
+    example: {"url": "https://github.com/acme/app/blob/abc1234/src/main.rs#L10-L20"}
+  - name: window.copy_text
+    summary: "Put `text` on the person's clipboard (Copy Revision Link). A person's: an agent is refused."
+    scope: window.show
+    op: copy_text
+    example: {"text": "https://github.com/acme/app/blob/abc1234/src/main.rs"}
   - name: window.navigate
     summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, knowledge page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
