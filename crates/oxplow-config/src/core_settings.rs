@@ -813,9 +813,9 @@ fn apply_family(
             .active_provider_origins
             .insert(capability.to_owned(), origin);
     } else if let Some(role) = role_from_key(key) {
+        // Checked here; `AiService` reads the binding from the settings.
         let assignment: crate::AiRoleOverride = de(value)?;
         crate::validate_ai_role(&role, &assignment).map_err(message)?;
-        config.ai_roles.insert(role, assignment);
     } else if let Some(rest) = key.strip_prefix(keys::AGENTS_PREFIX) {
         let Some((harness, field)) = rest.rsplit_once('.') else {
             return Ok(());
@@ -1169,7 +1169,6 @@ mod tests {
         .unwrap();
         assert_eq!(config.active_providers["snapshots"], "hashes");
         assert_eq!(config.active_provider_origins["snapshots"], Level::Project);
-        assert_eq!(config.ai_roles["default"].model, "a");
         assert!(!config.agent_enabled["claude"]);
         assert!(!config.agent_enabled["acme/coder"]);
         assert_eq!(config.agent_config["claude"]["model"], json!("opus"));

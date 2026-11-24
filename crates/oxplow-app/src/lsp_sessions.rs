@@ -965,7 +965,6 @@ mod tests {
             active_provider_origins: Default::default(),
             replacements: Default::default(),
             event_retention: Default::default(),
-            ai_roles: Default::default(),
             extension_sources: Default::default(),
         }))
     }
