@@ -154,7 +154,7 @@ export function fakePage(view: Node, over: Partial<Page> = {}): Page {
 
 /** A loader's declaration (what `labelRow` reads the order of). */
 export function decl(name: string): LoaderDecl {
-  return { name, loader: { kind: "rows", columns: [], rows: [] }, columns: [], reads: [], refresh: null, empty: null, readsLoaders: [], readsParams: [] };
+  return { name, loader: { kind: "rows", columns: [], rows: [] }, columns: [], reads: [], refresh: null, empty: null, live: null, readsLoaders: [], readsParams: [] };
 }
 
 export function loader(columns: string[], rows: SqlCell[][], error: string | null = null): LoaderRun {
