@@ -69,7 +69,10 @@ send has a small paper plane after its count.
 
 After you add something, the panel opens the tab of the basket it went to. The
 **Context** page (open it from the panel's header) shows the same baskets as
-tables.
+tables, and does the same things with them: **New Basket…** and **Put Back** on
+the page, **Move to Basket…**, **Move to This Thread**, **Edit Note…** and
+**Remove** on a row, and **Send Next**, **Rename…**, **Clear** and **Delete** on a
+basket.
 
 ## Sent by mistake?
 

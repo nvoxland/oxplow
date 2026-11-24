@@ -79,6 +79,18 @@ view:
         label: Note
         help: What you want the agent to do about it. Leave it empty to remove the note.
       row: true
+    - id: move
+      label: Move to Basket…
+      command: oxplow.context.move
+      form: true
+      about: what
+      input:
+        item: '{{row.id}}'
+      fields:
+      - name: basket
+        label: Basket
+        help: The name of a basket that exists.
+      row: true
     - id: remove
       label: Remove
       command: oxplow.context.remove
@@ -111,6 +123,18 @@ view:
       command: oxplow.context.send_next
       input:
         thread: thr{{param.thread_id}}
+    - id: move
+      label: Move to Basket…
+      command: oxplow.context.move
+      form: true
+      about: what
+      input:
+        item: '{{row.id}}'
+      fields:
+      - name: basket
+        label: Basket
+        help: The name of a basket that exists.
+      row: true
     - id: remove
       label: Remove
       command: oxplow.context.remove
@@ -209,6 +233,25 @@ view:
         label: Note
         help: What you want the agent to do about it. Leave it empty to remove the note.
       row: true
+    - id: move
+      label: Move to Basket…
+      command: oxplow.context.move
+      form: true
+      about: what
+      input:
+        item: '{{row.id}}'
+      fields:
+      - name: basket
+        label: Basket
+        help: The name of a basket that exists.
+      row: true
+    - id: to-this-thread
+      label: Move to This Thread
+      command: oxplow.context.move
+      input:
+        item: '{{row.id}}'
+        thread: thr{{param.thread_id}}
+      row: true
     - id: remove
       label: Remove
       command: oxplow.context.remove
@@ -223,3 +266,20 @@ actions:
     thread: thr{{param.thread_id}}
   prominent: true
   icon: trash-2
+- id: new-basket
+  label: New Basket…
+  command: oxplow.context.create_basket
+  form: true
+  input: {}
+  fields:
+  - name: name
+    label: Name
+    help: A name for the new basket, unique in any case.
+  icon: plus
+- id: put-back
+  label: Put Back
+  help: Put this thread's last send back where it came from, held when it was this thread's.
+  command: oxplow.context.put_back
+  input:
+    thread: thr{{param.thread_id}}
+  icon: history

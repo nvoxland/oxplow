@@ -1,0 +1,24 @@
+# The Context page does what its guide says the panel's baskets do: New Basket…
+# makes a named basket, Move to Basket… puts an item of the next prompt in it
+# (and Move to This Thread brings it back), and Put Back is there for the
+# thread's last send (refused while nothing has been sent).
+given:
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=problems", label: Problems } }
+when: { page: oxplow/context, params: { thread_id: 1 } }
+expect: { loaders: { next: { rows: 1 }, baskets: { rows: 0 } } }
+steps:
+  - press: { action: new-basket, input: { name: Auth } }
+    expect: { ok: true }
+  - expect: { loaders: { baskets: { rows: [{ name: Auth }] } } }
+  - press: { action: move, node: next, row: { what: Problems }, input: { basket: Auth } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        next: { rows: 0 }
+        in_baskets: { rows: [{ what: Problems, basket: Auth }] }
+  - press: { action: to-this-thread, node: in_baskets, row: { what: Problems } }
+    expect: { ok: true }
+  - expect: { loaders: { next: { rows: [{ what: Problems }] }, in_baskets: { rows: 0 } } }
+  # Nothing was sent yet: Put Back says so and changes nothing.
+  - press: { action: put-back }
+    expect: { ok: false }
