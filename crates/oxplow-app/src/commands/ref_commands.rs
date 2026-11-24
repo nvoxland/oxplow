@@ -247,30 +247,47 @@ pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, Stri
         .map(|s| s.id.clone())
         .collect();
     // `about_if`: the command's own script decides on this link, all of
-    // the menu's at once.
-    let deciding: Vec<(String, String)> = about_ifs(&all, &ids);
-    if !deciding.is_empty() {
-        let input = about_if_input(uri, &resource, &params);
-        let decided = futures::future::join_all(deciding.iter().map(|(id, func)| {
-            about_if_holds(
-                svc,
-                id.clone(),
-                func.clone(),
-                uri.to_string(),
-                input.clone(),
-            )
-        }))
-        .await;
-        let refused: Vec<&String> = deciding
-            .iter()
-            .zip(decided)
-            .filter(|(_, holds)| !holds)
-            .map(|((id, _), _)| id)
-            .collect();
-        ids.retain(|id| !refused.contains(&id));
-    }
+    // the menu's at once. Boxed: its script runs' state is large, and a
+    // menu's ref commands are awaited deep in a fixture's or a page's run.
+    let refused = Box::pin(refused_by_about_if(
+        svc, &all, &ids, uri, &resource, &params,
+    ))
+    .await;
+    ids.retain(|id| !refused.contains(id));
     ids.sort();
     Ok(ids)
+}
+
+/// The ids among `ids` whose command's `about_if` says no to `uri`.
+async fn refused_by_about_if(
+    svc: &Services,
+    all: &[CommandSpec],
+    ids: &[String],
+    uri: &str,
+    resource: &str,
+    params: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let deciding = about_ifs(all, ids);
+    if deciding.is_empty() {
+        return Vec::new();
+    }
+    let input = about_if_input(uri, resource, params);
+    let decided = futures::future::join_all(deciding.iter().map(|(id, func)| {
+        Box::pin(about_if_holds(
+            svc,
+            id.clone(),
+            func.clone(),
+            uri.to_string(),
+            input.clone(),
+        ))
+    }))
+    .await;
+    deciding
+        .into_iter()
+        .zip(decided)
+        .filter(|(_, holds)| !holds)
+        .map(|((id, _), _)| id)
+        .collect()
 }
 
 /// The ids among `ids` whose command has a `ui.about_if`, with its function.

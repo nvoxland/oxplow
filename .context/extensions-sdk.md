@@ -767,6 +767,9 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
 - `when: { item_commands: "<item uri>" }` → `expect: { commands: [ids]
   }`. The item may be a web URL (`https://…`, the commands `about: https`)
   or a file or directory URI, with `accepts.url` / `accepts.path` applied.
+- `when: { link_text: "<text>" }` → `expect: { links: [{ text, uri }] }`:
+  the links the extension's `links:` make in the text
+  (`link_rules::find_rule_links`, the matcher the desktop's mirrors).
 - `when: { search: "<text>", resource?: <id> }` → `expect: { uris: [...]
   }`, through the search index (not a `LIKE`).
 

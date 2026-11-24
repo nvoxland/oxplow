@@ -351,7 +351,7 @@ pub type ContributionOf = dyn Fn(&RunContext) -> RunContext + Send + Sync;
 impl Command {
     /// This command, offered to a person as `ui` says (label, group, …).
     pub fn with_ui(mut self, ui: oxplow_domain::CommandUi) -> Self {
-        self.spec.ui = Some(ui);
+        self.spec.ui = Some(Box::new(ui));
         self
     }
 

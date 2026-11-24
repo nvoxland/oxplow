@@ -993,12 +993,12 @@ async fn a_shortcut_is_held_once_per_when() {
     let (_db, bus) = bus();
     let keyed = |id: &str, when: Option<&str>| {
         let mut spec = kv_spec(id, Confirm::Never);
-        spec.ui = Some(oxplow_domain::CommandUi {
+        spec.ui = Some(Box::new(oxplow_domain::CommandUi {
             label: id.into(),
             shortcut: Some("Ctrl/Cmd+K".into()),
             when: when.map(str::to_string),
             ..Default::default()
-        });
+        }));
         Command::new(spec, kv_set())
     };
     bus.register(keyed("oxplow.kv.a", Some("fileShown")).unwrap())

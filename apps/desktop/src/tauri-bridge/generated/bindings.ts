@@ -1663,7 +1663,9 @@ export type CommandSpec = {
 	/**
 	 *  How a person meets it — label, group, where it's offered and how
 	 *  it runs from there. `None`: it isn't offered to a person by itself
-	 *  (a step other commands compose, an agent's tool).
+	 *  (a step other commands compose, an agent's tool). Boxed: it is
+	 *  large and most commands have none, and specs are moved and listed
+	 *  by the hundred.
 	 */
 	ui?: CommandUi | null,
 	/**
@@ -1881,7 +1883,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "test_convention" | "language" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "run_pattern" | "file_kind" | "link" | "test_convention" | "language" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -2455,7 +2457,10 @@ export type ExtensionCommand = {
 	 *  (`oxplow_domain::capability::check_need`).
 	 */
 	needs: string[],
-	/**  How a person meets it (label, group, …), as core's commands do. */
+	/**
+	 *  How a person meets it (label, group, …), as core's commands do
+	 *  (boxed, as theirs is).
+	 */
 	ui: CommandUi | null,
 	/**
 	 *  Stable: the commands of an extension that ships with oxplow are;
@@ -2629,6 +2634,11 @@ export type Extension_Deserialize = {
 	 *  invalid ones are in `errors`).
 	 */
 	fileKinds: FileKindDecl[],
+	/**
+	 *  The text it makes links of (`links:`; valid ones — invalid ones are
+	 *  in `errors`): the terminal and markdown match them.
+	 */
+	links: LinkRuleDecl[],
 	/**
 	 *  What makes a file, container or function a test, and what counts as
 	 *  an assertion or a skip (`test_conventions:`; valid ones — invalid
@@ -2813,6 +2823,11 @@ export type Extension_Serialize = {
 	 *  invalid ones are in `errors`).
 	 */
 	fileKinds: FileKindDecl[],
+	/**
+	 *  The text it makes links of (`links:`; valid ones — invalid ones are
+	 *  in `errors`): the terminal and markdown match them.
+	 */
+	links: LinkRuleDecl[],
 	/**
 	 *  What makes a file, container or function a test, and what counts as
 	 *  an assertion or a skip (`test_conventions:`; valid ones — invalid
@@ -3667,6 +3682,19 @@ export type LinkKind =
  *  tree if absent).
  */
 "compare";
+
+/**  One `links:` entry, checked. */
+export type LinkRuleDecl = {
+	/**  Its id within the extension. */
+	id: string,
+	/**
+	 *  The pattern as both engines read it: the param pattern's kept form,
+	 *  without `^…$` (`\d` spelled `[0-9]`).
+	 */
+	pattern: string,
+	/**  The URI a match links to, `{{match}}` where the text goes. */
+	uri: string,
+};
 
 export type Loader =
 /**

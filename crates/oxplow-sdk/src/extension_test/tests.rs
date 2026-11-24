@@ -2927,6 +2927,34 @@ commands:
     assert!(errors.contains("defines no `is_theirs`"), "{errors}");
 }
 
+/// `when: { link_text }` lists the links an extension's `links:` make in
+/// the text: whole words only, the match encoded into the URI.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_which_links_text_makes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Links issue keys.
+  examples:
+    - { name: keys, input: { link_text: \"fixes PROJ-12\" }, expect: the issue link }
+links:
+  - { id: issue, pattern: '[A-Z]{2,10}-[0-9]+', uri: 'https://linear.app/acme/issue/{{match}}' }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/keys.yaml",
+        "when: { link_text: \"fixes PROJ-12, not XPROJ-1x\" }\nexpect: { links: [{ text: PROJ-12, uri: \"https://linear.app/acme/issue/PROJ-12\" }] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,

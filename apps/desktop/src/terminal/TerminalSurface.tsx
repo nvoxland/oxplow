@@ -17,9 +17,11 @@ import { useContextMenu } from "../components/useRowContextMenu.js";
 import { terminalMenuItems } from "./terminalMenu.js";
 import { terminalSelectionWhat } from "./terminalSelection.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
-import { installFilePathLinkProvider, installUrlLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
+import { installFilePathLinkProvider, installRuleLinkProvider, installUrlLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
+import { extensionsNow } from "../extensionsStore.js";
+import { rulesOf } from "../linkRules.js";
 import type { MenuItem } from "../menu.js";
-import { linkRefOf, openInBrowser, openInForPath, openInForRef, withLinkOffers } from "../openIn.js";
+import { followRuleLink, linkRefOf, openInBrowser, openInForPath, openInForRef, withLinkOffers } from "../openIn.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import { isMacPlatform } from "../keybindings.js";
 
@@ -260,6 +262,14 @@ export function TerminalSurface({
         hovered.current = url ? { kind: "url", url } : null;
       },
     });
+    // An extension's `links:` (an issue key): its URI, a click away.
+    const ruleLinkDisp = installRuleLinkProvider(term, {
+      rules: () => rulesOf(extensionsNow()),
+      onActivate: followRuleLink,
+      onHover: (uri) => {
+        hovered.current = uri ? { kind: "url", url: uri } : null;
+      },
+    });
     const linkProviderDisp = installFilePathLinkProvider(term, {
       onActivate: (match: FilePathLinkActivation) => {
         const open = props.current.onOpenFile;
@@ -394,6 +404,7 @@ export function TerminalSurface({
       binaryDisp.dispose();
       linkProviderDisp.dispose();
       urlLinkDisp.dispose();
+      ruleLinkDisp.dispose();
       termRef.current = null;
       term.dispose();
     };

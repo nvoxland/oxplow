@@ -102,6 +102,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | advisory | `{ advisory: <id>, thread? }` | `{ lines: [text] }` |
 | action_point | `{ action_point: <id \| name>, context? } (what a named action point offers)` | `{ draws: none \| button \| menu, commands?: [ids] }` |
 | item_commands | `{ item_commands: <uri> } (the commands about an item, its store filter applied)` | `{ commands: [ids] }` |
+| link_text | `{ link_text: <text> } (the links the extension's `links:` make in the text)` | `{ links: [{ text, uri }] }` |
 | context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | language | `{ language: <id>, path, body } (the file `body` at `path`, read as that language)` | `{ symbols?: [{ kind, id, name, container, line }], functions?: [{ name, id, complexity, length, parameter_count, visibility, has_doc, start_line }], imports?: [{ module, kind, line }] }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |

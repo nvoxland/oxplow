@@ -225,6 +225,7 @@ Settings → Extensions lists each declared reference with Set… and Revoke.
 | `context` | text for the coding agent's context, sent once, then when it changes |  |
 | `run_patterns` | command substrings that mark a shell call as a test or static-analysis run |  |
 | `file_kinds` | what kind of file a path is, by glob: CI, generated, vendored, sensitive, … |  |
+| `links` | text that is a link, such as an issue key: a pattern and the URI a match opens |  |
 | `test_conventions` | what makes a file, container or function a test, and what counts as an assertion or a skip |  |
 | `languages` | a language oxplow can parse or suggest a server for: its grammar, analysis, symbols and server |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
@@ -464,6 +465,24 @@ test_conventions:
 ```
 
 A bad glob, pattern or expression is an error at its line.
+
+### Links in text
+
+`links:` makes text a link wherever the app shows text: in the terminal and
+in markdown. Each entry has a pattern and the URI a match opens. The
+pattern uses the same rules as a resource's param pattern, without `^` and
+`$`, and matches only a whole word. The URI is an `https://` URL or an
+oxplow URI, with `{{match}}` where the matched text goes.
+
+```yaml
+links:
+  - { id: issue, pattern: "[A-Z]{2,10}-[0-9]+", uri: "https://linear.app/acme/issue/{{match}}" }
+```
+
+A click opens the link. A right-click shows the same menu as any link,
+with Open In and the commands about the link. Test it with a fixture:
+`when: { link_text: "fixes PROJ-12" }` and
+`expect: { links: [{ text: PROJ-12, uri: "https://linear.app/acme/issue/PROJ-12" }] }`.
 
 ### File kinds and run patterns
 

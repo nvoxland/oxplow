@@ -1174,6 +1174,10 @@ export function App() {
     setOpenInHost({
       worktree: stream.worktree_path,
       openInApp: (url) => handleOpenExternalUrl(url),
+      openRef: (ref) => {
+        const tab = refFromTabId(ref);
+        if (tab) handleOpenPageRef.current?.(tab);
+      },
       openTerminalAt: (dir) =>
         void runCommand("oxplow.terminal.open", { stream: streamId, dir })
           .then(({ result }) => {

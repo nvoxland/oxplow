@@ -30,6 +30,14 @@
   the command is offered (`def is_mine(link): return
   link["url"].startswith("https://mine.example/")`). Each call is a script
   run, so keep a `url` or `path` filter in front of it.
+- **Making text a link** (an issue key, a ticket number) in the terminal
+  and in markdown: a top-level `links: [{ id, pattern, uri }]`. The pattern
+  is a param pattern without `^…$` (classes, no `.`), matched as a whole
+  word; the uri is `https://…` or an oxplow URI with `{{match}}`:
+  `{ id: issue, pattern: "[A-Z]{2,10}-[0-9]+", uri:
+  "https://linear.app/acme/issue/{{match}}" }`. The link gets Open In ▸
+  and the commands about its URI. Test it: `when: { link_text: "fixes
+  PROJ-12" }` → `expect: { links: [{ text: PROJ-12, uri: "…" }] }`.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional

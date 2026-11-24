@@ -16,6 +16,9 @@ import { parseMarkdownLink, parsedLinkIconKind, preprocessWikilinks, refLinkTitl
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
 import { rehypeHighlightCode } from "./codeHighlight.js";
+import { rehypeRuleLinks } from "./ruleLinks.js";
+import { useLinkRulesKey } from "../../extensionsStore.js";
+import { rulesOf } from "../../linkRules.js";
 import { InlineView } from "./InlineView.js";
 import { INLINE_ELEMENTS } from "./inlineMarkdown.js";
 import { followLink, linkMenuAtOpen, type OpenRef } from "./links.js";
@@ -178,11 +181,22 @@ export interface MarkdownViewProps {
  * fences draw as diagrams (pan and zoom, the lightbox); other code blocks
  * carry a Copy button.
  */
+/** The rehype plugins with no `links:` rules. */
+const PLAIN_REHYPE = [rehypeHighlightCode];
+
 export function MarkdownView({ body, base = null, maxHeight, style, className, inline = false, testId }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
   // …and the stores of the shared models (their ids) do too.
   const stores = useRecordStores();
+  // Extensions' `links:` make text a link (an issue key): `ruleLinks.ts`.
+  // Keyed by the rules, so a reload that changes none keeps the drawn
+  // tree (its images) as it is.
+  const rulesKey = useLinkRulesKey();
+  const rehypePlugins = useMemo(() => {
+    const rules = JSON.parse(rulesKey) as ReturnType<typeof rulesOf>;
+    return rules.length > 0 ? [rehypeHighlightCode, () => rehypeRuleLinks(rules)] : PLAIN_REHYPE;
+  }, [rulesKey]);
   const processedBody = useMemo(
     () => preprocessWikilinks(body),
     [body, refKinds, stores],
@@ -313,7 +327,7 @@ export function MarkdownView({ body, base = null, maxHeight, style, className, i
       <ReactMarkdown
         {...(inline ? { allowedElements: INLINE_ELEMENTS, unwrapDisallowed: true } : {})}
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlightCode]}
+        rehypePlugins={rehypePlugins}
         urlTransform={urlTransform}
         components={{
           pre: ({ node, children, ...props }) => {

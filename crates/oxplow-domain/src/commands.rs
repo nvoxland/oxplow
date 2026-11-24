@@ -169,9 +169,11 @@ pub struct CommandSpec {
     pub needs: Vec<String>,
     /// How a person meets it — label, group, where it's offered and how
     /// it runs from there. `None`: it isn't offered to a person by itself
-    /// (a step other commands compose, an agent's tool).
+    /// (a step other commands compose, an agent's tool). Boxed: it is
+    /// large and most commands have none, and specs are moved and listed
+    /// by the hundred.
     #[serde(default)]
-    pub ui: Option<CommandUi>,
+    pub ui: Option<Box<CommandUi>>,
     /// The scope operation behind it, when it is one: where it runs (a
     /// window scope's runs in the window) and what it does.
     #[serde(default)]

@@ -1,0 +1,21 @@
+{
+  "rules": [
+    { "id": "issue", "pattern": "[A-Z]{2,10}-[0-9]+", "uri": "https://linear.app/acme/issue/{{match}}" },
+    { "id": "ticket", "pattern": "#[0-9]+", "uri": "oxplow:acme/ticket?id={{match}}" },
+    { "id": "short", "pattern": "[A-Z]+-[0-9]+", "uri": "https://other.example/{{match}}" }
+  ],
+  "cases": [
+    { "text": "fixes PROJ-12 and AB-3.", "links": [
+      { "text": "PROJ-12", "uri": "https://linear.app/acme/issue/PROJ-12" },
+      { "text": "AB-3", "uri": "https://linear.app/acme/issue/AB-3" }
+    ] },
+    { "text": "XPROJ-12x and proj-12 are not", "links": [] },
+    { "text": "(#42) done", "links": [
+      { "text": "#42", "uri": "oxplow:acme/ticket?id=%2342" }
+    ] },
+    { "text": "A-1 is too short for the first rule", "links": [
+      { "text": "A-1", "uri": "https://other.example/A-1" }
+    ] },
+    { "text": "", "links": [] }
+  ]
+}

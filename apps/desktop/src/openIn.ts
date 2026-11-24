@@ -105,6 +105,8 @@ export interface OpenInHost {
   worktree: string | null;
   openInApp(url: string): void;
   openTerminalAt(dir: string): void;
+  /** Open an oxplow URI's page (a link an extension's `links:` made). */
+  openRef?(ref: string): void;
 }
 
 let host: OpenInHost | null = null;
@@ -206,4 +208,11 @@ export function linkRefOf(target: OpenTarget): string | null {
   if (target.path !== root && !target.path.startsWith(`${root}/`)) return null;
   const rel = target.path === root ? "" : target.path.slice(root.length + 1);
   return target.kind === "file" ? fileUri(rel) : dirUri(rel);
+}
+
+/** Follow a link an extension's `links:` made: a web URL in the browser,
+ *  an oxplow URI's page in this window. */
+export function followRuleLink(uri: string): void {
+  if (/^https?:\/\//i.test(uri)) openInBrowser(uri);
+  else host?.openRef?.(uri);
 }

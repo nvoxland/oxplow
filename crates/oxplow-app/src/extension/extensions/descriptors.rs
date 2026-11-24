@@ -254,6 +254,12 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         );
         out.push(d);
     }
+    for (i, l) in ext.links.iter().enumerate() {
+        let mut d = new(ContributionKind::Link, &l.id, RunsOn::Query);
+        d.source = item("links", i);
+        d.description = Some(format!("`{}` → {}", l.pattern, l.uri));
+        out.push(d);
+    }
     for (i, l) in ext.languages.iter().enumerate() {
         let mut d = new(ContributionKind::Language, &l.decl.id, RunsOn::Query);
         d.source = item("languages", i);
@@ -687,6 +693,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::TestConvention => ext.test_conventions.retain(|x| x.id != local),
         ContributionKind::Language => ext.languages.retain(|x| x.decl.id != local),
         ContributionKind::FileKind => ext.file_kinds.retain(|k| k.id != local),
+        ContributionKind::Link => ext.links.retain(|l| l.id != local),
         ContributionKind::RunPattern => ext.run_patterns.retain(|r| r.id != local),
         ContributionKind::Implementation => {
             let global = c.global.as_str();

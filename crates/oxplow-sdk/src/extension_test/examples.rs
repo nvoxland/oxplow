@@ -824,6 +824,36 @@ pub(super) async fn action_point_example(
     }
 }
 
+/// `when: { link_text: <text> }`: the links the extension's `links:` make
+/// in `text`, as the terminal and markdown draw them —
+/// `expect: { links: [{ text, uri }] }`.
+pub(super) fn link_text_example(
+    ext: &oxplow_app::extension::extensions::Extension,
+    ex: &Example<'_>,
+    text: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let links: Vec<Value> =
+        oxplow_app::extension::extensions::link_rules::find_rule_links(text, &ext.links)
+            .into_iter()
+            .map(|l| json!({ "text": l.text, "uri": l.uri }))
+            .collect();
+    let got = json!({ "links": links });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("`{text}` made {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("the extension's `links:` patterns and URIs, or the example's `expect`")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
 /// `when: { item_commands: <uri> }`: the commands a person is offered
 /// about the item `uri` (their `ui.about`, its store filter and
 /// `about_when` applied) — `expect: { commands: [ids] }`.

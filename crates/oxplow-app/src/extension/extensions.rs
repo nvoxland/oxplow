@@ -30,6 +30,7 @@ pub mod implementations;
 pub mod imports;
 pub mod jobs;
 pub(crate) mod languages;
+pub mod link_rules;
 pub mod manifest_v2;
 pub mod public_contracts;
 pub mod replacements;
@@ -430,6 +431,9 @@ pub struct Extension {
     /// The kinds of file it names by glob (`file_kinds:`; valid ones —
     /// invalid ones are in `errors`).
     pub file_kinds: Vec<file_kinds::FileKindDecl>,
+    /// The text it makes links of (`links:`; valid ones — invalid ones are
+    /// in `errors`): the terminal and markdown match them.
+    pub links: Vec<link_rules::LinkRuleDecl>,
     /// What makes a file, container or function a test, and what counts as
     /// an assertion or a skip (`test_conventions:`; valid ones — invalid
     /// ones are in `errors`).
@@ -1857,6 +1861,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         languages: Vec::new(),
         run_patterns: Vec::new(),
         file_kinds: Vec::new(),
+        links: Vec::new(),
         test_conventions: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
@@ -2089,6 +2094,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = m.file_kinds.as_ref() {
             let (declared, errors) = file_kinds::parse_file_kinds(v, man, &manifest);
             ext.file_kinds = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.links.as_ref() {
+            let (declared, errors) = link_rules::parse_links(v, man, &manifest);
+            ext.links = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.test_conventions.as_ref() {
@@ -3872,6 +3882,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.contexts.clear();
     ext.run_patterns.clear();
     ext.file_kinds.clear();
+    ext.links.clear();
     ext.test_conventions.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();

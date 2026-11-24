@@ -555,6 +555,11 @@ know HOME).
 URL opened it), and `installUrlLinkProvider` registers them: a click opens
 the system browser (`openInBrowser`).
 
+**Extensions' `links:` are links too** (`installRuleLinkProvider`, the
+rules read fresh from `extensionsNow()` on each scan): a click follows the
+URI (`followRuleLink`: a web URL in the browser, an oxplow URI's page),
+and the menu has its Open In ▸ and commands.
+
 **The right-click menu knows the link under the pointer.** Both providers
 take `onHover(match | null)` (xterm's `ILink.hover` / `leave`); the
 surface keeps the hovered link, and its menu puts that link's items first.

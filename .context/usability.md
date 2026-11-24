@@ -667,6 +667,9 @@ surface calls it and adds nothing of its own.
 - A failure goes to the error toast (`recordOpError`).
 - A tab builds its Open In as its menu opens (`CenterTab.menuAtOpen`), so
   it reads the window as it is then.
+- **Extensions add links.** `links:` (a pattern and a URI) make text a
+  link in the terminal and markdown, with the same menu
+  ([extensions-manifest.md](./extensions-manifest.md) `links`).
 - **Extensions add their own.** A command about the link whose `ui.group`
   is `Open In` joins after oxplow's items (`withLinkOffers`; the link's
   other commands keep their own groups): [extensions-slots.md](./extensions-slots.md)

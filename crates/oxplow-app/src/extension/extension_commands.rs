@@ -77,8 +77,9 @@ pub struct ExtensionCommand {
     /// it needs active, as core's commands declare them
     /// (`oxplow_domain::capability::check_need`).
     pub needs: Vec<String>,
-    /// How a person meets it (label, group, …), as core's commands do.
-    pub ui: Option<oxplow_domain::CommandUi>,
+    /// How a person meets it (label, group, …), as core's commands do
+    /// (boxed, as theirs is).
+    pub ui: Option<Box<oxplow_domain::CommandUi>>,
     /// Stable: the commands of an extension that ships with oxplow are;
     /// any other's are experimental.
     pub stable: bool,
@@ -698,7 +699,7 @@ fn command_of(
         access,
         job: f.job,
         needs: f.needs,
-        ui: f.ui,
+        ui: f.ui.map(Box::new),
         stable,
         examples: f
             .examples

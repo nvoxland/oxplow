@@ -395,6 +395,17 @@
       },
       "default": null
     },
+    "links": {
+      "description": "Text that is a link: a pattern and the URI a match links to, which\nthe terminal and markdown draw as a link.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/LinkRuleFile"
+      },
+      "default": null
+    },
     "test_conventions": {
       "description": "What makes a file, container or function a test, and what counts as\nan assertion or a skip.",
       "type": [
@@ -4178,6 +4189,30 @@
       "required": [
         "kind",
         "globs"
+      ]
+    },
+    "LinkRuleFile": {
+      "description": "A `links:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Its id within the extension (lowercase letters, digits, dashes).",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "What text is a link: a param pattern without `^…$` (characters,\nclasses, `\\d`, `\\w`, escaped punctuation, each with one quantifier;\nno `.`, groups or `|`), matched as a whole word.",
+          "type": "string"
+        },
+        "uri": {
+          "description": "The URI a match links to: `https://…` or an oxplow URI, with\n`{{match}}` where the matched text goes (percent-encoded).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pattern",
+        "uri"
       ]
     },
     "TestConventionFile": {

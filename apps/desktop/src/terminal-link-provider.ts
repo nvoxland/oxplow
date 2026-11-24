@@ -12,6 +12,9 @@
 
 import type { IDisposable, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 
+import { findRuleLinks } from "./linkRules.js";
+import type { LinkRuleDecl } from "./tauri-bridge/generated/bindings.js";
+
 export interface FilePathMatch {
   /** Inclusive start offset in the line text (0-based). */
   start: number;
@@ -334,6 +337,38 @@ export function installUrlLinkProvider(
             if (event.button === 0) opts.onActivate(m.url);
           },
           hover: () => opts.onHover?.(m.url),
+          leave: () => opts.onHover?.(null),
+        })),
+      );
+    },
+  });
+}
+
+/** Wire extensions' `links:` (`linkRules.ts`, read fresh on each scan:
+ *  they reload with the extensions) into `term` as a link provider: a click
+ *  calls `onActivate` with the URI, and `onHover` says which one the
+ *  pointer is over. */
+export function installRuleLinkProvider(
+  term: Terminal,
+  opts: { rules(): readonly LinkRuleDecl[]; onActivate(uri: string): void; onHover?(uri: string | null): void },
+): IDisposable {
+  return term.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const rules = opts.rules();
+      const text = rules.length > 0 ? readWrappedLine(term, bufferLineNumber) : null;
+      const matches = text ? findRuleLinks(text, rules) : [];
+      if (matches.length === 0) {
+        callback(undefined);
+        return;
+      }
+      callback(
+        matches.map((m) => ({
+          range: cellRange(term.cols, bufferLineNumber, m.start, m.end),
+          text: m.text,
+          activate: (event) => {
+            if (event.button === 0) opts.onActivate(m.uri);
+          },
+          hover: () => opts.onHover?.(m.uri),
           leave: () => opts.onHover?.(null),
         })),
       );

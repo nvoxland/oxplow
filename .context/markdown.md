@@ -19,7 +19,10 @@ set**, and a surface never builds its own:
   offers Open, Open in new tab, Open In ▸ (the file manager, the default
   app, a terminal, the browser: `openIn.ts`, [usability.md](./usability.md)
   "Open In ▸ on every path and URL") and a Copy of what it names (path, SHA,
-  id, link). A web link opens in the app's web page when the allowlist
+  id, link). An extension's `links:` make prose a link too
+  (`ruleLinks.ts`, a rehype plugin over text outside code and links; the
+  viewer subscribes to the rules alone, `useLinkRulesKey`, so a reload of
+  the extensions that changes none keeps the drawn tree). A web link opens in the app's web page when the allowlist
   takes it (`classifyExternalUrl`), else in the browser. An in-page
   anchor jumps. A broken `[[…]]` is inert and marked. A bare ref link
   (a record of a store, an extension's ref, written without a

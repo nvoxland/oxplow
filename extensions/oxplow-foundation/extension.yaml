@@ -869,6 +869,11 @@ resources:
     label: File kind
     params: { file_kind: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: file-text
+  - name: link
+    description: "Text that is a link, such as an issue key: a pattern and the URI a match opens."
+    label: Link
+    params: { link: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: link
   - name: test_convention
     description: "What makes a file, container or function a test, and what counts as an assertion or a skip."
     label: Test convention
