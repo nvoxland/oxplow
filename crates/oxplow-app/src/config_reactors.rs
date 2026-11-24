@@ -413,7 +413,7 @@ mod tests {
                 .as_array()
                 .map(Vec::len),
             Some(2),
-            "a publication leaves the project's own rows"
+            "an activation leaves the project's own rows"
         );
     }
 
@@ -502,7 +502,7 @@ mod tests {
                 .settle(&[METRICS], Duration::from_secs(5))
                 .await
         );
-        // The reactor asked for a generation; the owner publishes it.
+        // The reactor asked for a generation; the owner activates it.
         crate::test_fixtures::activate(&f.svc).await;
         assert!(enabled().await);
     }

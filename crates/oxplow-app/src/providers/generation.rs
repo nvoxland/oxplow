@@ -1,5 +1,5 @@
 //! Prepared provider instances for one catalog generation. This stages
-//! processes and adapters; publication is coordinated by the app host.
+//! processes and adapters; activation is coordinated by the app host.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -20,19 +20,19 @@ struct Staged {
     capability: Option<PreparedProviderCapability>,
     live: Option<Live>,
     epoch: u64,
-    published: bool,
+    activated: bool,
     /// Its start failed the way a start may (the process won't come up
-    /// yet): it is published without a connection, failing, and its next
+    /// yet): it is activated without a connection, failing, and its next
     /// call restarts it with backoff.
     start_failure: Option<String>,
     /// The running instance carried over unchanged: its process is the
-    /// generation's too, so nothing of it is stopped if this isn't published.
+    /// generation's too, so nothing of it is stopped if this isn't activated.
     reused: bool,
 }
 
 impl Drop for Staged {
     fn drop(&mut self) {
-        if self.published || self.reused {
+        if self.activated || self.reused {
             return;
         }
         self.instance
@@ -46,7 +46,7 @@ impl Drop for Staged {
 }
 
 /// All provider instances and adapters staged for one catalog generation.
-/// Dropping an unpublished value marks its candidates stopped and drops
+/// Dropping an unactivated value marks its candidates stopped and drops
 /// their processes as a last resort.
 pub struct PreparedProviderGeneration {
     generation: String,
@@ -56,7 +56,7 @@ pub struct PreparedProviderGeneration {
     base: BTreeMap<String, Arc<Instance>>,
     staged: Vec<Staged>,
     /// What instances left out of the generation read as, set when it is
-    /// published (a retired instance's late failure must not override it).
+    /// activated (a retired instance's late failure must not override it).
     states: Vec<(String, InstanceState)>,
     _reconciling: tokio::sync::OwnedMutexGuard<()>,
 }
@@ -91,16 +91,16 @@ impl PreparedProviderGeneration {
 }
 
 /// The host maps swapped after the candidate database transaction commits.
-pub struct ProviderGenerationPublication {
+pub struct ProviderGenerationActivation {
     retired: Vec<(Arc<Instance>, Option<Live>)>,
-    published: Vec<Arc<Instance>>,
+    activated: Vec<Arc<Instance>>,
     start_failures: Vec<(Arc<Instance>, String)>,
     registry: std::sync::Weak<ProviderRegistry>,
 }
 
-impl ProviderGenerationPublication {
+impl ProviderGenerationActivation {
     /// Record successful starts, schedule their initial sync and end replaced
-    /// processes outside the publication transaction.
+    /// processes outside the activation transaction.
     pub async fn finish(mut self) {
         if let Some(registry) = self.registry.upgrade() {
             for (instance, error) in std::mem::take(&mut self.start_failures) {
@@ -108,7 +108,7 @@ impl ProviderGenerationPublication {
                     .failed(&instance.name.clone(), Some(&instance), error)
                     .await;
             }
-            for instance in &self.published {
+            for instance in &self.activated {
                 let current = {
                     let running = registry.running.lock().await;
                     let current = running
@@ -169,7 +169,7 @@ async fn is_current(registry: &ProviderRegistry, instance: &Arc<Instance>) -> bo
 }
 
 /// A reserved running map and prepared provider candidate. The running
-/// mutex is acquired before database publication and borrowed here so a
+/// mutex is acquired before database activation and borrowed here so a
 /// retry can retain the same exclusion guard.
 pub struct ProviderGenerationReservation<'a> {
     registry: &'a ProviderRegistry,
@@ -179,7 +179,7 @@ pub struct ProviderGenerationReservation<'a> {
 }
 
 impl ProviderRegistry {
-    /// Hold the running-map writer across candidate publication. Acquire this
+    /// Hold the running-map writer across candidate activation. Acquire this
     /// before entering the database write boundary.
     pub async fn reserve_running(
         &self,
@@ -342,7 +342,7 @@ impl ProviderRegistry {
                     capability: Some(capability),
                     live: None,
                     epoch,
-                    published: false,
+                    activated: false,
                     start_failure: None,
                     reused: true,
                 });
@@ -355,7 +355,7 @@ impl ProviderRegistry {
                     capability: Some(capability),
                     live: Some(live),
                     epoch,
-                    published: false,
+                    activated: false,
                     start_failure: None,
                     reused: false,
                 }),
@@ -366,12 +366,12 @@ impl ProviderRegistry {
                     capability: Some(capability),
                     live: None,
                     epoch,
-                    published: false,
+                    activated: false,
                     start_failure: Some(e.to_string()),
                     reused: false,
                 }),
                 Err(e) => {
-                    instance.discard_unpublished().await;
+                    instance.discard_unactivated().await;
                     self.start_failed(name, None, e).await;
                 }
             }
@@ -403,7 +403,7 @@ impl ProviderRegistry {
         })
     }
 
-    /// Reserve provider publication after acquiring `running` before the
+    /// Reserve provider activation after acquiring `running` before the
     /// database transaction. Source/consent checks do bounded host file reads;
     /// this method starts no process and performs no network work.
     pub fn reserve_generation<'a>(
@@ -539,7 +539,7 @@ impl ProviderGenerationReservation<'_> {
         Ok(())
     }
 
-    /// Remove old adapters after the database commit and before publishing
+    /// Remove old adapters after the database commit and before activating
     /// their replacements into native registries.
     pub fn withdraw_maps(&mut self) {
         if self.withdrawn {
@@ -555,8 +555,8 @@ impl ProviderGenerationReservation<'_> {
 
     /// Swap adapters and the running map after the candidate database
     /// transaction commits. Database/capability metadata are coordinated by
-    /// the caller; this performs only synchronous native map publication.
-    pub fn apply(&mut self) -> ProviderGenerationPublication {
+    /// the caller; this performs only synchronous native map activation.
+    pub fn apply(&mut self) -> ProviderGenerationActivation {
         self.withdraw_maps();
         let old = std::mem::take(&mut **self.running);
         let mut retired = Vec::with_capacity(old.len());
@@ -587,12 +587,12 @@ impl ProviderGenerationReservation<'_> {
         let mut supervisors = Vec::with_capacity(self.prepared.staged.len());
         for staged in &mut self.prepared.staged {
             if let Some(capability) = staged.capability.take() {
-                capability.publish();
+                capability.activate();
             }
             if staged.reused {
                 self.running
                     .insert(staged.instance.name.clone(), staged.instance.clone());
-                staged.published = true;
+                staged.activated = true;
                 continue;
             }
             let peer = staged.live.as_ref().map(|live| live.conn.peer.clone());
@@ -609,7 +609,7 @@ impl ProviderGenerationReservation<'_> {
                 .instance
                 .admitted
                 .store(true, std::sync::atomic::Ordering::Release);
-            staged.published = true;
+            staged.activated = true;
             if let Some(peer) = peer {
                 supervisors.push((staged.instance.clone(), peer));
             }
@@ -622,9 +622,9 @@ impl ProviderGenerationReservation<'_> {
         }
         self.registry.global.lock().reconciled_at = self.prepared.global_mtime;
         self.registry.reconciled.send_replace(true);
-        ProviderGenerationPublication {
+        ProviderGenerationActivation {
             retired,
-            published: self
+            activated: self
                 .prepared
                 .staged
                 .iter()
@@ -665,7 +665,7 @@ async fn cleanup(staged: &mut Vec<Staged>) {
             .stopped
             .store(true, std::sync::atomic::Ordering::Release);
         candidate.instance.end(candidate.live.take()).await;
-        candidate.instance.discard_unpublished().await;
+        candidate.instance.discard_unactivated().await;
     }
     staged.clear();
 }

@@ -2815,7 +2815,7 @@ mod tests {
     }
 
     /// Two apps in one process (the extension tests' throwaways, run side
-    /// by side) each have their own derived dimensions: one's publication
+    /// by side) each have their own derived dimensions: one's activation
     /// never changes what the other reads.
     #[test]
     fn derived_dimensions_belong_to_their_own_database() {

@@ -275,8 +275,8 @@ is no instance's, so any well-formed one is an instance's own
 Each host's `prepare` validates declarations and constructs its adapter
 without changing a live registry or starting a process. It returns a
 `PreparedProviderCapability` with fixed features and an infallible,
-synchronous registry action that the generation applies at publication. All
-the capability hosts use this split; nothing publishes an adapter outside a
+synchronous registry action that the generation applies at activation. All
+the capability hosts use this split; nothing activates an adapter outside a
 generation.
 
 **A host adapts an endpoint, not a process** (`endpoint::Endpoint`):
@@ -290,13 +290,13 @@ functions, run in the command scripts' sandbox with its `needs`;
 extensions-commands.md "Implementations"). So every capability with a
 provider contract takes a script with no host change, and the script's
 answers meet the same checks as a process's. Script adapters are
-prepared and published with the generation's runtime adapters
-(`ProviderRegistry::prepare_scripts`, `publish_scripts`, which retires
+prepared and activated with the generation's runtime adapters
+(`ProviderRegistry::prepare_scripts`, `activate_scripts`, which retires
 the previous generation's), not with the instances.
 
-A candidate that is rejected before publication is marked stopped and shut down
+A candidate that is rejected before activation is marked stopped and shut down
 directly; cleanup does not withdraw by name or touch an incumbent's
-maps/database rows. Process supervision starts after publication.
+maps/database rows. Process supervision starts after activation.
 
 **A snapshots provider** marks the worktree; core keeps the record
 (`snapshot`, `file_snapshot`, `snapshot_op`, `snapshot.taken`), so
@@ -785,10 +785,10 @@ with its process; only a changed instance is replaced, and a removed or turned-o
 one stopped (the extension's place among the others doesn't count). An instance that can't run never rejects the
 generation: one that is unconfigured, refused (its id is another
 owner's), missing, or disabled is left out with that state on its row, and one
-whose start failed or hung is published failing, restarting with backoff and
+whose start failed or hung is activated as failing, restarting with backoff and
 counted by `contribution_health` — every other extension and instance
 activates. A started instance is handed to its capability's host at
-publication (each host's adapter, "What a provider may
+activation (each host's adapter, "What a provider may
 implement") and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`; confirm / access / undoable as declared). Its capability's verbs are never
 commands of their own: core's call of the verb is the one write surface. A refusal —
@@ -910,7 +910,7 @@ can't be read stays off too (`failing`, naming the error — not knowing
 isn't a yes). `InstanceHealth` is the process's state, showing the
 row's count. **A disable wins over a start in
 flight**: each disable bumps the instance's epoch under the
-`running` lock, and a generation publishes a started instance only if the
+`running` lock, and a generation activates a started instance only if the
 epoch it began with still holds, so a concurrent generation can't bring back
 what was just disabled.
 It is turned back on by **`oxplow.contribution.enable { extension, kind,
@@ -1032,7 +1032,7 @@ command run record, and its input is checked against its declared schema.
 URI's kind (`ui.about: <kind>`) is on that URI's page menu and its
 rows' right-click menus (`refOffers`).
 
-**Its features are published** while it runs: publication writes the
+**Its features are active** while it runs: activation writes the
 instance in the capability registry and the generation's withdrawal takes it
 out, each restating `v_capability_provider`, so the UI offers only what the
 provider declares. Each generation restates
@@ -1210,11 +1210,11 @@ non-disabled provider against one immutable catalog snapshot. It resolves the
 effective project/global configuration and credential scope, rejects duplicate
 instance IDs, prepares capability adapters, starts each process, and completes
 its private `check` before returning a candidate. Preparation performs no
-registry admission, health publication or supervision. Candidate diagnostics
+registry admission, health reporting or supervision. Candidate diagnostics
 are fixed and value-free; failed preparation shuts down already-started
 candidates, with owned process-group cleanup as the cancellation/drop fallback.
 
-The candidate owns the provider reconcile gate. Before publication,
+The candidate owns the provider reconcile gate. Before activation,
 `reserve_running` takes the running-map writer before the database write
 permit. This ordering is required because a stop or failure can hold that map
 while awaiting a database write. The reservation verifies that the incumbent
@@ -1227,13 +1227,13 @@ admitted.
 
 `ProviderGenerationReservation::apply` runs only after the candidate database
 transaction commits. It withdraws incumbent adapters, stops and removes old
-instances, publishes candidate adapters and running instances, marks them
+instances, activates candidate adapters and running instances, marks them
 admitted, then starts supervision. Old processes are shut down orderly outside
 the transaction; dropping the retired connection is the process-group kill
 fallback. Thus a preparation or transaction rejection retains the incumbents.
 `ExtensionActivation::activate` can coordinate these provider candidates with
 native capability, command, model, vocabulary and adapter candidates. This
-coordinator is the boot activation path. It first publishes a required-bundled
+coordinator is the boot activation path. It first activates a required-bundled
 baseline, then attempts strict full activation; failure of the required baseline
 prevents serving, while full-candidate failure retains the baseline or last good
 generation. Provider stop/revocation takes effect immediately and retains the

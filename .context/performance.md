@@ -1656,7 +1656,7 @@ these are operation-count improvements, not a measured latency claim.
 --nocapture` in release): Clojure's wasm grammar (92 KB) loads in ~15 ms, a
 thread's first wasm parser (its `WasmStore`) costs ~4 ms, and a parse runs at
 ~0.20 ms/KB against ~0.11 ms/KB for native Rust: about 1.8×. So no
-compiled-module cache: a grammar loads once per publication and once per
+compiled-module cache: a grammar loads once per activation and once per
 script worker that names it.
 
 ## `v_change_fact`: facts as of a change's head (V59)

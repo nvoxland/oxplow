@@ -317,7 +317,7 @@ the alert and a count) is the first loader its *author* declared
 
 ## Page files
 
-The catalog's runtime publication listener also invalidates every open
+The catalog's runtime activation listener also invalidates every open
 page run. Reloading only the extension metadata leaves runs with no SQL
 loaders (a dashboard of embeds or a markdown page) on their old definition
 after deploy. The existing listener sends `page_runs.notify_everything()`

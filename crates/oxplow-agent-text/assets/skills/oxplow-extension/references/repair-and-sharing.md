@@ -36,7 +36,7 @@ Read a collector's last outcome, run time and error in `v_collector`
   returns once it runs, replacing what ran: no restart. If the extension
   does not prepare, the deploy fails with the problems and the old
   deployment keeps running. Boot deploys nothing, so a restart never
-  publishes a source (`references/development-cycle.md`).
+  makes a source live (`references/development-cycle.md`).
   `oxplow.extension.rollback { name, to? }` makes an earlier deployment live.
   `oxplow.extension.disable { name }` turns an extension off for the person
   and `oxplow.extension.enable { name }` turns it on again; `oxplow.extension.remove

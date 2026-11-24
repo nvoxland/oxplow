@@ -601,7 +601,7 @@ under `.oxplow/`, never one of oxplow's own (`extensions`, `extensions-data`,
 `runtime`, `logs`, `snapshots`, …). Oxplow then watches it though git ignores
 it (the extension's `files:` trigger hears a change in it) and snapshots it; a
 tree (a diff, the working tree) is still git's view and leaves it out. The host
-publishes the enabled extensions' watched folders with each generation
+activates the enabled extensions' watched folders with each generation
 (`oxplow_fs_watch::set_declared_watched_folders`); core names no folder of
 its own.
 

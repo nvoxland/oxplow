@@ -514,7 +514,7 @@ impl SettingsRegistry {
         Ok(())
     }
 
-    /// Publish a new generation of one owner's definitions atomically. Values
+    /// Replace one owner's definitions with a new set, atomically. Values
     /// remain in their stores when an extension withdraws its declarations.
     pub fn replace_owner(
         &mut self,
@@ -545,7 +545,7 @@ impl SettingsRegistry {
     }
 
     /// Replace participating owners together, so declarations can move between
-    /// extensions without a transient collision or partially published batch.
+    /// extensions without a transient collision or a partly applied batch.
     pub fn replace_owners(
         &mut self,
         owners: &[String],

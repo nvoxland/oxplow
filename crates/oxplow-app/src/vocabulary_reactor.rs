@@ -108,7 +108,7 @@ impl PreparedVocabulary {
     /// Validate and restate the complete candidate inside the caller's write
     /// transaction. Any diagnostic restores this helper's database writes.
     /// Propagate rejection to roll back other candidate registrations too.
-    /// The returned vocabulary must only be published after the outer commit;
+    /// The returned vocabulary must only be activated after the outer commit;
     /// this helper neither swaps a handle nor coordinates runtime readers.
     pub fn replace_tx(
         &self,

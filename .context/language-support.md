@@ -83,7 +83,7 @@ languages:
   come from tree-sitter's store, which adds each load's memory to a 128 MB
   budget and never gives it back:
   - **Memoised by content** for the life of the process: the set is built
-    again at every publication, and a grammar loaded each time would, after
+    again at every activation, and a grammar loaded each time would, after
     about a hundred loads of a large one (Elixir's is 1.3 MB), be refused
     ("invalid memory size") and hold its extension until a restart.
   - **Loaded in a store of its own, dropped after the load**; the language
@@ -147,7 +147,7 @@ languages:
   the shipped extensions in their order, then the rest by name; the first to
   claim a name, alias, LSP id or file extension keeps it, the later one is
   left out) and
-  **swapped** at each publication beside the
+  **swapped** at each activation beside the
   model registry (`extension_activation`), into `svc.languages`
   (`LanguagesHandle`). Readers: change analysis, the symbol collector and
   resolver, the duplicate scan, the metrics service and collector runs, the
@@ -177,7 +177,7 @@ languages:
   (collector, fact-collector, effect, provider-implementation and review
   dry runs) and `Calls::with_languages` gives a command script its own
   (`Wanted::scopes_only(languages)`); a command's composer and a provider
-  endpoint hold the `LanguagesHandle`, so a run reads the set published now,
+  endpoint hold the `LanguagesHandle`, so a run reads the set active now,
   and the gateway (`SqlGateway::languages`) carries it for `extension
   check` examples.
 - **Every shipped language, on or off**: `language_set::shipped()` /
@@ -283,7 +283,7 @@ stream is restated: an error or a quit in between leaves the index not
 current, and the next run restates again. A newer snapshot landing mid-read
 isn't a reason to skip a stream: that snapshot's own collection restated only
 the files it changed, and `record` keeps a newer snapshot's rows for a file.
-The first publication at boot and each one that changes the set run it
+The first activation at boot and each one that changes the set run it
 (`extension_activation`). Columns: `.context/data-model.md`.
 
 ### Resolving a ref
@@ -343,7 +343,7 @@ extension declares, on or off: `id`, `title`, `extension`, `enabled` (the
 declaring extension is on), `analyzable` (it has a grammar), `extensions`,
 `aliases`, `lsp_ids` (JSON arrays), `lsp_package`, `monaco` and `facets` (JSON:
 `imports`, `merge`, `duplication`, `starter`, each 0 or 1, read from its
-`analysis.yaml`). It is restated whole with each published generation
+`analysis.yaml`). It is restated whole with each activated generation
 (`extension_generation.rs`, from the catalog snapshot, which holds the
 disabled extensions' declarations too), so a pack that is off is listed.
 
@@ -382,7 +382,7 @@ and `t.Skip*`, Clojure `*_test.clj[c]`, Java `@Disabled` / `@Ignore`).
   are left out; a path in no language has none stripped.
 - A bad glob, name pattern or regex is an error at the entry's line.
 - **The engine is core's** (`crate::test_conventions`): `TestConventions`
-  is built from the enabled extensions at each publication, swapped into
+  is built from the enabled extensions at each activation, swapped into
   `svc.test_conventions` beside `svc.languages`, and read by change analysis
   (`TestPaths`, which adds `oxplow.testing.testPaths`); a manifest is never
   read per file. A pack that is off contributes nothing.

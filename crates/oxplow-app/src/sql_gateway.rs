@@ -37,7 +37,7 @@ pub struct SqlGateway {
     /// What makes the stored things a query names by their keys
     /// (`crate::on_demand`); shared by every clone, bound once by the app.
     on_demand: std::sync::Arc<crate::on_demand::OnDemand>,
-    /// The published language set the scripts a check or a review dry-runs
+    /// The active language set the scripts a check or a review dry-runs
     /// parse with (the app's; none declared until it is set).
     languages: crate::extension::language_set::LanguagesHandle,
 }
@@ -76,7 +76,7 @@ impl SqlGateway {
         }
     }
 
-    /// Dry-run scripts with the app's published `languages`.
+    /// Dry-run scripts with the app's active `languages`.
     pub fn with_languages(
         mut self,
         languages: crate::extension::language_set::LanguagesHandle,
@@ -85,7 +85,7 @@ impl SqlGateway {
         self
     }
 
-    /// The language set a dry-run script parses with, as published now.
+    /// The language set a dry-run script parses with, as active now.
     pub fn languages(&self) -> std::sync::Arc<oxplow_code_metrics::Languages> {
         self.languages.current()
     }

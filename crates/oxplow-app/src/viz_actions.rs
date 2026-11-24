@@ -2031,7 +2031,7 @@ view:
 
     /// Load `acme/board`'s bundle as its frame does: the version it runs.
     async fn load_board(fx: &crate::test_fixtures::ThreadFixture, root: &Path) -> String {
-        // Whatever was edited since is published first, as the owner of
+        // Whatever was edited since is activated first, as the owner of
         // generations does on the file change.
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         load_component(&fx.svc, root, "acme/board").unwrap()

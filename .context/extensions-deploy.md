@@ -154,8 +154,8 @@ source directly: an edit changes nothing until it is deployed.
   checkout's HEAD when the source lies inside the project (NULL outside it)
   and `dirty` says the source had uncommitted changes, untracked files
   included: an uncommitted deploy is normal, and rollback names the
-  target's commit. The publish transaction of every
-  activation marks the active rows from what it published, so the table
+  target's commit. The activation transaction of every
+  activation marks the active rows from what it activated, so the table
   and what runs never disagree. The store keeps the active deployment and
   the five newest (`extension_store::KEEP`); deploy prunes the rest.
 
@@ -184,7 +184,7 @@ deploys from) → the source in the primary checkout → hash → already active
 source load, whose errors refuse it → copy into the store and record the
 row → turn it on in the person's layer when nothing turns it on → stage the
 live set with it in (`ExtensionCatalog::stage_changes`, which every staging
-check's `snapshot()` then reads) and publish. An extension the staging holds
+check's `snapshot()` then reads) and activate. An extension the staging holds
 back (it doesn't prepare) keeps its previous deployment and the deploy
 fails with its problems; a candidate overtaken by another change is staged
 again. The command returns once the deployment runs; restart starts from
@@ -249,7 +249,7 @@ oxplow — keeps its row `active` and its place in the catalog's live map,
 whatever runs in its place (its last working version, the copy that
 ships, or nothing): every activation and every boot tries it again and
 lists why it doesn't run (`v_extension.errors`), until a person deploys
-another or rolls back. The publication records the published deployments
+another or rolls back. The activation records the activated deployments
 plus each held name's chosen hash (`activate_kind`: `chosen`, read before
 the change is staged). A change that is held was never chosen, so a failed
 deploy still changes nothing. Because the chosen hash of a held extension
@@ -282,7 +282,7 @@ what the next boot would run and hold back without starting it
 (`extension_deploy::next_boot`: the active deployments activated in a
 throwaway in memory), and `oxplow-dev extension deploy [<name>]` deploys
 with oxplow quit (`.context/working-in-this-repo.md` "oxplow-dev"). Boot
-stops only when a generation can't publish at all (the host, the
+stops only when a generation can't activate at all (the host, the
 database).
 
 **Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything
@@ -455,7 +455,7 @@ declare the same non-empty `key`, it is a merge-join by key —
 rows in key order, each with its key and its row before and after (key
 order is SQLite's: numbers by value, then text). Otherwise — past the
 limit, or when a side's key has a NULL part or repeats (one row would
-stand for several; the key test runs only at publish) — the review gives
+stand for several; the key test runs only at activation) — the review gives
 counts with a note that says why (or that a side's query failed). An
 unchanged dataset has none. These rows are the review's only reads of
 dataset data; nothing is written.

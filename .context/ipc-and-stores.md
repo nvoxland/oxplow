@@ -142,7 +142,7 @@ scheduling are integrated for typed AI jobs. Runtime validation remains pending.
 and `datasets::replace_extensions` are denied to thin callers. The latter is a
 transaction helper with an inner savepoint, not an IPC write surface. A host
 generation coordinator owns strict candidate rejection and the larger DB /
-in-memory publication boundary; the legacy background compiler remains partial.
+in-memory activation boundary; the legacy background compiler remains partial.
 
 **Database generation candidate.** The app's PreparedExtensionDatabase helper
 accepts a caller-owned Transaction and applies datasets, vocabulary and enabled
@@ -153,7 +153,7 @@ candidate; rollback/storage failures propagate and require outer abort. Preparin
 copies one catalog snapshot and writes nothing. The helper returns vocabulary
 metadata, makes no outer commit, and does not swap the running handle. It is
 an activation building block, with no RPC surface or worker execution. The boot
-coordinator joins its publication to commands, capability/native/provider maps,
+coordinator joins its activation to commands, capability/native/provider maps,
 metric declarations and component bundles under owned reader/writer guards.
 Complete reader coverage and failure-injection validation remain unfinished.
 

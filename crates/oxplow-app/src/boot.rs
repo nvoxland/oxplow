@@ -120,7 +120,7 @@ pub async fn run_boot_orchestration(
         Err(e) => tracing::warn!(error = %e, "ensure_primary failed at boot"),
     }
 
-    // Publish the repairable baseline before extension consumers or requests
+    // Activate the repairable baseline before extension consumers or requests
     // can run, then attempt one strict full generation. A failed full candidate
     // leaves core usable; a failed required baseline prevents serving.
     state.extension_activation.initialize(state.clone()).await?;
@@ -213,7 +213,7 @@ pub async fn run_boot_orchestration(
     // Scripts run in workers bounded by the project's `scripts:` config.
     crate::config_reactors::apply_script_limits(&crate::config_service::read_config(&state.config));
     // A collector that registered a new entity may let a dataset compile,
-    // and a settings write republishes the datasets that read it.
+    // and a settings write reactivates the datasets that read it.
     register_extension_datasets(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
@@ -357,8 +357,8 @@ pub async fn run_boot_orchestration(
     // Each stream's recorded branch follows its checkout.
     state.branch_reconciler.clone().spawn();
 
-    // The renderer reloads published metadata (or rejection diagnostics),
-    // rather than observing a candidate before its coordinated publication.
+    // The renderer reloads active metadata (or rejection diagnostics),
+    // rather than observing a candidate before its coordinated activation.
     {
         let mut changes = state.extension_catalog.runtime_changes();
         let events = state.events.clone();
@@ -369,7 +369,7 @@ pub async fn run_boot_orchestration(
             {
                 // A definition can change without any loader reading a
                 // changed dataset (a dashboard made only of embeds, for
-                // example). Re-resolve runs after catalog publication.
+                // example). Re-resolve runs after catalog activation.
                 page_runs.notify_everything();
                 events.emit(crate::events::OxplowEvent::ExtensionsChanged);
             }
@@ -465,7 +465,7 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // The symbol index follows the language set: each publication that
+    // The symbol index follows the language set: each activation that
     // changes it (the first one at boot included) restates it
     // (`extension_activation`, `symbol_collector::backfill`).
 
@@ -562,7 +562,7 @@ pub fn register_stored_analyses(state: &std::sync::Arc<crate::Services>) {
     crate::request_analysis::register(state);
 }
 
-/// What republishes extensions' datasets when what they read changes: a
+/// What reactivates extensions' datasets when what they read changes: a
 /// collector's new entity, a settings write (`config()`). Boot registers
 /// it, and so does a throwaway oxplow that runs an extension's examples.
 pub fn register_extension_datasets(state: &std::sync::Arc<crate::Services>) {

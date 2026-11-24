@@ -1214,7 +1214,7 @@ pub async fn rollback(
     })
 }
 
-/// What follows a publication the activation owner didn't make itself.
+/// What follows an activation the activation owner didn't make itself.
 async fn after_activation(svc: &Arc<Services>) {
     let _ = svc
         .sql
@@ -3858,7 +3858,7 @@ mod tests {
     }
 
     /// A restart starts from the recorded deployments: the core baseline
-    /// published first doesn't drop them.
+    /// activated first doesn't drop them.
     #[tokio::test]
     async fn a_restart_keeps_what_was_deployed() {
         let fx = crate::test_fixtures::services_with_thread().await;

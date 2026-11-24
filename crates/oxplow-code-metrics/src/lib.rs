@@ -8,7 +8,7 @@
 //!
 //! Core names no language: each is a `languages:` entry of an extension
 //! (oxplow's language packs ship them), built into [`Languages`] at each
-//! publication. See [`spec`] and `.context/language-support.md`.
+//! activation. See [`spec`] and `.context/language-support.md`.
 //!
 //! Files in unsupported languages are silently skipped (the caller
 //! sees no findings for them).

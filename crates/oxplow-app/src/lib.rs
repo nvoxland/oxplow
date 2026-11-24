@@ -519,7 +519,7 @@ pub struct Services {
     pub extension_catalog: Arc<extension::extension_catalog::ExtensionCatalog>,
     pub jobs: Arc<extension::job_runs::JobRuns>,
     pub extension_secrets: Arc<extension::extension_secrets::ExtensionSecrets>,
-    /// Shared publication and reader boundary. Every service that reads a
+    /// Shared activation and reader boundary. Every service that reads a
     /// generation holds it; boot activates the first one (a repairable
     /// baseline), and until then they serve the current load.
     pub extension_activation: Arc<extension::extension_activation::ExtensionActivation>,
@@ -829,7 +829,7 @@ impl Services {
                 }
 
                 // Keep changed candidate owners visible for repair without
-                // exposing their new runtime contributions before publication.
+                // exposing their new runtime contributions before activation.
                 for candidate in self
                     .extension_catalog
                     .snapshot(root)
@@ -980,7 +980,7 @@ impl Services {
         let extension_activation =
             Arc::new(extension::extension_activation::ExtensionActivation::new());
         // The languages the enabled extensions declare, swapped in at each
-        // publication: the structural merge, code analysis and the LSP
+        // activation: the structural merge, code analysis and the LSP
         // services read them.
         let languages = extension::language_set::LanguagesHandle::default();
         let sql = sql_gateway::SqlGateway::new(db.clone())
@@ -1913,7 +1913,7 @@ impl Services {
     /// Test-only constructor with an in-memory DB. Useful for the
     /// IPC layer's smoke tests where we want a real Services without
     /// hitting the filesystem. Extensions are activated as boot does
-    /// (`ExtensionActivation::initialize`), so the services publish
+    /// (`ExtensionActivation::initialize`), so the services activate
     /// commands, models and providers through the production path; a test
     /// that writes extension files afterwards re-activates with
     /// `test_fixtures::activate`.
@@ -1980,7 +1980,7 @@ impl Services {
         Ok(svc)
     }
 
-    /// Publish the first extension generation, as boot does.
+    /// Activate the first extension generation, as boot does.
     pub(crate) async fn initialize_extensions(self: &Arc<Self>) -> Result<(), AppInitError> {
         self.extension_activation
             .initialize(self.clone())

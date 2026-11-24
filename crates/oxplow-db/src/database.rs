@@ -1023,19 +1023,19 @@ impl Database {
         self.write_transaction(std::panic::Location::caller(), None, f, true)
     }
 
-    /// Run a publication transaction on the database worker. Unlike
+    /// Run a activation transaction on the database worker. Unlike
     /// [`Self::transaction_or`], the closure owns its commit boundary so it
-    /// can keep synchronous publication reservations alive across SQL commit
+    /// can keep synchronous activation reservations alive across SQL commit
     /// and an infallible in-memory swap. The closure must not perform process
     /// or network work; it must hold the necessary reader/writer boundary and
-    /// leave the host fail-closed if publication panics after commit.
+    /// leave the host fail-closed if the activation panics after commit.
     ///
     /// A returned success without calling `commit` is an invariant error and
     /// rolls back. Errors before commit may retry only for storage contention;
     /// no result is retried after commit, including a post-commit `Busy`.
-    pub async fn transaction_with_publication<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    pub async fn transaction_with_activation<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
     where
-        F: Fn(&mut PublicationTransaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
+        F: Fn(&mut ActivationTransaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
         R: Send + 'static,
         A: Send + 'static,
     {
@@ -1051,7 +1051,7 @@ impl Database {
             _permit.yield_to_interactive();
             let _wait = LockWaitScope::enter(&_permit);
             let _writing = WritingGuard::enter(&db.writing);
-            let _flush_changes = PublicationChangeFlush(db.changes.clone());
+            let _flush_changes = ActivationChangeFlush(db.changes.clone());
             let mut attempt: u32 = 0;
             loop {
                 attempt += 1;
@@ -1071,25 +1071,25 @@ impl Database {
                         return Err(TxError::Storage(error));
                     }
                 };
-                let mut publication = PublicationTransaction {
+                let mut activation = ActivationTransaction {
                     transaction: Some(tx),
                     committed: false,
                 };
-                let result = f(&mut publication);
-                let committed = publication.committed;
-                drop(publication);
+                let result = f(&mut activation);
+                let committed = activation.committed;
+                drop(activation);
                 match result {
                     Ok(value) if committed => return Ok(value),
                     Ok(_) => {
                         return Err(TxError::Storage(oxplow_domain::DomainError::Invalid(
-                            "publication transaction returned without committing".into(),
+                            "activation transaction returned without committing".into(),
                         )));
                     }
                     Err(error) if committed => return Err(error),
                     Err(TxError::Storage(error))
                         if error.is_retryable() && attempt < MAX_ATTEMPTS =>
                     {
-                        // The publication transaction dropped without a
+                        // The activation transaction dropped without a
                         // successful commit, so SQLite rolled this attempt back.
                         std::thread::sleep(BACKOFF[(attempt - 1) as usize % BACKOFF.len()]);
                     }
@@ -1297,29 +1297,29 @@ impl Drop for WritingGuard<'_> {
     }
 }
 
-/// A database transaction whose commit is explicit so a publisher can keep
+/// A database transaction whose commit is explicit so an activation can keep
 /// its reservation guards alive while SQL commits and then swap memory state.
-pub struct PublicationTransaction<'conn> {
+pub struct ActivationTransaction<'conn> {
     transaction: Option<rusqlite::Transaction<'conn>>,
     committed: bool,
 }
 
-/// Flush committed table changes when the publication worker exits, even if
+/// Flush committed table changes when the activation worker exits, even if
 /// its async caller was canceled or the callback unwound after committing.
-struct PublicationChangeFlush(Arc<crate::changes::Changes>);
+struct ActivationChangeFlush(Arc<crate::changes::Changes>);
 
-impl Drop for PublicationChangeFlush {
+impl Drop for ActivationChangeFlush {
     fn drop(&mut self) {
         self.0.flush();
     }
 }
 
-impl<'conn> PublicationTransaction<'conn> {
+impl<'conn> ActivationTransaction<'conn> {
     /// The live SQLite transaction; unavailable after a commit attempt.
     pub fn transaction(&self) -> Result<&rusqlite::Transaction<'conn>, oxplow_domain::DomainError> {
         self.transaction.as_ref().ok_or_else(|| {
             oxplow_domain::DomainError::Invariant(
-                "publication transaction is no longer available".into(),
+                "activation transaction is no longer available".into(),
             )
         })
     }
@@ -1329,7 +1329,7 @@ impl<'conn> PublicationTransaction<'conn> {
     pub fn commit(&mut self) -> Result<(), oxplow_domain::DomainError> {
         let transaction = self.transaction.take().ok_or_else(|| {
             oxplow_domain::DomainError::Invariant(
-                "publication transaction is no longer available".into(),
+                "activation transaction is no longer available".into(),
             )
         })?;
         transaction.commit().map_err(map_sql_err)?;

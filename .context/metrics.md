@@ -964,13 +964,13 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   column read; `order` ranks the rows of one key and the first wins. Core names
   no dataset. `oxplow.task` is bundled's, over `v_oxplow_request_link` (the
   prompt's task first, then the one filed or edited, then the one moved).
-  The metrics service publishes the resolved list with each catalog
+  The metrics service activates the resolved list with each catalog
   generation, onto the database it reads (`Database::set_derived_dimensions`; never a
   process-wide list, which two apps in one process, a test's throwaways, would share); the engine stamps
   the values onto the facts it loads (`stamp_derived`, one query per dimension
   per read, into `FactRow.derived`). A dimension is on the fact path only
   (`is_spine_dim` is true for it; it can't be `promote`d). With the extension
-  off, or its dataset unreadable, the dimension isn't published: facts have no
+  off, or its dataset unreadable, the dimension isn't activated: facts have no
   value on it and nothing fails.
 - **Time buckets.** `metric_bucket::bucket_series(points, TimeBucket, fold)`
   collapses points per (UTC day / Monday week / month, group) with the same
@@ -1456,7 +1456,7 @@ dimensions:                        # custom conformed slice axes
   `request_metric_deltas` loads each measure's history **once** across the
   File-family specs sharing it (a per-call `fact_cache`), and `dim_value` parses
   a fact's `dims_json` **once** per lookup (`parse_dims` + `dim_from_map`).
-- **Boot seeding:** The metric catalog is published by the generation at boot and on
+- **Boot seeding:** The metric catalog is activated by the generation at boot and on
   every reseed — a config change (`config.metrics`) or extension change (the
   catalog's signal) — (beside `seed_definitions`), upserting resolved
   measures/dimensions into the `measure`/`dimension` tables. `MetricsService`
@@ -1640,7 +1640,7 @@ cannot disagree.
 - `none` has no answer.
 
 A metric over a measure with no `fold`, or `none`, is a check error when the
-catalog is published (`metrics_service/generation.rs`): oxplow never guesses
+catalog is activated (`metrics_service/generation.rs`): oxplow never guesses
 one. Derive it from `temporal_semantics` when writing a measure: `semi-additive`
 → `last`, `additive` → `sum`, a non-additive ratio or mean → `sum` (Σn/Σd).
 `temporal_semantics` stays: it decides which captures are current
@@ -2337,28 +2337,28 @@ no page (the detail page, sliced the same way, is where one group's chart
 lives).
 
 
-## Coherent extension metric publication
+## Coherent extension metric activation
 
 Production boot prepares metric declarations from the same immutable extension
 snapshot and captured project choices as datasets, commands and vocabulary.
 `metrics_service/generation.rs` resolves measures, dimensions, builtin/configured
 specs and the available catalog without writing. Candidates allow at most 4096
-entries per category and 16 MiB serialized metadata. Inside the publication
+entries per category and 16 MiB serialized metadata. Inside the activation
 transaction, entity SQL is checked against candidate views, measures/dimensions/
 specs are upserted, removed specs are reconciled and `metric_catalog` is replaced.
-Any diagnostic or storage failure aborts the candidate; published readers keep
+Any diagnostic or storage failure aborts the candidate; active readers keep
 the prior metric rows and declarations. Measures owned by disabled extensions
 remain with their history. The required-bundled repair baseline does not prune
 project measures or cascade away their facts.
 
-Captured metric choices and global definitions publish under the generation
+Captured metric choices and global definitions activate under the generation
 writer along with the catalog. Fact-collector resolution reads these frozen
 choices; catalogue reads pin before joining declarations and stored specs.
 Production metric reseed requests the activation owner instead of writing a
 second catalog; the independent raw-catalog metric reactor is retired. State
-value recapture happens after publication in a reader scope, outside the
-publication transaction. Until a generation is activated, metrics seed directly.
-No script, process, network call or capture executes inside catalog publication.
+value recapture happens after activation in a reader scope, outside the
+activation transaction. Until a generation is activated, metrics seed directly.
+No script, process, network call or capture executes inside catalog activation.
 Transaction-composable fact-store upserts preserve change-detected cube
 invalidation for capture-scope and promoted-dimension changes. Runtime
 acceptance checks and migration execution remain outstanding.

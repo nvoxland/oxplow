@@ -46,7 +46,7 @@ use crate::extension::extensions::Extension;
 #[path = "generation.rs"]
 mod generation;
 pub use generation::{
-    PreparedProviderGeneration, ProviderGenerationPublication, ProviderGenerationReservation,
+    PreparedProviderGeneration, ProviderGenerationActivation, ProviderGenerationReservation,
 };
 
 /// The generic settings key for one pasted credential of a provider instance.
@@ -148,7 +148,7 @@ pub struct HostDeps {
     pub config: Arc<RwLock<oxplow_config::OxplowConfig>>,
     pub catalog: Arc<ExtensionCatalog>,
     /// The project's activation boundary: once it has activated a
-    /// generation, provider maps are published through it.
+    /// generation, provider maps are activated through it.
     pub activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
     pub db: Database,
     /// What a provider's `host/call` `sql.read` reads through.
@@ -177,7 +177,7 @@ pub struct HostDeps {
     /// Each stream's worktree: where a script implementation's `tree.read`
     /// reads.
     pub captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
-    /// The published language set a script implementation parses with.
+    /// The active language set a script implementation parses with.
     pub languages: crate::extension::language_set::LanguagesHandle,
 }
 
@@ -986,7 +986,7 @@ impl Instance {
 
     /// End a candidate that was never admitted. Do not withdraw by name: an
     /// incumbent with that name may still own the live maps and database rows.
-    async fn discard_unpublished(&self) {
+    async fn discard_unactivated(&self) {
         self.stopped
             .store(true, std::sync::atomic::Ordering::Release);
         let live = self.live.lock().await.take();
@@ -1022,7 +1022,7 @@ impl Instance {
         };
         let Some(mut gone) = gone else { return };
         // The host's own doing: its revocation monitor stops a process whose
-        // authority is gone, before the generation saying so is published.
+        // authority is gone, before the generation saying so is activated.
         // That is no failure of the instance, and nothing to restart. (The
         // gate can hash files: off the async workers.)
         let calls = self.host_calls.clone();
@@ -1450,17 +1450,17 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 /// the capability's implementation (an external snapshots provider or
 /// filesystem) and takes it out again.
 /// Validated capability adapter awaiting registration. Construction cannot
-/// mutate a live registry; publication is a synchronous map change only.
+/// mutate a live registry; activation is a synchronous map change only.
 pub struct PreparedProviderCapability {
     features: Value,
-    publish: Box<dyn FnOnce() + Send>,
+    activate: Box<dyn FnOnce() + Send>,
 }
 
 impl PreparedProviderCapability {
-    pub(super) fn new(features: Value, publish: impl FnOnce() + Send + 'static) -> Self {
+    pub(super) fn new(features: Value, activate: impl FnOnce() + Send + 'static) -> Self {
         Self {
             features,
-            publish: Box::new(publish),
+            activate: Box::new(activate),
         }
     }
 
@@ -1468,8 +1468,8 @@ impl PreparedProviderCapability {
         &self.features
     }
 
-    pub(crate) fn publish(self) -> Value {
-        (self.publish)();
+    pub(crate) fn activate(self) -> Value {
+        (self.activate)();
         self.features
     }
 }
@@ -1482,7 +1482,7 @@ pub trait CapabilityHost: Send + Sync {
     fn has(&self, id: &str) -> bool;
     /// Validate and construct an adapter over `endpoint` — a started
     /// instance, or a script implementation (`providers::script`) — without
-    /// registering it. Its features and synchronous publication action
+    /// registering it. Its features and synchronous activation action
     /// belong to one activation candidate.
     fn prepare(
         &self,
@@ -1532,10 +1532,10 @@ pub struct ProviderRegistry {
     instances_gate: tokio::sync::Mutex<()>,
     /// Numbers each sign-in, so a finished one untracks only itself.
     sign_in_seq: std::sync::atomic::AtomicU32,
-    /// The script implementations the last generation published, each
+    /// The script implementations the last generation activated, each
     /// `(capability, id)`: what the next one retires
-    /// (`ProviderRegistry::publish_scripts`).
-    pub(super) published_scripts: parking_lot::Mutex<Vec<(String, String)>>,
+    /// (`ProviderRegistry::activate_scripts`).
+    pub(super) active_scripts: parking_lot::Mutex<Vec<(String, String)>>,
 }
 
 /// Where `scope`'s credentials are kept: the project's key, or the
@@ -1650,7 +1650,7 @@ impl ProviderRegistry {
             sign_in_gates: parking_lot::Mutex::new(BTreeMap::new()),
             instances_gate: tokio::sync::Mutex::new(()),
             sign_in_seq: std::sync::atomic::AtomicU32::new(1),
-            published_scripts: parking_lot::Mutex::new(Vec::new()),
+            active_scripts: parking_lot::Mutex::new(Vec::new()),
         })
     }
 
@@ -2263,7 +2263,7 @@ impl ProviderRegistry {
             .snapshot(&self.deps.project_dir)
             .source_generation()
             == snapshot.source_generation();
-        // Checks of unpublished candidates may start a process, but cannot
+        // Checks of unactivated candidates may start a process, but cannot
         // acquire private state under an active installation's identity.
         let state = crate::extension::extensions::owner(snapshot.extensions(), &ext.name)
             .filter(|current| {

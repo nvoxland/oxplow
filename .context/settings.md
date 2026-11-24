@@ -156,7 +156,7 @@ Settings have three read paths. Scripts and providers use
 agents use `v_config_value`. There is no nested snapshot read, and no stamps,
 CAS or migration protocol. SQL `config('/pointer')` and conditions receive a
 public projection that omits secrets before any secure read. Configuration-aware
-extensions republish when their resolved public settings change.
+extensions reactivate when their resolved public settings change.
 
 `v_config_value` is the registry-backed, redacted settings inventory, including
 labels, categories, schemas, origin and presence. Metric/dimension definitions

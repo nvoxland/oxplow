@@ -153,7 +153,7 @@ descriptors".
 
 **Public imports and exports.** The pure validator is `extensions/imports.rs`;
 `extensions/public_contracts.rs` normalizes manifest declarations, binds public
-dataset references and withholds contributions before catalog publication.
+dataset references and withholds contributions before catalog activation.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
@@ -190,7 +190,7 @@ does not make a contribution public.
 - Imports express compatibility, never permissions, subscriptions or event
   conversion. Existing foreign-event subscriptions and upcasts stay intact.
   The host exposes public references and gates contributions that use an
-  unavailable optional binding before catalog publication. The validator neither
+  unavailable optional binding before catalog activation. The validator neither
   rewrites SQL nor invents a dynamic extension service/RPC surface.
 
 The normalized validator takes all candidates (name, enabled/shared flags,
@@ -236,7 +236,7 @@ consumers; an invalid candidate never reserves global names. Resolve imports,
 withhold guarded contributions, remove mounts that
 refer to absent pages/datasets/providers, withdraw their exports, and
 resolve again until no contribution is removed. Repeat resolution after global
-collision checks, then bind SQL and publish. Removal is monotonic within a
+collision checks, then bind SQL and activate. Removal is monotonic within a
 load; a later reload starts from the source declarations. This also withdraws
 gated exports from downstream consumers without blocking independent
 contributions. Stable slot identities retain their original manifest indexes.
@@ -244,7 +244,7 @@ Disabled and blocked candidates are cleared after dependency resolution.
 
 `Extension.publicContracts` exposes declarations, withheld identities, resolved
 binding states, published references and an activation index. The index orders
-dependencies before consumers. Boot activation publishes runtime registries for
+dependencies before consumers. Boot activation swaps in the runtime registries for
 one catalog snapshot; the descriptor index itself remains source metadata. A
 blocked extension's lookup reports its contract errors,
 distinct from configuration disabling. Other contribution kinds expose their
@@ -253,7 +253,7 @@ Authoring checks and impact review now build a read-only candidate catalog
 from fresh source declarations, replace only the candidate's matching origin,
 and resolve imports and guards before compiling the overlay. This snapshot
 supplies all enabled datasets and entity stubs; it does not reuse active views or
-publish registries. Previously active consumers blocked by the candidate report
+activate registries. Previously active consumers blocked by the candidate report
 errors on that candidate, while unrelated existing failures are not attributed
 to it. Dataset compilation also reports errors from declared transitive consumers.
 Disabled packages can be inspected without changing enablement or authority.
@@ -388,8 +388,8 @@ advisories' queries — reads its own configuration with
 - **Datasets** are compiled during activation from the project's current
   shared settings (`PreparedExtensionDatabase::replace_tx`), so the view carries
   the literal; a stored configuration that can't be resolved holds that
-  extension back like a dataset that doesn't compile. **A change republishes:**
-  the generation records the configuration it was published with, for every
+  extension back like a dataset that doesn't compile. **A change activates again:**
+  the generation records the configuration it was activated with, for every
   extension with a configuration reader (`configuration_readers`: datasets
   that call `config()`, skills with `when:`, implementations with `when:`;
   `ConfigSignature`, beside the
@@ -398,7 +398,7 @@ advisories' queries — reads its own configuration with
   activation when it differs. Settings file watchers also request activation;
   a changed definition refills a materialized dataset.
 - **An implementation offered by a setting** (`implementations:` entry with
-  `when: { config, in }`, checked at load like a skill's): the publication
+  `when: { config, in }`, checked at load like a skill's): the activation
   reads the extension's effective values once
   (`capabilities::offering_implementations`, in activation's `prepare`), so
   the capability rows, the vocabulary's recognizers and the running adapters
@@ -408,7 +408,7 @@ advisories' queries — reads its own configuration with
   (`when: { config: /oxwiki, in: [true] }`) is the first.
 - **Pages and advisories** read the values stored now each time they run
   (`SqlGateway::with_extension_config`), so a change applies to the next
-  run with no republish. A check (`oxplow extension check`, the effect report)
+  run with no reactivation. A check (`oxplow extension check`, the effect report)
   reads no stored settings and compiles against the schema's defaults.
 - **Errors at load.** A read must name a key of the extension's own
   `configuration.schema` (under `properties`) with a `type`: an unknown key, a read in an

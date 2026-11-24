@@ -95,11 +95,11 @@ the store (a folder and a list of names each, so nothing is dropped).
 Once the deployment is pruned, its files 404 and the frame reloads.
 
 **A hot update reaches a mounted frame.** Activation stages every
-enabled extension's bundles into the generation it publishes
+enabled extension's bundles into the generation it activates
 (`PreparedComponentBundles`), each stamped with that generation. A frame
 whose snapshot belongs to a generation that is no longer active has its
 `querySql` and `invoke` refused. The host loads the bundle again on every
-`extensionsChanged` (sent after an activation publishes,
+`extensionsChanged` (sent after an activation completes,
 `CustomComponentViz`): the same version keeps the frame it has, a new
 one mounts a new frame, and the old version's `invoke` is refused.
 

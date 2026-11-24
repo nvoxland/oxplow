@@ -1,4 +1,4 @@
-//! Prepared metric declarations joined to extension generation publication.
+//! Prepared metric declarations joined to extension generation activation.
 
 use super::*;
 use crate::vocabulary_reactor::VocabularyErrors;
@@ -13,7 +13,7 @@ pub(crate) struct PreparedMetricCatalog {
     specs: BTreeMap<String, Option<NewMetricSpec>>,
     extension_specs: BTreeSet<String>,
     extension_dimensions: BTreeSet<String>,
-    /// The dimensions an extension's dataset answers, published with the rest.
+    /// The dimensions an extension's dataset answers, activated with the rest.
     derived: Vec<crate::metric_engine::DerivedDimension>,
 }
 
@@ -26,7 +26,7 @@ impl MetricsService {
         let mut frozen = self.clone();
         let config = config.clone();
         frozen.config = Arc::new(RwLock::new(config.clone()));
-        frozen.published_inputs = Arc::default();
+        frozen.active_inputs = Arc::default();
         frozen.global_catalog = Arc::new(std::sync::Mutex::new(None));
         frozen.extensions_cache = Arc::new(
             self.extensions_cache
@@ -291,7 +291,7 @@ impl PreparedMetricCatalog {
                         .and_then(|spec| {
                             spec.ok_or_else(|| {
                                 DomainError::Invalid(
-                                    "metric catalog changed during publication".into(),
+                                    "metric catalog changed during activation".into(),
                                 )
                             })
                         })
@@ -310,10 +310,10 @@ impl PreparedMetricCatalog {
         Ok(())
     }
 
-    pub(crate) fn publish(&self, metrics: &MetricsService) {
+    pub(crate) fn activate(&self, metrics: &MetricsService) {
         let config = crate::config_service::read_config(&self.frozen.config);
         let global = self.frozen.with_global_catalog(Clone::clone);
-        *metrics.published_inputs.lock() = Some(Arc::new(PublishedMetricInputs { config, global }));
+        *metrics.active_inputs.lock() = Some(Arc::new(ActiveMetricInputs { config, global }));
         // On the database the engine reads, not a process-wide list: two
         // apps in one process (a test's throwaways) must not share it.
         if let Some(facts) = metrics.fact_store.as_ref() {

@@ -475,7 +475,7 @@ person's.
 the key of a registered harness (`HarnessRegistry`: the `agent_harness`
 declarations in declaration order, then provider instances); nothing in
 core names one (`source_guards::only_harness_implementations_name_a_harness`).
-Each activation publishes the declared ones (`harnesses::prepare_built_ins`
+Each activation sets the declared ones (`harnesses::prepare_built_ins`
 → `set_declared`) and keeps a registered instance. Every harness has an
 independent `oxplow.agents.<id>.enabled` boolean, default true; all may be
 disabled. Each declared preference is registered as

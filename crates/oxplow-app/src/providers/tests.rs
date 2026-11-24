@@ -47,7 +47,7 @@ fn extension(project: &Path) -> Extension {
     ext
 }
 
-/// Deploys the extension, which publishes a generation that can start
+/// Deploys the extension, which activates a generation that can start
 /// its provider.
 async fn deploy(fx: &ThreadFixture, _ext: &Extension) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -129,7 +129,7 @@ fn configure(fx: &ThreadFixture, enabled: bool, config: serde_json::Value) {
 }
 
 /// Enable `spec`'s default instance with `config`, as the person's
-/// configuration does: write its entry, then publish the generation that
+/// configuration does: write its entry, then activate the generation that
 /// starts it. A refused or failing start shows in its health, not here.
 async fn enable_on(
     svc: &std::sync::Arc<crate::Services>,
@@ -153,7 +153,7 @@ async fn enable_on(
     crate::test_fixtures::activate_with_problems(svc).await;
 }
 
-/// Turn `instance` off in the project's configuration and publish the
+/// Turn `instance` off in the project's configuration and activate the
 /// generation without it: it stops, and what it registered goes.
 async fn turn_off(svc: &std::sync::Arc<crate::Services>, instance: &str) {
     {
@@ -328,10 +328,10 @@ async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
 }
 
 /// P6b.C2: a running instance's capability and features are a model row
-/// (as the host reads them); stopped, it's no longer published.
+/// (as the host reads them); stopped, it's no longer active.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_running_instance_publishes_its_features() {
+async fn a_running_instance_activates_its_features() {
     let (fx, ext) = deployed("").await;
     let store = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone());
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
@@ -343,11 +343,11 @@ async fn a_running_instance_publishes_its_features() {
         .unwrap()
         .into_iter()
         .find(|r| r.provider == "fake")
-        .expect("published");
+        .expect("activated");
     assert_eq!(fake.capability, "snapshots");
     assert_eq!(fake.extension.as_deref(), Some("tracker"));
     turn_off(&fx.svc, INSTANCE).await;
-    // A stopped instance is no longer published.
+    // A stopped instance is no longer active.
     assert!(store
         .list()
         .await
@@ -858,7 +858,7 @@ async fn deploying_updated_declarations_restarts_the_instance() {
         InstanceState::Ready
     );
     assert!(logged(&fx, "contribution.disabled").await.is_empty());
-    // The restarted instance republished its capability row, with the
+    // The restarted instance restated its capability row, with the
     // features it declares now.
     let row = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone())
         .list()
@@ -866,7 +866,7 @@ async fn deploying_updated_declarations_restarts_the_instance() {
         .unwrap()
         .into_iter()
         .find(|r| r.provider == "fake")
-        .expect("republished");
+        .expect("restated");
     assert_eq!(
         row.features,
         serde_json::to_value(&running.declared.capabilities[0].features).unwrap()
@@ -2043,7 +2043,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
 
 /// The host ends a process whose authority was revoked (its extension
 /// disabled, its config turned off) before the generation that says so is
-/// published. That exit is the host's doing: not a failure counted against
+/// activated. That exit is the host's doing: not a failure counted against
 /// the instance, and not restarted.
 #[cfg(unix)]
 #[tokio::test]
@@ -2178,7 +2178,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     .unwrap();
     // Deploying `other` turns it on in the person's file and reloads the
     // config; the instance's in-memory entry is put back before the
-    // generation that carries it publishes.
+    // generation that carries it activates.
     let kept = fx.svc.config.read().unwrap().extension_instances.clone();
     let changes = crate::extension::extension_deploy::stage_sources(&fx.svc).await;
     fx.svc.config.write().unwrap().extension_instances = kept;

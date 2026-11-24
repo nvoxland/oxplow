@@ -1593,20 +1593,20 @@ fn instance<'a>(provider: &'a ProviderConfig, key: Option<&'a str>) -> ProviderI
 }
 
 /// Providers prepared from one declared implementation snapshot. Preparing a
-/// candidate does not publish it into the live model-provider map.
+/// candidate does not activate it into the live model-provider map.
 pub struct PreparedModelProviders {
     providers: Vec<Arc<dyn ModelProvider>>,
 }
 
 impl PreparedModelProviders {
-    pub fn publish(self, providers: &ModelProviders) {
+    pub fn activate(self, providers: &ModelProviders) {
         providers.set(self.providers);
     }
 }
 
 /// Build the model providers named by `declared`: each declaration's
 /// Rust kind (`oxplow_ai_rig`) under its declared id, title and default
-/// base URL. This is a pure staging step: no provider is published or
+/// base URL. This is a pure staging step: no provider is activated or
 /// called.
 pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],

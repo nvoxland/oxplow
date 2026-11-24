@@ -1,6 +1,6 @@
 //! One coherent extension generation, through a real project: what a
 //! candidate activates, what a failed one keeps, and how readers and
-//! publication exclude one another.
+//! activation exclude one another.
 
 use oxplow_domain::Actor;
 use serde_json::{json, Value};
@@ -111,10 +111,10 @@ async fn a_new_broken_extension_exposes_nothing() {
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(1)));
 }
 
-/// A run holding the generation keeps it: publication waits for the last
+/// A run holding the generation keeps it: activation waits for the last
 /// reader, and a reader that comes after sees the new generation whole.
 #[tokio::test(flavor = "multi_thread")]
-async fn publication_waits_for_the_readers_of_the_last_generation() {
+async fn activation_waits_for_the_readers_of_the_last_generation() {
     let (dir, svc) = project().await;
     let pin = svc.extension_activation.pin().await.unwrap();
     let before = pin.generation().unwrap().to_owned();
@@ -125,16 +125,13 @@ async fn publication_waits_for_the_readers_of_the_last_generation() {
         tokio::spawn(async move { deploy_and_activate(&svc).await })
     };
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        !activating.is_finished(),
-        "publication waits for the reader"
-    );
+    assert!(!activating.is_finished(), "activation waits for the reader");
     assert_eq!(pin.generation(), Some(before.as_str()));
 
     drop(pin);
     tokio::time::timeout(Duration::from_secs(10), activating)
         .await
-        .expect("publication goes ahead once the reader is done")
+        .expect("activation goes ahead once the reader is done")
         .unwrap()
         .unwrap();
     let after = svc.extension_activation.pin().await.unwrap();
@@ -143,11 +140,11 @@ async fn publication_waits_for_the_readers_of_the_last_generation() {
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
 }
 
-/// A publication waiting on readers can say who they are: each reader is
+/// An activation waiting on readers can say who they are: each reader is
 /// listed with what holds it and for how long, and leaves the list when it
 /// lets go.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_waiting_publication_names_the_readers_it_waits_for() {
+async fn a_waiting_activation_names_the_readers_it_waits_for() {
     let (dir, svc) = project().await;
     let release = Arc::new(tokio::sync::Notify::new());
     let reader = {
@@ -166,10 +163,7 @@ async fn a_waiting_publication_names_the_readers_it_waits_for() {
         tokio::spawn(async move { deploy_and_activate(&svc).await })
     };
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        !activating.is_finished(),
-        "publication waits for the reader"
-    );
+    assert!(!activating.is_finished(), "activation waits for the reader");
     let readers = svc.extension_activation.readers();
     assert!(
         readers
@@ -183,7 +177,7 @@ async fn a_waiting_publication_names_the_readers_it_waits_for() {
     reader.await.unwrap().unwrap();
     tokio::time::timeout(Duration::from_secs(10), activating)
         .await
-        .expect("publication goes ahead once the reader is done")
+        .expect("activation goes ahead once the reader is done")
         .unwrap()
         .unwrap();
     assert!(
@@ -193,15 +187,15 @@ async fn a_waiting_publication_names_the_readers_it_waits_for() {
     );
 }
 
-/// A panic while an activation publishes is recovered, in three places over
+/// A panic during an activation is recovered, in three places over
 /// one project: after the database state committed (the boundary doesn't
 /// refuse every reader: the activation stages again from what committed and
 /// serves it); on that staging again too (no third try: the activation fails
 /// naming the host, the boundary refuses readers rather than serve maps it
 /// can't vouch for, and the next activation brings it back); and once the
-/// maps are published, before the boundary shows the generation.
+/// maps are activated, before the boundary shows the generation.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_panic_while_publishing_is_recovered_wherever_it_lands() {
+async fn a_panic_while_activating_is_recovered_wherever_it_lands() {
     use crate::extension::extension_activation::PanicPoint;
     let (dir, svc) = project().await;
 
@@ -438,7 +432,7 @@ async fn concurrent_activations_serialize_into_one_generation() {
 }
 
 /// An edit that lands while a candidate is staged (here: waiting on a
-/// reader) rejects that publication, and the next one carries the edit.
+/// reader) rejects that activation, and the next one carries the edit.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
     let (dir, svc) = project().await;
@@ -467,7 +461,7 @@ async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
     assert_eq!(
         answer(&svc, "alpha").await,
         Ok(json!(1)),
-        "nothing half-published"
+        "nothing half-activated"
     );
 
     crate::test_fixtures::activate_with_problems(&svc).await;

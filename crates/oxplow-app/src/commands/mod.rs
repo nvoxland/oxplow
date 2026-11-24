@@ -546,7 +546,7 @@ pub struct NamespaceRefusal {
 }
 
 /// Validated command registry candidate. It carries the registry identity it
-/// was prepared against; publication cannot overwrite intervening changes or
+/// was prepared against; activation cannot overwrite intervening changes or
 /// another bus. No active handler changes while this value is held.
 #[derive(Clone)]
 pub struct PreparedNamespaces {
@@ -561,7 +561,7 @@ pub(crate) struct NamespaceReservation<'a> {
 
 impl NamespaceReservation<'_> {
     /// Commit the matching database candidate before this infallible swap.
-    pub(crate) fn publish(mut self) {
+    pub(crate) fn activate(mut self) {
         self.apply();
     }
 
@@ -762,7 +762,7 @@ impl Registry {
                     error,
                 })?;
         }
-        // Even an empty publication receives a distinct identity.
+        // Even an empty activation receives a distinct identity.
         candidate.revision = Arc::new(());
         Ok(candidate)
     }
@@ -977,11 +977,11 @@ impl CommandBus {
         })
     }
 
-    /// Publish only on the exact registry used for validation. A host must
+    /// Activate only on the exact registry used for validation. A host must
     /// restage after any intervening registration, replacement or removal.
-    /// This is only an in-memory publication, never a DB commit boundary.
-    pub fn publish_namespaces(&self, prepared: PreparedNamespaces) -> Result<(), CommandError> {
-        self.reserve_namespaces(&prepared)?.publish();
+    /// This is only an in-memory activation, never a DB commit boundary.
+    pub fn activate_namespaces(&self, prepared: PreparedNamespaces) -> Result<(), CommandError> {
+        self.reserve_namespaces(&prepared)?.activate();
         Ok(())
     }
 
@@ -1245,7 +1245,7 @@ impl CommandBus {
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
-        // The lookup reads the published command map: it holds the
+        // The lookup reads the active command map: it holds the
         // generation for that alone. The run pins for itself.
         let command =
             {
@@ -1439,7 +1439,7 @@ impl CommandBus {
         };
         // Recording and proposals must honor private inputs through arbitrary
         // composers. Use an invocation-local spec; handler/schema/authority
-        // and the published command registry remain the captured originals.
+        // and the active command registry remain the captured originals.
         let command = if private_children {
             let mut private = command.with_handler(command.handler.clone())?;
             private.spec = steps::private_composite_spec(&command.spec);

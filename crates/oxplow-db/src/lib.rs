@@ -93,8 +93,8 @@ pub use contribution_health_store::{
     ContributionHealthRow, ContributionKey, SqliteContributionHealthStore,
 };
 pub use database::{
-    interactive, map_sql_err, string_to_ts, ts_to_string, Database, DbInitError, DerivedDimension,
-    PublicationTransaction, TxError,
+    interactive, map_sql_err, string_to_ts, ts_to_string, ActivationTransaction, Database,
+    DbInitError, DerivedDimension, TxError,
 };
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};

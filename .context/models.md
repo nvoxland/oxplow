@@ -6,7 +6,7 @@ V29; `crates/oxplow-app/src/models.rs`; manifest parsing in
 
 - `models:` / `fills:` / `fields:` in the manifest; the registry of the
   enabled extensions' models (`ModelRegistry::of`), swapped in with the
-  vocabulary; each model's table and views made in the publication;
+  vocabulary; each model's table and views made in the activation;
   its change event registered as the owner's declared type with core's
   schema (`models::change_event_schema`).
 - The store: the table and `v_<ns>_<model>` / `_all` views, diffing
@@ -31,7 +31,7 @@ the later one; a run names the rows it quarantined.
 Also built: children ("Children" below).
 
 Also built: the edge repair over models (`model_store::repair_edges_tx`,
-run in the publication when a model's edge code, declaration or the
+run in the activation when a model's edge code, declaration or the
 vocabulary changed: `models::repair_edges_if_needed_tx`, recorded as
 `model_repair:<model>`); a stated row keeps its refs (`refs` column) so
 the repair restates them as written.
@@ -211,12 +211,12 @@ fills:
   `[{ id, title, bucket }]` (the domain's `StageDecl`), checked as a task
   tracker's are (`stages_problem`: snake_case ids, a stage in each
   required bucket). A provider fill carries its instance's stages. Each
-  publication restates them into `model_stage_decl` (V32), read as
+  activation restates them into `model_stage_decl` (V32), read as
   `v_model_stage` (model, store, position, id, title, bucket, extension):
   what shared screens draw a store's columns from, without the
   capability rows.
 - **Stores** (built): each live store of a model (an enabled extension's
-  fill) is restated each publication into `model_store_decl` (V33, V39),
+  fill) is restated each activation into `model_store_decl` (V33, V39),
   read as `v_model_store` (model, store, extension, id_pattern, resource,
   store_param, key, loose): who fills it, and how a reader links its
   records without knowing the model (`oxplow:<resource>?<key>=<id>&<store_param>=<store>`;

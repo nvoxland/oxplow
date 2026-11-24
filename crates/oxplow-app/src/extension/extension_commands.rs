@@ -1462,7 +1462,7 @@ struct RegisteredCommands {
 }
 
 /// A fully validated command candidate, with metadata from one catalog
-/// snapshot and an optimistic registry publication fence. Preparing it neither
+/// snapshot and an optimistic registry activation fence. Preparing it neither
 /// changes handlers nor starts external work.
 #[derive(Clone)]
 pub struct StagedExtensionCommands {
@@ -1498,7 +1498,7 @@ impl StagedExtensionCommands {
 /// coordinates commands only, not the database or other extension registries.
 pub struct ExtensionCommands {
     bus: std::sync::Arc<crate::commands::CommandBus>,
-    /// The published language set a command's script parses with.
+    /// The active language set a command's script parses with.
     languages: crate::extension::language_set::LanguagesHandle,
     catalog: std::sync::Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     root: std::path::PathBuf,
@@ -1631,18 +1631,18 @@ impl ExtensionCommands {
         })
     }
 
-    /// Publish a candidate only if both its catalog and command registry are
+    /// Activate a candidate only if both its catalog and command registry are
     /// unchanged. Callers must coordinate the other registries separately.
-    pub async fn publish(
+    pub async fn activate(
         &self,
         staged: StagedExtensionCommands,
     ) -> Result<(), oxplow_domain::CommandError> {
         let mut registered = self.registered.lock().await;
-        self.publish_into(staged, &mut registered)?;
+        self.activate_into(staged, &mut registered)?;
         Ok(())
     }
 
-    /// Only call on the blocking publication worker. Lock ordering is owner
+    /// Only call on the blocking activation worker. Lock ordering is owner
     /// metadata, then the command bus, matching reconciliation. The activation
     /// owner must exclude readers and other generation writers before this.
     pub(crate) fn reserve(
@@ -1664,7 +1664,7 @@ impl ExtensionCommands {
         })
     }
 
-    fn publish_into(
+    fn activate_into(
         &self,
         staged: StagedExtensionCommands,
         registered: &mut BTreeMap<String, RegisteredCommands>,
@@ -1675,12 +1675,12 @@ impl ExtensionCommands {
                 retry_after_ms: None,
             });
         }
-        self.bus.publish_namespaces(staged.commands)?;
+        self.bus.activate_namespaces(staged.commands)?;
         *registered = staged.registrations;
         Ok(())
     }
 
-    /// Build handlers with their original contribution metadata, without publication.
+    /// Build handlers with their original contribution metadata, without activation.
     fn build(
         &self,
         extension: &str,
@@ -2661,10 +2661,10 @@ mod tests {
         );
     }
 
-    /// A command's script parses with the published language set: with the
+    /// A command's script parses with the active language set: with the
     /// Rust pack on, `ast_query(text, "rust", q)` finds the function.
     #[tokio::test]
-    async fn a_command_script_parses_with_the_published_languages() {
+    async fn a_command_script_parses_with_the_active_languages() {
         let fx = crate::test_fixtures::services_with_thread().await;
         write_ext(
             fx._dir.path(),

@@ -388,8 +388,8 @@ struct RegistryState {
     core: Vec<Implementation>,
     declared: Vec<Implementation>,
     external: Vec<Implementation>,
-    /// Config choices committed with this published registry generation.
-    published_config: Option<Arc<OxplowConfig>>,
+    /// Config choices committed with this activated registry generation.
+    active_config: Option<Arc<OxplowConfig>>,
     /// The shared models with a live store in this generation: what a
     /// `model:<ns>/<model>` need asks for.
     live_models: Arc<std::collections::BTreeSet<String>>,
@@ -418,7 +418,7 @@ pub struct CapabilityRegistry {
         Arc<crate::extension::extension_catalog::ExtensionCatalog>,
         std::path::PathBuf,
     )>,
-    /// The project's activation boundary; its published config applies once
+    /// The project's activation boundary; its active config applies once
     /// a generation has been activated.
     activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
 }
@@ -436,7 +436,7 @@ pub struct PreparedCapabilities {
 }
 
 /// A checked replacement holding the registry against competing writers.
-/// Created and consumed on the publication worker; no lock crosses an await.
+/// Created and consumed on the activation worker; no lock crosses an await.
 pub(crate) struct CapabilityReservation<'a> {
     state: std::sync::RwLockWriteGuard<'a, RegistryState>,
     candidate: Option<RegistryState>,
@@ -544,7 +544,7 @@ impl CapabilityRegistry {
                 core,
                 declared: Vec::new(),
                 external: Vec::new(),
-                published_config: None,
+                active_config: None,
                 live_models: Arc::default(),
                 revision: Arc::new(()),
             }),
@@ -577,7 +577,7 @@ impl CapabilityRegistry {
     }
 
     /// Prepare declarations and selections from one catalog and one registry
-    /// snapshot. Preparation neither registers adapters nor publishes rows.
+    /// snapshot. Preparation neither registers adapters nor activates rows.
     pub fn prepare(
         &self,
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
@@ -588,7 +588,7 @@ impl CapabilityRegistry {
     }
 
     /// Prepare declarations and selections using a host-staged external
-    /// capability map instead of the currently published instances.
+    /// capability map instead of the currently active instances.
     pub fn prepare_with_external(
         &self,
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
@@ -666,7 +666,7 @@ impl CapabilityRegistry {
             candidate.external = external;
         }
         candidate.declared = declared_by(snapshot.extensions(), settings);
-        candidate.published_config = Some(Arc::new(config.clone()));
+        candidate.active_config = Some(Arc::new(config.clone()));
         candidate.revision = Arc::new(());
         let all = candidate.implementations();
         let (rows, resolved) = Self::rows_from(&all, config);
@@ -901,13 +901,13 @@ impl CapabilityRegistry {
 
     /// The active task tracker's id recognizer under `config`: its id and
     /// declared `id_pattern`, if it declares one (none doesn't).
-    /// The config the last generation published; before the first one
+    /// The config the last generation activated; before the first one
     /// (boot's `initialize`) `fallback`, the config as it is now.
     fn read_effective_config(&self, fallback: &OxplowConfig) -> Arc<OxplowConfig> {
         self.state
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .published_config
+            .active_config
             .clone()
             .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
@@ -924,7 +924,7 @@ impl CapabilityRegistry {
     /// `capability.switched@2`, in the same transaction — so a change is
     /// logged once, across restarts too; the very first statement, with
     /// nothing active before, logs nothing.
-    pub async fn publish(
+    pub async fn restate(
         &self,
         config: &OxplowConfig,
         db: &oxplow_db::Database,
@@ -935,10 +935,10 @@ impl CapabilityRegistry {
             .await
     }
 
-    /// [`Self::publish`] at construction, before there's a runtime: so the
+    /// [`Self::restate`] at construction, before there's a runtime: so the
     /// first read of `v_capability_provider` (and of `v_oxplow_task`, which
     /// shows the active list's items) sees what's active.
-    pub fn publish_now(
+    pub fn restate_now(
         &self,
         config: &OxplowConfig,
         db: &oxplow_db::Database,
@@ -1195,7 +1195,7 @@ pub async fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::Ag
 
 /// The effective configuration of each namespace among `extensions` with an
 /// implementation a setting offers (`when:`), as stored now: what one
-/// publication's preparation reads once, so every reader of the declared
+/// activation's preparation reads once, so every reader of the declared
 /// implementations ([`declared_by`]) sees the same answer. One that can't be
 /// read is left out, so what it offers isn't (it fails closed).
 pub(crate) async fn offering_implementations(
@@ -1206,7 +1206,7 @@ pub(crate) async fn offering_implementations(
 }
 
 /// [`offering_implementations`] in the caller's transaction: what the
-/// publication checks, after it commits, against what it was prepared with.
+/// activation checks, after it commits, against what it was prepared with.
 pub(crate) fn offering_implementations_tx(
     project: &std::path::Path,
     global: &std::path::Path,
@@ -1283,7 +1283,7 @@ pub(crate) async fn offering_settings(
 /// switch.
 pub async fn refresh_agent_text(svc: &crate::Services) {
     // The offered capabilities and the extensions' files are read from one
-    // generation; an unavailable one is refreshed by the next publication.
+    // generation; an unavailable one is refreshed by the next activation.
     let Ok(text) = svc.sql.read_generation(agent_text(svc)).await else {
         return;
     };
@@ -1537,10 +1537,10 @@ mod tests {
             builtin("agent_harness", "claude", "oxplow:claude-code"),
             builtin("agent_harness", "codex", "oxplow:codex-cli"),
         ]);
-        svc.capabilities.publish(&c, &svc.db).await.unwrap();
+        svc.capabilities.restate(&c, &svc.db).await.unwrap();
         svc.capabilities
             .set_declared(vec![builtin("agent_harness", "codex", "oxplow:codex-cli")]);
-        svc.capabilities.publish(&c, &svc.db).await.unwrap();
+        svc.capabilities.restate(&c, &svc.db).await.unwrap();
         let rows = svc
             .sql
             .query_sql(
@@ -1653,7 +1653,7 @@ mod tests {
     async fn the_rows_say_what_is_active_and_why() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let c = config(&[("snapshots", "issues")], &[]);
-        fx.svc.capabilities.publish(&c, &fx.svc.db).await.unwrap();
+        fx.svc.capabilities.restate(&c, &fx.svc.db).await.unwrap();
         let out = fx
             .svc
             .sql
@@ -1696,7 +1696,7 @@ mod tests {
             .await
             .unwrap();
         for c in [&default, &default, &off, &off] {
-            svc.capabilities.publish(c, &svc.db).await.unwrap();
+            svc.capabilities.restate(c, &svc.db).await.unwrap();
         }
         let switches: Vec<String> = svc
             .db
@@ -1813,10 +1813,10 @@ mod tests {
 
 #[cfg(test)]
 mod contribution_tests {
-    /// A refresh publishes every enabled extension's contributions as
+    /// A refresh activates every enabled extension's contributions as
     /// `v_contribution`, a disabled one's taken out.
     #[tokio::test]
-    async fn a_refresh_publishes_the_contributions() {
+    async fn a_refresh_activates_the_contributions() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
@@ -2019,7 +2019,7 @@ skills:
         );
     }
 
-    /// A settings write through the extension's own command republishes, and
+    /// A settings write through the extension's own command reactivates, and
     /// the runtimes already on disk get the skills the new value offers: no
     /// restart.
     #[tokio::test(flavor = "multi_thread")]
@@ -2063,7 +2063,7 @@ skills:
                 skills.join("on-b/SKILL.md").is_file()
             })
             .await,
-            "the write republished and rewrote the skills"
+            "the write reactivated and rewrote the skills"
         );
         assert!(!skills.join("on-a").exists(), "on-a is no longer offered");
     }

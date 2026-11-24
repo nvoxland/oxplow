@@ -1371,7 +1371,7 @@ commands:
     lifecycle: experimental
     example: {"namespace": "review", "kind": "effect", "contribution": "notify"}
   - name: contribution.disable
-    summary: "Turn one extension contribution off on this machine without turning its extension off: a language (`kind: language`: it leaves the language set at the next publication, so its files parse no more, and `v_language.enabled` says 0), a collector or an effect. A provider instance is turned off in Settings. `oxplow.contribution.enable` turns it back on and is its undo."
+    summary: "Turn one extension contribution off on this machine without turning its extension off: a language (`kind: language`: it leaves the language set at the next activation, so its files parse no more, and `v_language.enabled` says 0), a collector or an effect. A provider instance is turned off in Settings. `oxplow.contribution.enable` turns it back on and is its undo."
     scope: extensions.enable
     op: disable
     lifecycle: experimental

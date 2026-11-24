@@ -52,7 +52,7 @@ pub struct Ledger {
 }
 
 /// The snapshots' side of the host: a started instance is a snapshot
-/// implementation in `Services.snapshots`, under its id. Publishing it
+/// implementation in `Services.snapshots`, under its id. Activating it
 /// logs `capability.switched` when it's the project's choice, and the
 /// captures follow (`snapshots::SnapshotSwitch`).
 pub struct SnapshotsHost {

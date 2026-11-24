@@ -1,5 +1,5 @@
 //! The database portion of an extension generation candidate. Runtime registry
-//! publication and compatible reader pinning belong to the activation owner.
+//! activation and compatible reader pinning belong to the activation owner.
 
 use oxplow_db::datasets::{self, ExtensionDatasets};
 use oxplow_db::TxError;
@@ -11,7 +11,7 @@ use crate::extension::extension_catalog::CatalogSnapshot;
 use crate::vocabulary_reactor::{PreparedVocabulary, VocabularyErrors};
 
 /// Database declarations copied from one catalog snapshot. No external code
-/// runs during preparation, and nothing is published by constructing this.
+/// runs during preparation, and nothing is activated by constructing this.
 pub struct PreparedExtensionDatabase {
     /// Declared entities, created empty when absent so datasets over them
     /// compile before their collectors first run.
@@ -34,7 +34,7 @@ pub struct PreparedExtensionDatabase {
     languages: Vec<oxplow_db::model_store::LanguageDeclRow>,
     /// The declarations of the extensions whose datasets read their own
     /// configuration (`config()`): their effective values are resolved in the
-    /// publishing transaction and compiled into the views.
+    /// activation transaction and compiled into the views.
     /// Each is `(extension, namespace, declaration)`: settings are stored
     /// under the namespace.
     configurations: Vec<(
@@ -44,13 +44,13 @@ pub struct PreparedExtensionDatabase {
     )>,
 }
 
-/// The effective configuration the published generation was made with, per
+/// The effective configuration the active generation was made with, per
 /// extension that reads its own ([`configuration_readers`]); a change in it
-/// republishes.
+/// reactivates.
 pub type ConfigSignature = std::collections::BTreeMap<String, String>;
 
-/// A kind of contribution whose published form depends on the extension's
-/// effective configuration: a change of its settings republishes the
+/// A kind of contribution whose active form depends on the extension's
+/// effective configuration: a change of its settings reactivates the
 /// generation (`ExtensionActivation::request_config_refresh`), which
 /// recompiles the datasets and rewrites the agents' skills
 /// (`capabilities::refresh_agent_text`).
@@ -66,10 +66,10 @@ pub enum ConfigReader {
 }
 
 /// What of `extension` reads its own configuration into what is
-/// published: the one list of configuration readers. A new contribution
-/// kind whose published form depends on a setting adds itself here. An
+/// activated: the one list of configuration readers. A new contribution
+/// kind whose active form depends on a setting adds itself here. An
 /// agent context is not one: its `when:` and `config()` are read at each
-/// delivery, so a write needs no republish.
+/// delivery, so a write needs no reactivation.
 pub fn configuration_readers(
     extension: &crate::extension::extensions::Extension,
 ) -> Vec<ConfigReader> {
@@ -100,7 +100,7 @@ pub fn reads_configuration(extension: &crate::extension::extensions::Extension) 
 
 /// The effective configuration of each extension in `extensions` that reads
 /// its own ([`reads_configuration`]), as it is stored now. A configuration that can't be resolved
-/// signs as its failure, so repairing it republishes too.
+/// signs as its failure, so repairing it reactivates too.
 pub fn config_signature_tx(
     project: &std::path::Path,
     global: &std::path::Path,
@@ -323,9 +323,9 @@ impl PreparedExtensionDatabase {
     /// transaction. Only storage contention may be retried.
     ///
     /// This makes no outer commit and never swaps the running vocabulary. The
-    /// activation owner must commit, coordinate in-memory publication and check
-    /// candidate identity under its publication boundary before exposing it.
-    /// The shared models this generation publishes.
+    /// activation owner must commit, coordinate in-memory activation and check
+    /// candidate identity under its activation boundary before exposing it.
+    /// The shared models this generation activates.
     pub fn models(&self) -> &crate::models::ModelRegistry {
         &self.models
     }

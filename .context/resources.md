@@ -371,5 +371,5 @@ this with datasets and contribution descriptors, restoring the whole
 candidate on rejection. When prepared capabilities are included, its
 recognizer comes from the planned task-tracker selection rather than the
 prior live registry, and capability rows and switch events share that
-transaction. Coordinated commit and publication and reader pinning remain
+transaction. Coordinated commit and activation and reader pinning remain
 the activation owner's unfinished work.

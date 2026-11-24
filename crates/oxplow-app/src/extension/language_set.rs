@@ -4,7 +4,7 @@
 //! and the language-server suggestions parse and name files with. Core
 //! names no language; a project's set is the packs it turned on.
 //!
-//! Built from the published extensions at each publication and swapped
+//! Built from the extensions of the generation at each activation and swapped
 //! whole (`extension_activation`, beside the model registry), so a reader
 //! holds one consistent set for as long as it works.
 
@@ -238,8 +238,8 @@ impl LanguagesHandle {
     }
 
     /// [`swap`](Self::swap), saying whether what is indexed by the set needs
-    /// restating: its first publication, or a set whose fingerprint moved.
-    pub fn publish(&self, languages: Languages) -> bool {
+    /// restating: its first activation, or a set whose fingerprint moved.
+    pub fn activate(&self, languages: Languages) -> bool {
         let moved = self.current().fingerprint() != languages.fingerprint();
         let first = !self.1.swap(true, std::sync::atomic::Ordering::SeqCst);
         self.swap(languages);
@@ -367,7 +367,7 @@ mod tests {
 
     /// A language is a contribution: it is listed with its URI, and turning
     /// one off (its health row, as a failing contribution's) drops just it
-    /// from the set at the next publication, as turning its extension off
+    /// from the set at the next activation, as turning its extension off
     /// would drop them all; turning it on brings it back.
     #[tokio::test]
     async fn a_disabled_language_contribution_leaves_the_set() {
@@ -453,7 +453,7 @@ mod tests {
     }
 
     /// A person turns one language off with the command: it leaves the set
-    /// at the next publication, `v_language` says it is off while its
+    /// at the next activation, `v_language` says it is off while its
     /// extension is on, and undoing the command turns it back on.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_turns_one_language_off_and_undoing_turns_it_on() {

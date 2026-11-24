@@ -144,7 +144,7 @@ impl PreparedComponentBundles {
     }
 
     /// Replace the active generation's bundle map in one infallible swap.
-    pub fn publish(self, registry: &ComponentBundles) {
+    pub fn activate(self, registry: &ComponentBundles) {
         let mut loaded = registry.loaded.lock();
         for bundle in self.bundles.values() {
             loaded.insert(bundle.version.clone(), bundle.clone());
@@ -373,7 +373,7 @@ mod tests {
 
         let prepared = PreparedComponentBundles::prepare(dir.path(), &snapshot).expect("staged");
         let registry = ComponentBundles::new();
-        prepared.publish(&registry);
+        prepared.activate(&registry);
         let loaded = registry.load(dir.path(), &ext, &component).expect("loaded");
         assert_eq!(loaded.version, bundle.version);
         assert!(registry.get(&bundle.version).is_some());

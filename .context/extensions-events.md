@@ -122,7 +122,7 @@ a `ui.mounts` replacement with oxplow-bundled's history graph; `providers` once
 the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11): a bundled extension acts with one. A bundled effect
-starts like any (K1), when the generation that first runs it publishes.
+starts like any (K1), when the generation that first runs it activates.
 A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
 `oxplow.task_record.changed` and the run's command run name the effect (its `native`
@@ -502,7 +502,7 @@ extension's `permissions:` (extensions-permissions.md "Permissions"); the comman
 composes are checked when it runs, and the effect itself needs nothing
 declared. What runs is what was deployed, so an edit takes effect with the
 next deploy. An effect starts when the generation that first runs it
-publishes: that publication sets `effect_state.start_after_seq` (V148) to
+activates: that activation sets `effect_state.start_after_seq` (V148) to
 the log's head (`effect_state_store::start_if_new_tx`, in
 `extension_activation.rs`, for each enabled extension's effect not yet
 started). An effect never reacts to an event logged before it started —
@@ -515,7 +515,7 @@ the effect that runs is the deployed one.
 
 **A bundled extension's effect starts the same way.** It has no deployment
 of its own and runs what ships, under `shipped_permissions`; its start
-position is set when the generation that first runs it publishes, and
+position is set when the generation that first runs it activates, and
 there is no bundled branch in the gate.
 
 **Running** (P8.D10, `effect_triggers.rs`): one async pump consumer,

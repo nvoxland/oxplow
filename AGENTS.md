@@ -116,7 +116,7 @@ update it in the same commit when behavior changes. The
 | Extensions — slots, replacements (`ui.mounts`), commands in core menus, decorators | `.context/extensions-slots.md` |
 | Extensions — custom components (frame, protocol, testing one) | `.context/extensions-components.md` |
 | Extensions — sources and deployments, builds, `extensionSources`, sharing, disabling, reviewing by impact | `.context/extensions-deploy.md` |
-| Extensions — health, disable and repair; candidate publication, vocabulary generations, runtime adapters, ingress | `.context/extensions-activation.md` |
+| Extensions — health, disable and repair; candidate activation, vocabulary generations, runtime adapters, ingress | `.context/extensions-activation.md` |
 | Extensions — permissions and approval, the run context, services, grants, secret references | `.context/extensions-permissions.md` |
 | Extensions — the event envelope, event types, resources, ordering, effects | `.context/extensions-events.md` |
 | Extensions — collectors (sources), contributing metrics, jobs, AI profiles | `.context/extensions-jobs.md` |

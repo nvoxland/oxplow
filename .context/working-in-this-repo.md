@@ -159,7 +159,7 @@ load is held back, as boot holds it: the deploy prints why and still
 succeeds, so `run:dev` starts oxplow (a required one failing, or the one
 named, fails it). It refuses while oxplow holds the project
 (the instance lock: a running daemon keeps the live set in memory and its
-next publication would undo it), so quit oxplow, deploy, then start it.
+next activation would undo it), so quit oxplow, deploy, then start it.
 With foundation running, deploy from inside oxplow instead
 (`oxplow.extension.deploy`, or Deploy in the Extensions page): it
 replaces what runs at once, no restart. Nothing deploys on its own: a

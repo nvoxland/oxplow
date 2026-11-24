@@ -479,10 +479,10 @@ async fn a_script_implementation_reads_the_worktree_with_tree_read() {
     );
 }
 
-/// A script implementation parses with the published language set: its
+/// A script implementation parses with the active language set: its
 /// `stat` reports how many Rust functions `ast_query` found as the size.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_script_implementation_parses_with_the_published_languages() {
+async fn a_script_implementation_parses_with_the_active_languages() {
     let fx = crate::test_fixtures::services_with_thread().await;
     worktree_files(&fx);
     let script = WORKTREE_FILESYSTEM.replace(

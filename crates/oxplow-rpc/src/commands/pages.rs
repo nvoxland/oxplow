@@ -444,7 +444,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(extension.join("pages/example.yaml"), INLINE).unwrap();
-        crate::test_support::publish(&ctx).await;
+        crate::test_support::activate(&ctx).await;
         let edited = INLINE.replace("SELECT 7", "SELECT 8");
         std::fs::write(extension.join("pages/example.yaml"), &edited).unwrap();
         let source = page_spec(&ctx, "my_pages/example".into()).await.unwrap();

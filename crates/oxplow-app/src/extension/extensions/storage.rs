@@ -331,10 +331,10 @@ mod tests {
     }
 
     /// The folders the enabled extensions declare watched reach the file
-    /// watch's filter when a generation is published, and leave with the
+    /// watch's filter when a generation is activated, and leave with the
     /// extension.
     #[tokio::test]
-    async fn a_published_watched_folder_reaches_the_file_watch() {
+    async fn an_activated_watched_folder_reaches_the_file_watch() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let write = |rel: &str, body: &str| {
