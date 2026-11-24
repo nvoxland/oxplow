@@ -25,6 +25,19 @@ pub fn of(extensions: &[Extension]) -> (Languages, Vec<LanguageProblem>) {
 /// rows of kind `language`), by (namespace, language id).
 pub type DisabledLanguages = std::collections::BTreeSet<(String, String)>;
 
+/// The languages turned off on this machine, from `db`'s contribution health.
+pub async fn turned_off(
+    db: &oxplow_db::Database,
+) -> Result<DisabledLanguages, oxplow_domain::DomainError> {
+    Ok(oxplow_db::SqliteContributionHealthStore::new(db.clone())
+        .list()
+        .await?
+        .into_iter()
+        .filter(|r| r.kind == "language" && r.state == "disabled")
+        .map(|r| (r.namespace, r.contribution))
+        .collect())
+}
+
 /// [`of`] without the languages `disabled` names: turning one language
 /// contribution off drops it from the set as turning its extension off would.
 pub fn of_without(
@@ -53,6 +66,41 @@ pub fn of_without(
         })
         .collect();
     Languages::build(&sources)
+}
+
+/// The extensions an activation holds for their languages: one whose
+/// language claims a name, alias, LSP id or file extension an earlier
+/// extension's language holds (the order of [`of`]), by name, with a
+/// `language.conflict` error naming the earlier. A language turned off on
+/// this machine (`disabled`) holds nothing, so turning it off frees its
+/// names. A language that doesn't build is its own extension's error at load.
+pub(crate) fn conflicts(
+    extensions: &[Extension],
+    disabled: &DisabledLanguages,
+) -> std::collections::BTreeMap<String, Vec<oxplow_domain::diagnostic::Diagnostic>> {
+    let mut out: std::collections::BTreeMap<String, Vec<_>> = Default::default();
+    let (_, problems) = of_without(extensions, disabled);
+    for p in problems
+        .into_iter()
+        .filter(|p| p.message.contains("already belongs to another language"))
+    {
+        let Some(ext) = extensions.iter().find(|e| e.name == p.extension) else {
+            continue;
+        };
+        out.entry(ext.name.clone()).or_default().push(
+            oxplow_domain::diagnostic::Diagnostic::error(
+                "language.conflict",
+                format!(
+                    "language `{}` can't be declared: {}",
+                    p.language, p.message
+                ),
+            )
+            .at("extension.yaml", None)
+            .contribution(format!("{}/{}", ext.namespace, p.language))
+            .fix("give it another id, alias or file extension, or turn off the language or the extension that holds them"),
+        );
+    }
+    out
 }
 
 /// Every language the extensions that ship with oxplow declare, enabled or
@@ -235,6 +283,43 @@ mod tests {
             "the earlier keeps `.rs`"
         );
         assert!(set.by_name("zeta").is_none());
+    }
+
+    /// A language turned off on this machine frees its names at the next
+    /// activation: the later extension that claims one of them is no longer
+    /// held, and its language takes the files.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_language_turned_off_frees_its_names_for_a_later_extension() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/zeta-rust");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: zeta-rust\nintent: { purpose: t, origin: null, examples: [] }\nlanguages:\n  - { id: zeta, title: Zeta, extensions: [rs] }\n",
+        )
+        .unwrap();
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.contribution.disable",
+                serde_json::json!({ "namespace": "oxplow", "kind": "language", "contribution": "rust" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(svc).await;
+        assert!(
+            !problems.contains_key("zeta-rust"),
+            "nothing holds `.rs` now: {problems:?}"
+        );
+        assert_eq!(
+            svc.languages
+                .current()
+                .declared_for_path("src/a.rs")
+                .map(|l| l.name().to_string()),
+            Some("zeta".to_string())
+        );
     }
 
     /// `v_language` lists every language every loaded extension declares,

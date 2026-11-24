@@ -65,10 +65,10 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   with the reason "turned off by <who>". A language turned off leaves the
   language set at the next publication (`language_set::of_without`; the
   command asks for one), its files parse no more, and `v_language.enabled`
-  says 0 while its extension is on. A disabled language still holds its
-  id, aliases and file extensions in the conflict check
-  (`hold_language_conflicts` reads declarations): turn off its extension to
-  free them.
+  says 0 while its extension is on. A disabled language holds no id,
+  alias or file extension in the conflict check
+  (`language_set::conflicts`), so an extension held for claiming one runs
+  at the next activation.
 - **In the app (C3).** the Extensions page shows one health line per
   contribution under its extension (`contributionHealth.ts`, live over
   `v_contribution_health`): `OK` with its average time, a missed schedule and
@@ -220,8 +220,9 @@ held-able extension (the host) rejects the candidate. A command namespace
 collision names only the source refused and the one it collided with
 (`commands::NamespaceRefusal`). A language that claims a name, file extension or
 LSP id an earlier extension's language holds is a `language.conflict` error of
-the later extension (`descriptors::hold_language_conflicts`, in
-`check_catalog`), which names the earlier and holds it. The active catalog is separate from raw
+the later extension (`language_set::conflicts`, checked as the candidate is
+admitted, with the languages turned off on this machine holding nothing),
+which names the earlier and holds it. The active catalog is separate from raw
 candidate loads; its `source_generation` preserves the raw fingerprint. Runtime catalog reads use
 the committed snapshot and apply immediate explicit-disable and missing-folder
 revocation without loading edited declarations.

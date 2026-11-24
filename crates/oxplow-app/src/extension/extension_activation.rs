@@ -614,9 +614,19 @@ impl ExtensionActivation {
         // the generation's offered set is stale, and another one follows
         // its commit.
         let offer_stale = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // The language contributions turned off on this machine: read before
+        // the activation holds the database. A language that is off holds no
+        // names in the conflict check (`admitted`) and leaves the set it
+        // activates.
+        let disabled_languages = crate::extension::language_set::turned_off(&svc.db)
+            .await
+            .unwrap_or_default();
         let (published, retired, mut held) = loop {
-            let (snapshot, mut held) =
-                raw.admitted(svc.extension_catalog.active().as_deref(), &failed);
+            let (snapshot, mut held) = raw.admitted(
+                svc.extension_catalog.active().as_deref(),
+                &failed,
+                &disabled_languages,
+            );
             // A deployment of an extension that ships with oxplow that is
             // held with nothing of it running gives way to the copy that
             // ships, and the candidate is admitted again.
@@ -686,18 +696,6 @@ impl ExtensionActivation {
                     live.insert(name.clone(), hash.clone());
                 }
             }
-            // The language contributions turned off on this machine: read
-            // before the publication holds the database, applied to the set it
-            // publishes.
-            let disabled_languages: crate::extension::language_set::DisabledLanguages =
-                oxplow_db::SqliteContributionHealthStore::new(svc.db.clone())
-                    .list()
-                    .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|r| r.kind == "language" && r.state == "disabled")
-                    .map(|r| (r.namespace, r.contribution))
-                    .collect();
             let db = svc.db.clone();
             let published = snapshot.clone();
             // Move the owned writer into the worker closure. Cancelling the async
@@ -711,6 +709,7 @@ impl ExtensionActivation {
             let bundles = Mutex::new(Some(bundles));
             let svc = svc.clone();
             let stale = offer_stale.clone();
+            let disabled_languages = disabled_languages.clone();
             let outcome = db
                 .transaction_with_publication(move |publication| {
                     let mut boundary = boundary.lock().unwrap_or_else(|error| error.into_inner());

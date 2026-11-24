@@ -71,14 +71,22 @@ impl CatalogSnapshot {
     ///
     /// `failed` names extensions whose preparation failed in an earlier
     /// attempt at this candidate: each is held the same way, and one whose
-    /// last working version failed too stays out.
+    /// last working version failed too stays out. `disabled` names the
+    /// languages turned off on this machine: one holds no names, so an
+    /// extension whose language claims one is held only by a language that
+    /// is on (`language_set::conflicts`).
     pub(crate) fn admitted(
         &self,
         published: Option<&CatalogSnapshot>,
         failed: &Failed,
+        disabled: &crate::extension::language_set::DisabledLanguages,
     ) -> (Arc<CatalogSnapshot>, VocabularyErrors) {
+        let conflicts = crate::extension::language_set::conflicts(&self.extensions, disabled);
         let can_load = |e: &Extension| {
-            e.errors.is_empty() && !e.public_contracts.blocked && !failed.0.contains_key(&e.name)
+            e.errors.is_empty()
+                && !e.public_contracts.blocked
+                && !failed.0.contains_key(&e.name)
+                && !conflicts.contains_key(&e.name)
         };
         let may_keep_last = |e: &Extension| {
             e.errors.is_empty()
@@ -100,6 +108,13 @@ impl CatalogSnapshot {
                     .find(|e| e.name == extension.name && e.enabled && may_keep_last(e))
             });
             let mut why: Vec<Diagnostic> = extension.errors.clone();
+            why.extend(
+                conflicts
+                    .get(&extension.name)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
             if let Some(f) = failed.0.get(&extension.name) {
                 why.extend(f.reasons.iter().cloned());
             }
@@ -814,7 +829,10 @@ mod tests {
             &manifest("edited", "one"),
         );
         let catalog = ExtensionCatalog::new();
-        let (first, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        let (first, held) =
+            catalog
+                .snapshot(dir.path())
+                .admitted(None, &Failed::new(), &Default::default());
         assert!(held.is_empty(), "{held:?}");
         assert_eq!(names(&first), ["edited:one", "good:one"]);
 
@@ -834,9 +852,11 @@ mod tests {
             ".oxplow/extensions/fresh/extension.yaml",
             &format!("{}bogus: 1\n", manifest("fresh", "one")),
         );
-        let (next, held) = catalog
-            .snapshot(dir.path())
-            .admitted(Some(&first), &Failed::new());
+        let (next, held) = catalog.snapshot(dir.path()).admitted(
+            Some(&first),
+            &Failed::new(),
+            &Default::default(),
+        );
         assert_eq!(names(&next), ["edited:one", "good:two"]);
         assert_eq!(held.keys().collect::<Vec<_>>(), ["edited", "fresh"]);
         assert!(
@@ -878,12 +898,15 @@ mod tests {
             from_source: ["oxplow-foundation".to_string()].into(),
             ..ExtensionCatalog::default()
         };
-        let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        let (good, held) =
+            catalog
+                .snapshot(dir.path())
+                .admitted(None, &Failed::new(), &Default::default());
         assert!(held.is_empty(), "{held:?}");
         let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
         std::fs::write(to.join("extension.yaml"), format!("{manifest}bogus: 1\n")).unwrap();
         let broken = catalog.snapshot(dir.path());
-        let (kept, held) = broken.admitted(Some(&good), &Failed::new());
+        let (kept, held) = broken.admitted(Some(&good), &Failed::new(), &Default::default());
         assert!(
             held["oxplow-foundation"]
                 .iter()
@@ -896,7 +919,7 @@ mod tests {
             .find(|e| e.name == "oxplow-foundation")
             .unwrap();
         assert!(running.errors.is_empty());
-        let (out, held) = broken.admitted(None, &Failed::new());
+        let (out, held) = broken.admitted(None, &Failed::new(), &Default::default());
         assert!(held.contains_key("oxplow-foundation"));
         assert!(!out
             .extensions()
@@ -934,7 +957,10 @@ mod tests {
             );
         }
         let catalog = ExtensionCatalog::new();
-        let (admitted, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        let (admitted, held) =
+            catalog
+                .snapshot(dir.path())
+                .admitted(None, &Failed::new(), &Default::default());
         assert_eq!(names(&admitted), ["alone:d", "fine:d"]);
         assert_eq!(held.keys().collect::<Vec<_>>(), ["chained", "needy"]);
         assert!(

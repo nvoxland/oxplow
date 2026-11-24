@@ -154,16 +154,21 @@ languages:
   LSP session manager (an installed server covers its language's files,
   read when files are matched; the no-server error names the language's
   `lsp.package`), and `GitProvider` (the structural merge).
-- **A conflict holds the later extension.** `descriptors::check_catalog`
-  runs the set's build over the loaded extensions
-  (`hold_language_conflicts`); a language whose name, alias, LSP id or file
-  extension an earlier extension's holds is a `language.conflict` error of
-  its extension, naming the earlier, and is taken out of it, so the
-  extension is held and listed with why like any cross-extension conflict.
+- **A conflict holds the later extension.** Each activation checks the
+  enabled extensions' languages in the set's order
+  (`language_set::conflicts`, from `ExtensionCatalog::admitted`); a language
+  whose name, alias, LSP id or file extension an earlier extension's holds
+  is a `language.conflict` error of its extension, naming the earlier, and
+  the extension is held and listed with why like any cross-extension
+  conflict. A language turned off on this machine
+  (`oxplow.contribution.disable`) holds nothing, so turning it off frees its
+  names at the next activation; turning off its whole extension does too.
   The packs are no exception: a pack whose id, alias or file extension
   another enabled language holds (`oxplow-yaml` and another pack claiming
-  `.yml`, two packs that both want `.h`) is held until the person turns one of
-  them off.
+  `.yml`, two packs that both want `.h`) is held until the person turns one
+  of them off. The check reads this machine's switches, so whether an
+  extension is held can differ between machines; `oxplow-dev extension
+  status` reads the same switches (`language_set::turned_off`).
 - **The script worker** gets the set's sources in a `{"languages": …}`
   message before its run and builds its own (`oxplow-script` `ToWorker::Languages`);
   `ast_query`, `code_metrics`, `markers`, `source_files` and
