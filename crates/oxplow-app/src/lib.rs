@@ -2432,6 +2432,12 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
+                // Bundled's forge links: the person's browser or clipboard,
+                // through `oxplow.window.open_url` / `copy_text`.
+                "oxplow.forge.bitbucket",
+                "oxplow.forge.copy_link",
+                "oxplow.forge.github",
+                "oxplow.forge.gitlab",
                 // Bundled's assignment and queue order: oxplow's fields on
                 // a task, through `oxplow.model.set_fields`.
                 "oxplow.tasks.assign",

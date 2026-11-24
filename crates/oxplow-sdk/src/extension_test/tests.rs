@@ -2927,6 +2927,52 @@ commands:
     assert!(errors.contains("defines no `is_theirs`"), "{errors}");
 }
 
+/// An `about_if` reads with the command's services: one that needs
+/// `sql.read` asks a query to decide (here, whether the link is a thread's).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_about_if_decides_with_a_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Opens our own links elsewhere.
+  examples:
+    - { name: known, input: { item_commands: \"https://mine.example/a\" }, expect: the command }
+permissions: [sql.read]
+commands:
+  - name: mine.open
+    summary: Open one of the links the project knows in our tool.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/mine.star
+    needs: [sql.read]
+    examples:
+      - { name: happy, input: { uri: \"https://mine.example/a\" }, expect_commands: [] }
+    ui: { label: Our Tool, group: Open In, about: https, about_if: known }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/mine.star",
+        "def transform(x):\n    return {\"commands\": []}\n\ndef known(link):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT 1 AS yes WHERE :u LIKE 'https://mine.example/%'\", \"params\": {\"u\": link[\"url\"]}})\n    return len(rows) > 0\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/known.yaml",
+        "when: { item_commands: \"https://mine.example/a\" }\nexpect: { commands: [acme.mine.open] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/unknown.yaml",
+        "when: { item_commands: \"https://other.example/a\" }\nexpect: { commands: [] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// `when: { link_text }` lists the links an extension's `links:` make in
 /// the text: whole words only, the match encoded into the URI.
 #[tokio::test(flavor = "multi_thread")]

@@ -50,6 +50,7 @@ pub const NAMES: &[&str] = &[
     "config_value",
     "agent_conversation",
     "vcs_workspace",
+    "vcs_remote",
     "file",
     "agent_harness",
     "branch_divergence",
@@ -150,6 +151,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "problem",
         ],
         "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
+        "vcs_remote" => &["name", "url"],
         "agent_harness" => &["id", "title", "enabled", "position", "settings"],
         "file" => &[
             "filesystem",
@@ -361,6 +363,9 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             "vcs_workspace" | "branch_divergence" | "commit_between" => {
                 matches!(event, E::VcsRefsChanged { .. })
             }
+            // A remote added or renamed comes with a ref change (its
+            // branches), or a config change.
+            "vcs_remote" => matches!(event, E::VcsRefsChanged { .. } | E::ConfigChanged),
             // A range headed at the working tree moves with the files.
             "extension_change" => matches!(
                 event,
@@ -600,6 +605,7 @@ impl LiveDatasets {
             "config_value" => sources.config_values().await,
             "agent_conversation" => sources.agent_conversations(stream).await,
             "vcs_workspace" => sources.vcs_workspaces().await,
+            "vcs_remote" => sources.vcs_remotes().await,
             "file" => sources.files(stream, filters).await,
             "agent_harness" => Ok(sources.agent_harnesses()),
             "branch_divergence" => sources.branch_divergence(stream, filters).await,
@@ -1005,6 +1011,16 @@ impl LiveSources {
                 ]
             })
             .collect()
+    }
+
+    async fn vcs_remotes(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        Ok(self
+            .vcs
+            .list_remotes(self.worktrees.project_dir())
+            .await?
+            .into_iter()
+            .map(|r| vec![text(r.name), text(r.url)])
+            .collect())
     }
 
     async fn vcs_workspaces(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {

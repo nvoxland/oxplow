@@ -2229,6 +2229,7 @@ mod tests {
                     path: Some("path".into()),
                     filesystem: None,
                     lines: None,
+                    blame: None,
                 })
             },
         );

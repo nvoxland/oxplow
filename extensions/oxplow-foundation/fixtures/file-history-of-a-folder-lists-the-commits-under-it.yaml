@@ -1,0 +1,19 @@
+# A folder's history (Git ▸ Show History on a folder): the commits that
+# touched any file under it, once each, their files' lines summed and how
+# many it changed said in a word; a file beside the folder, or in a folder
+# whose name only starts the same, is not under it.
+given:
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: src/a.rs, status: added, additions: 1 }, { path: src/b.rs, status: added, additions: 2 }] } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: src/a.rs, status: modified, additions: 2, deletions: 1 }] } }
+  - observe: { commit: { sha: c3, at: "2026-01-03T00:00:00Z", author: cat, subject: other, parents: [c2], files: [{ path: srcx/c.rs, status: added, additions: 4 }, { path: README.md, status: added, additions: 1 }] } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: c3, stream: 1 }]
+        heads: [{ stream: 1, sha: c3 }]
+when: { page: oxplow/file-history, params: { stream_id: 1, path: src, limit: 20 } }
+expect:
+  loaders:
+    file_history:
+      rows:
+        - { sha: c2, change: null, additions: 2, deletions: 1, added: "+2", removed: "−1" }
+        - { sha: c1, change: "2 files", additions: 3, deletions: 0, added: "+3", removed: "−0" }

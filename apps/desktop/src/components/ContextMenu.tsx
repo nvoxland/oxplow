@@ -140,7 +140,9 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
             onMouseLeave={() => openSubmenuId === item.id && setOpenSubmenuId(null)}
           >
             <button type="button"
+              className="oxplow-menu-item"
               data-testid={`menu-item-${item.id}`}
+              data-open={openSubmenuId === item.id ? "true" : undefined}
               ref={(el) => { submenuRefs.current.set(item.id, el); }}
               onClick={async () => {
                 if (!item.enabled) return;
@@ -164,7 +166,6 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
                 ...menuItemStyle,
                 opacity: item.enabled ? 1 : 0.45,
                 cursor: item.enabled ? "pointer" : "default",
-                background: openSubmenuId === item.id ? "var(--bg-2)" : "transparent",
               }}
             >
               <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
@@ -304,7 +305,8 @@ const menuItemStyle: CSSProperties = {
   border: "none",
   borderRadius: 4,
   padding: "6px 8px",
-  background: "transparent",
+  // The background is `.oxplow-menu-item`'s (index.html): lit on hover,
+  // keyboard focus and an open submenu. Inline, it would beat `:hover`.
   color: "var(--fg)",
   fontFamily: "inherit",
   fontSize: "var(--text-xs)",

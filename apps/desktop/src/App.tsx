@@ -23,6 +23,7 @@ import {
   switchStream,
   runCommand,
   runCommandInBackground,
+  openInSystemBrowser,
   commandOpenAfter,
   type ThreadMark,
   type ThreadState,
@@ -145,6 +146,9 @@ import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
 import { openInBrowser, openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
+import { setGitMenuHost, type GitStatusEntry } from "./gitMenu.js";
+import { openCompareWith, openRollback } from "./components/Git/gitDialogStore.js";
+import { GitDialogs } from "./components/Git/GitDialogs.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 
@@ -1188,7 +1192,28 @@ export function App() {
           })
           .catch((e: unknown) => recordOpError({ label: "Open a terminal", message: e instanceof Error ? e.message : String(e) })),
     });
-    return () => setOpenInHost(null);
+    // Git ▸ (`gitMenu.ts`): the stream's changes, read as a menu opens, and
+    // its dialogs (`GitDialogs`).
+    setGitMenuHost({
+      status: () =>
+        runCommand("oxplow.vcs.status", { stream_id: streamId }).then(
+          ({ result }) => ((result as { entries?: GitStatusEntry[] } | null)?.entries ?? []),
+        ),
+      openRef: (ref) => {
+        const tab = refFromTabId(ref);
+        if (tab) handleOpenPageRef.current?.(tab);
+      },
+      compareWith: openCompareWith,
+      rollback: openRollback,
+      ignore: (path) =>
+        void runCommand("oxplow.git.ignore", { stream: streamId, entry: path }).catch((e: unknown) =>
+          recordOpError({ label: "Add to .gitignore", message: e instanceof Error ? e.message : String(e) }),
+        ),
+    });
+    return () => {
+      setOpenInHost(null);
+      setGitMenuHost(null);
+    };
   }, [stream, handleOpenExternalUrl]);
 
   /** Open the commit page for a wikilink-resolved commit SHA. */
@@ -1551,6 +1576,20 @@ export function App() {
           if (!find) throw new Error("nothing to find in on the page shown");
           find();
           return null;
+        },
+        // Past the window (the daemon refuses an agent): the person's
+        // browser, their clipboard.
+        open_url: async (input) => {
+          const url = (input as { url?: unknown } | null)?.url;
+          if (typeof url !== "string") throw new Error("`url` is a web address");
+          await openInSystemBrowser(url);
+          return null;
+        },
+        copy_text: async (input) => {
+          const text = (input as { text?: unknown } | null)?.text;
+          if (typeof text !== "string") throw new Error("`text` is the text to copy");
+          await navigator.clipboard.writeText(text);
+          return { copied: text.length };
         },
         quick_open: (input) => {
           if (!stream) throw new Error("no stream is shown");
@@ -1960,13 +1999,14 @@ export function App() {
           ...pageActions.map((a) => ({ id: a.id, label: a.label, enabled: !a.disabled, run: () => void a.run() })),
         ];
       }
-      // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`).
+      // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`)
+      // and a file's or folder's Git ▸ (`gitMenu.ts`).
       tab.menuAtOpen = () => {
         const elsewhere = openInForRef(ref.id);
         return withLinkOffers(elsewhere ? [elsewhere] : [], ref.id).then((items) =>
           // The tab's page menu has the ref's other commands; the tab adds
-          // only its Open In ▸.
-          items.filter((i) => i.id === "open-in"),
+          // only its Open In ▸ and Git ▸.
+          items.filter((i) => i.id === "open-in" || i.id === "git"),
         );
       };
       // An agent session's tab: its harness's logo and its status dot.
@@ -2151,6 +2191,8 @@ export function App() {
           border: "1px solid var(--border-strong)",
           borderTopLeftRadius: 8,
           borderBottomLeftRadius: 8,
+          // Git ▸'s dialogs dock over it (`GitDialogs`).
+          position: "relative",
         }}>
           {stream ? (
             <CenterTabs
@@ -2181,6 +2223,15 @@ export function App() {
               onReorder={handleReorderCenterTabs}
             />
           ) : <TabLoading />}
+          {stream ? (
+            <GitDialogs
+              streamId={stream.id}
+              openRef={(ref) => {
+                const tab = refFromTabId(ref);
+                if (tab) handleOpenPageRef.current?.(tab);
+              }}
+            />
+          ) : null}
         </div>
         </div>
         <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage}>

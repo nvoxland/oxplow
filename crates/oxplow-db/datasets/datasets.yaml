@@ -1808,6 +1808,16 @@ datasets:
     - { name: "lines", type: "TEXT", doc: "What the change does, as a JSON array of lines (grants first, then collectors' outputs, datasets and their rows, pages); `[]` for a removed extension." }
     - { name: "page_changes", type: "TEXT", doc: "The pages that differ, as a JSON array of `{ id, change }`." }
     - { name: "stream_id", type: "INT", doc: "The stream whose worktree was reviewed." }
+- name: vcs_remote
+  version: 1
+  key: [name]
+  description: "The repository's remotes, by name, each with the URL it fetches from (`git remote -v`). Read live when a query names it. What a forge link is built from: `git@github.com:acme/app.git` or `https://github.com/acme/app.git` names the host and the repository."
+  fields:
+    - { name: "name", type: "TEXT", doc: "The remote's name (`origin`)." }
+    - { name: "url", type: "TEXT", doc: "Where it fetches from." }
+  tests:
+    - { not_null: name }
+    - { unique: name }
 - name: vcs_workspace
   version: 1
   key: [path]

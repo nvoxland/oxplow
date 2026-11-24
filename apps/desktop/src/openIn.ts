@@ -7,6 +7,7 @@
 /// `.context/usability.md` "Open In".
 import { filesAreLocal, openInSystemBrowser, openPath, revealPath } from "./api.js";
 import { offersForRef, refCommandMenuItems } from "./components/refCommands.js";
+import { gitItemFor } from "./gitMenu.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import type { MenuItem } from "./menu.js";
@@ -165,9 +166,19 @@ export function openInForWorktreePath(kind: "file" | "dir", relPath: string, ext
 /** The `ui.group` whose commands about a link join its Open In ▸. */
 export const OPEN_IN_GROUP = "Open In";
 
-/** `items`, a link's menu, with the extensions' commands about `ref`
- *  as it opens: those in the Open In group after oxplow's items in its
- *  Open In ▸ (one is added when `items` has none), the rest a submenu per
+/** The `ui.group` whose commands about a file join its Git ▸ (`gitMenu.ts`). */
+export const GIT_GROUP = "Git";
+
+/** The submenus an extension's commands join by their `ui.group`. */
+const GROUP_SUBMENUS = [
+  { group: OPEN_IN_GROUP, id: "open-in", label: "Open In" },
+  { group: GIT_GROUP, id: "git", label: "Git" },
+] as const;
+
+/** `items`, a link's menu, as it opens: with oxplow's Git ▸ for a file
+ *  or folder (after Open In ▸, `gitItemFor`), and the extensions' commands
+ *  about `ref` — those in the Open In and Git groups at the end of those
+ *  submenus (one is added when `items` has none), the rest a submenu per
  *  group at the end (`refCommandMenuItems`). `offers` is the daemon's say
  *  on which apply (`offersForRef`). */
 export async function withLinkOffers(
@@ -175,27 +186,37 @@ export async function withLinkOffers(
   ref: string | null,
   offers: (ref: string) => Promise<CommandEntry[]> = offersForRef,
 ): Promise<MenuItem[]> {
-  const entries = ref ? await offers(ref) : [];
-  if (entries.length === 0) return items;
-  const { items: merged, rest } = mergeOpenInOffers(items, entries);
+  const [entries, git] = await Promise.all([ref ? offers(ref) : Promise.resolve([]), gitItemFor(ref)]);
+  const withGit = git ? insertAfter(items, "open-in", git) : items;
+  if (entries.length === 0) return withGit;
+  const { items: merged, rest } = mergeGroupOffers(withGit, entries);
   return [...merged, ...refCommandMenuItems(rest)];
 }
 
-/** `items` with `entries`' Open In group in its Open In ▸ (one is added
- *  when `items` has none), and the entries of other groups, for the caller
- *  to place. */
-export function mergeOpenInOffers(items: MenuItem[], entries: CommandEntry[]): { items: MenuItem[]; rest: CommandEntry[] } {
-  const extra: MenuItem[] = entries
-    .filter((e) => e.group === OPEN_IN_GROUP)
-    .map((e) => ({ id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run }));
-  const rest = entries.filter((e) => e.group !== OPEN_IN_GROUP);
-  if (extra.length === 0) return { items, rest };
-  const at = items.findIndex((i) => i.id === "open-in");
-  const merged =
-    at === -1
-      ? [...items, { id: "open-in", label: "Open In", enabled: true, submenu: extra }]
-      : items.map((i, n) => (n === at ? { ...i, submenu: [...(i.submenu ?? []), ...extra] } : i));
-  return { items: merged, rest };
+/** `items` with `item` after the one with id `after` (at the end without). */
+function insertAfter(items: MenuItem[], after: string, item: MenuItem): MenuItem[] {
+  const at = items.findIndex((i) => i.id === after);
+  return at === -1 ? [...items, item] : [...items.slice(0, at + 1), item, ...items.slice(at + 1)];
+}
+
+/** `items` with `entries`' Open In and Git groups at the end of those
+ *  submenus (one is added when `items` has none), and the entries of other
+ *  groups, for the caller to place. */
+export function mergeGroupOffers(items: MenuItem[], entries: CommandEntry[]): { items: MenuItem[]; rest: CommandEntry[] } {
+  let merged = items;
+  for (const { group, id, label } of GROUP_SUBMENUS) {
+    const extra: MenuItem[] = entries
+      .filter((e) => e.group === group)
+      .map((e) => ({ id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run }));
+    if (extra.length === 0) continue;
+    const at = merged.findIndex((i) => i.id === id);
+    merged =
+      at === -1
+        ? [...merged, { id, label, enabled: true, submenu: extra }]
+        : merged.map((i, n) => (n === at ? { ...i, submenu: [...(i.submenu ?? []), ...extra] } : i));
+  }
+  const grouped = new Set<string>(GROUP_SUBMENUS.map((g) => g.group));
+  return { items: merged, rest: entries.filter((e) => !grouped.has(e.group)) };
 }
 
 /** The ref the daemon is asked about for `target` (a link's commands):

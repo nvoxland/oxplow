@@ -335,8 +335,9 @@ fn about_if_answers(
     ANSWERS.get_or_init(Default::default)
 }
 
-/// The script of command `id` (an enabled extension's `entry:`).
-fn command_script(svc: &Services, id: &str) -> Option<String> {
+/// The script of command `id` (an enabled extension's `entry:`) and the
+/// services it needs.
+fn command_script(svc: &Services, id: &str) -> Option<(String, Vec<String>)> {
     svc.extension_catalog
         .get(&svc.layout.project_dir)
         .iter()
@@ -345,14 +346,15 @@ fn command_script(svc: &Services, id: &str) -> Option<String> {
         .find(|c| c.name == id)
         .and_then(|c| match &c.handler {
             crate::extension::extension_commands::CommandHandler::Script { script, .. } => {
-                Some(script.clone())
+                Some((script.clone(), c.needs.clone()))
             }
             _ => None,
         })
 }
 
 /// Whether command `id`'s `func` returns `True` for the link: one script
-/// run (`ABOUT_IF_BUDGET`). A run that fails, runs too long or answers
+/// run (`ABOUT_IF_BUDGET`), with the services the command needs (its
+/// `sql.read` answers a query). A run that fails, runs too long or answers
 /// anything else is no, and is logged.
 async fn about_if_holds(
     svc: &Services,
@@ -362,7 +364,7 @@ async fn about_if_holds(
     input: serde_json::Value,
 ) -> bool {
     use std::hash::{Hash, Hasher};
-    let Some(script) = command_script(svc, &id) else {
+    let Some((script, needs)) = command_script(svc, &id) else {
         return false;
     };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -377,12 +379,33 @@ async fn about_if_holds(
             return holds;
         }
     }
+    // As the person opening the menu, with the command's own services: a
+    // `sql.read` it needs answers its `scope("sql.read", …)` here.
+    let run = oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::Pure);
+    let languages = svc.languages.current();
+    let given = match crate::services::decide(&run, &script, &needs)
+        .and_then(|wanted| wanted.scopes_only(languages.clone()))
+    {
+        Ok(given) => given,
+        Err(e) => {
+            tracing::warn!(command = %id, error = %e, "a command's about_if can't have its services: not offered");
+            return false;
+        }
+    };
+    let (layer, runtime) = (svc.sql.clone(), tokio::runtime::Handle::current());
     let ran = tokio::task::spawn_blocking(move || {
         use oxplow_script::workers::{shared, ScriptRun};
+        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
+        let mut calls =
+            crate::scope_calls::Calls::new(&run, &needs, read).with_languages(languages);
+        let mut serve = |scope: &str, args: serde_json::Value| calls.serve(scope, args);
         shared().run(
             &ABOUT_IF_BUDGET,
-            ScriptRun::starlark_fn(&script, &func, input),
-            None,
+            given.onto(
+                ScriptRun::starlark_fn(&script, &func, input),
+                Some(&mut serve),
+            ),
+            Some(run.cancel()),
         )
     })
     .await;

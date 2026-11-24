@@ -637,9 +637,15 @@ describe("structure components (P6.A2)", () => {
 
   test("editorRow is the first row's file and the line it lands on", () => {
     const l = viz({ viz: "editor", editor: { path: "p", lines: "l" } });
-    expect(editorRow(l, result(["p", "l"], [["src/a.rs", "12-14"]]))).toEqual({ path: "src/a.rs", filesystem: null, line: 12 });
-    expect(editorRow(l, result(["p", "l"], [["src/a.rs", null]]))).toEqual({ path: "src/a.rs", filesystem: null, line: null });
+    expect(editorRow(l, result(["p", "l"], [["src/a.rs", "12-14"]]))).toEqual({ path: "src/a.rs", filesystem: null, line: 12, blame: false });
+    expect(editorRow(l, result(["p", "l"], [["src/a.rs", null]]))).toEqual({ path: "src/a.rs", filesystem: null, line: null, blame: false });
     expect(editorRow(l, result(["p", "l"], []))).toBeNull();
+  });
+
+  test("editorRow says when the file opens with its blame shown (`#blame=1`)", () => {
+    const l = viz({ viz: "editor", editor: { path: "p", blame: "b" } } as never);
+    expect(editorRow(l, result(["p", "b"], [["a.rs", "1"]]))?.blame).toBe(true);
+    expect(editorRow(l, result(["p", "b"], [["a.rs", null]]))?.blame).toBe(false);
   });
 
   test("diffRow is the first row's file, two revisions and the line it lands on", () => {
@@ -839,6 +845,9 @@ describe("rowOpenInRef", () => {
     expect(rowOpenInRef(v, ["target"], ["oxplow:oxplow/dir?path=src"])).toBe("oxplow:oxplow/dir?path=src");
     expect(rowOpenInRef(v, ["target"], ["https://example.com/x"])).toBe("https://example.com/x");
     expect(rowOpenInRef(v, ["target"], ["oxplow:oxplow/task?provider=p&id=1"])).toBeNull();
+    // A diff to the working copy names its file; one between commits doesn't.
+    expect(rowOpenInRef(v, ["target"], ["oxplow:oxplow/page?page=diff&path=src/a.ts&left=git:HEAD&right=working"])).toBe("oxplow:oxplow/file?path=src/a.ts");
+    expect(rowOpenInRef(v, ["target"], ["oxplow:oxplow/page?page=diff&path=src/a.ts&left=git:a&right=git:b"])).toBeNull();
   });
   test("a diff to the working copy names the file; one between commits names nothing", () => {
     const v = viz({ columns: [col("path", { kind: "diff-at", base: "base", head: "head" })] });

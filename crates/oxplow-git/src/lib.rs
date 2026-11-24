@@ -15,6 +15,7 @@ pub mod divergence;
 pub mod log;
 pub mod refs;
 mod refs_watch;
+mod remote;
 mod repo;
 pub mod smart_merge;
 pub mod status;
@@ -47,6 +48,7 @@ pub use refs::{
     CommitRefLabelKind, RemoteBranchEntry,
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
+pub use remote::{list_remotes, GitRemote};
 pub use repo::{
     detect_current_branch, init_repository, is_git_repo, is_git_worktree, main_checkout,
     merge_base, resolve_revision,

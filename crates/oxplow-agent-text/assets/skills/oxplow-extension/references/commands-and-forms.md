@@ -24,12 +24,22 @@
   stops at `/`). It gets `{ uri }`: the URL, or the file's URI. Test it
   with a fixture `when: { item_commands: "https://…" }` →
   `expect: { commands: [<ids>] }`.
+- **A command on a file's Git ▸** (beside oxplow's blame, history, diff,
+  compare and rollback) is the same, with `group: Git` and `about:
+  oxplow/file` (or `oxplow/dir`).
 - **Deciding with your own logic:** `ui.about_if: <function>` names a
   function of the command's `entry:` script. It gets `{ uri, kind, url?,
   path? }` for each link that passes `accepts` and returns `True` where
   the command is offered (`def is_mine(link): return
   link["url"].startswith("https://mine.example/")`). Each call is a script
-  run, so keep a `url` or `path` filter in front of it.
+  run, so keep a `url` or `path` filter in front of it. It runs with the
+  command's `needs`: with `sql.read` (and `permissions: [sql.read]`) it may
+  `scope("sql.read", {...})`, e.g. `v_vcs_remote` (the repository's
+  remotes) to see which forge the project is on.
+- **Leaving the window:** a command a person runs may compose
+  `oxplow.window.open_url { url }` (their browser) or
+  `oxplow.window.copy_text { text }` (their clipboard). An agent is refused
+  both.
 - **Making text a link** (an issue key, a ticket number) in the terminal
   and in markdown: a top-level `links: [{ id, pattern, uri }]`. The pattern
   is a param pattern without `^…$` (classes, no `.`), matched as a whole

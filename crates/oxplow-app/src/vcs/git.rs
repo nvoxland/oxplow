@@ -12,7 +12,7 @@ use oxplow_domain::vcs::{
     BlameLine, Branch, Checkout, CleanBaseline, CommitRequest, ConflictChoice, Divergence,
     FileStatus, Head, InProgressOp, LogQuery, MergeReadiness, ObjectId, ObjectStore, OpOutcome,
     RemoteBranch, RevisionDetail, RevisionFile, RevisionGraph, RevisionInfo, StatusEntry, Tag, Vcs,
-    VcsError, VcsFeatures, VcsWorkspace, WorkspaceStatus,
+    VcsError, VcsFeatures, VcsRemote, VcsWorkspace, WorkspaceStatus,
 };
 
 /// Git, as the VCS provider. It holds the languages the enabled extensions
@@ -981,6 +981,21 @@ impl Vcs for GitProvider {
                     branch: w.branch,
                     head: w.head_sha,
                     is_main: w.is_main,
+                })
+                .collect())
+        })
+        .await
+    }
+
+    async fn list_remotes(&self, repo: &Path) -> Result<Vec<VcsRemote>, VcsError> {
+        let repo = repo.to_path_buf();
+        blocking(move || {
+            repo_check(&repo)?;
+            Ok(oxplow_git::list_remotes(&repo)
+                .into_iter()
+                .map(|r| VcsRemote {
+                    name: r.name,
+                    url: r.url,
                 })
                 .collect())
         })

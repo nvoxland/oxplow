@@ -1,0 +1,10 @@
+# Open In ▸ Bitbucket: `/src/<sha>/` and `#lines-10:20`.
+when:
+  command: oxplow.forge.bitbucket
+  input: { uri: "oxplow:oxplow/file?path=src/main.rs#lines=10-20", stream: str1, forge: bitbucket }
+  answers:
+    sql.read:
+      - [{ name: origin, url: "https://me@bitbucket.org/acme/app.git" }]
+      - [{ head_sha: abc1234 }]
+expect:
+  result: { url: "https://bitbucket.org/acme/app/src/abc1234/src/main.rs#lines-10:20" }

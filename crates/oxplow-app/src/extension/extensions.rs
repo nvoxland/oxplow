@@ -7172,6 +7172,10 @@ commands:
             commands,
             [
                 "oxplow.tasks.clear_finished",
+                "oxplow.forge.github",
+                "oxplow.forge.gitlab",
+                "oxplow.forge.bitbucket",
+                "oxplow.forge.copy_link",
                 "oxplow.tasks.assign",
                 "oxplow.tasks.reorder"
             ]
@@ -8332,6 +8336,7 @@ commands:
                 path: Some("p".into()),
                 filesystem: None,
                 lines: Some("l".into()),
+                blame: None,
             })
         );
         assert!(e.fills);

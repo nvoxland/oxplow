@@ -675,6 +675,42 @@ surface calls it and adds nothing of its own.
   other commands keep their own groups): [extensions-slots.md](./extensions-slots.md)
   "Links: `url` and `path`".
 
+## Git ▸ on every file and folder
+
+Beside Open In ▸, the same menus of a working-copy file or folder
+(not the repository root, not a file at a revision or on another
+filesystem) have one **Git ▸** submenu, from one builder: `gitMenu` /
+`gitItemFor` in `apps/desktop/src/gitMenu.ts`, added by `withLinkOffers`
+(`openIn.ts`), the page ☰ (`PageMenu`) and the editor. It holds what git
+does with **that path** only. The repository's operations (push, pull,
+branches, commit) stay on the Git page and the menu bar.
+
+| Item | Shown when |
+|---|---|
+| Annotate with Git Blame (a file: opens the editor with `#blame=1`; in the editor it toggles) | tracked |
+| Show History (`file-history`; a folder's: the commits under it) | tracked |
+| Show Diff (a file: `git:HEAD` → working; a folder: Uncommitted Changes) | it, or something under the folder, is changed |
+| Compare with… (a file) | tracked |
+| Rollback… | it, or something under the folder, is changed |
+| Add to .gitignore | untracked |
+
+- **What applies is read as the menu opens:** one `vcs.status`
+  (`GitMenuHost.status`, set by `App`). A stream with no VCS gets no
+  Git ▸.
+- **The dialogs dock over the tab area** (`components/Git/GitDialogs.tsx`,
+  drawn once by `App`, opened through `gitDialogStore.ts` from any menu):
+  - **Compare with…** has one search over the branches, the tags and the
+    file's last 30 commits (`compareChoices`). Arrows move, Enter picks,
+    and typed text that matches nothing is offered as a revision of its
+    own (`HEAD~3`). It opens the diff, that revision → working.
+  - **Rollback…** is a checklist of the stream's changes by folder, with
+    the target (or the folder's files) checked, Select All and Select
+    None. A name opens its diff, and an untracked file says rolling it
+    back deletes it. **Rollback N Files** runs `vcs.discard`; the dialog
+    is the confirmation.
+- **Extensions add their own:** a command about the file whose `ui.group`
+  is `Git` joins after oxplow's items (`mergeGroupOffers`).
+
 ## A page changes its own view, it doesn't open itself
 
 A filter, a mode, a pick or "Show every snapshot" on a page is that page at

@@ -557,6 +557,16 @@
         color: var(--text-primary);
         border-color: var(--border-strong);
       }
+      /* A context menu's item (ContextMenu): lit under the pointer, on
+         keyboard focus and while its submenu is open; a disabled one never. */
+      .oxplow-menu-item {
+        background: transparent;
+      }
+      .oxplow-menu-item:not(:disabled):hover,
+      .oxplow-menu-item:not(:disabled):focus-visible,
+      .oxplow-menu-item[data-open="true"] {
+        background: var(--bg-2);
+      }
       /* The slide-out strip's show / hide-panel toggle (SlideoutChevron). */
       .oxplow-slideout-toggle {
         background: transparent;
