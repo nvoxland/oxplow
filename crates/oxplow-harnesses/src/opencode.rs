@@ -135,6 +135,12 @@ impl AgentHarness for Opencode {
 
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         let mut tool = claude_shaped_tool_use(body)?;
+        // opencode names an MCP tool `<server>_<tool>`; oxplow's own is named
+        // as the other harnesses name it.
+        if let Some(name) = tool.name.strip_prefix(&format!("{MCP_SERVER}_")) {
+            tool.name = format!("mcp__{MCP_SERVER}__{name}");
+            tool.kind = ToolKind::Mcp;
+        }
         if tool.name == "apply_patch" {
             tool.kind = ToolKind::Edit;
             tool.paths = super::shared::patch_paths(&body["tool_input"]);
@@ -433,6 +439,10 @@ fn sessions_in(
 /// person's own): the oxplow MCP server (the bearer interpolated by
 /// opencode itself from `{env:…}`), the hook-bridge plugin, the session's
 /// instructions file, oxplow's skills folder and its slash commands.
+/// The name oxplow's MCP server has in opencode's config, and so the
+/// prefix of its tools' names there.
+const MCP_SERVER: &str = "oxplow";
+
 fn config_content(
     mcp_endpoint_url: &str,
     hooks_plugin: &Path,
@@ -442,7 +452,7 @@ fn config_content(
 ) -> String {
     serde_json::json!({
         "mcp": {
-            "oxplow": {
+            MCP_SERVER: {
                 "type": "remote",
                 "url": mcp_endpoint_url,
                 "enabled": true,
@@ -461,6 +471,25 @@ fn config_content(
 
 #[cfg(test)]
 mod tests {
+
+    /// opencode names an MCP tool `<server>_<tool>`: a call to oxplow's own
+    /// server is named as Claude and Codex name it, `mcp__oxplow__<tool>`,
+    /// so the pages that read oxplow's tools see it. Its own tools keep
+    /// their names.
+    #[test]
+    fn a_call_to_oxplows_mcp_server_has_the_shared_mcp_name() {
+        let h = harness("oxplow:opencode", "opencode");
+        let call = |name: &str| {
+            let body = serde_json::json!({"session_id": "s", "tool_name": name, "tool_input": {}});
+            crate::test_launch::block(h.tool_use(&body)).expect("a call")
+        };
+        let read = call("oxplow_oxplow_read");
+        assert_eq!(read.name, "mcp__oxplow__oxplow_read");
+        assert_eq!(read.kind, oxplow_domain::agent::tool::ToolKind::Mcp);
+        assert_eq!(call("oxplow_run_command").name, "mcp__oxplow__run_command");
+        assert_eq!(call("Bash").name, "Bash");
+        assert_eq!(call("other_server_tool").name, "other_server_tool");
+    }
 
     /// Its edit tool is `apply_patch`, the patch as `patchText` (a
     /// recorded OpenCode 2026-10 body): an edit of every file it names,
