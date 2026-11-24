@@ -678,9 +678,10 @@ null `ruleId` → no rule).
 Declare a report collector with its own `entry` — no recompile. The
 **script lives in its own file** (relative to the extension folder, e.g.
 `collectors/clover.jq`; absolute paths and `..` are rejected), not inline in the yaml. The entry and the report `path` are
-also resolved through every symlink before anything is read, and one that
-lands outside the checkout is refused (`in_checkout`): a repo can't
-point a collector at a file of the person's. Example: a Clover (XML) coverage
+also resolved through every symlink before anything is read (`inside`): an
+entry that lands outside its extension's folder (its deployment, wherever
+that is) or a report that lands outside the checkout is refused, so a repo
+can't point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
 ```yaml

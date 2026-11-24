@@ -1,0 +1,10 @@
+# The clippy report collector reads `target/clippy.json` (cargo's JSON
+# message stream) by hand: one finding per message with a source span; a
+# span-less summary and a non-JSON line are skipped.
+requires: [oxplow-rust]
+given:
+  - observe: { turn: { prompt: run clippy, write: { path: target/clippy.json, body: "{\"reason\": \"compiler-message\", \"message\": {\"level\": \"warning\", \"message\": \"this `if` has identical blocks\", \"code\": {\"code\": \"clippy::if_same_then_else\"}, \"spans\": [{\"file_name\": \"src/lib.rs\", \"line_start\": 3, \"column_start\": 5, \"is_primary\": true}]}}\n{\"reason\": \"compiler-message\", \"message\": {\"level\": \"warning\", \"message\": \"1 warning emitted\", \"code\": null, \"spans\": []}}\nnot json\n" } } }
+when: { command: oxplow.collector.sync, input: { collector: oxplow/oxplow.rust.clippy_report, thread: thr1 } }
+expect:
+  ok: true
+  result: { recorded: { status: stored, records: analysis, findings: 1, warningCount: 1, errorCount: 0 } }

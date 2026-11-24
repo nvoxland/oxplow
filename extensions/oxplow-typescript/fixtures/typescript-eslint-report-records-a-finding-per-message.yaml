@@ -1,0 +1,9 @@
+# The ESLint report collector reads `target/eslint.json` by hand: one
+# finding per message, a file with none adds none.
+requires: [oxplow-typescript]
+given:
+  - observe: { turn: { prompt: run eslint, write: { path: target/eslint.json, body: "[{\"filePath\": \"src/a.ts\", \"messages\": [{\"ruleId\": \"no-console\", \"severity\": 1, \"line\": 2, \"column\": 3, \"message\": \"Unexpected console statement.\"}, {\"ruleId\": null, \"severity\": 2, \"line\": 5, \"column\": 1, \"message\": \"Parsing error\"}]}, {\"filePath\": \"src/b.ts\", \"messages\": []}]" } } }
+when: { command: oxplow.collector.sync, input: { collector: oxplow/oxplow.ts.eslint_report, thread: thr1 } }
+expect:
+  ok: true
+  result: { recorded: { status: stored, records: analysis, findings: 2, warningCount: 1, errorCount: 1 } }
