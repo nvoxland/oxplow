@@ -478,8 +478,69 @@ pub struct Node {
     pub replaceable: Option<String>,
     /// A grid child's size.
     pub size: Option<TileSize>,
+    /// It shows only while its params say (`when:`); none shows always. A
+    /// hidden node is not in the run, and its loaders don't run.
+    pub when: Option<NodeWhen>,
     #[serde(flatten)]
     pub kind: NodeKind,
+}
+
+/// When a node shows, by the page's params (`when:`). A param is empty
+/// when it has no value, null, or text that is blank.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeWhen {
+    /// While every one is empty: `when: { empty: [q, author] }`.
+    Empty(Vec<String>),
+    /// While one of them is set: `when: { not_empty: [q, author] }`, the
+    /// opposite of `empty`.
+    NotEmpty(Vec<String>),
+}
+
+impl NodeWhen {
+    /// Whether the node shows with `params`.
+    pub fn holds(&self, params: &BTreeMap<String, SqlCell>) -> bool {
+        let empty = |name: &String| match params.get(name) {
+            None | Some(SqlCell::Null(_)) => true,
+            Some(SqlCell::Text(t)) => t.trim().is_empty(),
+            Some(_) => false,
+        };
+        match self {
+            NodeWhen::Empty(names) => names.iter().all(empty),
+            NodeWhen::NotEmpty(names) => !names.iter().all(empty),
+        }
+    }
+
+    fn names(&self) -> &[String] {
+        match self {
+            NodeWhen::Empty(names) | NodeWhen::NotEmpty(names) => names,
+        }
+    }
+}
+
+/// A node's `when:`, read: one of its two keys over a list of the page's
+/// params.
+fn parse_when(value: serde_yaml::Value, params: &[PageParam]) -> Result<NodeWhen, String> {
+    const SHAPE: &str = "`when` is `{ empty: [params] }` or `{ not_empty: [params] }`";
+    let map = value.as_mapping().filter(|m| m.len() == 1).ok_or(SHAPE)?;
+    let (key, list) = map.iter().next().ok_or(SHAPE)?;
+    let names: Vec<String> = serde_yaml::from_value(list.clone()).map_err(|_| SHAPE.to_string())?;
+    let when = match key.as_str() {
+        Some("empty") => NodeWhen::Empty(names),
+        Some("not_empty") => NodeWhen::NotEmpty(names),
+        _ => return Err(SHAPE.to_string()),
+    };
+    if when.names().is_empty() {
+        return Err("`when` names at least one param".to_string());
+    }
+    if let Some(gone) = when
+        .names()
+        .iter()
+        .find(|n| !params.iter().any(|p| &p.name == *n))
+    {
+        return Err(format!("`when`: `{gone}` isn't a param of this page"));
+    }
+    Ok(when)
 }
 
 impl Node {
@@ -1612,6 +1673,15 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     let collapsible = flag(&mut map, "collapsible")?;
     let link = take_str(&mut map, "link")?;
     let replaceable = take_str(&mut map, "replaceable")?;
+    let when = map
+        .remove("when")
+        .map(|v| {
+            parse_when(v, ctx.params).map_err(|why| match &id {
+                Some(id) => format!("node `{id}`: {why}"),
+                None => why,
+            })
+        })
+        .transpose()?;
     let size = map
         .remove("size")
         .map(serde_yaml::from_value::<TileSize>)
@@ -1750,6 +1820,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         link,
         replaceable,
         size,
+        when,
         kind,
     })
 }

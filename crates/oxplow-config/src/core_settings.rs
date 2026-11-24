@@ -542,7 +542,7 @@ pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
             keys::REPLACEMENTS,
             "Replacements",
             "integrations",
-            "Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.",
+            "Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, task.list: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.",
             json!({"type": ["object", "null"], "additionalProperties": {"type": "string"}}),
             Some(json!({})),
             |c, v| {

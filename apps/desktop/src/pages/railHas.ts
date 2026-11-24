@@ -43,12 +43,18 @@ function titleOf(run: PageRun, at: RunNode): string | null {
  *  history list should not sit five rows tall in an empty page. */
 const FILLS_ALONE: ReadonlySet<string> = new Set(["table", "list", "tree", "custom"]);
 
-/** Whether node `id` is the whole of its page's body: its view, or the only
- *  node of a view that is a stack. */
+/** The one node the run shows as its page's body: its view, or the only
+ *  child the run shows of a view that is a stack (a node's `when` keeps the
+ *  others out of the run). */
+function wholeNode(run: PageRun): string | null {
+  const tree = run.tree;
+  if (run.page.view.kind !== "stack") return tree.id;
+  return tree.children.length === 1 ? tree.children[0]!.id : null;
+}
+
+/** Whether node `id` is the whole of its page's body. */
 function isWholePage(run: PageRun, id: string): boolean {
-  const view = run.page.view;
-  if (view.id === id) return true;
-  return view.kind === "stack" && view.children.length === 1 && view.children[0]!.id === id;
+  return run.tree.id === id || wholeNode(run) === id;
 }
 
 /** Whether viz node `id` takes its page's height: its viz always does (a
@@ -64,9 +70,8 @@ export function vizFills(run: PageRun, id: string): boolean {
  *  the page (`vizFills` and not `viewFills`): the body takes the height, the
  *  page keeps its width and rail. */
 export function aloneFills(run: PageRun): boolean {
-  const view = run.page.view;
-  const only = view.kind === "stack" && view.children.length === 1 ? view.children[0]! : view;
-  return vizFills(run, only.id);
+  const only = wholeNode(run);
+  return only !== null && vizFills(run, only);
 }
 
 /** Whether the page's body may have markdown headings Contents lists: a

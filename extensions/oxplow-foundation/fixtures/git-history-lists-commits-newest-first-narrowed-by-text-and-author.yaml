@@ -1,5 +1,6 @@
-# The commits reachable from the stream's head, newest first, narrowed by
-# text, author or branch, with the branches and tags at each.
+# The commits reachable from the stream's head, newest first: the graph's
+# rows with nothing filtering; narrowed by text, author or branch, the
+# matches, with the branches and tags at each.
 given:
   - observe: { commit: { sha: aaa111, at: "2023-11-14T22:13:20Z", author: ann, email: ann@x, subject: First } }
   - observe: { commit: { sha: bbb222, at: "2023-11-14T22:15:00Z", author: bob, email: bob@x, subject: Second fix, parents: [aaa111] } }
@@ -14,15 +15,15 @@ given:
 when: { page: oxplow/git-history, params: { stream_id: 1 } }
 expect:
   loaders:
-    history:
+    graph:
       rows:
-        - { subject: Third, refs: main }
-        - { subject: Second fix, refs: v1 }
-        - { subject: First, refs: null }
+        - { subject: Third, branches: '["main"]' }
+        - { subject: Second fix, tags: '["v1"]' }
+        - { subject: First, branches: '[]' }
 steps:
   - params: { stream_id: 1, q: fix }
-    expect: { loaders: { history: { rows: [{ subject: Second fix }] } } }
+    expect: { loaders: { history: { rows: [{ subject: Second fix, refs: v1 }] } } }
   - params: { stream_id: 1, author: ann }
-    expect: { loaders: { history: { rows: [{ subject: Third }, { subject: First }] } } }
+    expect: { loaders: { history: { rows: [{ subject: Third, refs: main }, { subject: First, refs: null }] } } }
   - params: { stream_id: 1, branch: side }
     expect: { loaders: { history: { rows: [{ subject: First }] } } }

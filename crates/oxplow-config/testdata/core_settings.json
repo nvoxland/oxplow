@@ -417,7 +417,7 @@
   {
     "key": "oxplow.replacements",
     "title": "Replacements",
-    "description": "Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.",
+    "description": "Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, task.list: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.",
     "category": "integrations",
     "default": {},
     "secret": false,

@@ -1468,7 +1468,8 @@ or opening a page from it hides it; widening the window resets it (`NarrowRail`)
   thing's own page (or in its expansion).
 
 - **A list, table, tree or custom component that is all of its page fills the page's height** (`railHas.ts`
-  `vizFills`, `isWholePage`: the page's view, or the only node of a stack), as a file or a diff does
+  `vizFills`, `isWholePage`: the page's view, or the only node the run shows of a stack — a node's
+  `when` keeps the others out), as a file or a diff does
   (`Viz::fills`). One among other nodes keeps its own height. `PageTree` fills the node and `PageHost`
   the page body around it (`aloneFills`) by that one rule; the page keeps its width and rail. Git
   History is the case: its commits fill the page, replaced by the graph or not.

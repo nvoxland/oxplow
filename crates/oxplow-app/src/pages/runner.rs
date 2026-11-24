@@ -808,7 +808,7 @@ impl<'a> PageRunner<'a> {
                     let mut before: Vec<(String, RunNode)> = Vec::new();
                     let mut after: Vec<(String, RunNode)> = Vec::new();
                     let mut resolved: Vec<RunNode> = Vec::new();
-                    for c in children.iter() {
+                    for c in children.iter().filter(|c| node_shown(c, params)) {
                         let NodeKind::Slot { name } = &c.kind else {
                             let r = self
                                 .resolve(page, c, params, loaders, ctx, viewer, memo, budget, depth)
@@ -1378,6 +1378,11 @@ pub fn rows_of(value: serde_json::Value) -> SqlQueryResult {
 
 /// The child of a switch on `param` in view: the one whose id is its
 /// value, else the first.
+/// Whether `node` shows with `params`: its `when`, when it has one.
+fn node_shown(node: &Node, params: &BTreeMap<String, SqlCell>) -> bool {
+    node.when.as_ref().is_none_or(|w| w.holds(params))
+}
+
 fn in_view<'n>(
     param: &str,
     children: &'n [Node],
@@ -1405,6 +1410,9 @@ fn hidden_loaders(page: &Page, params: &BTreeMap<String, SqlCell>) -> Vec<String
         }
     }
     fn visible(node: &Node, params: &BTreeMap<String, SqlCell>, out: &mut Vec<String>) {
+        if !node_shown(node, params) {
+            return;
+        }
         match &node.kind {
             NodeKind::Viz { from: Some(f), .. } => out.push(f.clone()),
             NodeKind::Switch { param, children } => {

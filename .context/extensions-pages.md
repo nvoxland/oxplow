@@ -332,7 +332,14 @@ those. A catalog change (a deploy) re-runs every open run
 `view:` is one node, usually a `stack`. Every node has an `id` (default:
 its loader, embedded page, slot or component; else `stack`, `stack-2`, …),
 unique in the page. `#node=<id>` in a link lands on it. `title`,
-`replaceable` and `size` are on any node. An embedded page's nodes are
+`replaceable` and `size` are on any node, and `when`: `when: { empty: [q,
+author] }` shows the node only while every listed param is empty (absent,
+null or blank text), `when: { not_empty: [..] }` only while one is set
+(`NodeWhen`, `pages/schema.rs`). A hidden node is not in the run, so its
+loaders don't run (`hidden_loaders`), and the one node shown of a stack
+counts as the whole page (`railHas.ts` `wholeNode`). Each name is one of the
+page's params, or the page doesn't load. Git History is the case: the graph
+while nothing filters, the table of matches while something does. An embedded page's nodes are
 `<embed-id>/<node-id>`; `oxplow_run_page` text prints each node under
 `[node <id>]` (`pages/text.rs`).
 

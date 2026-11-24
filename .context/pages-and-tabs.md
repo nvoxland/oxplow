@@ -891,8 +891,8 @@ margin; an embed or a slot takes its title from the page it shows):
   `operations` (with an `expand` into `alerts-operation`) and `extensions`
   nodes, with `embed`s of `alerts-deliveries` and `alerts-reactions`.
   `git-history` (params `stream_id`, `q`, `author`, `branch`, `head_sha`,
-  `reveal_sha`, `limit`): a `table` with the `vcs.history.graph`
-  replaceable. `local-history` (params `stream_id`, `mode` `recent` |
+  `reveal_sha`, `limit`): the `history-graph` component while no filter is
+  set, a `table` of the matches while one is. `local-history` (params `stream_id`, `mode` `recent` |
   `by-commit`, and `all`, which lifts the caps — the rail's, so no "View
   all" step to go Back from): two `table`s. `uncommitted-changes` (param
   `stream_id`; the working change, `kind = 'working' AND target = ''`):

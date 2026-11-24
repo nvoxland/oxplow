@@ -419,13 +419,13 @@ test("a host with no view refuses view params and history state", async () => {
 test("a view param the host refuses says why", async () => {
   const h = harness({
     setViewParams: () => {
-      throw Object.assign(new Error("`sha` isn't in vcs.history.graph's view (q, author, branch)."), { code: "INVALID" });
+      throw Object.assign(new Error("`sha` isn't in task.board's view (show, priority, q)."), { code: "INVALID" });
     },
   });
   h.send({ id: "p", method: "setViewParams", params: { sha: "abc" } });
   await h.settle();
   expect(h.received).toEqual([
-    { id: "p", ok: false, error: { code: "INVALID", message: "`sha` isn't in vcs.history.graph's view (q, author, branch)." } },
+    { id: "p", ok: false, error: { code: "INVALID", message: "`sha` isn't in task.board's view (show, priority, q)." } },
   ]);
   h.channel.port1.close();
 });

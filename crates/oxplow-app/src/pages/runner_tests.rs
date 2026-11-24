@@ -104,6 +104,30 @@ async fn a_switch_runs_only_the_child_in_view() {
     );
 }
 
+/// A node's `when` keeps it out of the run while its params say so: the
+/// one shown is the only child, and the hidden one's loader doesn't run.
+/// Blank text is empty.
+#[tokio::test]
+async fn a_node_when_shows_it_only_while_its_params_say() {
+    let (_dir, svc) = fixture().await;
+    let ids =
+        |r: &PageRun| -> Vec<String> { r.tree.children.iter().map(|c| c.id.clone()).collect() };
+    let r = run(&svc, "acme/chosen", &[]).await;
+    assert_eq!(ids(&r), ["every"]);
+    assert!(
+        !r.loaders.contains_key("found"),
+        "the hidden node's loader doesn't run"
+    );
+    let r = run(&svc, "acme/chosen", &[("q", SqlCell::Text("  ".into()))]).await;
+    assert_eq!(ids(&r), ["every"]);
+    let r = run(&svc, "acme/chosen", &[("q", SqlCell::Text("fix".into()))]).await;
+    assert_eq!(ids(&r), ["found"]);
+    assert!(
+        !r.loaders.contains_key("every"),
+        "the hidden node's loader doesn't run"
+    );
+}
+
 /// A loader only a choice's `options_from` names feeds the rail's list
 /// and a form's open, on demand: a run of the page doesn't run it. One a
 /// node also shows still runs.

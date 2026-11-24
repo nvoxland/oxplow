@@ -732,7 +732,7 @@ pub struct OxplowConfig {
     pub active_provider_origins: std::collections::BTreeMap<String, settings::Level>,
     /// Whose component shows for a replaceable core sub-component, by
     /// target (`replacements: { task.board: task-views,
-    /// vcs.history.graph: oxplow }`): an extension replacing it, or
+    /// task.list: oxplow }`): an extension replacing it, or
     /// `oxplow` for oxplow's own. A target not listed shows its default:
     /// the only extension replacing it, or a bound target's provider's.
     /// Only `oxplow` may be chosen for a bound target (its provider's
@@ -2825,7 +2825,7 @@ mod tests {
     fn replacements_chooses_whose_component_shows() {
         let parse = config_from_yaml;
         let config = parse(
-            "oxplow.replacements: { vcs.history.graph: oxplow-bundled, task.board: task-views, task.detail.state: oxplow }\n",
+            "oxplow.replacements: { task.list: oxplow-bundled, task.board: task-views, task.detail.state: oxplow }\n",
         )
         .unwrap();
         assert_eq!(

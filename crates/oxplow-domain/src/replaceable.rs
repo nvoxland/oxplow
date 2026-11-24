@@ -205,8 +205,8 @@ mod tests {
             Some("model:oxplow/task_record".to_string())
         );
         assert_eq!(
-            replaceable("vcs.history.graph").map(|r| r.subject()),
-            Some("vcs".to_string())
+            replaceable("task.board").map(|r| r.subject()),
+            Some("model:oxplow/task_record".to_string())
         );
         assert_eq!(
             replaceable("task.board").map(|r| r.bound_to_provider),
@@ -232,7 +232,7 @@ mod tests {
     }
 
     /// A target's view is its host page's view params: never one of its
-    /// props, and the history graph shares Git History's filters.
+    /// props, and the board shares the Work page's filters.
     #[test]
     fn a_view_key_is_the_host_pages_not_a_prop() {
         for r in all() {
@@ -240,10 +240,7 @@ mod tests {
                 assert!(!r.props.contains(key), "{}: {key}", r.target);
             }
         }
-        assert_eq!(
-            replaceable("vcs.history.graph").map(|r| (r.version, r.view)),
-            Some((2, &["q", "author", "branch"][..]))
-        );
+        assert_eq!(replaceable("task.board").map(|r| r.version), Some(2));
         assert_eq!(
             replaceable("task.board").map(|r| r.view),
             Some(&["show", "priority", "q"][..])

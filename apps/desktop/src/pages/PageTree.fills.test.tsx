@@ -50,3 +50,17 @@ test("the only node of a stack fills; one of several does not", () => {
   const b = render(<PageTree run={two} runId="r" />);
   expect(fills(b.getByTestId("node-rows"))).toBe(false);
 });
+
+// A node's `when` keeps a node out of the run: of two in a stack, the one
+// the run shows is all of the page, and fills it.
+test("the one node a run shows of a stack of two fills", () => {
+  const page = fakePage(
+    node.stack("s", [
+      node.viz("rows", "rows", { viz: "table", columns: [{ key: "a" }] }, { title: "Rows" }),
+      node.viz("more", "rows", { viz: "table", columns: [{ key: "a" }] }, { title: "More" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: rows, tree: { id: "s", children: [{ id: "more", children: [], embed: null, error: null, replacedBy: null, actionPoint: null }], embed: null, error: null, replacedBy: null, actionPoint: null } as never });
+  const view = render(<PageTree run={run} runId="r" />);
+  expect(fills(view.getByTestId("node-more"))).toBe(true);
+});

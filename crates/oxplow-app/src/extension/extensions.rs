@@ -7335,8 +7335,9 @@ commands:
 
     /// Foundation keeps data, resource views, the basic git screens and the
     /// agent's tools. Screens a person opens by choice (Dashboards,
-    /// Timeline, the Metrics list) aren't here, and the only custom component
-    /// foundation keeps is the hand-written Integrations area.
+    /// Timeline, the Metrics list) aren't here, and the only custom components
+    /// foundation keeps are hand-written: Git History's graph and the
+    /// Integrations area.
     #[test]
     fn foundation_has_no_dashboards_index_timeline_or_metrics_list() {
         let dir = tempfile::tempdir().unwrap();
@@ -7359,7 +7360,7 @@ commands:
             .iter()
             .map(|c| c.id.as_str())
             .collect();
-        assert_eq!(components, ["integrations"]);
+        assert_eq!(components, ["history-graph", "integrations"]);
         // Making a dashboard is the bare product; the launcher lists them.
         assert!(foundation
             .commands

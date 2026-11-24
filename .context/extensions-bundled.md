@@ -399,8 +399,6 @@ screens and Bundled's add review and analysis:
 - **Request blocks.** Blocks for a request's tests (coverage, untested
   files, test runs, failed tests, analysis findings), its metric deltas, its
   nudges and its plan, mounted at `oxplow/diff-view.sections`.
-- **Git History's commit graph.** The `history-graph` component is
-  the Graph view of the Git History page, alongside its commit list.
 - **The wiki screens** have moved to `oxplow-bundled`: see "The knowledge
   pages" below.
 - **Data discovery.** Catalog shows the first sentence of each dataset's description.
@@ -409,7 +407,7 @@ screens and Bundled's add review and analysis:
   The agent's catalog tool returns full descriptions and the metadata for querying them.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `commit`,
-  `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
+  `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`, `git-history` (the commit graph, its own `history-graph` component, while no filter is set; a table of the matches while one is),
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
 - **Rail panels.** A panel lives in the extension that has its page:

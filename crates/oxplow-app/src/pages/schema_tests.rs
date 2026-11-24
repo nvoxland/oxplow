@@ -99,6 +99,45 @@ fn a_section_needs_a_title_and_hide_title_keeps_it_unseen() {
     assert!(!by_id("more"));
 }
 
+/// A node may be shown only while params are empty (`when: { empty: [..] }`)
+/// or only while one of them is set (`not_empty`, its opposite). It names
+/// the page's own params, one key, a list that isn't empty.
+#[test]
+fn a_node_when_names_params_that_are_empty_or_not() {
+    let head = "title: T\nparams: [{ name: q, role: filter, default: '' }, { name: who, role: filter, default: '' }]\nloaders:\n  a: { rows: [{ x: 1 }] }\n";
+    let ok = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: all, title: All, hide_title: true, when: {{ empty: [q, who] }}, viz: table, from: a }}\n    - {{ id: found, title: Found, hide_title: true, when: {{ not_empty: [q, who] }}, viz: table, from: a }}\n"
+    ))
+    .expect("loads");
+    let kids = ok.view.children();
+    assert_eq!(
+        kids[0].when,
+        Some(NodeWhen::Empty(vec!["q".into(), "who".into()]))
+    );
+    assert_eq!(
+        kids[1].when,
+        Some(NodeWhen::NotEmpty(vec!["q".into(), "who".into()]))
+    );
+    let refuses = |when: &str, says: &str| {
+        let why = refused(&format!(
+            "{head}view:\n  stack:\n    - {{ id: all, title: All, when: {when}, viz: table, from: a }}\n"
+        ));
+        assert!(why.contains(says), "{when}: {why}");
+        assert!(why.contains("node `all`"), "{when}: {why}");
+    };
+    refuses("{ empty: [gone] }", "`gone` isn't a param of this page");
+    refuses(
+        "{ set: [q] }",
+        "`when` is `{ empty: [params] }` or `{ not_empty: [params] }`",
+    );
+    refuses(
+        "{ empty: [q], not_empty: [who] }",
+        "`when` is `{ empty: [params] }`",
+    );
+    refuses("{ empty: [] }", "names at least one param");
+    refuses("q", "`when` is `{ empty: [params] }`");
+}
+
 /// A loader's SQL is read with the one SQL tokenizer: an apostrophe in a
 /// comment doesn't hide the loaders and params after it, a word or
 /// `:param` in a comment or a string isn't read, and a quoted identifier

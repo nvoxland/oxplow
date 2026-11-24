@@ -724,7 +724,6 @@ ui:
   # A task's page shows the agent's tokens on it and what another
   # thread shares with it.
   mounts:
-    - { page: history-graph, at: vcs.history.graph, version: 2 }
     # The request summary's tasks (foundation's page reads no task).
     - { page: request-tasks, at: oxplow/request-summary.sections, position: { after: request }, title: Tasks }
     - { page: contribution-repair, at: oxplow/contribution-health.repair }
@@ -897,9 +896,6 @@ commands:
     needs: [sql.read]
     access: write
 custom_components:
-  - id: history-graph
-    title: Git History
-    description: Switch between a commit list and a graph of the same history.
   # The Work board: the tasks as cards in a column per stage, its own
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
   - id: board

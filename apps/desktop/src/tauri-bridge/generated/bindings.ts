@@ -4104,6 +4104,19 @@ export type NodeKind_Serialize =
  */
 ({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
 
+/**
+ *  When a node shows, by the page's params (`when:`). A param is empty
+ *  when it has no value, null, or text that is blank.
+ */
+export type NodeWhen =
+/**  While every one is empty: `when: { empty: [q, author] }`. */
+({ empty: string[] }) & { notEmpty?: never } |
+/**
+ *  While one of them is set: `when: { not_empty: [q, author] }`, the
+ *  opposite of `empty`.
+ */
+({ notEmpty: string[] }) & { empty?: never };
+
 /**  A node of a page's view. */
 export type Node_Deserialize = {
 	/**  Unique in its page; `#node=<id>` points at it. */
@@ -4145,6 +4158,11 @@ export type Node_Deserialize = {
 	replaceable: string | null,
 	/**  A grid child's size. */
 	size: TileSize | null,
+	/**
+	 *  It shows only while its params say (`when:`); none shows always. A
+	 *  hidden node is not in the run, and its loaders don't run.
+	 */
+	when: NodeWhen | null,
 } & NodeKind_Deserialize;
 
 /**  A node of a page's view. */
@@ -4188,6 +4206,11 @@ export type Node_Serialize = {
 	replaceable: string | null,
 	/**  A grid child's size. */
 	size: TileSize | null,
+	/**
+	 *  It shows only while its params say (`when:`); none shows always. A
+	 *  hidden node is not in the run, and its loaders don't run.
+	 */
+	when: NodeWhen | null,
 } & NodeKind_Serialize;
 
 /**

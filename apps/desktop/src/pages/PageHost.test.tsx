@@ -308,6 +308,16 @@ test("a table that is the whole page fills the page body, still a document's wid
   expect(view.container.querySelector(".oxplow-reading-column")).not.toBeNull();
 });
 
+test("the one node a run shows of a stack of two fills the page body", async () => {
+  const base = tablePage();
+  const page = { ...base.page, view: node.stack("s", [{ ...base.page.view, title: "Items" }, node.viz("other", "items", { viz: "table", columns: [{ key: "id" }] }, { title: "Other" })]) };
+  const run = { ...base, page, tree: { id: "s", children: [{ ...base.tree }], embed: null, error: null, replacedBy: null, actionPoint: null } } as typeof base;
+  const view = render(<PageHost pageKey={key} runs={fakePageRuns(run).runs} />);
+  await view.findByText("Items: Alpha");
+  const body = view.getByTestId("page-file");
+  expect(body.style.flex === "1" || body.style.flex === "1 1 0%").toBe(true);
+});
+
 test("`focus` lands on its node once the run draws it", async () => {
   const view = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} focus="items" />);
   await waitFor(() => expect(view.container.querySelector('[data-node="items"]')?.getAttribute("data-focused")).toBe("true"));

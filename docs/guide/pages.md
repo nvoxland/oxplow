@@ -452,8 +452,8 @@ draws them itself; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. Some views also share
-their page's view params: Git History's graph (`vcs.history.graph`) has
-the page's `q`, `author` and `branch`, so a custom graph reads them from
+their page's view params: the Work board (`task.board`) has
+the page's `show`, `priority` and `q`, so a custom board reads them from
 `component.viewParams`, writes them with `setViewParams` and follows
 `onViewParams` — the same address oxplow's own page keeps. A `viz: custom` view that
 changes items needs its commands declared like any component, and the

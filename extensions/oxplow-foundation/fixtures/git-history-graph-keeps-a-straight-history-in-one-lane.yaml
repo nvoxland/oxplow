@@ -7,7 +7,6 @@ given:
 when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: ccccccc } }
 steps:
   - ui:
-      - click: '#graph-mode'
       - expect:
           count:
             '.row circle.node-0': 3

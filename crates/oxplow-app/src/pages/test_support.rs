@@ -130,6 +130,20 @@ view:
 "#,
     ),
     (
+        "chosen",
+        r#"
+title: Chosen
+params: [{ name: q, role: filter, default: '' }]
+loaders:
+  every: { sql: "SELECT 'every' AS a" }
+  found: { sql: "SELECT 'found' AS a" }
+view:
+  stack:
+    - { id: every, title: Every, when: { empty: [q] }, viz: list, from: every }
+    - { id: found, title: Found, when: { not_empty: [q] }, viz: list, from: found }
+"#,
+    ),
+    (
         "queried",
         r#"
 title: Queried

@@ -63,6 +63,12 @@ view:
 - `switch: { param, children }` shows the one child whose `id` equals the
   param's value (else the first). The param is a filter, drawn in the rail.
   Loaders only hidden children show do not run. Children may be switches.
+- `when:` on any node shows it only while params say: `when: { empty: [q,
+  author] }` while every listed param is empty (absent, null or blank),
+  `when: { not_empty: [q, author] }` while one is set. Two nodes with the
+  opposite `when` are "this view until a filter is set, that one after"
+  (Git History: its graph, then its table of matches). A hidden node's
+  loaders do not run. Each name must be a param of the page.
 - `{ markdown: "text" }`: static text. `{ component: { id, props } }`: one of
   the extension's custom components, fed the page's loaders
   (`commands-and-forms.md`).

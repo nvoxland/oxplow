@@ -124,7 +124,6 @@ than handing it props it does not know.
 | `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | model `oxplow/task_record` | no | `uri` (the item) | — |
 | `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | model `oxplow/task_record` | yes | `uri` (the item) | — |
 | `knowledge.detail.body` | a knowledge page's body (the `body` node of bundled's `knowledge-page`): oxplow's own is the read-only markdown; About, referenced files, backlinks, comments and mounts stay oxplow's. oxwiki's replacement is an editor with Save | model `oxplow/knowledge_record` | yes, by the URI's `store` (a task's is `provider`; the table's `provider_param`) | `uri` (the page) | — |
-| `vcs.history.graph` | Git History's commits (a node of the `git-history` page): oxplow's own is a plain list | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A page node marked `replaceable: <target>`
 (`Node.replaceable`; `check_page` refuses an unknown target and a target
@@ -216,28 +215,6 @@ a `ui` step on the embedded component); the badge, the fallback line and
 choosing one on Settings are the e2e specs'. The pages with every
 enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
 ([tasks.md](./tasks.md), "Conformance").
-
-**Git History.** Bundled's `history-graph` component replaces the commit
-list at `vcs.history.graph`. It starts in List view. Graph draws each commit
-and its parents in lanes, with children before their parents. Both views
-use the same rows from `:head_sha` through `v_commit` and label local branch
-tips and tags from `v_branch` and `v_tag`. A `reveal_sha` link starts in Graph
-and highlights the commit. The mode is kept in the tab entry's history state.
-The List filters hide nonmatching rows. Graph dims text and author mismatches
-to retain their connections; its branch filter keeps the reachable rows.
-Both share Git History's `q`, `author` and `branch` view params, which the
-replacement page also declares as params, so they flow into its run by
-name. The List shows the `history_matches` loader: the search runs in SQL
-over everything reachable from the head, before `limit`, as core's list
-does, so an older commit is found too. The Graph draws the `history_graph`
-loader, the newest `limit` commits unfiltered: lanes need every commit
-between two matches, so a match beyond the loaded range is not drawn
-there. Both also filter locally, so a change shows before the re-run
-answers, and a tile (no view) filters its loaded rows only
-(`git-history-search-finds-commits-beyond-the-loaded-limit`). The host refreshes the rows when a commit or ref moves. Each row
-links to the commit, with Cmd/Ctrl-click or middle-click opening a new tab.
-Setting `oxplow.replacements.vcs.history.graph` to `oxplow` restores the
-standard list. Bundled's fixtures exercise the replacement and its controls.
 
 **The example that proves views and forms: `examples/extensions/task-views`.**
 An extension with no provider of its own, replacing `task.board`
