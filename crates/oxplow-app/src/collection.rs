@@ -748,17 +748,18 @@ impl CollectionService {
             .any(|r| r.matches(owner, id))
     }
 
-    /// `rel` under the checkout `root`, after every symlink: `None`
-    /// when it isn't there, an error when it resolves outside `root` — a
-    /// repo can't point a collector at a file of the person's. The config
-    /// check is lexical (no `..`, not absolute); this is the one that
-    /// follows links.
-    fn in_checkout(root: &std::path::Path, rel: &str) -> Result<Option<PathBuf>, String> {
+    /// `rel` under `root` (the checkout, or an extension's folder), after
+    /// every symlink: `None` when it isn't there, an error when it resolves
+    /// outside `root` — a repo can't point a collector at a file of the
+    /// person's. The config check is lexical (no `..`, not absolute); this
+    /// is the one that follows links.
+    /// `what` names `root` in the refusal ("the checkout").
+    fn inside(root: &std::path::Path, what: &str, rel: &str) -> Result<Option<PathBuf>, String> {
         let base = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         match root.join(rel).canonicalize() {
             Ok(abs) if abs.starts_with(&base) => Ok(Some(abs)),
             Ok(_) => Err(format!(
-                "`{rel}` resolves outside the checkout (a symlink?); refused"
+                "`{rel}` resolves outside {what} (a symlink?); refused"
             )),
             Err(_) => Ok(None),
         }
@@ -786,22 +787,17 @@ impl CollectionService {
             Records::Coverage => CollectorKind::Coverage,
             Records::Analysis => CollectorKind::Analysis,
         };
-        let entry = format!(
-            "{}/{}",
-            collector.dir,
-            spec.entry.as_deref().unwrap_or_default()
-        );
+        let entry = spec.entry.as_deref().unwrap_or_default();
         // The extension's files are the project's (one set for every stream),
-        // so its entry is read from the project's checkout, not from the
-        // stream's worktree that holds the report: a worktree has no copy
-        // (or a link out of itself), and a parser that "resolves outside the
-        // checkout" there failed three times and was disabled.
+        // not the stream's worktree that holds the report: a worktree has no
+        // copy. Its entry is its own file, so it must stay inside the
+        // extension's folder (its deployment, wherever that is) after links.
         let project = self.extensions.project_of(root);
-        let abs = Self::in_checkout(project, &entry)
+        let ext_dir = project.join(&collector.dir);
+        let abs = Self::inside(&ext_dir, "its extension", entry)
             .map_err(|e| ParserProblem::Broken(format!("entry {e}")))?
-            .unwrap_or_else(|| project.join(&entry));
+            .unwrap_or_else(|| ext_dir.join(entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            let ext_dir = project.join(&collector.dir);
             // A program, run from its extension's deployment (which declares
             // `process`: it doesn't load otherwise).
             let location = oxplow_script::runtime::ExecLocation {
@@ -857,7 +853,7 @@ impl CollectionService {
             return ReportRead::Missing(String::new());
         }
         let path = self.report_path(collector, root);
-        let abs = match Self::in_checkout(root, &path) {
+        let abs = match Self::inside(root, "the checkout", &path) {
             Ok(Some(abs)) => abs,
             Ok(None) => return ReportRead::Missing(path),
             Err(e) => return ReportRead::Failed(format!("{path} ({}): report {e}", spec.id)),

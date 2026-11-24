@@ -2194,9 +2194,10 @@ redelivered event can't fire the same kind twice). Missing-report notices
 use the person audience. For agent-directed advisories,
 `post_tool_context` checks the active agent advisories and waits only when
 one can respond to the recorded tool event. It watches the matching consumer's
-checkpoint through that event, up to 2.5 s. The ordinary advisory consumer
-still follows collection. Advisories declared `after_collection: false`
-can respond after the tool call is projected. Collection and person-facing
+checkpoint through that event, up to 2.5 s. Advisories that name an `after:`
+run in `advisories.post_tool`, which waits on the immediate consumer and on
+what their targets run in (`advisories::ordered_gates`); those with none run
+in `advisories.post_tool.immediate` once the call is projected. Collection and person-facing
 notices run in the background. The hook takes the thread's undelivered nudges
 (`take_for_agent`, which stamps `delivered_at`; oxplow's own kinds before
 advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and

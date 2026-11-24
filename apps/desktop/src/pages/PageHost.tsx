@@ -302,7 +302,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             <ComponentPage run={run} stream={stream} streamId={streamId} threadId={pageKey.threadId} onOpenPage={onOpenPage} host={componentHost} />
           ) : run ? (
             <HostedViewContext.Provider value={hostedView}>
-              <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} showAs={{ onSaved: nav || onOpenPage ? open : undefined }} />
+              <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} showAs={{ onSaved: nav || onOpenPage ? open : undefined, given: pageKey.params }} />
             </HostedViewContext.Provider>
           ) : reading ? (
             <LoadingScreen />

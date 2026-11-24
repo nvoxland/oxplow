@@ -86,7 +86,7 @@ impl AgentContext {
                         AdvisoryOn::PostToolUse,
                         |a| a.audience == AdvisoryAudience::Agent,
                         |_, advisories| {
-                            if advisories.iter().any(|a| a.after_collection) {
+                            if advisories.iter().any(|a| !a.after.is_empty()) {
                                 consumer = Some(POST_TOOL_ADVISORIES);
                             } else if consumer.is_none() {
                                 consumer = Some(IMMEDIATE_ADVISORIES);

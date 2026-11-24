@@ -1,0 +1,18 @@
+# A merge's second parent gets the next lane, drawn from the merge's row,
+# and its line folds back into the first lane at the common parent.
+given:
+  - observe: { commit: { sha: aaaaaaa, at: "2026-01-01T00:00:00Z", subject: Main work } }
+  - observe: { commit: { sha: bbbbbbb, at: "2026-01-02T00:00:00Z", subject: Side work, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ccccccc, at: "2026-01-03T00:00:00Z", subject: Main again, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ddddddd, at: "2026-01-04T00:00:00Z", subject: Merge side, parents: [ccccccc, bbbbbbb] } }
+when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: ddddddd } }
+steps:
+  - ui:
+      - click: '#graph-mode'
+      - expect:
+          count:
+            '.row[data-sha="ddddddd"] circle.node-0': 1
+            '.row[data-sha="ccccccc"] circle.node-0': 1
+            '.row[data-sha="bbbbbbb"] circle.node-1': 1
+            '.row[data-sha="aaaaaaa"] circle.node-0': 1
+            '.row[data-sha="ddddddd"] line.lane-1': 1

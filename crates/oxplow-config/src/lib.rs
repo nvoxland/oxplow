@@ -746,10 +746,6 @@ pub struct OxplowConfig {
     #[serde(rename = "eventRetention")]
     pub event_retention:
         std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
-    /// Resolved AI role assignments, keyed by role name (one of
-    /// [`AI_ROLE_NAMES`]). Provider ids refer to `oxplow.ai.providers`.
-    #[serde(rename = "aiRoles")]
-    pub ai_roles: std::collections::BTreeMap<String, AiRoleOverride>,
     /// Where an extension's source is when it isn't
     /// `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
     /// relative to the checkout or absolute.
@@ -1064,7 +1060,6 @@ fn blank_config(project_name: &str) -> OxplowConfig {
         active_provider_origins: Default::default(),
         replacements: Default::default(),
         event_retention: Default::default(),
-        ai_roles: Default::default(),
         extension_sources: Default::default(),
     }
 }
@@ -3490,59 +3485,14 @@ oxplow.lsp.servers:
     }
 
     #[test]
-    fn ai_roles_round_trip_and_reject_unknown_roles() {
+    fn ai_roles_load_and_unknown_roles_are_refused() {
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
             "oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }\noxplow.ai.roles.acme.review: { provider: openrouter, model: big, restrict: [tools, streaming] }\n",
         )
         .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert!(
-            cfg.ai_roles.contains_key("acme/review"),
-            "an extension's AI profile"
-        );
-        assert_eq!(
-            cfg.ai_roles.get("summarize"),
-            Some(&AiRoleOverride {
-                provider: "openrouter".into(),
-                model: "openai/gpt-5-mini".into(),
-                restrict: Default::default(),
-            })
-        );
-        assert_eq!(
-            cfg.ai_roles["acme/review"].restrict,
-            [
-                oxplow_domain::ai::AiRestriction::Tools,
-                oxplow_domain::ai::AiRestriction::Streaming
-            ]
-            .into(),
-            "what the project forbids the binding"
-        );
-        let values: std::collections::BTreeMap<String, serde_json::Value> = cfg
-            .ai_roles
-            .iter()
-            .map(|(role, binding)| {
-                let mut value = serde_json::to_value(binding).unwrap();
-                if binding.restrict.is_empty() {
-                    value.as_object_mut().unwrap().remove("restrict");
-                }
-                (crate::core_settings::role_key(role), value)
-            })
-            .collect();
-        std::fs::write(
-            cfg_path(dir.path()),
-            serde_yaml::to_string(&values).unwrap(),
-        )
-        .unwrap();
-        let written = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert_eq!(
-            written.matches("restrict").count(),
-            1,
-            "only a restricted role says so: {written}"
-        );
-        let again = load_project_config(dir.path()).unwrap();
-        assert_eq!(again.ai_roles, cfg.ai_roles, "written back unchanged");
+        load_project_config(dir.path()).expect("a core role and an extension's AI profile");
 
         for (yaml, needle) in [
             (
@@ -4383,8 +4333,6 @@ metrics:
             .expect("shadowed overrides are not validated");
         let yaml = serde_json::to_value(&config).unwrap();
         assert_eq!(yaml["testing"]["command"], "make test", "{yaml}");
-        assert_eq!(yaml["aiRoles"]["default"]["model"], "m", "{yaml}");
-        assert_eq!(yaml["aiRoles"]["acme/review"]["model"], "r", "{yaml}");
         assert_eq!(yaml["agentEnabled"]["acme/coder"], false, "{yaml}");
 
         std::fs::remove_file(dir.path().join(".oxplow/local.yaml")).unwrap();

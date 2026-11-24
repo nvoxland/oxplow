@@ -175,13 +175,12 @@ pub struct Advisory {
     pub needs: Vec<String>,
     #[serde(default)]
     pub when: Option<config_schema::ConfigCondition>,
-    /// Post-tool advisories read collection results unless they opt out.
-    #[serde(default = "after_collection_default")]
-    pub after_collection: bool,
-}
-
-fn after_collection_default() -> bool {
-    true
+    /// What a post-tool advisory runs after on the tool call's event, as
+    /// resolved refs (`.context/extensions-events.md` "Ordering"): a core
+    /// consumer such as `collection`, or an effect or a collector. None runs
+    /// it as soon as the call is projected.
+    #[serde(default)]
+    pub after: Vec<String>,
 }
 
 /// An advisory as written in `extension.yaml`.
@@ -201,8 +200,12 @@ struct AdvisoryFile {
     needs: Vec<String>,
     #[serde(default)]
     when: Option<config_schema::ConfigCondition>,
-    #[serde(default = "after_collection_default")]
-    after_collection: bool,
+    /// A post-tool-use advisory's targets on the tool call's event: a core
+    /// consumer (`collection` to read the run's test results), or an
+    /// effect or collector (`effect:<namespace>/<id>`). None: it runs as
+    /// soon as the call is projected.
+    #[serde(default)]
+    after: Vec<String>,
 }
 
 /// Where a mount goes among a page's parts: `start`, `end` (the default),
@@ -2422,7 +2425,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 audience: a.audience,
                 needs: a.needs,
                 when: a.when,
-                after_collection: a.after_collection,
+                after: a.after,
             }) {
                 Ok(a)
                     if a.needs
@@ -2459,6 +2462,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         ),
                     ))
                 }
+                Ok(a) if !a.after.is_empty() && a.on != AdvisoryOn::PostToolUse => ext.errors.push(
+                    at(
+                        "advisory.after_not_post_tool",
+                        man,
+                        line_under(&manifest, "advisories", &a.id),
+                        format!(
+                            "advisory {}: `after` orders a post-tool-use advisory; \
+                                 this one runs at another moment",
+                            a.id
+                        ),
+                    )
+                    .contribution(format!("{}/{}", ext.namespace, a.id)),
+                ),
                 Ok(a) => {
                     if let Some((code, why)) = a
                         .when

@@ -90,9 +90,10 @@ an inherited default binding. Provider ids name declared implementations.
 oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
 ```
 
-- `OxplowConfig.ai_roles` is the typed runtime projection. Core roles are from
-  `AI_ROLE_NAMES`; extension profiles use `<namespace>/<name>`.
-- `AiService.with_settings` reads through the shared store. Settings → AI keeps
+- Loading the config checks each binding (`validate_ai_role`); core roles are
+  from `AI_ROLE_NAMES`, extension profiles use `<namespace>/<name>`. There is
+  no typed copy: `AiService` and `ai_service::role_bindings` read the settings.
+- `AiService` (built with the settings store) reads through it. Settings → AI keeps
   its specialized controls; registry metadata and origins remain available in
   `v_config_value`. Global edits may be shadowed by project or local overrides.
 

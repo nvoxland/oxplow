@@ -259,9 +259,9 @@ hook + MCP wiring):
   events aren't caused by the run's `command.executed`). Collection runs
   in the background. A hook waits up to 2.5 seconds for an eligible
   agent-facing advisory's consumer to checkpoint the current tool event.
-  Post-tool advisories follow collection by default, so they can read
-  the current run. An advisory with `after_collection: false` reads the
-  tool projection independently. A nudge that lands later can be delivered
+  A post-tool advisory that reads the current run declares
+  `after: [collection]`; one with no `after:` reads the tool projection as
+  soon as the call is projected. A nudge that lands later can be delivered
   by the next tool or prompt hook.
   **The legs are isolated and coverage retries:** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
@@ -678,9 +678,10 @@ null `ruleId` → no rule).
 Declare a report collector with its own `entry` — no recompile. The
 **script lives in its own file** (relative to the extension folder, e.g.
 `collectors/clover.jq`; absolute paths and `..` are rejected), not inline in the yaml. The entry and the report `path` are
-also resolved through every symlink before anything is read, and one that
-lands outside the checkout is refused (`in_checkout`): a repo can't
-point a collector at a file of the person's. Example: a Clover (XML) coverage
+also resolved through every symlink before anything is read (`inside`): an
+entry that lands outside its extension's folder (its deployment, wherever
+that is) or a report that lands outside the checkout is refused, so a repo
+can't point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
 ```yaml

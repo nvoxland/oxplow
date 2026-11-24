@@ -1342,13 +1342,10 @@ pub fn order_lines(ext: &Extension) -> Vec<String> {
     ext.contributions
         .iter()
         .filter(|d| !d.after.is_empty())
-        .map(|d| {
-            format!(
-                "{} → level {}, after {}",
-                d.id,
-                d.order_level.unwrap_or(0),
-                d.after.join(", ")
-            )
+        .map(|d| match d.order_level {
+            Some(level) => format!("{} → level {level}, after {}", d.id, d.after.join(", ")),
+            // An advisory runs in its own consumer, after its targets: no level.
+            None => format!("{} → after {}", d.id, d.after.join(", ")),
         })
         .collect()
 }
