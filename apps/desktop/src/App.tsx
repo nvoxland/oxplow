@@ -1,16 +1,12 @@
-import { useTreeDirty } from "./treeDirty.js";
 import { useResourcesLoader } from "./resources.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   type AgentStatus,
   type AgentStatusEntry,
-  type GitOpKickoff,
   desktopBridge,
   probeDaemon,
   runCommand,
-  runCommandInBackground,
-  commandOpenAfter,
   type SqlCell,
 } from "./api.js";
 import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
@@ -21,7 +17,6 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Dock } from "./components/Dock/Dock.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
-import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf,    paramOf, parseUri, typeOf } from "./uri/uri.js";
 import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
@@ -45,8 +40,8 @@ import { useWindowStreams } from "./window/useWindowStreams.js";
 import { HOME_TAB, useWindowTabs } from "./window/useWindowTabs.js";
 import { useWindowOpeners } from "./window/useWindowOpeners.js";
 import { useWindowHost } from "./window/useWindowHost.js";
+import { useWindowCommands } from "./window/useWindowCommands.js";
 import type { TabRef } from "./tabs/tabState.js";
-import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation } from "./tabs/PageNavigationContext.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
@@ -57,7 +52,6 @@ import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { MissingPage } from "./pages/MissingPage.js";
 import { PartNotAPage } from "./pages/PartNotAPage.js";
-import { kindForTabId } from "./pageKinds.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
@@ -65,7 +59,6 @@ import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { diskFilePath,  refFromTabId,   fileRef,  pagePayload, recordedPageKind, isPage,  newStreamRef, alertsRef,  streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams,  pageTabRef, terminalRef } from "./tabs/pageRefs.js";
-import { requestNewThread } from "./new-thread-bus.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
@@ -85,17 +78,11 @@ import {
 } from "./tabs/session.js";
 import { installCli, listRecentProjects, shellAvailable } from "./api.js";
 import { triggerRemoteResync } from "./api.js";
-import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type { Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { finishPageVisit, recordPageVisit } from "./api.js";
 import { PageVisitTimer } from "./pageVisitTimer.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
-import { offerForShortcut } from "./keybindings.js";
-import { commandOffers, type OfferDeps } from "./commandOffers.js";
-import { setRefOfferHost } from "./components/refCommands.js";
-import type { WhenContext } from "./when.js";
-import { runLocally } from "./clientHost.js";
-import { usePersonCommands } from "./personCommandsStore.js";
-import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
+import { personCommands } from "./personCommands.js";
 import { logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
 import { openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
@@ -103,7 +90,6 @@ import { setGitMenuHost, type GitStatusEntry } from "./gitMenu.js";
 import { openCompareWith, openRollback } from "./components/Git/gitDialogStore.js";
 import { GitDialogs } from "./components/Git/GitDialogs.js";
 import { startRecordStores } from "./recordStoresLoader.js";
-import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 import { copyText } from "./clipboard.js";
 
 /** The tab a thread falls back to: its first agent session's, else the
@@ -336,236 +322,6 @@ export function App() {
   // input events"), so React doesn't auto-flush effects for them — the
   // useEffect chain can stall for 10+ seconds before committing. Direct
   // ref call inside flushSync sidesteps the scheduler entirely.
-  // The window's context keys: what a command's `when` reads
-  // (`oxplow_domain::when::CONTEXT_KEYS`; `.context/commands.md`).
-  const treeDirty = useTreeDirty(stream?.id);
-  // The agent terminals a pane shows running: Restart Terminal is offered
-  // for these only (an ended pane has Start Again).
-  const liveTerminals = useLiveTerminals();
-  const whenContext = useMemo<WhenContext>(
-    () => ({
-      streamShown: !!stream,
-      streamKind: stream?.kind ?? "",
-      threadShown: !!selectedThread,
-      fileShown: shownFilePath !== null,
-      pageDirty: !!centerActive && !!dirtyTabs[centerActive],
-      pageKind: centerActive ? kindForTabId(centerActive) : "",
-      agentTerminalLive: liveTerminals.has((centerActive && refFromTabId(centerActive)?.id) || ""),
-      vcsEnabled: !!workspaceContext.vcsEnabled,
-      treeDirty,
-      shellAvailable: shellAvailable(),
-      enabledAgents: harnesses
-        .filter((h) => h.enabled)
-        .map((h) => h.id)
-        .join(","),
-    }),
-    [centerActive, dirtyTabs, harnesses, liveTerminals, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
-  );
-  // Run a Git-menu mutation (pull/push) as a background task and surface
-  // any failure the same way the Git Dashboard does: record an op-error
-  // and offer a toast that opens its detail page. There's no page focus
-  // here, so we route through handleOpenPageRef rather than onOpenPage.
-  const runGitMenuOp = useCallback(
-    async (
-      label: string,
-      command: string,
-      action: () => Promise<GitOpKickoff>,
-    ) => {
-      const result = await awaitGitOp(await action());
-      if (result.success) return;
-      // Surfaces globally (toast + status-bar indicator) via recordOpError.
-      recordOpError(opErrorOf(label, command, result));
-    },
-    [],
-  );
-  /** One of the window's own forms — a command's `ui.form` that isn't a
-   *  tab id: what gathers New Thread's and Commit's input. */
-  const openForm = useCallback((name: string) => {
-    switch (name) {
-      case "new-thread":
-        // The Navigator owns thread creation (inline title + agent picker).
-        if (stream) requestNewThread(stream.id);
-        return;
-      default:
-        recordOpError({ label: "Open form", message: `the window has no form \`${name}\`` });
-    }
-  }, [stream, workspaceContext.vcsEnabled]);
-  const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
-  // The native menu and its recent projects are the shell's: a browser
-  // window has neither to ask for.
-  useEffect(() => {
-    if (!shellAvailable()) return;
-    listRecentProjects()
-      .then(setRecentProjects)
-      .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
-  }, []);
-  // Cancel the native WKWebView context menu everywhere except inputs,
-  // contenteditable, Monaco, and the terminal (see context-menu.ts).
-  useEffect(() => installContextMenuSuppressor(), []);
-  // A toast's Open link opens a page the way a command offer does.
-  useEffect(() => {
-    setPersonCommandsOpener((tabId) => {
-      const ref = refFromTabId(tabId);
-      if (ref) handleOpenPageRef.current?.(ref);
-    });
-    return () => setPersonCommandsOpener(null);
-  }, []);
-  // What the command bus offers a person (Pull, New Task, …): search lists
-  // them with the app's own commands, and a shortcut may run one.
-  const personSpecs = usePersonCommands();
-  const offerCtx = useMemo(
-    () => ({ streamId: stream?.id ?? null, threadId: selectedThreadId ?? null, when: whenContext }),
-    [stream?.id, selectedThreadId, whenContext],
-  );
-  const offerDeps = useMemo<OfferDeps>(
-    () => ({
-      openPage: (tabId) => {
-        const ref = refFromTabId(tabId);
-        if (ref) handleOpenPageRef.current?.(ref);
-      },
-      openForm,
-      run: (label, id, input) => {
-        // One the window hosts runs here: nothing goes to the daemon.
-        const spec = personSpecs.find((s) => s.id === id);
-        const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
-        if (local) {
-          return local
-            .then(({ result }): CommandOutcome => ({ result, command_run_id: null, event_id: null, inverse: null }))
-            .catch((e: unknown) => {
-              recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
-              return null;
-            });
-        }
-        return personCommands.run(label, id, input);
-      },
-      runInBackground: (label, id, input) =>
-        void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
-      openAfter: (id, result) =>
-        commandOpenAfter(id, result).catch((e: unknown) => {
-          recordOpError({ label: "Open what it made", message: e instanceof Error ? e.message : String(e) });
-          return null;
-        }),
-      }),
-    [personSpecs, runGitMenuOp, openForm],
-  );
-  const offers = useMemo(() => commandOffers(personSpecs, offerCtx, offerDeps), [personSpecs, offerCtx, offerDeps]);
-  // A ref's menus (its page's, its rows') run offers the same way.
-  useEffect(() => {
-    setRefOfferHost({ ctx: offerCtx, deps: offerDeps });
-    return () => setRefOfferHost(null);
-  }, [offerCtx, offerDeps]);
-  // The menu bar (File, Edit) and what search lists: the bus's offers,
-  // and the shell's project commands.
-  // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
-  // the layout's provider, hands them up as the layout changes).
-  const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
-  const menuGroups = useMemo(
-    () => [...buildMenuBar(offers), viewMenu(railMenu.panels, railMenu.toggle)],
-    [offers, railMenu],
-  );
-  // The stars the thread sees (a page's star says where it is starred).
-  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
-  // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
-  // panels' provider, hands it up as the pane's run changes).
-  const [goRows, setGoRows] = useState<GoRow[]>([]);
-  const nativeMenuSnapshots = useMemo(
-    () => buildNativeMenuSnapshots(menuGroups, recentProjects, goRows),
-    [menuGroups, recentProjects, goRows],
-  );
-
-  // The launcher (QuickOpen) is the single discovery surface — pages,
-  // files, commands, and body search in one box — and has exactly one
-  // shortcut: Cmd/Ctrl+P (`oxplow.window.quick_open`'s). The old
-  // Cmd+K / Cmd+Shift+F aliases were removed: one door is
-  // clearer, and Cmd+P is the established dev quick-open reflex. Monaco
-  // doesn't bind Cmd+P, so no capture-phase interception is needed — the
-  // menu accelerator opens the launcher even when the editor is focused.
-
-  useEffect(() => {
-    // Runs in both Electron and browser modes. In Electron the native
-    // menu's accelerator should also fire for the same command, but the
-    // handler is idempotent (an offer's run → modal setters are no-ops
-    // when the modal is already open) so a double-dispatch is harmless
-    // — and not relying on the native menu means Cmd+Shift+N works even
-    // when the menu snapshot is momentarily stale at startup.
-    function handleKeyDown(event: KeyboardEvent) {
-      // A command's `ui.shortcut`; typing in a field keeps it unless it
-      // runs while typing (Save, Find, Quick Open do — a user mid-way
-      // through a description shouldn't lose it to New Task's form).
-      const offer = offerForShortcut(offers, event, isEditableTarget(event.target));
-      if (offer) {
-        event.preventDefault();
-        offer.run();
-        return;
-      }
-      // Back, Forward, and Up / Down the page's origin, on the active tab.
-      const key = navigationKey(event, event.target);
-      if (!key) return;
-      const keys = navKeysRef.current;
-      event.preventDefault();
-      if (key === "back") keys.back();
-      else if (key === "forward") keys.forward();
-      else if (key === "mode") keys.mode();
-      else keys.step(key === "up" ? -1 : 1);
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [offers]);
-
-  useEffect(() => {
-    if (!shellAvailable()) return;
-    void desktopBridge().setNativeMenu(nativeMenuSnapshots).catch((error) => {
-      logUi("error", "failed to update native menu", { error: String(error) });
-    });
-  }, [nativeMenuSnapshots]);
-
-  useEffect(() => {
-    return desktopBridge().onMenuCommand((commandId: string) => {
-      // Dynamic "Open Recent ▸ <project>" entries aren't menu items:
-      // `oxplow.project.open`'s operation opens the trailing path in a
-      // new window. A recent whose `.oxplow/` has since been deleted
-      // errors rather than re-creating it.
-      if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
-        const path = commandId.slice(OPEN_RECENT_PREFIX.length);
-        void Promise.resolve(
-          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human", call: null }),
-        ).catch((e: unknown) => {
-          recordOpError({
-            label: "Open project",
-            message: e instanceof Error ? e.message : String(e),
-          });
-        });
-        return;
-      }
-      const goUri = goUriFromMenuId(commandId);
-      if (goUri !== null) {
-        const ref = refFromTabId(goUri);
-        if (ref) flushSync(() => handleOpenPageRef.current?.(ref));
-        return;
-      }
-      if (commandId === INSTALL_CLI_ID) {
-        installCli().then(
-          (done) => showToast({ message: `Installed ${done.path}. ${done.hint ?? ""}`.trim() }),
-          (e: unknown) => recordOpError({ label: "Install command line", message: e instanceof Error ? e.message : String(e) }),
-        );
-        return;
-      }
-      const command = menuItemById(menuGroups, commandId);
-      if (!command || !command.run) return;
-      // React 18 only auto-flushes effects synchronously for discrete
-      // user input events (click, keydown on webContents). IPC messages
-      // from the main process don't qualify, so setState calls made in
-      // this callback stay queued until the next real input event wakes
-      // the scheduler — users reported menu dispatches stalling 10+
-      // seconds. flushSync commits inside the callback. The commands
-      // that open modals (plan.newTask, etc.) additionally go
-      // through an imperative ref registered by the target pane so the
-      // modal setState also commits here rather than via useEffect.
-      const run = command.run;
-      flushSync(() => { void run(); });
-    });
-  }, [menuGroups]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
@@ -804,6 +560,103 @@ export function App() {
     },
   });
   useEffect(() => visitTimerRef.current?.setVisible(windowVisible), [windowVisible]);
+  // The window's commands: what their `when` reads, the person's offers,
+  // and the keyboard shortcuts that run them.
+  const { liveTerminals, offerDeps, offers } = useWindowCommands({
+    stream,
+    selectedThread,
+    workspaceContext,
+    harnesses,
+    tabs: { centerActive, dirtyTabs, shownFilePath },
+    handleOpenPageRef,
+    windowHandlersRef,
+    navKeysRef,
+  });
+  const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
+  // The native menu and its recent projects are the shell's: a browser
+  // window has neither to ask for.
+  useEffect(() => {
+    if (!shellAvailable()) return;
+    listRecentProjects()
+      .then(setRecentProjects)
+      .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
+  }, []);
+  // Cancel the native WKWebView context menu everywhere except inputs,
+  // contenteditable, Monaco, and the terminal (see context-menu.ts).
+  useEffect(() => installContextMenuSuppressor(), []);
+  // The menu bar (File, Edit) and what search lists: the bus's offers,
+  // and the shell's project commands.
+  // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
+  // the layout's provider, hands them up as the layout changes).
+  const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
+  const menuGroups = useMemo(
+    () => [...buildMenuBar(offers), viewMenu(railMenu.panels, railMenu.toggle)],
+    [offers, railMenu],
+  );
+  // The stars the thread sees (a page's star says where it is starred).
+  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
+  // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
+  // panels' provider, hands it up as the pane's run changes).
+  const [goRows, setGoRows] = useState<GoRow[]>([]);
+  const nativeMenuSnapshots = useMemo(
+    () => buildNativeMenuSnapshots(menuGroups, recentProjects, goRows),
+    [menuGroups, recentProjects, goRows],
+  );
+
+
+  useEffect(() => {
+    if (!shellAvailable()) return;
+    void desktopBridge().setNativeMenu(nativeMenuSnapshots).catch((error) => {
+      logUi("error", "failed to update native menu", { error: String(error) });
+    });
+  }, [nativeMenuSnapshots]);
+
+  useEffect(() => {
+    return desktopBridge().onMenuCommand((commandId: string) => {
+      // Dynamic "Open Recent ▸ <project>" entries aren't menu items:
+      // `oxplow.project.open`'s operation opens the trailing path in a
+      // new window. A recent whose `.oxplow/` has since been deleted
+      // errors rather than re-creating it.
+      if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
+        const path = commandId.slice(OPEN_RECENT_PREFIX.length);
+        void Promise.resolve(
+          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human", call: null }),
+        ).catch((e: unknown) => {
+          recordOpError({
+            label: "Open project",
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
+        return;
+      }
+      const goUri = goUriFromMenuId(commandId);
+      if (goUri !== null) {
+        const ref = refFromTabId(goUri);
+        if (ref) flushSync(() => handleOpenPageRef.current?.(ref));
+        return;
+      }
+      if (commandId === INSTALL_CLI_ID) {
+        installCli().then(
+          (done) => showToast({ message: `Installed ${done.path}. ${done.hint ?? ""}`.trim() }),
+          (e: unknown) => recordOpError({ label: "Install command line", message: e instanceof Error ? e.message : String(e) }),
+        );
+        return;
+      }
+      const command = menuItemById(menuGroups, commandId);
+      if (!command || !command.run) return;
+      // React 18 only auto-flushes effects synchronously for discrete
+      // user input events (click, keydown on webContents). IPC messages
+      // from the main process don't qualify, so setState calls made in
+      // this callback stay queued until the next real input event wakes
+      // the scheduler — users reported menu dispatches stalling 10+
+      // seconds. flushSync commits inside the callback. The commands
+      // that open modals (plan.newTask, etc.) additionally go
+      // through an imperative ref registered by the target pane so the
+      // modal setState also commits here rather than via useEffect.
+      const run = command.run;
+      flushSync(() => { void run(); });
+    });
+  }, [menuGroups]);
   const foundationErrors = foundationDown(extensions);
   // Which pages can draw each tab of the thread: the daemon's list
   // (`pages/useRenderers.ts`), fetched as tabs appear and remembered.
@@ -1309,25 +1162,6 @@ function AlertToasts({ onReview }: { onReview(open?: string): void }) {
   const { items } = useAlerts();
   useAlertToasts(items, onReview);
   return null;
-}
-
-/**
- * Fill empty diff sides with a readable placeholder so the Monaco diff view
- * doesn't just show blank text with no explanation. State flags from the
- * snapshot store tell us why content is missing.
- */
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  if (tag === "TEXTAREA") return true;
-  if (tag === "INPUT") {
-    const type = (target as HTMLInputElement).type;
-    // Checkbox / button / radio inputs shouldn't block the shortcut — they
-    // don't swallow typed characters the way a text field does.
-    return type === "text" || type === "search" || type === "email" || type === "url" || type === "password" || type === "" || type === "tel";
-  }
-  return false;
 }
 
 /**

@@ -222,7 +222,7 @@ a boolean key; a string or a regular expression for a string key) — so a
 typo is a refusal (`Invalid` at `/ui/when`), never a silently hidden
 command; the window only evaluates. Both read the same cases
 (`crates/oxplow-domain/fixtures/when_cases.json`). A new key goes in
-`CONTEXT_KEYS` and the window's `whenContext` (`App.tsx`) together.
+`CONTEXT_KEYS` and the window's `whenContext` (`window/useWindowCommands.ts`) together.
 
 A page's `open: <column>` action is not a command: it runs nothing on the
 bus (no command run, no `command.executed`), so it appears in no command list and
