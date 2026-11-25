@@ -237,18 +237,21 @@ impl EventClient {
     }
 }
 
-/// What a named socket holds while it is open: its page runs, and its
-/// device's place among the connected ones.
+/// What a named socket holds while it is open: its page runs, its device's
+/// place among the connected ones, and what its window reports showing.
 struct SocketOwner {
     _runs: oxplow_app::pages::open_runs::PageClient,
-    devices: std::sync::Arc<oxplow_app::client_devices::ClientDevices>,
+    services: std::sync::Arc<oxplow_app::Services>,
     device: oxplow_domain::DeviceId,
     connection: oxplow_domain::ConnectionId,
 }
 
 impl Drop for SocketOwner {
     fn drop(&mut self) {
-        self.devices.disconnected(&self.device, &self.connection);
+        self.services
+            .client_devices
+            .disconnected(&self.device, &self.connection);
+        self.services.client_reports.forget(&self.connection);
     }
 }
 
@@ -270,7 +273,7 @@ async fn events_ws(
             .connected(descriptor, connection.clone());
         SocketOwner {
             _runs: services.page_runs.connect_client(connection.as_str()),
-            devices: services.client_devices.clone(),
+            services: services.clone(),
             device,
             connection,
         }
@@ -1085,6 +1088,29 @@ mod tests {
             .expect("the device is connected");
         assert_eq!(seen.name, "Tab S9");
         assert_eq!(seen.kind, oxplow_domain::DeviceKind::Tablet);
+        // What the window reports showing is shown while its socket is open.
+        let caller = oxplow_domain::Caller {
+            device: device.clone(),
+            connection: oxplow_domain::ConnectionId::parse(CONNECTION).unwrap(),
+        };
+        let ctx = oxplow_rpc::RpcContext {
+            services: svc.clone(),
+            plugin_runtime: None,
+        };
+        oxplow_rpc::dispatch_as(
+            "report_tabs",
+            serde_json::json!({ "report": { "focused": true, "visible": true, "shown_thread": null,
+                                            "threads": [], "detail_json": null } }),
+            &ctx,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        let now = oxplow_domain::Timestamp::now();
+        assert_eq!(
+            svc.client_reports.live_ids(now),
+            vec![CONNECTION.to_string()]
+        );
         socket.close(None).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while svc.client_devices.get(&device).is_some() {
@@ -1093,6 +1119,12 @@ mod tests {
         })
         .await
         .expect("a closed socket's device is no longer connected");
+        assert!(
+            svc.client_reports
+                .live_ids(oxplow_domain::Timestamp::now())
+                .is_empty(),
+            "a closed window's report is gone with it"
+        );
 
         for bad in [
             format!("{base}&device={DEVICE}"),
@@ -1122,27 +1154,41 @@ mod tests {
         };
         let (mut one, _) = tokio_tungstenite::connect_async(url(ONE)).await.unwrap();
         let (mut two, _) = tokio_tungstenite::connect_async(url(TWO)).await.unwrap();
+        let ctx = oxplow_rpc::RpcContext {
+            services: svc.clone(),
+            plugin_runtime: None,
+        };
         let yaml =
             "title: Open\nloaders: { a: { sql: SELECT 1 AS n } }\nview: { viz: number, from: a }\n";
         let first = oxplow_rpc::commands::pages::open_page(
-            &svc,
+            &oxplow_rpc::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&oxplow_domain::Caller {
+                    device: oxplow_domain::DeviceId::parse(DEVICE).unwrap(),
+                    connection: oxplow_domain::ConnectionId::parse(ONE).unwrap(),
+                }),
+            },
             None,
             Some(yaml.into()),
             None,
             None,
             None,
-            ONE.into(),
         )
         .await
         .unwrap();
         let second = oxplow_rpc::commands::pages::open_page(
-            &svc,
+            &oxplow_rpc::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&oxplow_domain::Caller {
+                    device: oxplow_domain::DeviceId::parse(DEVICE).unwrap(),
+                    connection: oxplow_domain::ConnectionId::parse(TWO).unwrap(),
+                }),
+            },
             None,
             Some(yaml.into()),
             None,
             None,
             None,
-            TWO.into(),
         )
         .await
         .unwrap();

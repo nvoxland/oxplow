@@ -735,6 +735,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_open_page_reports_what_the_human_sees() {
+        const WINDOW: &str = "con-00000000-0000-4000-8000-000000000001";
         use oxplow_domain::stores::ThreadStore;
         let (proj, services, server) = boot().await;
         let stream = services.streams.list_streams().await.unwrap()[0].clone();
@@ -795,15 +796,18 @@ mod tests {
                     ctx: oxplow_app::pages::spec::ViewContext::default(),
                     viewer: oxplow_domain::Actor::Human,
                 },
-                "window",
+                WINDOW,
             )
             .await
             .unwrap();
         let id = "oxplow:oxplow/page?page=demo/kinds#kind=primary";
         services.client_reports.report(
+            &oxplow_domain::Caller {
+                device: oxplow_domain::DeviceId::generate(),
+                connection: oxplow_domain::ConnectionId::parse(WINDOW).unwrap(),
+            },
             oxplow_app::client_reports::TabReport {
                 runs: Vec::new(),
-                client: "window".into(),
                 focused: true,
                 visible: true,
                 shown_thread: Some(thread),

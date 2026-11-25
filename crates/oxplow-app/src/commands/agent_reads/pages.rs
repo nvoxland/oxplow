@@ -378,6 +378,21 @@ mod tests {
         assert_eq!(open["open"]["origin"], "Recent commits");
     }
 
+    /// The page load a test names `a`, `b`, `w1`…: a fixed `con-<uuid>` per
+    /// name, on one device.
+    pub(super) fn con(name: &str) -> String {
+        let n: u32 = name.bytes().map(u32::from).sum();
+        format!("con-00000000-0000-4000-8000-{n:012x}")
+    }
+
+    pub(super) fn caller(name: &str) -> oxplow_domain::Caller {
+        oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427")
+                .unwrap(),
+            connection: oxplow_domain::ConnectionId::parse(&con(name)).unwrap(),
+        }
+    }
+
     fn report(
         svc: &Services,
         client: &str,
@@ -387,9 +402,9 @@ mod tests {
         active: &str,
     ) {
         svc.client_reports.report(
+            &caller(client),
             TabReport {
                 runs: Vec::new(),
-                client: client.into(),
                 focused,
                 visible: true,
                 shown_thread: Some(thread),
@@ -447,7 +462,7 @@ mod tests {
         );
         let open = run(json!({ "thread_id": tid })).await.unwrap().result;
         assert_eq!(open["open"]["pageId"], "oxplow:oxplow/file?path=src/a.rs");
-        assert_eq!(open["open"]["client"], "a");
+        assert_eq!(open["open"]["client"], con("a"));
         assert_eq!(open["open"]["detail"]["line"], 3);
         assert_eq!(
             open["others"][0]["pageId"],
@@ -576,15 +591,15 @@ mod page_run_tests {
                     ctx: crate::pages::spec::ViewContext::default(),
                     viewer: Actor::Human,
                 },
-                "w1",
+                &super::tests::con("w1"),
             )
             .await
             .unwrap();
         let id = "oxplow:oxplow/page?page=acme/numbers#n=3&node=big";
         svc.client_reports.report(
+            &super::tests::caller("w1"),
             TabReport {
                 runs: Vec::new(),
-                client: "w1".into(),
                 focused: true,
                 visible: true,
                 shown_thread: Some(thread),

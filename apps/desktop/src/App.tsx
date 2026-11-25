@@ -143,7 +143,7 @@ import { planNavigation } from "./tabs/navigation.js";
 import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
-import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
+import { logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
 import { openInBrowser, openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
 import { setGitMenuHost, type GitStatusEntry } from "./gitMenu.js";
@@ -1123,7 +1123,6 @@ export function App() {
       const ctx = visitContextRef.current;
       const shown = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
       const report = buildTabReport({
-        client: getUiClientId(),
         runs: windowPageRuns().runIds(),
         focused: windowFocused,
         visible: windowVisible,

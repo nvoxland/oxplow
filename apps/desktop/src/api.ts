@@ -613,25 +613,24 @@ async function runAsBackgroundTask(
 
 /** The commands a person is offered — those with a `ui` they may run now
  *  (`list_person_commands`); search lists the ref-less ones. */
-/** Window `client` says it's open and hosts `scopes` (`clientHost.ts`). */
-export async function registerClientHost(client: string, scopes: string[]): Promise<void> {
-  unwrap(await commands.registerClientHost(client, scopes));
+/** This window says it's open and hosts `scopes` (`clientHost.ts`). Which
+ *  window is the request's own page load (its `Oxplow-Connection`). */
+export async function registerClientHost(scopes: string[]): Promise<void> {
+  unwrap(await commands.registerClientHost(scopes));
 }
 
-/** Window `client` is closing: calls stop coming to it. */
-export async function unregisterClientHost(client: string): Promise<void> {
-  unwrap(await commands.unregisterClientHost(client));
+/** This window is closing: calls stop coming to it. */
+export async function unregisterClientHost(): Promise<void> {
+  unwrap(await commands.unregisterClientHost());
 }
 
-/** Window `client`'s answer to a `clientCall`: its result, or why not. */
+/** This window's answer to a `clientCall`: its result, or why not. */
 export async function answerClientCall(
-  client: string,
   id: string,
   answer: { result: unknown } | { error: string },
 ): Promise<void> {
   unwrap(
     await commands.answerClientCall(
-      client,
       id,
       "result" in answer ? (answer.result ?? null) : null,
       "error" in answer ? answer.error : null,
@@ -646,7 +645,7 @@ export async function runCommandForCall(
   name: string,
   input: unknown,
 ): Promise<CommandOutcome> {
-  return unwrap(await commands.runCommandForCall(call.client, call.id, name, input));
+  return unwrap(await commands.runCommandForCall(call.id, name, input));
 }
 
 export async function listPersonCommands(): Promise<CommandSpec[]> {

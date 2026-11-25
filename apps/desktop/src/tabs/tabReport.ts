@@ -15,8 +15,6 @@ import type { TabRef } from "./tabState.js";
 export interface TabReportInput {
   /** All runs held anywhere in the window, not just its current tab. */
   runs?: readonly string[];
-  /** The window's renderer (`getUiClientId`). */
-  client: string;
   focused: boolean;
   visible: boolean;
   shownThread: string | null;
@@ -30,7 +28,6 @@ export interface TabReportInput {
 
 export function buildTabReport(input: TabReportInput): TabReport {
   return {
-    client: input.client,
     runs: [...new Set(input.runs ?? [])].sort(),
     focused: input.focused,
     visible: input.visible,

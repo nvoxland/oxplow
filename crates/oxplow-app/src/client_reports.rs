@@ -60,11 +60,11 @@ pub struct ThreadTabs {
     pub active: Option<String>,
 }
 
-/// What one window shows, as its renderer reports it.
+/// What one window shows, as its renderer reports it. Which window it is
+/// comes from the request's caller (its page load and device), not from
+/// the report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct TabReport {
-    /// The window's renderer, for as long as it lives.
-    pub client: String,
     pub focused: bool,
     pub visible: bool,
     /// The thread the window shows.
@@ -81,6 +81,10 @@ pub struct TabReport {
 
 #[derive(Debug, Clone)]
 struct Client {
+    /// The page load reporting (`con-…`): what `client` says to agents.
+    connection: String,
+    /// Its device (`dev-…`).
+    device: String,
     report: TabReport,
     reported_at: Timestamp,
     /// When it last reported being focused: which window the person is in.
@@ -99,7 +103,10 @@ pub struct ListedTab {
     /// On screen: selected, in the thread its window shows, in a visible
     /// window.
     pub visible: bool,
+    /// The window: its page load.
     pub client: String,
+    /// The device the window is on.
+    pub device: String,
     #[serde(rename = "reportedAt")]
     pub reported_at: Timestamp,
     pub stale: bool,
@@ -114,7 +121,10 @@ pub struct OpenPage {
     /// The window's published detail, when this is the page it shows.
     #[serde(skip)]
     pub detail_json: Option<String>,
+    /// The window: its page load.
     pub client: String,
+    /// The device the window is on.
+    pub device: String,
     /// It is on screen (the window shows its thread and is visible).
     pub visible: bool,
     #[serde(rename = "reportedAt")]
@@ -138,28 +148,35 @@ impl ClientReports {
 
     /// Windows still reporting at `now`; expired reports are forgotten.
     pub fn live_ids(&self, now: Timestamp) -> Vec<String> {
-        self.live(now)
-            .into_iter()
-            .map(|c| c.report.client)
-            .collect()
+        self.live(now).into_iter().map(|c| c.connection).collect()
     }
 
-    /// Take `report` as what its window shows at `now`.
-    pub fn report(&self, report: TabReport, now: Timestamp) {
+    /// Take `report` as what `caller`'s window shows at `now`.
+    pub fn report(&self, caller: &oxplow_domain::Caller, report: TabReport, now: Timestamp) {
         let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
+        let connection = caller.connection.as_str().to_string();
         let focused_at = if report.focused {
             Some(now)
         } else {
-            clients.get(&report.client).and_then(|c| c.focused_at)
+            clients.get(&connection).and_then(|c| c.focused_at)
         };
         clients.insert(
-            report.client.clone(),
+            connection.clone(),
             Client {
+                connection,
+                device: caller.device.as_str().to_string(),
                 report,
                 reported_at: now,
                 focused_at,
             },
         );
+    }
+
+    /// `connection`'s window is gone (its socket closed): what it showed
+    /// is no longer shown.
+    pub fn forget(&self, connection: &oxplow_domain::ConnectionId) {
+        let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
+        clients.remove(connection.as_str());
     }
 
     /// The live clients at `now`, the one the person was in most recently
@@ -172,7 +189,7 @@ impl ClientReports {
             b.focused_at
                 .cmp(&a.focused_at)
                 .then(b.reported_at.cmp(&a.reported_at))
-                .then(a.report.client.cmp(&b.report.client))
+                .then(a.connection.cmp(&b.connection))
         });
         out
     }
@@ -200,7 +217,8 @@ impl ClientReports {
                         visible: selected
                             && c.report.visible
                             && c.report.shown_thread == Some(t.thread),
-                        client: c.report.client.clone(),
+                        client: c.connection.clone(),
+                        device: c.device.clone(),
                         reported_at: c.reported_at,
                         stale,
                     });
@@ -227,7 +245,8 @@ impl ClientReports {
                 page_id: tab.id.clone(),
                 kind: tab.kind.clone(),
                 detail_json: shown.then(|| c.report.detail_json.clone()).flatten(),
-                client: c.report.client.clone(),
+                client: c.connection.clone(),
+                device: c.device.clone(),
                 visible: shown && c.report.visible,
                 reported_at: c.reported_at,
                 stale: now.unix_ms() - c.reported_at.unix_ms() > STALE_AFTER_MS,
@@ -292,10 +311,34 @@ mod tests {
         }
     }
 
+    /// The page load a test names `a`, `b`, …, on one device.
+    fn con(name: &str) -> oxplow_domain::ConnectionId {
+        let n = name.bytes().next().unwrap();
+        oxplow_domain::ConnectionId::parse(&format!(
+            "con-00000000-0000-4000-8000-0000000000{n:02x}"
+        ))
+        .unwrap()
+    }
+
+    fn caller(name: &str) -> oxplow_domain::Caller {
+        oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427")
+                .unwrap(),
+            connection: con(name),
+        }
+    }
+
+    /// The test name of a listed window.
+    fn named(client: &str) -> &'static str {
+        ["a", "b", "c"]
+            .into_iter()
+            .find(|n| con(n).as_str() == client)
+            .unwrap()
+    }
+
     fn report(client: &str, focused: bool, shown: i64, threads: Vec<ThreadTabs>) -> TabReport {
         TabReport {
             runs: Vec::new(),
-            client: client.into(),
             focused,
             visible: true,
             shown_thread: Some(ThreadId::new(shown)),
@@ -319,6 +362,7 @@ mod tests {
     fn two_windows_each_report_their_own_page() {
         let r = ClientReports::new();
         r.report(
+            &caller("a"),
             report(
                 "a",
                 true,
@@ -332,6 +376,7 @@ mod tests {
             at(1_000),
         );
         r.report(
+            &caller("b"),
             report(
                 "b",
                 false,
@@ -355,7 +400,7 @@ mod tests {
         assert_eq!(
             pages
                 .iter()
-                .map(|p| (p.client.as_str(), p.page_id.as_str(), p.visible))
+                .map(|p| (named(&p.client), p.page_id.as_str(), p.visible))
                 .collect::<Vec<_>>(),
             [
                 ("a", "oxplow:oxplow/knowledge?id=home&store=oxwiki", true),
@@ -366,6 +411,7 @@ mod tests {
         assert_eq!(pages[1].detail_json, None, "b shows another thread");
         // The person moves to b: it leads.
         r.report(
+            &caller("b"),
             report(
                 "b",
                 true,
@@ -378,7 +424,10 @@ mod tests {
             ),
             at(4_000),
         );
-        assert_eq!(r.open_pages(ThreadId::new(1), at(4_500))[0].client, "b");
+        assert_eq!(
+            named(&r.open_pages(ThreadId::new(1), at(4_500))[0].client),
+            "b"
+        );
     }
 
     /// What the windows are looking at, for the answer to "what is open?"
@@ -388,6 +437,7 @@ mod tests {
     fn the_shown_threads_are_what_the_windows_look_at() {
         let r = ClientReports::new();
         r.report(
+            &caller("a"),
             report(
                 "a",
                 true,
@@ -409,6 +459,7 @@ mod tests {
         );
         // A window showing a thread with nothing selected shows none.
         r.report(
+            &caller("a"),
             report("a", true, 1, vec![thread(1, vec![], None)]),
             at(3_000),
         );
@@ -419,6 +470,7 @@ mod tests {
     fn tabs_are_listed_per_thread_with_selection_visibility_and_staleness() {
         let r = ClientReports::new();
         r.report(
+            &caller("a"),
             report(
                 "a",
                 true,
@@ -471,6 +523,7 @@ mod tests {
     fn a_window_that_stops_reporting_is_forgotten() {
         let r = ClientReports::new();
         r.report(
+            &caller("a"),
             report(
                 "a",
                 true,

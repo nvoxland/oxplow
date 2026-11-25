@@ -50,9 +50,11 @@ export interface ClientHostDeps {
 }
 
 const DEPS: ClientHostDeps = {
-  register: registerClientHost,
-  unregister: unregisterClientHost,
-  answer: answerClientCall,
+  // The daemon knows the window from the request itself (its page load), so
+  // the id these take is the one the transport already sends.
+  register: (_client, scopes) => registerClientHost(scopes),
+  unregister: () => unregisterClientHost(),
+  answer: (_client, id, answer) => answerClientCall(id, answer),
   subscribe: subscribeOxplowEvents,
   onReconnect: onRemoteReconnect,
   onClose: (fn) => {

@@ -184,14 +184,16 @@ export const commands = {
 	listServices: () => typedError<ServiceListing[], IpcError_Serialize>(__TAURI_INVOKE("list_services")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	openPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, params, streamId, threadId, client })),
+	openPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, params, streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	openPanelPart: (panel: string, part: PanelPart, choices: { [key in string]: string } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_panel_part", { panel, part, choices, streamId, threadId, client })),
+	openPanelPart: (panel: string, part: PanelPart, choices: { [key in string]: string } | null, streamId: string | null, threadId: string | null) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_panel_part", { panel, part, choices, streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -275,7 +277,8 @@ export const commands = {
 	pageActionForm: (runId: string, node: string | null, action: string, row: { [key in string]: SqlCell } | null) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("page_action_form", { runId, node, action, row })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	reportTabs: (report: TabReport) => typedError<TabReportAnswer, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
@@ -530,24 +533,28 @@ export const commands = {
 	actionPointCommands: (point: string, context: unknown) => typedError<PointOffer, IpcError_Serialize>(__TAURI_INVOKE("action_point_commands", { point, context })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { client, scopes })),
+	registerClientHost: (scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { scopes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	unregisterClientHost: (client: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("unregister_client_host", { client })),
+	unregisterClientHost: () => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("unregister_client_host")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	answerClientCall: (client: string, id: string, result: unknown | null, error: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("answer_client_call", { client, id, result, error })),
+	answerClientCall: (id: string, result: unknown | null, error: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("answer_client_call", { id, result, error })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	runCommandForCall: (client: string, call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command_for_call", { client, call, id, input })),
+	runCommandForCall: (call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command_for_call", { call, id, input })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -6296,10 +6303,12 @@ export type SymbolLocation = {
 	versionGone: boolean,
 };
 
-/**  What one window shows, as its renderer reports it. */
+/**
+ *  What one window shows, as its renderer reports it. Which window it is
+ *  comes from the request's caller (its page load and device), not from
+ *  the report.
+ */
 export type TabReport = {
-	/**  The window's renderer, for as long as it lives. */
-	client: string,
 	focused: boolean,
 	visible: boolean,
 	/**  The thread the window shows. */

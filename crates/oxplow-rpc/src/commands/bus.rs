@@ -9,6 +9,7 @@ use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
 use oxplow_domain::{CommandRunId, ProposalId};
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 /// Run command `id` with `input` as the person. `confirmed` says the person
 /// confirmed this exact call (a destructive command, a human-only config
@@ -113,26 +114,24 @@ pub async fn action_point_commands(
 /// (`oxplow_app::client_host`). Said when the window starts and again
 /// when it reconnects.
 pub async fn register_client_host(
-    svc: &Services,
-    client: String,
+    req: &RpcRequest<'_>,
     scopes: Vec<String>,
 ) -> Result<(), IpcError> {
-    svc.client_host.register(&client, scopes);
+    req.client_host.register(req.connection()?.as_str(), scopes);
     Ok(())
 }
 
 /// Window `client` is closing: no more calls go to it, and those it
 /// hadn't answered are refused now.
-pub async fn unregister_client_host(svc: &Services, client: String) -> Result<(), IpcError> {
-    svc.client_host.unregister(&client);
+pub async fn unregister_client_host(req: &RpcRequest<'_>) -> Result<(), IpcError> {
+    req.client_host.unregister(req.connection()?.as_str());
     Ok(())
 }
 
 /// Window `client`'s answer to client call `id`: its `result`, or the
 /// `error` it couldn't do it for.
 pub async fn answer_client_call(
-    svc: &Services,
-    client: String,
+    req: &RpcRequest<'_>,
     id: String,
     result: Option<Json>,
     error: Option<String>,
@@ -141,7 +140,8 @@ pub async fn answer_client_call(
         Some(message) => Err(message),
         None => Ok(result.map(|r| r.0).unwrap_or(serde_json::Value::Null)),
     };
-    svc.client_host.answer(&client, &id, answer);
+    req.client_host
+        .answer(req.connection()?.as_str(), &id, answer);
     Ok(())
 }
 
@@ -150,14 +150,13 @@ pub async fn answer_client_call(
 /// (its write gate and its stream), never as the person at the window.
 /// Not confirmed: a run that asks is the caller's to settle.
 pub async fn run_command_for_call(
-    svc: &Services,
-    client: String,
+    req: &RpcRequest<'_>,
     call: String,
     id: String,
     input: Json,
 ) -> Result<CommandOutcome, IpcError> {
-    let actor = svc.client_host.caller(&client, &call)?;
-    let outcome = svc.commands.run(&actor, &id, input.0, false).await?;
+    let actor = req.client_host.caller(req.connection()?.as_str(), &call)?;
+    let outcome = req.commands.run(&actor, &id, input.0, false).await?;
     Ok(outcome)
 }
 

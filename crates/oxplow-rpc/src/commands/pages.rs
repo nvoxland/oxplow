@@ -17,6 +17,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, DomainError};
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 /// A run a window opened: its id (what it closes, fetches and acts by)
 /// and its first result.
@@ -51,24 +52,24 @@ async fn context(svc: &Services, stream_id: Option<&str>, thread_id: Option<&str
     .await
 }
 
-/// Run a page and keep it open for `client` (the window's id).
-#[allow(clippy::too_many_arguments)]
+/// Run a page and keep it open for the page load asking (its connection).
 pub async fn open_page(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     page: Option<String>,
     spec_yaml: Option<String>,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
     thread_id: Option<String>,
-    client: String,
 ) -> Result<OpenedRun, IpcError> {
+    let client = request.connection()?.as_str();
+    let svc: &Services = request;
     let req = RunRequest {
         target: target(page, spec_yaml)?,
         params: params.unwrap_or_default(),
         ctx: context(svc, stream_id.as_deref(), thread_id.as_deref()).await,
         viewer: Actor::Human,
     };
-    let (run_id, run) = svc.page_runs.open(svc, req, &client).await?;
+    let (run_id, run) = svc.page_runs.open(svc, req, client).await?;
     Ok(OpenedRun {
         run_id,
         run,
@@ -76,23 +77,23 @@ pub async fn open_page(
     })
 }
 
-/// Open `part` of left-nav panel `panel` (`<extension>/<panel>`) for
-/// `client`, as `open_page` does: the daemon says which page the part runs
+/// Open `part` of left-nav panel `panel` (`<extension>/<panel>`) for the
+/// page load asking, as `open_page` does: the daemon says which page the part runs
 /// and with what (`oxplow_app::pages::panels::part_request` — the scope's
 /// id from the view, the body's toggles from the viewer's `choices`), and
 /// what the run gives the panel (`part_view`: the header's count, the
 /// toggles), so the window decides neither.
-#[allow(clippy::too_many_arguments)]
 pub async fn open_panel_part(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     panel: String,
     part: oxplow_app::pages::panels::PanelPart,
     choices: Option<BTreeMap<String, String>>,
     stream_id: Option<String>,
     thread_id: Option<String>,
-    client: String,
 ) -> Result<OpenedRun, IpcError> {
     use oxplow_app::pages::panels;
+    let client = request.connection()?.as_str();
+    let svc: &Services = request;
     let found = panels::find_panel(svc, &panel).await?;
     let ctx = context(svc, stream_id.as_deref(), thread_id.as_deref()).await;
     let req = panels::part_request(svc, &found, part, ctx, &choices.unwrap_or_default())
@@ -100,7 +101,7 @@ pub async fn open_panel_part(
         .ok_or_else(|| DomainError::Invalid(format!("panel `{panel}` has no {part:?} part")))?;
     let (run_id, run) = svc
         .page_runs
-        .open_part(svc, req, &client, &found, part)
+        .open_part(svc, req, client, &found, part)
         .await?;
     Ok(OpenedRun {
         panel: Some(panels::part_view(&found, part, &run)),
@@ -351,13 +352,15 @@ mod tests {
         let (ctx, _dir) = crate::test_support::services().await;
         let yaml = "title: Param\nparams: [{ name: n, default: 7 }]\nloaders:\n  value: { sql: 'SELECT :n AS n' }\nview: { viz: number, from: value }\n";
         let opened = open_page(
-            &ctx,
+            &crate::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&crate::test_support::caller()),
+            },
             None,
             Some(yaml.into()),
             None,
             None,
             None,
-            "snapshot-window".into(),
         )
         .await
         .unwrap();
@@ -401,13 +404,15 @@ mod tests {
         let (ctx, _dir) = crate::test_support::services().await;
         ctx.temp.put("v1.yaml", INLINE.as_bytes()).await.unwrap();
         let opened = open_page(
-            &ctx,
+            &crate::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&crate::test_support::caller()),
+            },
             Some("temp/v1".into()),
             None,
             None,
             None,
             None,
-            "window".into(),
         )
         .await
         .unwrap();
@@ -419,13 +424,15 @@ mod tests {
         close_page(&ctx, opened.run_id).await.unwrap();
         ctx.temp.remove("v1.yaml").await.unwrap();
         let missing = open_page(
-            &ctx,
+            &crate::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&crate::test_support::caller()),
+            },
             Some("temp/v1".into()),
             None,
             None,
             None,
             None,
-            "window".into(),
         )
         .await
         .unwrap_err();

@@ -1608,7 +1608,10 @@ forgotten, a report older than a minute is listed as stale.
   window: id (a ref), kind, title, thread, stream, agent session for a
   session tab, `selected` (in its thread, in that window), `visible`
   (selected, in the thread its window shows, in a visible window),
-  window and staleness; `unreported` names the threads no window reported.
+  window (`client`, its page load) and its `device`, and staleness;
+  `unreported` names the threads no window reported. A window's report is
+  keyed by its page load, comes from the request's caller (the report itself
+  names no window), and is dropped when the window's event socket closes.
 - `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
   thread in the window the person was in last (most recently focused),
   with `others` (each other window's), or the listed `tab`: its
