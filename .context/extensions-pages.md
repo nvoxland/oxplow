@@ -239,8 +239,11 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   `view_context(svc, stream?, thread?)` resolves it: the given stream
   (else the thread's, else the primary) and the given thread (else the
   stream's selected-or-first one). IPC `open_page` and `run_page_action`
-  resolve it from their `stream_id`; MCP `oxplow_run_page` also takes the
-  agent's `thread_id`; `oxplow_get_open_page` uses the viewer's thread.
+  resolve it from their `stream_id`; MCP `oxplow_run_page` and
+  `oxplow_show_page` take an optional `thread_id`, else the calling
+  agent's own thread (never the person's selected one); a person's run
+  keeps the selected-or-first thread. `oxplow_get_open_page` uses the
+  viewer's thread.
   A dry run (a check, `validate`) uses no context.
 - **`head_sha`.** A param so named is, unless supplied, the viewed
   stream's HEAD commit (`v_stream.head_sha`, `PageRunner::params_of`).

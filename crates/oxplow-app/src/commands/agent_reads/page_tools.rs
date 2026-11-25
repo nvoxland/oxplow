@@ -389,7 +389,10 @@ async fn context(
                 )
             })
         })
-        .transpose()?;
+        .transpose()?
+        // No thread given: an agent's page is about its own thread, not the
+        // one the person has selected. A person keeps the selected one.
+        .or(invocation.actor().agent_thread().flatten());
     Ok(crate::pages::spec::view_context(
         svc,
         stream.as_deref().and_then(StreamId::try_from_str),
@@ -1795,6 +1798,64 @@ mod tests {
         assert_eq!(
             titles.rows,
             vec![vec![oxplow_db::SqlCell::Text("alpha".into())]]
+        );
+    }
+}
+
+#[cfg(test)]
+mod agent_thread_tests {
+    use oxplow_domain::stores::StreamStore as _;
+    use oxplow_domain::{Actor, StreamKind};
+    use serde_json::json;
+
+    use crate::pages::test_support::fixture;
+
+    const PAGE: &str = "title: T\nparams: [{ name: thread_id }]\nloaders:\n  a: { sql: \"SELECT :thread_id AS t\" }\nview: { viz: table, from: a }\n";
+
+    async fn thread_seen_by(
+        actor: &Actor,
+        svc: &crate::Services,
+        input: serde_json::Value,
+    ) -> serde_json::Value {
+        let out = svc
+            .commands
+            .run(actor, "oxplow.page.run", input, false)
+            .await
+            .unwrap()
+            .result;
+        out["loaders"]["a"]["rows"].clone()
+    }
+
+    #[tokio::test]
+    async fn an_agent_run_page_without_thread_id_uses_the_agents_own_thread() {
+        let (_dir, svc) = fixture().await;
+        let stream = svc
+            .stream_store
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| matches!(s.kind, StreamKind::Primary))
+            .unwrap()
+            .id;
+        // The person's selection is the first thread; the agent works on another.
+        let first = crate::test_fixtures::new_thread(&svc, stream, "persons").await;
+        let mine = crate::test_fixtures::new_thread(&svc, stream, "agents own").await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(mine.id),
+            stream_id: Some(stream),
+        };
+        let input = json!({ "spec": PAGE, "format": "json" });
+        assert_eq!(
+            thread_seen_by(&agent, &svc, input).await,
+            json!([[mine.id.value()]])
+        );
+        // An explicit thread_id still wins.
+        let input = json!({ "spec": PAGE, "format": "json", "thread_id": first.id.to_string() });
+        assert_eq!(
+            thread_seen_by(&agent, &svc, input).await,
+            json!([[first.id.value()]])
         );
     }
 }
