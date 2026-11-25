@@ -379,8 +379,11 @@ async fn context(
     if let Some(stream) = &stream_id {
         check_stream_id("/stream_id", stream)?;
     }
-    let stream = stream_or_actors(svc, invocation.actor(), stream_id).await?;
-    let thread = thread_id
+    let stream = stream_or_actors(svc, invocation.actor(), stream_id)
+        .await?
+        .as_deref()
+        .and_then(StreamId::try_from_str);
+    let given = thread_id
         .map(|t| {
             ThreadId::try_from_str(&t).ok_or_else(|| {
                 invalid(
@@ -389,16 +392,33 @@ async fn context(
                 )
             })
         })
-        .transpose()?
+        .transpose()?;
+    let thread = match given {
+        Some(thread) => Some(thread),
         // No thread given: an agent's page is about its own thread, not the
-        // one the person has selected. A person keeps the selected one.
-        .or(invocation.actor().agent_thread().flatten());
-    Ok(crate::pages::spec::view_context(
-        svc,
-        stream.as_deref().and_then(StreamId::try_from_str),
-        thread,
-    )
-    .await)
+        // one the person has selected; a person keeps the selected one.
+        None => own_thread_in(svc, invocation.actor(), stream).await?,
+    };
+    Ok(crate::pages::spec::view_context(svc, stream, thread).await)
+}
+
+/// The acting agent's own thread, when it is in `stream` (or no stream is
+/// named): an agent reading another stream's page reads it on that stream's
+/// thread, never with its own thread from elsewhere.
+async fn own_thread_in(
+    svc: &Services,
+    actor: &oxplow_domain::Actor,
+    stream: Option<StreamId>,
+) -> Result<Option<ThreadId>, CommandError> {
+    use oxplow_domain::stores::ThreadStore as _;
+    let Some(own) = actor.agent_thread().flatten() else {
+        return Ok(None);
+    };
+    let Some(stream) = stream else {
+        return Ok(Some(own));
+    };
+    let found = svc.thread_store.get(&own).await.map_err(super::failed)?;
+    Ok(found.filter(|t| t.stream_id == stream).map(|t| t.id))
 }
 
 fn page_error(page: &str, e: DomainError) -> CommandError {
@@ -1838,7 +1858,7 @@ mod agent_thread_tests {
             .find(|s| matches!(s.kind, StreamKind::Primary))
             .unwrap()
             .id;
-        // The person's selection is the first thread; the agent works on another.
+        // Two threads besides the fixture's own; the agent works on the second.
         let first = crate::test_fixtures::new_thread(&svc, stream, "persons").await;
         let mine = crate::test_fixtures::new_thread(&svc, stream, "agents own").await;
         let agent = Actor::Agent {
@@ -1856,6 +1876,38 @@ mod agent_thread_tests {
         assert_eq!(
             thread_seen_by(&agent, &svc, input).await,
             json!([[first.id.value()]])
+        );
+    }
+
+    /// An agent that reads another stream's page, naming no thread, reads it
+    /// on that stream's own thread: its own thread is in another stream.
+    #[tokio::test]
+    async fn an_agent_run_page_on_another_stream_does_not_use_its_own_thread() {
+        let (_dir, svc) = fixture().await;
+        let primary = svc.streams.ensure_primary().await.unwrap();
+        let other = svc
+            .stream_store
+            .upsert(&oxplow_domain::Stream {
+                id: oxplow_domain::StreamId::placeholder(),
+                kind: StreamKind::Worktree,
+                title: "other".into(),
+                branch: "other".into(),
+                worktree_path: _dir.path().join("other").to_string_lossy().into_owned(),
+                ..primary.clone()
+            })
+            .await
+            .unwrap();
+        let theirs = crate::test_fixtures::new_thread(&svc, other, "theirs").await;
+        let mine = crate::test_fixtures::new_thread(&svc, primary.id, "agents own").await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(mine.id),
+            stream_id: Some(primary.id),
+        };
+        let input = json!({ "spec": PAGE, "format": "json", "stream_id": other.to_string() });
+        assert_eq!(
+            thread_seen_by(&agent, &svc, input).await,
+            json!([[theirs.id.value()]])
         );
     }
 }
