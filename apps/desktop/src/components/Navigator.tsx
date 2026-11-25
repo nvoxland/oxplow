@@ -174,7 +174,7 @@ export function Navigator({
   }, [streams]);
 
   const handleSelectThread = (streamId: string, threadId: string) => {
-    // App.handleSelectThread switches the stream first when streamId
+    // useWindowStreams.selectThread switches the stream first when streamId
     // differs from the current one, so we don't dispatch onSwitchStream
     // separately here — doing both in parallel races their thread-state
     // writes and can leave the old thread selected.

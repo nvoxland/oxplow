@@ -4,32 +4,20 @@ import { isWorkspaceDir } from "./workspaceFiles.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
-  closeThread,
-  markThread,
-  createThread,
   getThreadState,
   type AgentStatus,
   type AgentStatusEntry,
   getCurrentStream,
-  getWorkspaceContext,
   type GitOpKickoff,
   desktopBridge,
   listStreams,
   probeDaemon,
-  renameThread,
-  renameStream,
-  selectThread,
   recordUsage,
-  switchStream,
   runCommand,
   runCommandInBackground,
   openInSystemBrowser,
   commandOpenAfter,
-  type ThreadMark,
-  type ThreadState,
   type SqlCell,
-  type Stream,
-  type WorkspaceContext,
 } from "./api.js";
 import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
 import { GoMenuFeed } from "./components/Panels/GoMenuFeed.js";
@@ -52,7 +40,6 @@ import { TempPage } from "./pages/TempPage.js";
 import { TEMP_EXTENSION } from "./pages/viewActions.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
-import { runForPerson } from "./commands/runForPerson.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
@@ -62,6 +49,7 @@ import type { SlotNav } from "./pages/slotNav.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import { NarrowRail } from "./components/RailHud/NarrowRail.js";
 import { useNarrowWindow } from "./windowWidth.js";
+import { useWindowStreams } from "./window/useWindowStreams.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
@@ -125,7 +113,7 @@ import {
   type Tab,
 } from "./tabs/session.js";
 import { installCli, openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
-import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
+import { triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { isDirty } from "./editor/buffers.js";
@@ -236,14 +224,7 @@ function changeView(
 export function App() {
   // A window under 800 px wide gives the rail up so the page keeps the room.
   const narrowWindow = useNarrowWindow();
-  const [streams, setStreams] = useState<Stream[]>([]);
-  const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
   const harnesses = useAgentHarnesses();
-  // Mirror of threadStates for subscription callbacks that need the
-  // latest map without re-subscribing when it changes (see
-  // useBackendSubscriptions). Kept current on every render.
-  const threadStatesRef = useRef(threadStates);
-  threadStatesRef.current = threadStates;
 
   // Each agent session's status (`sessionStatusKey`). A thread's dot is its
   // sessions' roll-up, and its question (the rail dot's tooltip) the one
@@ -255,7 +236,6 @@ export function App() {
     () => threadStatuses(Object.values(sessionStatuses)),
     [sessionStatuses],
   );
-  const [stream, setStream] = useState<Stream | null>(null);
   // Every thread's center tabs: a session of entries per thread
   // (`tabs/session.ts`), restored on start and stored on every change.
   // The strip, the bodies, history, origins and the active tab all come
@@ -335,7 +315,25 @@ export function App() {
     return () => clearTimeout(t);
   }, [error]);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
-  const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ vcsEnabled: false });
+  // The streams, their threads and the shown thread; loaded on mount and
+  // on every reconnect.
+  const {
+    streams,
+    stream,
+    threadStates,
+    threadStatesRef,
+    workspaceContext,
+    selectedThread,
+    switchStream: handleSwitch,
+    renameStream: handleRenameStreamById,
+    renameThread: handleRenameThreadById,
+    streamCreated: handleStreamCreated,
+    selectThread: handleSelectThread,
+    createThread: handleCreateThread,
+    markThread: handleMarkThread,
+    closeThread: handleCloseThread,
+    live: windowStreamsLive,
+  } = useWindowStreams({ setError, setDaemonUnavailable });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState("");
   const daemonDownLogged = useRef(false);
@@ -347,58 +345,6 @@ export function App() {
   const isMac = typeof navigator !== "undefined"
     && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 
-
-  // Top-level state hydration: streams, the current stream + its
-  // threads, workspace context, and the selected thread's work state.
-  // Run on mount and again on a remote-daemon WS reconnect (see
-  // `onRemoteReconnect` below) so state goes live again after a drop
-  // without a manual full-page reload.
-  const loadInitialAppState = useCallback(() => {
-    return Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
-      .then(async ([allStreams, current, context]) => {
-        const initialThreadState = await getThreadState(current.id);
-        setStreams(allStreams);
-        setStream(current);
-        setThreadStates((prev) => ({ ...prev, [current.id]: initialThreadState }));
-        setWorkspaceContext(context);
-        // Prefetch thread state for the remaining streams so the
-        // navigator can render every thread under every stream
-        // immediately, not only after the user switches to that stream.
-        const otherStreams = allStreams.filter((s) => s.id !== current.id);
-        for (const s of otherStreams) {
-          void getThreadState(s.id)
-            .then((state) => setThreadStates((prev) => ({ ...prev, [s.id]: state })))
-            .catch((e) => logUi("warn", "failed to prefetch thread state", { streamId: s.id, error: String(e) }));
-        }
-        setError(null);
-        setDaemonUnavailable(false);
-        logUi("info", "loaded initial app state", {
-          streamCount: allStreams.length,
-          currentStreamId: current.id,
-          vcsEnabled: context.vcsEnabled,
-        });
-      })
-      .catch((e) => {
-        setError(String(e));
-        setDaemonUnavailable(true);
-        logUi("error", "failed to load initial app state", { error: String(e) });
-      });
-  }, []);
-
-  useEffect(() => {
-    void loadInitialAppState();
-  }, [loadInitialAppState]);
-
-  // Remote-daemon WS reconnect: re-hydrate the top-level stores so the
-  // UI catches up on events missed while the socket was down. The WS
-  // itself auto-re-subscribes; this covers the snapshot the client
-  // holds. No manual reload — that's the whole point.
-  useEffect(() => {
-    return onRemoteReconnect(() => {
-      logUi("info", "remote daemon reconnected, resyncing state");
-      void loadInitialAppState();
-    });
-  }, [loadInitialAppState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -435,77 +381,6 @@ export function App() {
       window.clearInterval(timer);
     };
   }, []);
-
-  async function handleSwitch(id: string) {
-    try {
-      logUi("info", "switching stream", { streamId: id });
-      const next = await switchStream(id);
-      let nextThreadState = threadStates[next.id] ?? await getThreadState(next.id);
-      // Invariant: a stream must always have a selected thread. If the
-      // switched-to stream has no remembered selection, auto-pick its
-      // first thread by sort order and persist that choice so subsequent
-      // switches remember it.
-      if (!nextThreadState.selectedThreadId && nextThreadState.threads.length > 0) {
-        nextThreadState = await selectThread(next.id, nextThreadState.threads[0].id);
-      }
-      setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
-      setStream(next);
-      setError(null);
-      setDaemonUnavailable(false);
-      logUi("info", "switched stream", { streamId: next.id, title: next.title });
-    } catch (e) {
-      setError(String(e));
-      logUi("error", "failed to switch stream", { streamId: id, error: String(e) });
-    }
-  }
-
-  async function handleRenameStreamById(streamId: string, newTitle: string) {
-    const updated = await renameStream(streamId, newTitle);
-    if (stream?.id === updated.id) setStream(updated);
-    setStreams((prev) =>
-      prev
-        .map((candidate) => (candidate.id === updated.id ? updated : candidate))
-        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
-    );
-    setError(null);
-  }
-
-  async function handleRenameThreadById(threadId: string, newTitle: string) {
-    if (!stream) return;
-    // The person's command: a failure is recorded, and the toast's.
-    await runForPerson("Rename thread", async () => {
-      await renameThread(stream.id, threadId, newTitle);
-      const refreshed = await getThreadState(stream.id);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: refreshed }));
-    });
-  }
-
-  async function handleStreamCreated(next: Stream) {
-    setStreams((prev) => {
-      const others = prev.filter((stream) => stream.id !== next.id);
-      return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    });
-    setError(null);
-    setDaemonUnavailable(false);
-    logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
-    // Make the new stream current on the backend BEFORE we let the
-    // terminal view mount and call open_terminal_session — that command
-    // builds its session_key from `state.streams.current()`, so without
-    // this hop the new thread's terminal would dedup onto the previous
-    // stream/thread's PTY and show the wrong agent's transcript.
-    try {
-      await switchStream(next.id);
-    } catch (e) {
-      logUi("warn", "switch_stream after create failed", { streamId: next.id, error: String(e) });
-    }
-    try {
-      const state = await getThreadState(next.id);
-      setThreadStates((prev) => ({ ...prev, [next.id]: state }));
-    } catch (e) {
-      setError(String(e));
-    }
-    setStream(next);
-  }
 
   /** Open the working-tree file `path`, its tab showing `ref` (the file in
    *  a view: `#lines=`; the plain file when none is given). Its buffer is
@@ -597,59 +472,7 @@ export function App() {
     });
   }
 
-  async function handleSelectThread(streamId: string, threadId: string) {
-    try {
-      // Cross-stream selection: switch the active stream first so the
-      // rest of the app (center tabs, file session, work panel) reframes
-      // around the new stream before we apply the thread selection.
-      // Doing this sequentially also avoids a race where handleSwitch's
-      // own setThreadStates write (seeded from the prefetched state with
-      // the OLD selectedThreadId) clobbers the selection we're about to
-      // apply.
-      if (stream && streamId !== stream.id) {
-        await handleSwitch(streamId);
-      }
-      const next = await selectThread(streamId, threadId);
-      setThreadStates((prev) => ({ ...prev, [streamId]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
 
-  async function handleCreateThread(title: string): Promise<boolean> {
-    if (!stream) return false;
-    // It opens on the session picker: a thread names no agent.
-    const ran = await runForPerson("New thread", async () => {
-      const { state: next } = await createThread(stream.id, title);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-    });
-    return ran.ok;
-  }
-
-  async function handleMarkThread(threadId: string, mark: ThreadMark | null) {
-    const owner = streams.find((s) => threadStates[s.id]?.threads.some((t) => t.id === threadId));
-    if (!owner) return;
-    await runForPerson(mark ? "Mark thread" : "Clear thread mark", async () => {
-      const next = await markThread(owner.id, threadId, mark);
-      setThreadStates((prev) => ({ ...prev, [owner.id]: next }));
-    });
-  }
-
-  async function handleCloseThread(threadId: string) {
-    if (!stream) return;
-    await runForPerson("Close thread", async () => {
-      const next = await closeThread(stream.id, threadId);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-    });
-  }
-
-
-  const currentThreadState = useMemo(
-    () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, threads: [] } : { selectedThreadId: null, threads: [] }),
-    [threadStates, stream],
-  );
-  const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
   // The selected thread's open agent sessions: its session tabs follow them.
   const selectedThreadSessions = useThreadSessions(selectedThread?.id ?? null);
   // A session just opened, to show once the window's list of sessions has it.
@@ -726,10 +549,7 @@ export function App() {
   useResourcesLoader();
   useBackendSubscriptions({
     threadStatesRef,
-    setWorkspaceContext,
-    setThreadStates,
-    setStreams,
-    setStream,
+    ...windowStreamsLive,
     setSessionStatuses,
   });
 
