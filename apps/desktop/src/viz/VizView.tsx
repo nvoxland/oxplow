@@ -306,7 +306,7 @@ function actionMenuItem(
  *  any of them is offered (`when`), run on those. */
 function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
   return run.config.actions
-    .filter((a) => a.bulk)
+    .filter((a) => a.bulk && !a.drag) // a drag action runs on a drop, not a button
     .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
     .filter((o) => o.rows.length > 0);
 }

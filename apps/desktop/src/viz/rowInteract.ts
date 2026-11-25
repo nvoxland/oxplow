@@ -154,5 +154,5 @@ export function chainedDrops(at: DropAt, dragged: readonly Record<string, SqlCel
 
 /** The row action key `key` runs (`key:`), if any. */
 export function keyAction(actions: readonly PageAction[], key: string): PageAction | null {
-  return actions.find((a) => a.row && !a.inForm && a.key !== null && a.key !== undefined && a.key === key) ?? null;
+  return actions.find((a) => a.row && !a.inForm && !a.drag && a.key !== null && a.key !== undefined && a.key === key) ?? null;
 }

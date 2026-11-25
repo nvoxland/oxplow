@@ -85,3 +85,7 @@ test("a key runs the row action that declares it", () => {
   expect(keyAction([action({ id: "n" }), f], "f")?.id).toBe("f");
   expect(keyAction([f], "g")).toBeNull();
 });
+
+test("a key never runs a drag action: it has no drop", () => {
+  expect(keyAction([action({ id: "r", key: "r", drag: true })], "r")).toBeNull();
+});

@@ -71,10 +71,11 @@ export function actionOffered(action: PageAction, row: Record<string, SqlCell>):
 }
 
 /** Whether `action` is one of a row's own actions (its menu, a click, its
- *  key): a row action, not an editor's Save, and not one a form action's
- *  `also` shows in its form only (`inForm`). */
+ *  key): a row action, not an editor's Save, not one a form action's
+ *  `also` shows in its form only (`inForm`), and not a drag action, which
+ *  runs on a drop (a menu press or click sends none). */
 export function rowMenuAction(action: PageAction): boolean {
-  return action.row && !action.edit && !action.inForm;
+  return action.row && !action.edit && !action.inForm && !action.drag;
 }
 
 /** The actions form action `action`'s `also` names, as buttons in its form:

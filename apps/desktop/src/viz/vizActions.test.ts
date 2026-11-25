@@ -4,7 +4,7 @@ import { createFailureStore, createInlineClaims } from "../commands/actionFailur
 import { createRunner } from "../commands/runForPerson.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
-import { skipSummary, actionHelp, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
+import { skipSummary, rowMenuAction, actionHelp, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: false };
@@ -267,4 +267,10 @@ test("a point action whose row nothing answers says it was skipped, and is not a
 test("a run says how many of its rows were skipped", () => {
   expect(skipSummary("Mark", ["nothing answers it"], 1)).toBe("Mark: skipped — nothing answers it");
   expect(skipSummary("Mark", ["nothing answers it", "nothing answers it"], 5)).toBe("Mark: 2 of 5 skipped — nothing answers it");
+});
+
+test("a drag action is not a row menu action: a menu press sends no drop", () => {
+  const reorder = { id: "reorder", label: "Reorder", command: "oxplow.tasks.reorder", input: {}, row: true, drag: true } as PageAction;
+  expect(rowMenuAction(reorder)).toBe(false);
+  expect(rowMenuAction({ ...reorder, drag: false })).toBe(true);
 });
