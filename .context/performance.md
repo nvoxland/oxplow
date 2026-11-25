@@ -1701,7 +1701,11 @@ doesn't help): that CTE is computed for every change first. `v_change_fact`
 - After: the same read among 1,500 changes of 10 files is 9 ms (debug build).
 - What changed: each CTE is read once, or each arm of a UNION spells its own
   join, and the lookups go by an indexed key (`commit_file.path`,
-  `co_change_pair.path`, `change_duplicate.change_id` — V61). The latest
+  `co_change_pair.path`, `change_duplicate.change_id` — V61).
+  `co_change_pair` had no index until its v2 `key: [path, other]` (the
+  stored table's primary key): each file's partner lookup read all ~80k
+  pairs, and a 1,447-file merge's Review brief timed out at 5 s. The plan
+  guard's `BY_PATH` now refuses a scan of it. The latest
   analysed event of a change is a column (`v_change.files_analyzed_seq`, kept
   by a trigger on the log) instead of a `json_extract` scan of every
   `change.analyzed` event.

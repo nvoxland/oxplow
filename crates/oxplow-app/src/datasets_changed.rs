@@ -847,6 +847,95 @@ mod tests {
         assert_eq!(rows().await, 1, "the recreated table is refilled");
     }
 
+    /// A key added to a clocked dataset (`every: 1h`) with its columns and
+    /// SELECT unchanged recreates its table empty, keyed, and drops its
+    /// last recompute: it is refilled at once, not left empty until its
+    /// clock comes round (bundled's `co_change_pair` stayed empty for an hour).
+    #[tokio::test]
+    async fn a_key_change_alone_refills_a_clocked_dataset() {
+        use oxplow_db::datasets::{
+            DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
+        };
+        let f = crate::test_fixtures::services_with_thread().await;
+        let compile = |version: u32, key: Vec<String>| {
+            let db = f.svc.db.clone();
+            let source = DatasetSource {
+                decl: DatasetDecl {
+                    name: "titles".into(),
+                    version,
+                    description: "titles.".into(),
+                    field_groups: Vec::new(),
+                    fields: ["id", "title"]
+                        .iter()
+                        .map(|n| DatasetField {
+                            name: (*n).into(),
+                            sql_type: "TEXT".into(),
+                            doc: "d".into(),
+                            ai_context: None,
+                        })
+                        .collect(),
+                    relationships: vec![],
+                    key,
+                    tests: Vec::new(),
+                    deprecated: Vec::new(),
+                    materialize: Some(Materialize::Every { every: "1h".into() }),
+                    ai_context: None,
+                    open: false,
+                    adds_to: None,
+                },
+                file: "datasets/titles.sql".into(),
+                sql: "SELECT uri AS id, title FROM ref('thread')".into(),
+                twin: None,
+            };
+            async move {
+                let errors = db
+                    .compile_extension_datasets(vec![ExtensionDatasets {
+                        extension: "acme".into(),
+                        namespace: "acme".into(),
+                        sources: vec![source],
+                        config: None,
+                    }])
+                    .await
+                    .unwrap();
+                assert_eq!(errors["acme"], Vec::<String>::new());
+            }
+        };
+        let rows = || async {
+            f.svc
+                .db
+                .read(|tx| {
+                    tx.query_row("SELECT count(*) FROM v_acme_titles", [], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        let until_rows = || async {
+            for _ in 0..100 {
+                if rows().await == 1 {
+                    return 1;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            rows().await
+        };
+        compile(1, vec![]).await;
+        let assets =
+            crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
+        assets.sync_datasets().await.unwrap();
+        assert_eq!(until_rows().await, 1, "its first build fills it");
+
+        compile(2, vec!["id".into()]).await;
+        assets.sync_datasets().await.unwrap();
+        assert_eq!(
+            until_rows().await,
+            1,
+            "the recreated, keyed table is refilled"
+        );
+    }
+
     /// P7.B1: the change loop is the one place `MetricSamplesChanged` is
     /// made — a recording site that emitted its own could drift from what
     /// landed.

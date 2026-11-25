@@ -143,6 +143,7 @@ view:
       - id: none
         title: Facts
         viz: table
+        chartable: true
         from: facts
         columns:
         - { key: captured_at, label: Captured, format: datetime }
@@ -155,6 +156,7 @@ view:
       - id: subject
         title: Facts by subject
         viz: table
+        chartable: true
         from: grouped
         columns:
         - { key: group, label: Subject }
@@ -165,6 +167,7 @@ view:
       - id: day
         title: Facts by day
         viz: table
+        chartable: true
         from: grouped
         columns:
         - { key: group, label: Day }

@@ -2367,6 +2367,11 @@ pub struct VizConfig {
     /// log does.
     #[serde(default)]
     pub single_line: bool,
+    /// For `table`: its rows are data a chart can draw, so the page offers
+    /// "Show as" (table, list, number, bar, line, treemap) and Save as
+    /// Page. A table of records (a log, a list of problems) leaves it off.
+    #[serde(default)]
+    pub chartable: bool,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
     /// For `list` / `table`: a column whose value is a tone (`danger`,

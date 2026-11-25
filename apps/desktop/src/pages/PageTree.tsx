@@ -384,7 +384,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
           {lead}
         </p>
       ) : null}
-      {showAs && def.config.viz === "table" && def.from !== null && !compact ? (
+      {showAs && def.config.viz === "table" && def.config.chartable && def.from !== null && !compact ? (
         <TablePresentation
           key={`${run.page.id}:${id}`}
           id={id}

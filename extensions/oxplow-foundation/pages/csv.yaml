@@ -30,6 +30,7 @@ loaders:
 view:
   from: rows
   viz: table
+  chartable: true
   empty: "There is no such file, or it has no rows."
 see_also:
   - { from: related }

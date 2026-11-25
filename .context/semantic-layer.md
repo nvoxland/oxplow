@@ -483,7 +483,8 @@ its `dataset_input` followed through live datasets down to tables (and to a
 materialized input's own table) — re-run when the registry (`dataset`,
 `dataset_input`) changes. One whose SELECT, contract or input tables
 changed is re-registered, so its first recompute fills it: a contract
-can change under an unchanged SELECT (an input's column changed type),
+(its columns and its key) can change under an unchanged SELECT (an
+input's column changed type, a key was added), a clocked one included,
 and the compiler then recreates the table empty. A recompute refills the table, whole, in one
 transaction, after its inputs have been quiet for the coalesce window
 (or three windows after the first change when they never go quiet), and

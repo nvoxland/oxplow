@@ -54,6 +54,7 @@ view:
     title: Recordings
     from: recordings
     viz: table
+    chartable: true
     columns:
     - { key: time, label: Time, format: datetime }
     - { key: value, label: Value, unit: unit }

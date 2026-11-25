@@ -6881,6 +6881,12 @@ export type VizConfig_Deserialize = {
 	 *  log does.
 	 */
 	singleLine?: boolean,
+	/**
+	 *  For `table`: its rows are data a chart can draw, so the page offers
+	 *  "Show as" (table, list, number, bar, line, treemap) and Save as
+	 *  Page. A table of records (a log, a list of problems) leaves it off.
+	 */
+	chartable?: boolean,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
@@ -6971,6 +6977,12 @@ export type VizConfig_Serialize = {
 	 *  log does.
 	 */
 	singleLine: boolean,
+	/**
+	 *  For `table`: its rows are data a chart can draw, so the page offers
+	 *  "Show as" (table, list, number, bar, line, treemap) and Save as
+	 *  Page. A table of records (a log, a list of problems) leaves it off.
+	 */
+	chartable: boolean,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**

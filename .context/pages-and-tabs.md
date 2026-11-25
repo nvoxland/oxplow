@@ -448,7 +448,9 @@ inline page offers Save as Page for any valid node tree,
 including inline rows and multiple loaders.
 
 **Show as** on a page table renders the same loaded rows as Table, List,
-Number, Bar, Line, or Treemap. Only the page's own tables offer it: an
+Number, Bar, Line, or Treemap. Only a table that says `chartable: true`
+offers it (a table of records has nothing to chart), and only the page's
+own: an
 embedded page's tables (a dashboard tile, an Alerts section) are that
 page's. The shell keeps the choice and its column roles in the tab entry's
 history state. **Save as Page** takes the selected presentation and the
@@ -457,7 +459,8 @@ original page's loader using the params the person set (the tab's, not
 what the page resolved: a default such as `head_sha` stays a default, so a
 page saved from Git History follows new commits). A temporary shown view
 carries its original loader definitions into the saved page. Number uses
-the chosen column of the first row.
+the chosen column of the first row. A view saved as a table is
+`chartable` itself.
 
 **Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve in
 this order (supplied, else the viewer's context, else the default;

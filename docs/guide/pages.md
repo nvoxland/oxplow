@@ -20,7 +20,7 @@ Everything oxplow tracks is exposed as read-only SQL views: `v_oxplow_task`
 
 Open **Catalog** from the launcher to find datasets. Open a dataset to
 see its definition and the data it reads, or select **Dataset data** to
-browse its rows. On a page table, pick **Show as** to switch to a list,
+browse its rows. On a table of data, pick **Show as** to switch to a list,
 number, or chart. Choose the chart's columns, then use **Save as Page**
 to keep that view live.
 
@@ -150,7 +150,7 @@ section above their subsections; Contents nests both levels.
 ### Grouping and styling rows
 
 `group: { by: <column> }` puts rows under a heading per value;
-`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `single_line: true` (a table) keeps each row on one line and cuts a long cell with "…"; `depth:
+`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `single_line: true` (a table) keeps each row on one line and cuts a long cell with "…"; `chartable: true` (a table) offers **Show as** and **Save as Page** on it, for rows worth charting; `depth:
 <column>` indents. A column's `icon: <column>` draws an icon named by that
 column's value, and `tone: <column>` colours the cell (`accent`, `success`,
 `warning`, `danger`, `muted`). A column's `badges: <column>` draws that column's labels (a JSON array, such as a commit's branches and tags) as pills at the right end of the cell, each in its `tone`.

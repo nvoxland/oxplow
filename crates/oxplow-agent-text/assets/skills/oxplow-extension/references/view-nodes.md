@@ -274,7 +274,10 @@ is truthy; `reveal: <column>` (`list`, `table`) marks the row whose value is
 truthy the same way and scrolls it into view when first drawn;
 `single_line: true` (`table`) keeps each row on one line, a long cell cut
 with "…" (its whole text on hover): for a log-like table of long
-subjects; `depth: <column>` nests (a full-width list draws a parent and
+subjects; `chartable: true` (`table`) offers the person **Show as** (list,
+number, bar, line, treemap) and **Save as Page** on it: set it when the
+rows are data worth charting (counts, values over time, a query's
+result), not on a table of records; `depth: <column>` nests (a full-width list draws a parent and
 the deeper rows after it as one panel; a rail panel's list and a table
 indent); `edge: <column>` (a tone: `danger`,
 `warning`, `success`, `accent`, `muted`) draws a coloured bar down the row's

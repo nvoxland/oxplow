@@ -35,7 +35,11 @@ datasets:
       - { name: interest, type: "", doc: "Review priority (a real number); higher means look here first." }
       - { name: reasons, type: "", doc: "Why it's high, `; `-separated ('' for a routine file)." }
   - name: co_change_pair
-    version: 1
+    version: 2
+    # A file's partners are looked up by its path, once per file of a
+    # change: the key is the stored table's primary key, so that lookup is
+    # an index probe, not a read of every pair (v2).
+    key: [path, other]
     # "The last 180 days" moves with the clock, not with a write.
     materialize: { every: 1h }
     description: "Files usually committed together: each pair (both ways round) that shared at least 3 commits of 50 files or fewer in the last 180 days."

@@ -64,6 +64,7 @@ view:
   - id: seen
     title: Values
     viz: table
+    chartable: true
     from: seen
     columns:
     - { key: value, label: Value }

@@ -19,6 +19,11 @@ const PER_CHANGE: &[&str] = &[
     "file_kind_rule_decl",
 ];
 
+/// The tables a review looks up by a file's path, once per file of the
+/// change: a scan of one is the whole table read for each file (a merge
+/// of 1,447 files over 80,000 co-change pairs timed out).
+const BY_PATH: &[&str] = &["m_v_oxplow_co_change_pair"];
+
 /// The plan lines (`EXPLAIN QUERY PLAN` details) of `sql`.
 async fn plan(svc: &crate::Services, sql: &str) -> Vec<String> {
     let sql = format!("EXPLAIN QUERY PLAN {sql}");
@@ -62,12 +67,12 @@ async fn many_changes(svc: &crate::Services, n: i64) {
         .unwrap();
 }
 
-/// The per-change tables a plan scans.
+/// The per-change and by-path tables a plan scans.
 fn scanned(plan: &[String]) -> Vec<String> {
     plan.iter()
         .filter(|line| {
             let line = line.trim_start();
-            PER_CHANGE.iter().any(|t| {
+            PER_CHANGE.iter().chain(BY_PATH).any(|t| {
                 line.strip_prefix("SCAN ")
                     .is_some_and(|rest| rest == *t || rest.starts_with(&format!("{t} ")))
             })

@@ -86,11 +86,14 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `off`.
     - **The advisory `untracked-work`** (`agent_tracks` only): a request that
       changed files (a claimed or sole `v_turn_file`) while the thread had no
-      task in progress and no task linked is reminded once per request.
+      task in progress and no task linked is reminded once per request
+      (a small fix, one or two files, needs no task), and once more,
+      with the count, when it has changed 5 files (`untracked-work-grown`).
     Fixtures are oxtask's: `task-state-*`, `task-workflow-settings-*`,
     `the-task-workflow-dataset-reads-the-setting-as-it-changes`,
     `setting-the-task-workflow-keeps-the-definition-of-done`,
-    `the-reminder-is-only-for-the-agent-tracks-workflow`, `next-task-*`.
+    `the-reminder-is-only-for-the-agent-tracks-workflow`,
+    `a-request-that-grows-past-a-small-fix-is-reminded-again`, `next-task-*`.
   - `oxwiki` (`oxwiki`): the knowledge store as an extension (on by default): `.oxplow/oxwiki/<slug>.md` pages, `oxwiki.page.write` / `delete` / `restore`, a collector filling bundled's `knowledge_record` model, the `oxwiki` skill and `/note`. `knowledge.md` "The oxwiki extension". Fixtures are its own.
 
 - **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_kind`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
@@ -586,7 +589,7 @@ change analysis.
 dashboards**. The base version lets people see what metrics exist and
 pin a few to a dashboard as a starting point, a bit like Metabase. It does
 not need to be fancy. Dataset data previews any published dataset. In a
-page's table, **Show as** changes the presentation and **Save as Page**
+page's chartable table, **Show as** changes the presentation and **Save as Page**
 keeps that choice as a live view. A dashboard is a page with `category: Dashboards` and a grid
 of nodes ([dashboards.md](./dashboards.md)). Metrics is a catalog (search,
 enabled/all, range, branch, sparkline + latest value); the metric page

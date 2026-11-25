@@ -62,6 +62,7 @@ view:
     title: Recurring Outcomes
     from: error_groups
     viz: table
+    chartable: true
     columns:
     - { key: outcome, label: Outcome }
     - { key: error, label: Message }

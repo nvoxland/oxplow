@@ -35,7 +35,7 @@ view: { viz: table, from: items }
   });
 });
 
-test("a saved table keeps its columns' labels, formats and links, and only the params the person set", () => {
+test("a saved table keeps its columns' labels, formats and links, only the params the person set, and its Show as", () => {
   // `head` is resolved by the page (the newest commit): saved, the page
   // would stay on that commit.
   const run = { ...tablePage(), params: { head: "abc123", author: "Ann" } };
@@ -49,6 +49,7 @@ test("a saved table keeps its columns' labels, formats and links, and only the p
     view: {
       viz: "table",
       from: "rows",
+      chartable: true,
       columns: [
         { key: "sha", label: "Commit", link: { kind: "page", from: "uri" } },
         { key: "at", format: "relative" },

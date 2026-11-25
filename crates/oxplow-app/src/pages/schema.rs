@@ -795,6 +795,8 @@ struct VizFile {
     #[serde(default)]
     single_line: bool,
     #[serde(default)]
+    chartable: bool,
+    #[serde(default)]
     depth: Option<String>,
     #[serde(default)]
     edge: Option<String>,
@@ -1903,6 +1905,7 @@ fn leaf_viz(
         emphasis: f.emphasis,
         reveal: f.reveal,
         single_line: f.single_line,
+        chartable: f.chartable,
         depth: f.depth,
         edge: f.edge,
         fills: f.viz.fills(),

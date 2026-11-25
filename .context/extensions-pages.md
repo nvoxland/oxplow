@@ -681,8 +681,13 @@ at the panel's row cap. A page and an agent's read show every row
 scrolls it into view (nearest) when first drawn (`rowRevealed`);
 `single_line: true` (`table` only) keeps each row on one line: every cell
 is cut to its column with "…", its whole text on hover, and a cell's
-`badges` stay whole before its cut text (`ox-cell-text` in
-`oxplow-kit.css`; a cut column lays the table out fixed); `depth` (`list` / `table`) is
+`badges` stay whole at its right end (`ox-cell-text` in
+`oxplow-kit.css`; a cut column lays the table out fixed);
+`chartable: true` (`table` only) says the rows are data a chart can draw
+(counts, values over time, a dataset's or a file's rows), so the page
+offers **Show as** and its **Save as Page** on that table
+(`TablePresentation`); a table of records (a log, problems, runs) leaves
+it off, the default, since none of the other presentations helps there; `depth` (`list` / `table`) is
 a whole number 0–8 that nests: in a full-width `list` a row followed by
 deeper rows is their parent, and the two are one raised panel (the kit's
 `ox-nest`, as the Work board's epics: the parent row its top line, with

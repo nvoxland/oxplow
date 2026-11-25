@@ -3877,6 +3877,9 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
     if cfg.single_line && cfg.viz != Viz::Table {
         return Some(format!("`single_line` is only for `table`, not `{viz}`"));
     }
+    if cfg.chartable && cfg.viz != Viz::Table {
+        return Some(format!("`chartable` is only for `table`, not `{viz}`"));
+    }
     lanes_problem(cfg, &viz)
 }
 
@@ -10027,6 +10030,9 @@ commands:
                 // One line per row is a table's: its cells cut to one line.
                 ("j", &viz_page("", "SELECT 1 AS id", "viz: list\nsingle_line: true\n")),
                 ("k", &viz_page("", "SELECT 1 AS id", "viz: table\nsingle_line: true\n")),
+                // Only a table offers "Show as": a list's rows are not a chart's.
+                ("l", &viz_page("", "SELECT 1 AS id", "viz: list\nchartable: true\n")),
+                ("m", &viz_page("", "SELECT 1 AS id", "viz: table\nchartable: true\n")),
             ],
             "",
         );
@@ -10060,6 +10066,11 @@ commands:
                 .expect("a single-line table loads")
                 .single_line
         );
+        assert!(node(&ext, "m").expect("a chartable table loads").chartable);
+        assert!(
+            !node(&ext, "k").unwrap().chartable,
+            "a table is not chartable unless it says so"
+        );
         for (slug, needle) in [
             ("b", "`group` is only for `list`, `table` and `board`"),
             ("c", "missing field `by`"),
@@ -10070,6 +10081,7 @@ commands:
             ("h", "`group.compact` and `group.grown` are only for `list`"),
             ("i", "`edge` is only for `list` and `table`"),
             ("j", "`single_line` is only for `table`"),
+            ("l", "`chartable` is only for `table`"),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(

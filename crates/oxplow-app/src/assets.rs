@@ -266,10 +266,11 @@ async fn run_once(db: &Database, entries: &Entries, entry: &Entry, now: &Now) {
 }
 
 /// A materialized dataset as the registry has it: its compiled SELECT, its
-/// contract (the columns its table is made of) and the tables it reads,
-/// transitively. Any of them changing re-registers it, so a table the
-/// compiler recreated — its contract changed though its SELECT didn't (an
-/// input's column changed type) — gets its first build.
+/// contract (the columns its table is made of, and its key, the table's
+/// primary key) and the tables it reads, transitively. Any of them changing
+/// re-registers it, so a table the compiler recreated — its contract
+/// changed though its SELECT didn't (an input's column changed type, a key
+/// was added) — gets its first build.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DatasetAsset {
     sql: String,
@@ -560,7 +561,7 @@ impl Assets {
 /// The dataset registry as an asset reads it: each dataset's compiled SELECT,
 /// its policy when materialized, its contract, and what each reads.
 struct Registry {
-    /// view → (sql, materialize, contract columns).
+    /// view → (sql, materialize, contract: its columns and key).
     datasets: BTreeMap<String, (String, Option<String>, Option<String>)>,
     /// view → the views and tables it reads.
     inputs: BTreeMap<String, Vec<String>>,
@@ -570,7 +571,8 @@ impl Registry {
     fn load(tx: &rusqlite::Connection) -> Result<Registry, DomainError> {
         let mut st = tx
             .prepare(
-                "SELECT m.view, m.sql, m.materialize, c.columns_json FROM dataset m
+                "SELECT m.view, m.sql, m.materialize, c.columns_json || ' key ' || coalesce(c.key_json, '[]')
+                 FROM dataset m
                  LEFT JOIN dataset_contract c ON c.view = m.view AND c.version = m.version",
             )
             .map_err(oxplow_db::map_sql_err)?;

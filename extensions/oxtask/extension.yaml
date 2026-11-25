@@ -375,13 +375,36 @@ advisories:
     needs: [model:oxplow/task_record]
     when: { config: /tasks/workflow, in: [agent_tracks] }
     query: |
-      SELECT 'This request changed files, and no task is in progress on this thread. If it is '
-             || 'work the person will want to see on the Work panel, take or file its task and '
-             || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
+      SELECT 'This request changed files, and no task is in progress on this thread. Unless it '
+             || 'is a small fix (one or two files: a typo, a one-line change), take or file its '
+             || 'task and move it to in progress, so the person sees it on the Work panel (the '
+             || '`track-work` skill).' AS message
       WHERE :request_id IS NOT NULL
         AND EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record')
         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
                      WHERE t.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_link rt WHERE rt.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_oxplow_task w JOIN v_thread th ON th.uri = w.assignee
+                         WHERE th.id = :thread_id AND w.state = 'in_progress')
+
+  # The first reminder comes at the first edit, when the work looks
+  # smallest. A request that goes on to change 5 files with still no task
+  # in progress or linked is reminded once more, with the count.
+  - id: untracked-work-grown
+    on: post-tool-use
+    once_per: request
+    needs: [model:oxplow/task_record]
+    when: { config: /tasks/workflow, in: [agent_tracks] }
+    query: |
+      SELECT 'This request has now changed ' || n.files || ' files and no task tracks them: '
+             || 'that is no small fix. Take or file its task and move it to in progress, so the '
+             || 'person sees it on the Work panel (the `track-work` skill).' AS message
+      FROM (SELECT count(DISTINCT p.path) AS files
+              FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
+             WHERE t.request_id = :request_id) n
+      WHERE :request_id IS NOT NULL
+        AND n.files >= 5
+        AND EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record')
         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_link rt WHERE rt.request_id = :request_id)
         AND NOT EXISTS (SELECT 1 FROM v_oxplow_task w JOIN v_thread th ON th.uri = w.assignee
                          WHERE th.id = :thread_id AND w.state = 'in_progress')

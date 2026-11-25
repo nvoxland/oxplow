@@ -1379,6 +1379,7 @@ mod tests {
                 emphasis: None,
                 reveal: None,
                 single_line: false,
+                chartable: false,
                 depth: None,
                 edge: None,
                 fills: false,

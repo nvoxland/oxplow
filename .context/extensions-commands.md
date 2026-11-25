@@ -579,10 +579,14 @@ advisories:
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxtask ships one hint: `untracked-work` (post-tool-use,
-  `once_per: request`, while the task model has a live store: the request has
-  a recorded edit and no linked task, and the thread has no task in
-  progress; the `track-work` skill says what to do). Shared Work shows
+- oxtask ships two hints, both post-tool-use and `once_per: request`, while
+  the task model has a live store, the request has no linked task and the
+  thread has no task in progress: `untracked-work` at the request's first
+  recorded edit (it names a small fix as one or two files), and
+  `untracked-work-grown` once the request has changed 5 files, with the
+  count. The first comes when the work looks smallest, so an agent that
+  judged it small hears again once it isn't. The `track-work` skill says
+  what to do. Shared Work shows
   overlapping edits and Agent Interface shows advisory effectiveness.
   **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never

@@ -75,6 +75,7 @@ view:
   - id: recorded
     title: Facts it recorded
     viz: table
+    chartable: true
     from: recorded
     columns:
     - { key: captured_at, label: Captured, format: datetime }
