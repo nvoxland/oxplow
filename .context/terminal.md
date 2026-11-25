@@ -612,7 +612,7 @@ ends in `/` is a directory, any other a file (the terminal can't tell).
   correctly. **Caveat:** only the `shell` pane benefits — its child *is*
   the shell, so the pid's cwd tracks `cd`; an agent pane's child is the
   agent, which doesn't `cd`, so its cwd is the worktree anyway.
-- A missing target is benign: `handleOpenFile` (App.tsx) shows a
+- A missing target is benign: `handleOpenFile` (`window/useWindowOpeners.ts`) shows a
   friendly "File not found: <path>" at `warn`, not an error with the
   raw OS code — so a stale link doesn't look like a crash.
 - Absolute paths outside the worktree open as-is — the App.tsx

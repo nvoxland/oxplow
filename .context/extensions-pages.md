@@ -13,7 +13,7 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   optional `head` version column and opens the side-by-side
   `duplicate-block` page, which is the general compare page (two `code`
   rows with `sync: true`).
-  Both URIs carry their whole spec, so App's `handleOpenPage` and
+  Both URIs carry their whole spec, so the window's `handleOpenPage` (`window/useWindowOpeners.ts`) and
   in-tab navigation register them directly.
 
 - **A page keeps one shape whatever its data holds.** In a `stack`, every

@@ -650,7 +650,7 @@ signal.
 ## `PageVisitStore` — page navigation event log
 
 Distinct from `UsageStore` (which is a generic kind/key tracker with
-coalescing). `PageVisitStore` records every `App.handleOpenPage` call
+coalescing). `PageVisitStore` records every `handleOpenPage` call (`window/useWindowOpeners.ts`)
 as a fresh event with the full `TabRef` (kind + id + payload + label).
 Append-only, no coalescing — analytics queries collapse as needed.
 

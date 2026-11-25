@@ -2108,7 +2108,7 @@ inside the bus's transactions; read as `v_command_proposal` (ref
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit
-recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
+recorded by `handleOpenPage` (`window/useWindowOpeners.ts`) (skipping `agent`, `new-stream`,
 `new-task`).
 
 Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
