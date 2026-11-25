@@ -225,6 +225,8 @@ function titleFromRow(run: PageRun, def: ReturnType<typeof nodeById>): string | 
 function fillsNode(run: PageRun, at: RunNode): boolean {
   const def = nodeById(run.page, at.id);
   if (def?.kind === "viz") return vizFills(run, at.id);
+  // A component that declares `size: fill` takes the page's height.
+  if (def?.kind === "component") return def.sizing === "fill";
   if (def?.kind === "stack" && at.children.length === 1) {
     // A stack of one is its child's height.
     return fillsNode(run, at.children[0]!);

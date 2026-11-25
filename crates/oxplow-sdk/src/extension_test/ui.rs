@@ -358,7 +358,7 @@ impl PageAt<'_> {
                     return Err(format!(
                         "{at} at `{path}`, the example expects {want} — fix: the component, or \
                          the step's `expect` (`{{ visible, count, text, title, actions, \
-                         view_params, invoked, navigated, confirmed, forms, shown }}`)"
+                         view_params, invoked, navigated, revealed, confirmed, forms, shown }}`)"
                     ))
                 }
             }
@@ -464,6 +464,8 @@ impl PageAt<'_> {
                 }
                 "invoked" => json!(of("invoked")),
                 "navigated" => json!(of("navigate")),
+                // Each `reveal`, `{ top, bottom }`, in the order asked.
+                "revealed" => json!(of("reveal")),
                 "confirmed" => json!(of("confirm")),
                 "forms" => json!(of("openForm")
                     .into_iter()

@@ -551,7 +551,8 @@ fn table(run: &VizRun) -> String {
 
 /// The displayed columns (the UI's `displayColumns`): the declared ones in
 /// their order with their labels, else every result column — never the
-/// row-styling ones (`group.by`, `emphasis`, `depth`).
+/// row-styling ones (`group.by`, `emphasis`, `reveal`, `depth`) nor a
+/// `lanes` column (how the rows look, not what they say).
 fn shown(run: &VizRun) -> Vec<(usize, String)> {
     let styling: Vec<&String> = run
         .config
@@ -559,7 +560,15 @@ fn shown(run: &VizRun) -> Vec<(usize, String)> {
         .iter()
         .map(|g| &g.by)
         .chain(run.config.emphasis.iter())
+        .chain(run.config.reveal.iter())
         .chain(run.config.depth.iter())
+        .chain(
+            run.config
+                .columns
+                .iter()
+                .filter(|c| c.format == Some(crate::pages::spec::ColumnFormat::Lanes))
+                .map(|c| &c.key),
+        )
         .collect();
     let all: Vec<(usize, String)> = if run.config.columns.is_empty() {
         run.result.columns.iter().cloned().enumerate().collect()
@@ -1351,9 +1360,11 @@ mod tests {
                 custom: None,
                 group: None,
                 emphasis: None,
+                reveal: None,
                 depth: None,
                 edge: None,
                 fills: false,
+                sizing: None,
                 actions: Vec::new(),
                 origin: Default::default(),
                 lead: None,
@@ -1735,6 +1746,7 @@ mod tests {
             select: None,
             expand: None,
             when: when.map(str::to_string),
+            parents: None,
         };
         let one = with(
             run(
@@ -1809,6 +1821,7 @@ mod tests {
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 }];
             },
         );
@@ -1855,6 +1868,7 @@ mod tests {
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 }];
             },
         );
@@ -1890,6 +1904,7 @@ mod tests {
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 };
                 l.columns = vec![
                     col("perms", Some(crate::pages::spec::ColumnFormat::Items)),
@@ -1901,6 +1916,49 @@ mod tests {
             render(&r, &Resolved::default()),
             "**perms**: plain · sql.read (may run its own SQL) · to\n**other**: [1]"
         );
+    }
+
+    /// A `lanes` column is how the rows look, not what they say: an agent
+    /// reads the table without it.
+    #[test]
+    fn a_lanes_column_is_left_out_of_the_text() {
+        let r = with(
+            run(
+                Viz::Table,
+                None,
+                &["sha", "parents", "subject"],
+                vec![vec![t("abc1234"), t("[]"), t("First work")]],
+            ),
+            |l| {
+                let col =
+                    |key: &str, format, parents: Option<&str>| crate::pages::spec::PageColumn {
+                        key: key.into(),
+                        label: None,
+                        link: None,
+                        unit: None,
+                        icon: None,
+                        tone: None,
+                        width: None,
+                        format,
+                        highlight: None,
+                        select: None,
+                        expand: None,
+                        when: None,
+                        parents: parents.map(str::to_string),
+                    };
+                l.columns = vec![
+                    col(
+                        "sha",
+                        Some(crate::pages::spec::ColumnFormat::Lanes),
+                        Some("parents"),
+                    ),
+                    col("subject", None, None),
+                ];
+            },
+        );
+        let text = render(&r, &Resolved::default());
+        assert!(text.contains("First work"), "{text}");
+        assert!(!text.contains("abc1234"), "{text}");
     }
 
     /// A `marks` column reads as its marks joined by spaces, a hint in
@@ -1924,6 +1982,7 @@ mod tests {
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 }];
             },
         );
@@ -1965,6 +2024,7 @@ mod tests {
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 };
                 l.columns = vec![col("by"), col("ext"), col("you"), col("other")];
             },

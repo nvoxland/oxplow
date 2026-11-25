@@ -3869,6 +3869,42 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
             "`emphasis` is only for `list`, `table` and `tree`, not `{viz}`"
         ));
     }
+    if cfg.reveal.is_some() && !rows {
+        return Some(format!(
+            "`reveal` is only for `list` and `table`, not `{viz}`"
+        ));
+    }
+    lanes_problem(cfg, &viz)
+}
+
+/// A `lanes` column and its `parents` go together, on a `table` that draws
+/// its rows in the order given (a list has no column cells to line up).
+fn lanes_problem(cfg: &VizConfig, viz: &str) -> Option<String> {
+    use crate::pages::spec::ColumnFormat;
+    for c in &cfg.columns {
+        let lanes = c.format == Some(ColumnFormat::Lanes);
+        if lanes && c.parents.is_none() {
+            return Some(format!(
+                "column `{}`: `format: lanes` needs `parents: <column>`",
+                c.key
+            ));
+        }
+        if !lanes && c.parents.is_some() {
+            return Some(format!(
+                "column `{}`: `parents` is for a `format: lanes` column",
+                c.key
+            ));
+        }
+        if lanes && cfg.viz != Viz::Table {
+            return Some(format!("`format: lanes` is only for `table`, not `{viz}`"));
+        }
+        if lanes && (cfg.group.is_some() || cfg.depth.is_some()) {
+            return Some(
+                "`format: lanes` draws the rows in their order: not with `group` or `depth`"
+                    .to_string(),
+            );
+        }
+    }
     None
 }
 
@@ -4946,6 +4982,7 @@ fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
         keys.extend(c.unit.iter());
         keys.extend(c.icon.iter());
         keys.extend(c.tone.iter());
+        keys.extend(c.parents.iter());
         if let Some(link) = c.link.as_ref() {
             keys.extend(link.from.iter());
             keys.extend(link.line.iter());
@@ -5052,6 +5089,36 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// A `lanes` column's `parents` and a `reveal` column must be in the
+    /// loader's result, as any column a viz names.
+    #[test]
+    fn a_lanes_columns_parents_and_reveal_are_result_columns() {
+        let page = crate::pages::schema::parse_page(
+            "acme",
+            "acme",
+            "p",
+            "pages/p.yaml",
+            "title: T\nloaders:\n  q: { rows: [{ id: a }] }\nview:\n  viz: table\n  from: q\n  reveal: shown\n  columns:\n    - { key: id, format: lanes, parents: parents }\n",
+            crate::pages::schema::PageKind::Page,
+        )
+        .unwrap();
+        let crate::pages::schema::NodeKind::Viz { config, .. } = &page.view.kind else {
+            panic!("a viz");
+        };
+        let problems = viz_column_problems(config, &["id".to_string()]);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("column `parents` isn't in the query result")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("reveal column `shown` isn't in the query result")),
+            "{problems:?}"
+        );
+    }
 
     /// A Settings category id is one namespace's: the first by name keeps
     /// it; a later one's declaration of it is dropped, with a load error.
@@ -7335,9 +7402,8 @@ commands:
 
     /// Foundation keeps data, resource views, the basic git screens and the
     /// agent's tools. Screens a person opens by choice (Dashboards,
-    /// Timeline, the Metrics list) aren't here, and the only custom components
-    /// foundation keeps are hand-written: Git History's graph and the
-    /// Integrations area.
+    /// Timeline, the Metrics list) aren't here, and the only custom component
+    /// foundation keeps is the hand-written Integrations area.
     #[test]
     fn foundation_has_no_dashboards_index_timeline_or_metrics_list() {
         let dir = tempfile::tempdir().unwrap();
@@ -7360,7 +7426,7 @@ commands:
             .iter()
             .map(|c| c.id.as_str())
             .collect();
-        assert_eq!(components, ["history-graph", "integrations"]);
+        assert_eq!(components, ["integrations"]);
         // Making a dashboard is the bare product; the launcher lists them.
         assert!(foundation
             .commands

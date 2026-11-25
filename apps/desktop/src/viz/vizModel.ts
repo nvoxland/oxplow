@@ -49,6 +49,8 @@ export interface DisplayColumn {
   /** Position of the column that must be truthy for a detail to draw this
    *  fact (`PageColumn.when`). */
   whenIndex: number | null;
+  /** For `format: lanes`: position of the column of the row's parents. */
+  parentsIndex?: number | null;
 }
 
 /** `text` split around each case-insensitive occurrence of `needle`, the
@@ -69,11 +71,11 @@ export function markParts(text: string, needle: string): { text: string; mark: b
 }
 
 /** The columns that style rows rather than show as cells: `group.by`,
- *  `emphasis` and `depth`. */
+ *  `emphasis`, `reveal` and `depth`. */
 function stylingColumns(viz: VizConfig): string[] {
   // A `sections` viz's role columns are its heading and body, never facts.
   const s = viz.viz === "sections" ? viz.sections : null;
-  return [viz.group?.by, viz.emphasis, viz.depth, s?.title, s?.id, s?.link, s?.body, s?.group, s?.group_link].filter((c): c is string => !!c);
+  return [viz.group?.by, viz.emphasis, viz.reveal, viz.depth, s?.title, s?.id, s?.link, s?.body, s?.group, s?.group_link].filter((c): c is string => !!c);
 }
 
 /** Columns to render, in order. Declared `columns` win (skipping keys the
@@ -108,6 +110,7 @@ export function displayColumns(viz: VizConfig, resultColumns: string[]): Display
       highlight: c.highlight ?? null,
       ...(c.expand ? { expand: c.expand } : {}),
       whenIndex: at(c.when),
+      ...(c.format === "lanes" ? { parentsIndex: at(c.parents) } : {}),
     });
   }
   return out;
@@ -183,10 +186,13 @@ function cellOf(columns: string[], row: SqlCell[], key: string | null | undefine
 /** Whether the row is highlighted: its `emphasis` cell is truthy (true,
  *  a non-zero number, text other than empty / `0` / `false`). */
 export function rowEmphasized(viz: VizConfig, columns: string[], row: SqlCell[]): boolean {
-  const v = cellOf(columns, row, viz.emphasis);
-  if (typeof v === "number") return v !== 0;
-  if (typeof v === "string") return v !== "" && v !== "0" && v.toLowerCase() !== "false";
-  return v === true;
+  return truthy(cellOf(columns, row, viz.emphasis) ?? null) || rowRevealed(viz, columns, row);
+}
+
+/** Whether `reveal`'s column is truthy on this row: it is marked as
+ *  `emphasis` marks a row, and brought into view when drawn. */
+export function rowRevealed(viz: VizConfig, columns: string[], row: SqlCell[]): boolean {
+  return truthy(cellOf(columns, row, viz.reveal) ?? null);
 }
 
 /** How far the row is indented: its `depth` cell as a whole number
@@ -448,7 +454,7 @@ export function markList(v: SqlCell | undefined): Mark[] | null {
  *  path) that break anywhere, so it is the column that gives way. */
 export type ColumnWrap = "nowrap" | "words" | "breakable";
 
-const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge", "marks"]);
+const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge", "marks", "lanes"]);
 const SHORT_VALUE = 20;
 const LONGEST_WORD = 24;
 
@@ -544,8 +550,9 @@ export function isDefaultValue(param: Pick<PageParam, "type" | "options" | "defa
   return text(value) === text(fallback);
 }
 
+/** Not null, 0, `""`, `"0"` or false (`"false"` in any case). */
 function truthy(value: SqlCell): boolean {
-  return value === true || (typeof value === "number" && value !== 0) || (typeof value === "string" && value !== "" && value !== "0" && value !== "false");
+  return value === true || (typeof value === "number" && value !== 0) || (typeof value === "string" && value !== "" && value !== "0" && value.toLowerCase() !== "false");
 }
 
 function text(value: SqlCell): string {

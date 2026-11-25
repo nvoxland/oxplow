@@ -26,8 +26,6 @@ Custom components (the sandboxed frame, protocol, and testing a component). Part
   context menu (it draws `.ox-menu`).
 - **Foundation's only custom component** is the hand-written
   `integrations`.
-- **Git History** includes Bundled's graph component as an alternate view
-  of the commit results. The same page supplies the history filters and data.
 
 A component can send an inline page to core with `showView`. Core draws
 its loaders and nodes below the frame, and **Save as Page** writes that
@@ -122,7 +120,17 @@ custom_components:
     bundle: components/burndown        # default components/<id>; holds index.html
     commands: [oxtask.task.move]
     sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions
+    size: content                      # optional: content (default) | fill
 ```
+
+`size` says how tall the frame is. `content`: as tall as the content the
+component draws (the client library reports its height), no border, the
+page scrolls. `fill`: the frame takes the page's height and the component
+scrolls itself (the Work board declares it). A run fills each `viz: custom`
+and each `component:` node with its component's `sizing` from the
+declaration (`size_components` in `custom_components.rs`), and a `fill`
+custom viz fills the page. A lone `content` custom viz does not.
+`v_custom_component.size` shows it.
 ```yaml
 # pages/burn.yaml
 title: Burndown
@@ -255,7 +263,10 @@ loader with `field: /loaders/<loader>/sql`. A null spec clears it. While a
 view shows, the frame sits at its content's height: the library posts
 `{ type: size, height }` (a message, not a request, from a
 `ResizeObserver` on its root; a component leaves `html` and `body` at
-`height: auto`). `setTitle`, `setActions` and `showView` are a
+`height: auto`). `component.reveal({ top, bottom })` (protocol 14; px from
+the component's top) asks the host to scroll what holds the frame so that
+part is in view: a sandboxed frame cannot scroll its page
+(`viz/revealInFrame.ts`). `setTitle`, `setActions` and `showView` are a
 whole-page component's. `openForm`, `signIn` and `cancelSignIn` are any
 host's that draws a slideover — a whole page and a component inside a
 page's layout, a settings section included (`viz/frameForms.tsx`,
@@ -341,7 +352,7 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   `form: { submit: {..} }` (the next form's values; without, it's closed);
   `expect: { visible, count: { <sel>: n }, text: { <sel>: text | {
   contains } }, title, actions: [ids], view_params, invoked: [{ command,
-  input, ok, result | refused }], navigated, confirmed, forms, shown }`,
+  input, ok, result | refused }], navigated, confirmed, forms, shown, revealed: [{ top, bottom }] }`,
   compared by the one rule and waited for (5 s). A finding names
   `steps[i]: ui[j]` and carries the frame's HTML (4 kB) and the errors
   the agent caught.
@@ -366,8 +377,8 @@ the host's contract names.
   the whole entry: all its params (`patchViewParams`) and its history
   state.
 - A **replacement** has the host page's view params that its target's
-  contract lists (`UiReplacement.view`, `v_replaceable.view`: Git
-  History's `q`, `author`, `branch` for the history graph). These are the
+  contract lists (`UiReplacement.view`, `v_replaceable.view`: the Work
+  page's `show`, `priority`, `q` for the board). These are the
   ones the core part it replaces reads, so the two leave the same
   address. Another key answers `INVALID` naming the contract.
 - A **`viz: custom` node** on a page has the page's non-resource params
@@ -435,7 +446,7 @@ is the reference; `viewParams` / `historyState` are null where the host
 gives no view). A failed request rejects with the host's `{ code,
 message }`. `init` carries `protocol` (`BRIDGE_PROTOCOL` in
 `componentBridge.ts`, `PROTOCOL` in the library — one number, bumped when
-a message's shape changes; now 13), and `connect` rejects a host that
+a message's shape changes; now 14), and `connect` rejects a host that
 speaks another. One app is one library version. `componentClient.test.ts`
 drives the served file against the real `createBridgeHost` and the real
 `init` (`initMessage`, which `CustomComponentViz` posts), so the two

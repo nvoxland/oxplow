@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { inFrame, open, shown, load } from "../../support/ui.js";
+import { open, shown, load } from "../../support/ui.js";
 
 // Oxplow's own pages are complete with every enhancement off: with only
 // oxplow-foundation on, a page shows its own content, and nothing another
@@ -57,15 +57,15 @@ test("oxplow's pages are complete with every enhancement off", async ({ page, da
   await load(page);
   const host = shown(page).getByTestId("page-host");
 
-  // The VCS pages: their own content. Git History's commits are its own
-  // graph's rows, in that component's frame.
+  // The VCS pages: their own content. Git History's commits are a table
+  // whose first column draws their lanes.
   await open(page, daemon, "oxplow:oxplow/page?page=git-history");
-  const graph = await inFrame(host);
-  await expect(graph.getByText("Merge side").first()).toBeVisible();
-  await expect(graph.getByText("Side work").first()).toBeVisible();
+  await expect(host.getByText("Merge side").first()).toBeVisible();
+  await expect(host.getByText("Side work").first()).toBeVisible();
+  await expect(host.getByTestId("viz-lanes").first()).toBeVisible();
   await nothingAdded(page);
 
-  await graph.getByText("Main work").first().click();
+  await host.getByText("Main work").first().click();
   const commit = shown(page).getByTestId("page-file");
   await expect(commit).toContainText("Main work");
   await expect(commit).toContainText("main.txt");

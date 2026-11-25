@@ -36065,6 +36065,58 @@
       "key": [
         "uri"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its `v_contribution.uri`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id, which a page's `component` node names."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What a person calls it; its id when it has no title."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what it is (`description:` in `custom_components:`); NULL when its declaration says nothing."
+        },
+        {
+          "name": "bundle",
+          "type": "TEXT",
+          "doc": "The folder in the extension that holds its code."
+        },
+        {
+          "name": "commands",
+          "type": "TEXT",
+          "doc": "The commands it may invoke, as a JSON array."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "`read` when it runs its own read-only SQL over the datasets; NULL otherwise."
+        },
+        {
+          "name": "size",
+          "type": "TEXT",
+          "doc": "How it sizes on a page (`size:`): `content`, as tall as what it draws, the page scrolling; `fill`, the page's height, scrolling itself. (v3)"
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "search_metric": {

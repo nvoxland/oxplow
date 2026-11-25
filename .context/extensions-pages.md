@@ -559,13 +559,22 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   filters and the links.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
-`tone`, `width`, `format`, `highlight`, `select`, `expand`, `when`.
+`tone`, `width`, `format`, `parents`, `highlight`, `select`, `expand`, `when`.
 
 - `when: <column>` on a `detail`'s column draws the fact only while that
   column of the row is truthy (the same rule as an action's `when`): a
   merge's second parent on a merge alone. A null value with no `when`
   reads "(none)".
 
+- `format: lanes` (`{ key: <id column>, format: lanes, parents: <column> }`,
+  `viz: table` only): draws, for each row, its part of the lanes of the
+  graph the rows form. The `parents` column of a row is a JSON array of
+  ids, first parent first. The rows are drawn in the order the loader
+  gives; each child must come before its parents (newest first). It is
+  refused with `group` or `depth`. `lanes` needs `parents`, and `parents`
+  needs `lanes`; `parents` must be a result column (`lanes_problem` in
+  `extensions.rs`; `lanes.ts`, `LaneCell.tsx`). An agent's page text
+  leaves the lanes column out.
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
   (kinds: `task`, `file`, `knowledge`, `commit`, `metric`, `request`,
   `page`, `diff-at`, `compare`). `page` opens any oxplow URI. `request`
@@ -609,7 +618,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   value), `items` (a JSON array of
   strings or `{text, hint?, uri?}`, drawn inline separated by " · ", the
   hint on hover, the uri a link; an agent reads `text (hint) · text`),
-  `source` (who caused the row, a JSON object `{kind, label, uri?}` with
+  `lanes` (a table only: the row's part of the lanes of the graph the rows
+  form, like `git log --graph`; see below), `source` (who caused the row, a JSON object `{kind, label, uri?}` with
   `kind` one of `agent`, `you`, `extension`, `page`: the `SourceChip`
   every Alerts row uses, its kind's icon and label, a link with a `uri`;
   an agent reads `agent in <label>`, `extension <label>`, `You`). It
@@ -644,7 +654,9 @@ more", which grows the panel, or, grown, opens the page its header opens. A
 group not named shows every row, and a list that caps its groups isn't cut
 at the panel's row cap. A page and an agent's read show every row
 (`capGroups`, `VizView.rows.test.tsx`); `emphasis` (`list` / `table` /
-`tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
+`tree`) highlights rows with a truthy value; `reveal: <column>` (`list` /
+`table`) marks the row whose column is truthy as `emphasis` does and
+scrolls it into view (nearest) when first drawn (`rowRevealed`); `depth` (`list` / `table`) is
 a whole number 0–8 that nests: in a full-width `list` a row followed by
 deeper rows is their parent, and the two are one raised panel (the kit's
 `ox-nest`, as the Work board's epics: the parent row its top line, with

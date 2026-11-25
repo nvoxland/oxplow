@@ -2350,7 +2350,7 @@ datasets:
     - { name: "page", type: "TEXT", doc: "The page it shows there (`<extension>/<slug>`)." }
     - { name: "description", type: "TEXT", doc: "What the mount does, in a sentence." }
 - name: custom_component
-  version: 2
+  version: 3
   key: [uri]
   description: "Each custom component an enabled extension draws with its own code (`custom_components:`), with what it may reach. Read live from the catalog."
   fields:
@@ -2362,6 +2362,7 @@ datasets:
     - { name: "bundle", type: "TEXT", doc: "The folder in the extension that holds its code." }
     - { name: "commands", type: "TEXT", doc: "The commands it may invoke, as a JSON array." }
     - { name: "sql", type: "TEXT", doc: "`read` when it runs its own read-only SQL over the datasets; NULL otherwise." }
+    - { name: "size", type: "TEXT", doc: "How it sizes on a page (`size:`): `content`, as tall as what it draws, the page scrolling; `fill`, the page's height, scrolling itself. (v3)" }
 - name: replacement
   version: 3
   key: [target, extension]

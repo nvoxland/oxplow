@@ -17,9 +17,9 @@ expect:
   loaders:
     graph:
       rows:
-        - { subject: Third, branches: '["main"]' }
-        - { subject: Second fix, tags: '["v1"]' }
-        - { subject: First, branches: '[]' }
+        - { subject: Third, refs: main, parents: '["bbb222"]' }
+        - { subject: Second fix, refs: v1, parents: '["aaa111"]' }
+        - { subject: First, refs: null, parents: '[]' }
 steps:
   - params: { stream_id: 1, q: fix }
     expect: { loaders: { history: { rows: [{ subject: Second fix, refs: v1 }] } } }

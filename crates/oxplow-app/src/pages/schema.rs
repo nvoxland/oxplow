@@ -566,6 +566,19 @@ impl Node {
         }
     }
 
+    /// Every node below it, `self` included, to change.
+    pub fn for_each_mut(&mut self, f: &mut impl FnMut(&mut Node)) {
+        f(self);
+        if let NodeKind::Stack { children }
+        | NodeKind::Grid { children }
+        | NodeKind::Switch { children, .. } = &mut self.kind
+        {
+            for c in children {
+                c.for_each_mut(f);
+            }
+        }
+    }
+
     pub fn children(&self) -> &[Node] {
         match &self.kind {
             NodeKind::Stack { children }
@@ -606,6 +619,10 @@ pub enum NodeKind {
         component: String,
         #[specta(type = Option<oxplow_domain::Json>)]
         props: Option<serde_json::Value>,
+        /// How it sizes, as its declaration's `size:` says: the run fills
+        /// it in. (`size` is a grid tile's.)
+        #[serde(default)]
+        sizing: crate::pages::spec::ComponentSize,
     },
     /// A named action point (`action_point: <id>`, `context:`): the
     /// commands that joined it, drawn by the shell as nothing, a button or
@@ -773,6 +790,8 @@ struct VizFile {
     group: Option<VizGroup>,
     #[serde(default)]
     emphasis: Option<String>,
+    #[serde(default)]
+    reveal: Option<String>,
     #[serde(default)]
     depth: Option<String>,
     #[serde(default)]
@@ -1803,6 +1822,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
             NodeKind::Component {
                 component: c.id,
                 props: c.props,
+                sizing: Default::default(),
             },
         )
     } else {
@@ -1879,10 +1899,12 @@ fn leaf_viz(
         custom: f.custom,
         group: f.group,
         emphasis: f.emphasis,
+        reveal: f.reveal,
         depth: f.depth,
         edge: f.edge,
         fills: f.viz.fills(),
         actions,
+        sizing: None,
         origin: ctx.origin.clone(),
     };
     // A custom viz's component is the extension's: checked where it loads.

@@ -118,7 +118,7 @@ dataset's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable (`ui.decorators` and
 `ref_kinds` (now `resources`) in P10, extensions-slots.md "Decorators" and "Resources"; `effects` and
 `custom_components` in P11, below and extensions-components.md "Custom components";
-a `ui.mounts` replacement with oxplow-bundled's history graph; `providers` once
+a `ui.mounts` replacement with oxplow-bundled's board; `providers` once
 the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11): a bundled extension acts with one. A bundled effect

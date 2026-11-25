@@ -227,8 +227,8 @@ commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (
 the dashboard finds the head commit by sha, not as the first row). Git
 History's own view is foundation's `git-history` page: the lane graph
-(its `history-graph` component, which runs the same walk and does the same
-`topoOrder`) while no filter is set, a table of the matches while one is; the
+(a table with a `lanes` column while no filter is set, its loader reading
+down to the revealed commit), a table of the matches while one is; the
 branch picker, compare list and new-stream form read `v_branch` /
 `v_tag`. `v_branch.stream_id` is the stream whose workspace has the
 branch checked out, read from that workspace's head at each refresh —

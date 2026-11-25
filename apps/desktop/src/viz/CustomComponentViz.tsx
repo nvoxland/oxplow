@@ -23,7 +23,6 @@ export function CustomComponentViz({
   onFailure,
   onReady,
   view = null,
-  fit = false,
   data,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
@@ -42,8 +41,6 @@ export function CustomComponentViz({
   /** Its host's view, where the host shares one (a replacement, a viz's
    *  own page); none in a tile or a slot. */
   view?: HostedView | null;
-  /** The frame is as tall as its content says: a section of a document. */
-  fit?: boolean;
   /** What it is fed (a page node's: every loader of its page); none: the
    *  viz's own rows. */
   data?: HostedData | null;
@@ -111,7 +108,7 @@ export function CustomComponentViz({
         onReady={onReady}
         view={view}
         formDeps={frameForms.forms}
-        fit={fit}
+        fit={run.config.sizing !== "fill"}
       />
       {frameForms.element}
     </div>

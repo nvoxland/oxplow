@@ -40,8 +40,10 @@ function titleOf(run: PageRun, at: RunNode): string | null {
 }
 
 /** The vizzes that take the page's height when they are all of it: a
- *  history list should not sit five rows tall in an empty page. */
-const FILLS_ALONE: ReadonlySet<string> = new Set(["table", "list", "tree", "custom"]);
+ *  history list should not sit five rows tall in an empty page. A custom
+ *  component isn't one: it fills only when it declares `size: fill` (the
+ *  run then marks its viz `fills`), else it is as tall as what it draws. */
+const FILLS_ALONE: ReadonlySet<string> = new Set(["table", "list", "tree"]);
 
 /** The one node the run shows as its page's body: its view, or the only
  *  child the run shows of a view that is a stack (a node's `when` keeps the
@@ -58,8 +60,8 @@ function isWholePage(run: PageRun, id: string): boolean {
 }
 
 /** Whether viz node `id` takes its page's height: its viz always does (a
- *  file, a terminal), or it is a table, list, tree or custom component that
- *  is the whole page. `PageTree` fills the node and `PageHost` the body
+ *  file, a terminal, a component that declares `size: fill`), or it is a
+ *  table, list or tree that is the whole page. `PageTree` fills the node and `PageHost` the body
  *  around it by this one rule. */
 export function vizFills(run: PageRun, id: string): boolean {
   const def = nodeById(run.page, id);

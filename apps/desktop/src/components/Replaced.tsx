@@ -10,8 +10,8 @@ import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
  * the person's choice, the only candidate, a bound target's provider) and
  * runs it; this draws that run (`children`, drawn as an embed) under a
  * badge naming the extension, its custom components sharing the host's
- * view params the target's contract lists (Git History's filters for the
- * history graph) and nothing else of the host's. One whose page couldn't
+ * view params the target's contract lists (the Work page's filters for the
+ * board) and nothing else of the host's. One whose page couldn't
  * run shows `fallback` — oxplow's own — and says why.
  */
 export function Replaced({

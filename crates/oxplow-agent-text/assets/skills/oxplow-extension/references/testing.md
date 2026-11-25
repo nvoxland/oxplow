@@ -180,7 +180,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      <nav-bar action id>`, `view_params` (the view params a component sets, and
      these, are the page's params for its next run, as the app's tab does), `given`, `confirm: false`, `form: {
      submit: {..} }`, and `expect: { visible, count, text, title, actions,
-     view_params, invoked, navigated, confirmed, forms, shown }` (waited for,
+     view_params, invoked, navigated, confirmed, forms, shown, revealed: [{ top, bottom }] }` (waited for,
      5 s). It drives the page's first component, or `node: <id>`; a
      component inside an embed, a slot mount or a replacement is
      `node: <embed node>/<node>` (or the first found when the page has

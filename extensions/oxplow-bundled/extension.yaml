@@ -902,6 +902,8 @@ custom_components:
     title: Board
     description: "The tasks as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
     bundle: dist/board
+    # Its columns scroll themselves: it takes the page's height.
+    size: fill
     commands: [oxplow.tasks.assign, oxplow.tasks.reorder]
     # Whichever store holds a card answers these: the board names no store's command.
     action_points: [oxplow/task.move, oxplow/task.edit, oxplow/task.unparent, oxplow/task.delete]

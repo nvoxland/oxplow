@@ -138,6 +138,63 @@ fn a_node_when_names_params_that_are_empty_or_not() {
     refuses("q", "`when` is `{ empty: [params] }`");
 }
 
+/// A `lanes` column draws a DAG's lanes from its row's id (`key`) and the
+/// column `parents` names; one needs the other. It draws the rows in the
+/// order given, so it is only for a `table` that keeps that order (no
+/// `group`, no `depth`).
+#[test]
+fn a_lanes_column_names_its_parents_on_a_table_in_order() {
+    let head = "title: T\nloaders:\n  q: { rows: [{ id: a, parents: '[]' }] }\n";
+    let ok = page(&format!(
+        "{head}view:\n  viz: table\n  from: q\n  columns:\n    - {{ key: id, format: lanes, parents: parents }}\n"
+    ))
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &ok.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.columns[0].parents.as_deref(), Some("parents"));
+    let refuses = |view: &str, says: &str| {
+        let why = refused(&format!("{head}view:\n{view}"));
+        assert!(why.contains(says), "{view}: {why}");
+    };
+    refuses(
+        "  viz: table\n  from: q\n  columns:\n    - { key: id, format: lanes }\n",
+        "column `id`: `format: lanes` needs `parents: <column>`",
+    );
+    refuses(
+        "  viz: table\n  from: q\n  columns:\n    - { key: id, parents: parents }\n",
+        "column `id`: `parents` is for a `format: lanes` column",
+    );
+    refuses(
+        "  viz: table\n  from: q\n  group: { by: id }\n  columns:\n    - { key: id, format: lanes, parents: parents }\n",
+        "`format: lanes` draws the rows in their order: not with `group` or `depth`",
+    );
+    refuses(
+        "  viz: board\n  from: q\n  columns:\n    - { key: id, format: lanes, parents: parents }\n",
+        "`format: lanes` is only for `table`, not `board`",
+    );
+}
+
+/// `reveal: <column>` marks the row whose column is truthy and brings it
+/// into view; it is for a `list` or `table`.
+#[test]
+fn reveal_names_a_column_on_a_list_or_table() {
+    let head = "title: T\nloaders:\n  q: { rows: [{ id: a, shown: 1 }] }\n";
+    let ok = page(&format!(
+        "{head}view: {{ viz: table, from: q, reveal: shown }}\n"
+    ))
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &ok.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.reveal.as_deref(), Some("shown"));
+    let why = refused(&format!("{head}view: {{ viz: tree, from: q, reveal: shown, tree: {{ id: id, parent: id, label: id }} }}\n"));
+    assert!(
+        why.contains("`reveal` is only for `list` and `table`, not `tree`"),
+        "{why}"
+    );
+}
+
 /// A loader's SQL is read with the one SQL tokenizer: an apostrophe in a
 /// comment doesn't hide the loaders and params after it, a word or
 /// `:param` in a comment or a string isn't read, and a quoted identifier

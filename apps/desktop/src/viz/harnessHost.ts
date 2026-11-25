@@ -144,6 +144,7 @@ export async function runHarness(
             setActions: record("actions"),
             setViewParams: record("viewParams"),
             setHistoryState: record("historyState"),
+            reveal: (top, bottom) => server.record("reveal", { top, bottom }),
           },
           fed,
           start.view,

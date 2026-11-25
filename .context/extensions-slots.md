@@ -161,7 +161,7 @@ several and no choice keeping oxplow's own, and for a bound target its
 provider's extension's. Settings → Integrations lists each replaced
 target with that choice (a `<select>`: Default, oxplow's own, each
 extension). Every target has a `label` a person reads, in the same table
-("board", "state control", "history graph"), carried on each
+("board", "list", "state control"), carried on each
 `UiReplacement`. A state control replacement lists the store's own
 stages, each with **Move Here** (the `oxplow/task.move` point with the
 stage id); oxplow's Move To stays beside it.

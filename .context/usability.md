@@ -494,8 +494,8 @@ markdown itself, nor edits it in a `<textarea>`.
   below the frame), never inside the frame. When it can't start, a muted
   line says so and the page's table shows.
 - A **custom page** (a page whose `view:` is one `component` node, `pages/PageComponent.tsx` `ComponentPage`)
-  keeps oxplow's nav bar; the frame fills only
-  the page body. Its title and actions are data the frame sends
+  keeps oxplow's nav bar; a `size: fill` frame fills only
+  the page body (the Work board), a `size: content` one is as tall as its content, with no border. Its title and actions are data the frame sends
   (`setTitle`, `setActions`) and core draws in the bar — never buttons of
   oxplow's look inside the frame for page-level actions. A form it asks
   for (`openForm`) is oxplow's tab modal, with Enter submitting and
@@ -1467,7 +1467,7 @@ or opening a page from it hides it; widening the window resets it (`NarrowRail`)
   dataset list, Settings → Data’s entities) says a thing's first sentence; the whole description is on the
   thing's own page (or in its expansion).
 
-- **A list, table, tree or custom component that is all of its page fills the page's height** (`railHas.ts`
+- **A list, table, tree or custom component that is all of its page fills the page's height** (a custom component fills only when it declares `size: fill`; a `content` one is as tall as what it draws and the page scrolls) (`railHas.ts`
   `vizFills`, `isWholePage`: the page's view, or the only node the run shows of a stack — a node's
   `when` keeps the others out), as a file or a diff does
   (`Viz::fills`). One among other nodes keeps its own height. `PageTree` fills the node and `PageHost`

@@ -74,11 +74,11 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // 12: `init` and `update` carry the page's data — each loader's rows by
 // name, its params and props — and `update` says which loaders changed; a
 // page shows an inline page under it (`showView`) in place of a viz spec.
-test("init carries the run, the data, params, props and tokens, at protocol 13", () => {
+test("init carries the run, the data, params, props and tokens, at protocol 14", () => {
   const r = { config: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: { n: 2 }, result: { columns: ["k"], rows: [[1]], truncated: false } } as unknown as VizRun;
   expect(initMessage(vizData(r), { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 13,
+    protocol: 14,
     run: r,
     data: { rows: { columns: ["k"], rows: [[1]], truncated: false } },
     params: { n: 2 },
@@ -95,7 +95,7 @@ test("a component shown as a page gets its page, its view and the page's data, a
   const data: HostedData = { run: null, data: { items: { columns: ["id"], rows: [["a"]], truncated: false } }, params: { from: null }, props: { size: 3 } };
   expect(initMessage(data, {}, page, view)).toEqual({
     type: "init",
-    protocol: 13,
+    protocol: 14,
     run: null,
     data: data.data,
     params: { from: null },
@@ -248,6 +248,28 @@ test("navigate opens the ref; a malformed request is answered with an error when
     { id: "b1", ok: false, error: { code: "BAD_REQUEST", message: "Not a request this host knows." } },
   ]);
   h.channel.port1.close();
+});
+
+// A component as tall as what it draws can't scroll the page itself (its
+// frame is sandboxed): it asks the host to bring a part of it into view.
+test("reveal asks the host to bring a part of the frame into view; a host that can't scroll does nothing", async () => {
+  expect(parseFrameMessage({ id: "r0", method: "reveal", top: 40, bottom: 76 })).toEqual({
+    type: "request",
+    request: { id: "r0", method: "reveal", top: 40, bottom: 76 },
+  });
+  expect(parseFrameMessage({ id: "r0", method: "reveal", top: 80, bottom: 40 })).toBeNull();
+  expect(parseFrameMessage({ id: "r0", method: "reveal", top: "a", bottom: 40 })).toBeNull();
+  const h = harness({ reveal: (top, bottom) => h.calls.push(["reveal", top, bottom]) });
+  h.send({ id: "r1", method: "reveal", top: 40, bottom: 76 });
+  await h.settle();
+  expect(h.calls).toEqual([["reveal", 40, 76]]);
+  expect(h.received).toEqual([{ id: "r1", ok: true, result: null }]);
+  h.channel.port1.close();
+  const none = harness();
+  none.send({ id: "r2", method: "reveal", top: 0, bottom: 10 });
+  await none.settle();
+  expect(none.received).toEqual([{ id: "r2", ok: true, result: null }]);
+  none.channel.port1.close();
 });
 
 test("ready is heard once; an update posts only what the frame hasn't seen, naming the loaders that changed", async () => {

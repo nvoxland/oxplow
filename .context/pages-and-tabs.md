@@ -891,7 +891,7 @@ margin; an embed or a slot takes its title from the page it shows):
   `operations` (with an `expand` into `alerts-operation`) and `extensions`
   nodes, with `embed`s of `alerts-deliveries` and `alerts-reactions`.
   `git-history` (params `stream_id`, `q`, `author`, `branch`, `head_sha`,
-  `reveal_sha`, `limit`): the `history-graph` component while no filter is
+  `reveal_sha`, `limit`): a `table` with a `lanes` column while no filter is
   set, a `table` of the matches while one is. `local-history` (params `stream_id`, `mode` `recent` |
   `by-commit`, and `all`, which lifts the caps — the rail's, so no "View
   all" step to go Back from): two `table`s. `uncommitted-changes` (param
@@ -1782,8 +1782,8 @@ pick) is the list's own (`useListNav`); only a pick is a selection, and
 **A component inside a page shares the page's view only where its host
 says which keys** (`viz/hostedView.ts`; `.context/extensions-components.md` "Whose
 view a component has"): a replacement the keys its target's contract
-lists (the history graph: Git History's `q`, `author`, `branch`, the
-same ones core's commit list reads), a page's own component all of
+lists (the board: the Work page's `show`, `priority`, `q`, the same
+ones oxplow's own board reads), a page's own component all of
 the page's params (`"all"`). Its history state is its own object in the entry
 (`component:<scope>`). A tile or a slot gives none.
 

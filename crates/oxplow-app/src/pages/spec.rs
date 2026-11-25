@@ -122,6 +122,29 @@ impl Viz {
     }
 }
 
+/// How a custom component sizes (`size:` in `custom_components:`).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ComponentSize {
+    /// As tall as what it draws: its frame grows with it and the page
+    /// scrolls.
+    #[default]
+    Content,
+    /// It takes the page's height and scrolls itself (a board's columns).
+    Fill,
+}
+
 /// A `custom` viz's component and the props it starts with.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -929,6 +952,10 @@ pub struct PageColumn {
     /// only on a merge. The same word, with the same rule, as an action's.
     #[serde(default)]
     pub when: Option<String>,
+    /// For `format: lanes`: the column of the same row holding its
+    /// parents' ids (a JSON array, first parent first).
+    #[serde(default)]
+    pub parents: Option<String>,
 }
 
 /// How a column's value reads in the UI. An agent reads the raw value.
@@ -971,6 +998,11 @@ pub enum ColumnFormat {
     /// a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
     /// agent reads them joined by spaces, a hint in parentheses.
     Marks,
+    /// The lanes of the graph the rows form, as `git log --graph` draws
+    /// them: the column's value is the row's id and `parents` names the
+    /// column of its parents' ids. For a `table`, whose rows are drawn in the
+    /// order given, each child before its parents. An agent reads no lanes.
+    Lanes,
     /// Who caused it (a JSON object `{ "kind": "agent" | "you" |
     /// "extension" | "page", "label": …, "uri"?: … }`): a small chip with
     /// the kind's icon, a link when it has a `uri` (an agent's thread, an
@@ -2320,6 +2352,9 @@ pub struct VizConfig {
     /// For `list` / `table` / `tree`: a column whose truthy value
     /// highlights the row.
     pub emphasis: Option<String>,
+    /// For `list` / `table`: a column whose truthy value marks the row, as
+    /// `emphasis` does, and brings it into view when it is drawn.
+    pub reveal: Option<String>,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
     /// For `list` / `table`: a column whose value is a tone (`danger`,
@@ -2333,6 +2368,11 @@ pub struct VizConfig {
     pub fills: bool,
     /// Commands the viz offers, as buttons or row actions (P6.B1).
     pub actions: Vec<PageAction>,
+    /// For `custom`: how its component sizes, as its declaration's `size:`
+    /// says; none on any other viz. The run fills it in
+    /// (`size_components`); a page doesn't write it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sizing: Option<ComponentSize>,
     /// Where it comes from: the file that runs and the source to edit.
     pub origin: PageProvenance,
 }
@@ -2486,6 +2526,7 @@ impl VizConfig {
             }
         }
         out.extend(self.emphasis.iter().map(|k| ("emphasis", k)));
+        out.extend(self.reveal.iter().map(|k| ("reveal", k)));
         out.extend(self.depth.iter().map(|k| ("depth", k)));
         out.extend(self.edge.iter().map(|k| ("edge", k)));
         out

@@ -1,11 +1,11 @@
-# With no filter the page is the graph of the loaded commits; with one set
-# it is oxplow's own table of the matches.
+# With no filter the page is the graph of the loaded commits, a table whose
+# first column draws their lanes; with one set it is the table of matches.
 given:
   - observe: { commit: { sha: aaaaaaa, at: "2026-01-01T00:00:00Z", author: ann, email: ann@x, subject: First work } }
   - observe: { commit: { sha: bbbbbbb, at: "2026-01-02T00:00:00Z", author: bob, email: bob@x, subject: Second work, parents: [aaaaaaa] } }
 when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: bbbbbbb } }
 expect:
-  nodes: [{ id: graph, viz: custom }]
+  nodes: [{ id: graph, viz: table }]
   loaders:
     graph: { rows: [{ sha: bbbbbbb }, { sha: aaaaaaa }] }
 steps:

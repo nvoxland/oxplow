@@ -22,6 +22,7 @@
 ///                 { id, method: "pageMemoryGet", key }       its own memory, for the person
 ///                 { id, method: "pageMemorySet", key, value } (null forgets it)
 ///                 { id, method: "showView", spec }           an inline page's YAML to draw under it (null clears; a page only)
+///                 { id, method: "reveal", top, bottom }      bring that part of it (px from its top) into view
 ///   host → frame  { type: "init", protocol, run, data, params, props, page, view, tokens }
 ///                 { type: "update", run, data, params, changed } its data changed
 ///                 { type: "action", id }                     a page action was pressed
@@ -79,8 +80,12 @@ import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from ".
 /// the values submitted. 12: a component is fed its page's data — `init`
 /// and `update` carry `data` (each loader's rows), `params` and `props`,
 /// `update` the loaders that `changed` — and a page shows an inline page
-/// under it (`showView`, its YAML) where it showed a viz spec.
-export const BRIDGE_PROTOCOL = 13;
+/// under it (`showView`, its YAML) where it showed a viz spec. 13: the host
+/// draws markdown for the frame as a tree (`markdown`), and `query` is gone.
+/// 14: a component asks the host to bring a part of it into view
+/// (`reveal`): one as tall as what it draws scrolls with the page, which its
+/// sandboxed frame can't scroll.
+export const BRIDGE_PROTOCOL = 14;
 
 /** One loader's rows as a component reads them (and what `showView`
  *  answers: the inline page's first loader's). */
@@ -179,6 +184,7 @@ export type BridgeRequest =
   | { id: string; method: "pageMemoryGet"; key: string }
   | { id: string; method: "pageMemorySet"; key: string; value: unknown }
   | { id: string; method: "showView"; spec: string | null }
+  | { id: string; method: "reveal"; top: number; bottom: number }
   | { id: string; method: "markdown"; text: string; inline: boolean };
 
 export type FrameMessage = { type: "ready" } | { type: "size"; height: number } | { type: "request"; request: BridgeRequest };
@@ -214,6 +220,11 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
         type: "request",
         request: { id: m.id, method: "navigate", uri: m.uri, newTab: m.newTab === true, replace: m.replace === true },
       };
+    case "reveal": {
+      const at = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+      if (!at(m.top) || !at(m.bottom) || m.bottom < m.top) return null;
+      return { type: "request", request: { id: m.id, method: "reveal", top: m.top, bottom: m.bottom } };
+    }
     case "markdown":
       if (typeof m.text !== "string" || (m.inline !== undefined && typeof m.inline !== "boolean")) return null;
       return { type: "request", request: { id: m.id, method: "markdown", text: m.text, inline: m.inline === true } };
@@ -391,6 +402,9 @@ export interface BridgeDeps {
   showView?(spec: string | null): Promise<ShownRows | null>;
   /** The frame's content height, as it changes. */
   size?(height: number): void;
+  /** Bring `[top, bottom]` (px from the frame's top) into view, scrolling
+   *  what holds the frame; a host that can't scroll leaves it be. */
+  reveal?(top: number, bottom: number): void;
 }
 
 /** Whether a component's `navigate` may open `ref`: one of oxplow's URIs,
@@ -478,6 +492,10 @@ export function createBridgeHost(
       case "navigate":
         if (deps.navigate(r.uri, { newTab: r.newTab, replace: r.replace })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
+        return;
+      case "reveal":
+        deps.reveal?.(r.top, r.bottom);
+        reply(r.id, null);
         return;
       case "markdown":
         try {

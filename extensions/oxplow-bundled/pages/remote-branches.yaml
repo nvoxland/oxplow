@@ -68,7 +68,7 @@ loaders:
              CASE WHEN local_branch IS NOT NULL THEN
                uri('oxplow/page', 'page', 'oxplow/branch-commits', 'base', local_branch,
                    'head', short_name, 'stream_id', :stream_id) END AS comparison_uri,
-             CASE WHEN a.head_sha IS NOT NULL THEN 'Open in History Graph' END AS graph_label,
+             CASE WHEN a.head_sha IS NOT NULL THEN 'Open in Git History' END AS graph_label,
              CASE WHEN a.head_sha IS NOT NULL THEN
                uri_view(uri('oxplow/page', 'page', 'oxplow/git-history',
                             'stream_id', :stream_id, 'head_sha', a.head_sha),

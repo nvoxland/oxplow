@@ -248,6 +248,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "bundle",
             "commands",
             "sql",
+            "size",
         ],
         "provider_instance" => &[
             "instance",
@@ -1484,6 +1485,7 @@ impl LiveSources {
                             text(c.bundle.clone()),
                             text(serde_json::to_string(&c.commands).unwrap_or_default()),
                             opt(c.sql.as_ref().map(wire_name)),
+                            text(wire_name(&c.size)),
                         ]);
                     }
                 }

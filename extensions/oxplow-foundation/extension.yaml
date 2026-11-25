@@ -9,10 +9,6 @@ engine: ">=0.7"
 permissions: [sql.read, files.read, ai.compute, agent.write]
 custom_components:
   # Settings → Integrations: hand-written, with no build step.
-  # Git History's commits as a graph of their lines of descent: hand-written, with no build step.
-  - id: history-graph
-    title: Git History graph
-    description: "The stream's commits as `git log --graph` draws them: a lane per line of descent, a dot per commit, its branches and tags."
   - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync], description: "The Settings area for the instances of external providers: adding one, signing in and checking it." }
 # What counts as a test or an analysis run: core matches these (and the
 # project's own `testing:` patterns) and names no tool itself.

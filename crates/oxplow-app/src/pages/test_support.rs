@@ -552,6 +552,24 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<crate::Services>) {
         ".oxplow/extensions/beta/pages/early.yaml",
         "title: Early\nloaders:\n  e: { sql: \"SELECT 0 AS e\" }\nview: { viz: number, from: e }\n",
     );
+    // A third with custom components: one that fills, one that grows.
+    write(
+        dir.path(),
+        ".oxplow/extensions/gamma/extension.yaml",
+        "manifest: 2\nname: gamma\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, size: fill }\n  - { id: chart }\n",
+    );
+    for id in ["board", "chart"] {
+        write(
+            dir.path(),
+            &format!(".oxplow/extensions/gamma/components/{id}/index.html"),
+            "<!doctype html>",
+        );
+    }
+    write(
+        dir.path(),
+        ".oxplow/extensions/gamma/pages/sized.yaml",
+        "title: Sized\nloaders:\n  r: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: board, title: Board, viz: custom, from: r, custom: { component: board } }\n    - { id: chart, title: Chart, viz: custom, from: r, custom: { component: chart } }\n    - { id: node, title: Node, component: { id: board } }\n",
+    );
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&svc).await;
     assert!(problems.is_empty(), "{problems:?}");

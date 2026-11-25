@@ -150,7 +150,7 @@ section above their subsections; Contents nests both levels.
 ### Grouping and styling rows
 
 `group: { by: <column> }` puts rows under a heading per value;
-`emphasis: <column>` highlights rows whose value is truthy; `depth:
+`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `depth:
 <column>` indents. A column's `icon: <column>` draws an icon named by that
 column's value, and `tone: <column>` colours the cell (`accent`, `success`,
 `warning`, `danger`, `muted`).
@@ -264,7 +264,14 @@ the commands it declares, and it is fed its page's data.
 custom_components:
   - id: burndown
     commands: [oxtask.task.move]    # commands it may run
+    size: content                   # content (default) or fill
 ```
+
+`size` is how tall the frame is. With `content` the frame is as tall as what
+the component draws (no border, the page scrolls). With `fill` the frame
+takes the page's height and the component scrolls itself. To scroll the page
+so a part of the component shows, call `component.reveal({ top, bottom })`
+(pixels from the component's top).
 
 ```yaml
 # pages/burndown.yaml
@@ -354,7 +361,7 @@ inside the frame.
 ### A custom page
 
 A component can also be a whole page: a page whose view is one `component`
-node. It fills the page under oxplow's own bar, which still draws the
+node. With `size: fill` it fills the page under oxplow's own bar, which still draws the
 title, back and forward, bookmarks and the page's actions.
 
 ```yaml
@@ -404,7 +411,7 @@ live, with Save as Page and Pin to Dashboard when it is one viz over one
 fails rejects `INVALID` with `field: "/loaders/<loader>/sql"`. A component is
 fed its page's data: `component.data` holds each loader's `{ columns,
 rows, truncated }` by name, `component.params` what they ran with, and
-`onUpdate(({ data, params, changed }) => …)` hears each change. While one shows, the frame takes its content's height:
+`onUpdate(({ data, params, changed }) => …)` hears each change. While one shows, the frame takes its content's height (`size: content`):
 leave `html` and `body` at `height: auto`. A page can also have a `rail:` node tree: oxplow
 draws it in the page's rail, and a row it picks sets the page's view
 param, which the component hears through `onViewParams`. Bundled's Work

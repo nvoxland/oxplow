@@ -71,7 +71,7 @@ view:
   loaders do not run. Each name must be a param of the page.
 - `{ markdown: "text" }`: static text. `{ component: { id, props } }`: one of
   the extension's custom components, fed the page's loaders
-  (`commands-and-forms.md`).
+  (`commands-and-forms.md`). Its size comes from the component's `size:`.
 
 ## `viz`
 
@@ -164,7 +164,9 @@ under the node's heading, above its viz: what a thing is, above its facts
   extension's settings (`commands-and-forms.md` "Editing your settings on
   a page").
 - `custom`: `custom: { component: <id>, props }`, a sandboxed component;
-  reach for it only when no built-in viz fits.
+  reach for it only when no built-in viz fits. Its size comes from the
+  component's `size:` in `custom_components:` (`content`, the default: as
+  tall as what it draws; `fill`: the page's height, the component scrolls).
 
 An inline page (`markdown-blocks.md`) may not use `form`, `approvals`,
 `terminal`, `editor`, `custom`, actions, components or slots.
@@ -204,7 +206,7 @@ its right-click menu where `failing` is set. A "Problems" line is one more
 ## Columns
 
 `columns: [{ key, label?, width?, format?, link?, select?, highlight?,
-expand?, icon?, tone?, unit?, when? }]` (a column the viz doesn't list still
+expand?, icon?, tone?, unit?, when?, parents? }]` (a column the viz doesn't list still
 exists for actions and links).
 
 - `width` is pixels; the rest share the space. `format`: `date`,
@@ -213,7 +215,7 @@ exists for actions and links).
   JSON array of numbers), `badge` (a pill in the column's `tone`),
   `markdown` (inline markdown on its line: emphasis, code and links, a
   wikilink by its title; a description's `first_sentence(body)`), `items`,
-  `marks` and `source` (below). It changes only what the person sees;
+  `marks`, `lanes` and `source` (below). It changes only what the person sees;
   agents read the raw values (but for `items`, `marks` and `source`).
 - `format: marks`: short marks drawn tight, each in its own colour, a JSON
   array of strings or `{ "text": ..., "tone"?: ..., "hint"?: ..., "gap"?: true }` (tone:
@@ -221,6 +223,12 @@ exists for actions and links).
   it starts a new group, a dot before it). For
   counts that read by colour: `4A 5M · +179 −175 · 2U`. An agent reads them joined
   by spaces.
+- `format: lanes`: `{ key: <id column>, format: lanes, parents: <column> }`
+  on a `table` draws each row's part of a graph, like `git log --graph`.
+  `parents` is a result column holding a JSON array of ids, first parent
+  first. The loader must give each child before its parents (newest
+  first). Not with `group` or `depth`. `lanes` needs `parents` and
+  `parents` needs `lanes`. An agent's page text leaves this column out.
 - `format: items`: the value is a JSON array of items, each a string or
   `{ "text": ..., "hint"?: ..., "uri"?: ... }`, drawn inline separated by
   " · " in a `detail` or `sections` fact, a `table` or `list` cell. `hint`
@@ -257,7 +265,8 @@ under a heading per value. On a `list` in a rail panel, `compact: { Ready: 2 }`
 shows that many of a group's rows, then "+N more" (it grows the panel), and
 `grown: { Ready: 10 }` does the same in the grown panel (there "+N more"
 opens the panel's page); a group not named shows all, and a page shows all; `emphasis: <column>` highlights rows whose value
-is truthy; `depth: <column>` nests (a full-width list draws a parent and
+is truthy; `reveal: <column>` (`list`, `table`) marks the row whose value is
+truthy the same way and scrolls it into view when first drawn; `depth: <column>` nests (a full-width list draws a parent and
 the deeper rows after it as one panel; a rail panel's list and a table
 indent); `edge: <column>` (a tone: `danger`,
 `warning`, `success`, `accent`, `muted`) draws a coloured bar down the row's

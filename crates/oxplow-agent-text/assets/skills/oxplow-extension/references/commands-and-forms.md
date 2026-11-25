@@ -82,7 +82,8 @@
   Settings → Extensions) is a working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
   component node renders: `{ id, title?, description?, bundle?: components/<id>,
-  commands: [names] }`. The bundle (an `index.html`
+  commands: [names], size?: content | fill }`. `size` is the frame's height: `content` (the default) is as tall as
+  what the component draws, the page scrolls; `fill` is the page's height, the component scrolls itself. The bundle (an `index.html`
   and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
   no storage, no token — and reaches oxplow only by asking the host to
   invoke one of its `commands` (a
@@ -99,7 +100,7 @@
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls
   `oxplow.connect().then((component) => …)` for `component.data` (each
-  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke`, `invokePoint` and `navigate`; it never
+  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke`, `invokePoint` and `navigate`; `component.reveal({ top, bottom })` (px from its top) scrolls the page so that part shows (the frame can't); it never
   fetches (a page loader feeds it). `$OXPLOW_BIN extension new
   component <name>` scaffolds a working one; `docs/guide/pages.md` has
   the reference; `dashboards.md` has an example. A component written in TypeScript or with a library is
