@@ -21,10 +21,29 @@
 /// `gen` a module at a time.
 macro_rules! tauri_adapters {
     (
-        ctx { $( $cname:literal => $ccore:path { $( $cfield:ident : $cfty:ty ),* $(,)? } ),* $(,)? }
+        req { $( $rname:ident => $rcore:path { $( $rfield:ident : $rfty:ty ),* $(,)? } -> $rret:ty ),* $(,)? }
         svc { $( $name:literal => $core:path { $( $field:ident : $fty:ty ),* $(,)? } ),* $(,)? }
         gen { $( $gname:ident => $gcore:path { $( $gfield:ident : $gfty:ty ),* $(,)? } -> $gret:ty ),* $(,)? }
     ) => {
+        $(
+            /// Generated from the command table in `oxplow-rpc`; the
+            /// implementation and its docs live on the core. A request
+            /// over Tauri IPC names no caller.
+            #[allow(clippy::too_many_arguments)]
+            #[tauri::command]
+            #[specta::specta]
+            pub async fn $rname(
+                state: tauri::State<'_, crate::AppState>,
+                plugin_runtime: tauri::State<'_, crate::PluginRuntimeState>,
+                $( $rfield : $rfty ),*
+            ) -> Result<$rret, crate::IpcError> {
+                let ctx = oxplow_rpc::RpcContext {
+                    services: state.inner().clone(),
+                    plugin_runtime: Some(plugin_runtime.inner().as_ref().clone()),
+                };
+                $rcore(&oxplow_rpc::RpcRequest { ctx: &ctx, caller: None } $(, $rfield )*).await
+            }
+        )*
         $(
             /// Generated from the command table in `oxplow-rpc`; the
             /// implementation and its docs live on the core.

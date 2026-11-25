@@ -123,17 +123,58 @@ pub struct Daemon {
 async fn ipc_handler(
     State(state): State<DaemonState>,
     AxumPath(name): AxumPath<String>,
+    headers: axum::http::HeaderMap,
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
+    let caller = match caller_from_headers(&headers) {
+        Ok(caller) => caller,
+        Err(message) => {
+            let envelope = oxplow_rpc::ipc_envelope(Err(oxplow_rpc::IpcError::invalid(message)));
+            return (StatusCode::OK, Json(envelope)).into_response();
+        }
+    };
     let args = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
     // A request the UI makes is one a person waits on: its database work
     // isn't held back by background work's (`oxplow_db::interactive`).
-    let result = oxplow_db::interactive(oxplow_rpc::dispatch(&name, args, &state.ctx)).await;
+    let result = oxplow_db::interactive(oxplow_rpc::dispatch_as(
+        &name,
+        args,
+        &state.ctx,
+        caller.as_ref(),
+    ))
+    .await;
     // Single source of truth for the `{status, data|error}` shape — the
     // Tauri path reaches the byte-identical envelope via typedError +
     // the shared IpcError. See oxplow_rpc::envelope.
     let envelope = oxplow_rpc::ipc_envelope(result);
     (StatusCode::OK, Json(envelope)).into_response()
+}
+
+/// Who a request comes from (`.context/remote-daemon.md` "Who is asking"):
+/// the `Oxplow-Device` and `Oxplow-Connection` headers, both or neither. A
+/// request with neither (a script with the token, a test) has no caller; one
+/// header alone, or an id of the wrong shape, is refused. Until a host stands
+/// in front of the daemon it trusts them: the UI token already says the
+/// request is the person's.
+fn caller_from_headers(
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<oxplow_domain::Caller>, String> {
+    let read = |name: &str| -> Result<Option<&str>, String> {
+        headers
+            .get(name)
+            .map(|v| v.to_str().map_err(|_| format!("{name} is not text")))
+            .transpose()
+    };
+    match (read("oxplow-device")?, read("oxplow-connection")?) {
+        (None, None) => Ok(None),
+        (Some(device), Some(connection)) => Ok(Some(oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::parse(device)
+                .map_err(|e| format!("Oxplow-Device: {e}"))?,
+            connection: oxplow_domain::ConnectionId::parse(connection)
+                .map_err(|e| format!("Oxplow-Connection: {e}"))?,
+        })),
+        _ => Err("Oxplow-Device and Oxplow-Connection come together".into()),
+    }
 }
 
 /// Liveness probe for tunnels/scripts (the renderer uses `/ipc/ping`).
@@ -699,6 +740,84 @@ mod tests {
 
     /// A stream's page loads its component from the stream's worktree: a
     /// version of its own, served from what that worktree held.
+    fn headers(pairs: &[(&str, &str)]) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        h
+    }
+
+    const DEVICE: &str = "dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427";
+    const CONNECTION: &str = "con-6fa459ea-ee8a-3ca4-894e-db77e160355e";
+
+    /// A request says who asks with two headers, both or neither: a request
+    /// with neither (a script, a test) has no caller.
+    #[test]
+    fn a_request_names_its_caller_in_two_headers() {
+        assert_eq!(caller_from_headers(&headers(&[])), Ok(None));
+        let caller = caller_from_headers(&headers(&[
+            ("oxplow-device", DEVICE),
+            ("oxplow-connection", CONNECTION),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(caller.device.as_str(), DEVICE);
+        assert_eq!(caller.connection.as_str(), CONNECTION);
+        for bad in [
+            vec![("oxplow-device", DEVICE)],
+            vec![("oxplow-connection", CONNECTION)],
+            vec![
+                ("oxplow-device", "dev-x"),
+                ("oxplow-connection", CONNECTION),
+            ],
+            vec![("oxplow-device", CONNECTION), ("oxplow-connection", DEVICE)],
+        ] {
+            assert!(caller_from_headers(&headers(&bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    /// A malformed caller is refused before any command runs.
+    #[tokio::test]
+    async fn ipc_refuses_a_malformed_caller() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let url = format!("http://{}/ipc/ping", daemon.bind_addr);
+        let ok: serde_json::Value = client()
+            .post(&url)
+            .header("Oxplow-Device", DEVICE)
+            .header("Oxplow-Connection", CONNECTION)
+            .json(&serde_json::Value::Null)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(ok["status"], "ok");
+        let refused: serde_json::Value = client()
+            .post(&url)
+            .header("Oxplow-Device", "dev-not-an-id")
+            .header("Oxplow-Connection", CONNECTION)
+            .json(&serde_json::Value::Null)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(refused["status"], "error", "{refused}");
+        assert!(
+            refused.to_string().contains("Oxplow-Device"),
+            "the error names the header: {refused}"
+        );
+    }
+
     #[tokio::test]
     async fn ipc_ping_returns_ok_envelope() {
         let (svc, _dir) = services().await;

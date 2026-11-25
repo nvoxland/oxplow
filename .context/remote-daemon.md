@@ -306,17 +306,39 @@ keeps the two one value.
 
 ## Dispatch context
 
-`dispatch` takes an `RpcContext { services, plugin_runtime }`
-(`crates/oxplow-rpc/src/lib.rs`; derefs to `Services`). The
-`rpc_dispatch!` registry has two sections: `svc { … }` cores receive
-`&Services` (the ~180 common commands) and `ctx { … }` cores receive
-`&RpcContext` (today just `open_terminal_session`, whose agent path
-reads `plugin_runtime` — the control-plane hook/MCP URLs + token).
-Both hosts populate it from their own control plane: the Tauri
-wrapper from the managed `PluginRuntimeState`, the daemon in
-`main.rs` from its `ControlPlane` handle. A host that passes
-`plugin_runtime: None` degrades cleanly — plain shell terminals
-work, agent spawn returns INVALID.
+`dispatch_as(name, args, ctx, caller)` runs a command
+(`crates/oxplow-rpc/src/lib.rs`); `dispatch(name, args, ctx)` is the same
+with no caller. `RpcContext { services, plugin_runtime }` is one value shared
+by every request (it derefs to `Services`). The `rpc_dispatch!` registry has
+these sections: `svc { … }` and `gen { … }` cores receive `&Services` (nearly
+every command), and `req { … }` cores receive `&RpcRequest { ctx, caller }`,
+for commands that need who asks or the agent spawn's `plugin_runtime`
+(`open_terminal_session`, `restart_agent_terminal`). `req` rows carry their
+return type, as `gen` rows do; the Tauri side generates their adapters too
+(`oxplow-tauri-ipc/src/commands/generated.rs`), with no caller.
+Both hosts populate `plugin_runtime` from their own control plane: the Tauri
+wrapper from the managed `PluginRuntimeState`, the daemon in `main.rs` from
+its `ControlPlane` handle. A host that passes `plugin_runtime: None` degrades
+cleanly — plain shell terminals work, agent spawn returns INVALID.
+
+## Who is asking
+
+A request names its caller (`oxplow_domain::Caller`): the person's **device**
+(`dev-<uuid>`: the Mac app, all its windows; or a paired browser on one host
+address) and the **connection** (`con-<uuid>`: one page load of one project's
+app, across its socket's reconnects). The client makes both ids;
+`oxplow_domain::client` checks their shape before they reach a row or a log.
+
+- `POST /ipc/:name` carries them as the `Oxplow-Device` and
+  `Oxplow-Connection` headers, both or neither (`caller_from_headers`,
+  `crates/oxplow-daemon/src/lib.rs`). Neither: no caller (a script with the
+  token, a test). One alone, or an id of the wrong shape: refused as INVALID
+  before any command runs.
+- Until a host stands in front of the daemon, the daemon trusts them: the UI
+  token already says the request is the person's. With the host, the host
+  sets them from the device's own token.
+- A request with no caller reads per-device state as its defaults and may
+  not write it.
 
 ## Known v1 gaps
 

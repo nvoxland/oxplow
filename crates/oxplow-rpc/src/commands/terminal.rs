@@ -21,7 +21,7 @@ use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{AgentSessionId, Stream, StreamId, Thread, ThreadId};
 
 use crate::error::IpcError;
-use crate::RpcContext;
+use crate::{RpcContext, RpcRequest};
 
 /// Whether `session` has a terminal oxplow may start: it is open.
 fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
@@ -138,7 +138,7 @@ pub(crate) fn terminal_cwd(worktree: &str, dir: Option<&str>) -> std::path::Path
 /// and a re-attach replays its buffer. The URI is the key — opening it
 /// again, from another window or a browser client, resumes the one process.
 pub async fn open_terminal_session(
-    ctx: &RpcContext,
+    ctx: &RpcRequest<'_>,
     uri: String,
     cols: u16,
     rows: u16,
@@ -187,7 +187,7 @@ pub async fn open_terminal_session(
 /// Replace a terminal process without closing the agent session or
 /// changing its conversation binding. The ordinary launch resolves the
 /// harness executable again and, for Codex, attaches to the same thread.
-pub async fn restart_agent_terminal(ctx: &RpcContext, uri: String) -> Result<(), IpcError> {
+pub async fn restart_agent_terminal(ctx: &RpcRequest<'_>, uri: String) -> Result<(), IpcError> {
     let Target::AgentSession(id) = target_of(&uri)? else {
         return Err(IpcError::invalid(
             "restart requires an agent session terminal",

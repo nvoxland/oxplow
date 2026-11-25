@@ -65,14 +65,34 @@ impl std::ops::Deref for RpcContext {
     }
 }
 
+/// One request: the shared context, and who asks. The caller is the
+/// person's device and the page load the request comes from
+/// (`oxplow_domain::Caller`); a request with none (an agent over MCP, a
+/// script with the token, a test) reads per-device state as its defaults and
+/// may not write it. One `RpcContext` serves every request, so the caller
+/// rides beside it, never in it.
+#[derive(Clone, Copy)]
+pub struct RpcRequest<'a> {
+    pub ctx: &'a RpcContext,
+    pub caller: Option<&'a oxplow_domain::Caller>,
+}
+
+impl std::ops::Deref for RpcRequest<'_> {
+    type Target = RpcContext;
+    fn deref(&self) -> &RpcContext {
+        self.ctx
+    }
+}
+
 /// Build the [`dispatch`] function from two sections of
 /// `"wire_name" => core_fn { field: Type, ... }` entries:
 ///
 /// - `svc { ... }` — the common case; the core's first parameter is
 ///   `&Services`.
-/// - `ctx { ... }` — commands that need more than the services (today:
-///   agent spawn, which reads `plugin_runtime`); the core's first
-///   parameter is `&RpcContext`.
+/// - `req { ... }` — commands that need more than the services: who asks
+///   (the caller) or the agent spawn's `plugin_runtime`; the core's first
+///   parameter is `&RpcRequest`, and each row carries its return type,
+///   as `gen` does.
 ///
 /// Each entry generates a match arm that deserializes the args object
 /// into a private camelCase struct, destructures it, and calls the
@@ -80,18 +100,31 @@ impl std::ops::Deref for RpcContext {
 #[macro_export]
 macro_rules! rpc_dispatch {
     (
-        ctx { $( $cname:literal => $ccore:path { $( $cfield:ident : $cfty:ty ),* $(,)? } ),* $(,)? }
+        req { $( $rname:ident => $rcore:path { $( $rfield:ident : $rfty:ty ),* $(,)? } -> $rret:ty ),* $(,)? }
         svc { $( $name:literal => $core:path { $( $field:ident : $fty:ty ),* $(,)? } ),* $(,)? }
         gen { $( $gname:ident => $gcore:path { $( $gfield:ident : $gfty:ty ),* $(,)? } -> $gret:ty ),* $(,)? }
     ) => {
-        /// Route a command by name to its core, deserializing `args`
-        /// (the renderer's camelCase invoke payload) and re-serializing
-        /// the result. An unknown name yields `NOT_FOUND`.
+        /// [`dispatch_as`] a request with no caller: a test, a script, an
+        /// agent's path that names no device.
         pub async fn dispatch(
             name: &str,
             args: serde_json::Value,
             ctx: &$crate::RpcContext,
         ) -> Result<serde_json::Value, $crate::IpcError> {
+            dispatch_as(name, args, ctx, None).await
+        }
+
+        /// Route a command by name to its core, deserializing `args`
+        /// (the renderer's camelCase invoke payload) and re-serializing
+        /// the result. `caller` is who asks (`req` rows read it). An
+        /// unknown name yields `NOT_FOUND`.
+        pub async fn dispatch_as(
+            name: &str,
+            args: serde_json::Value,
+            ctx: &$crate::RpcContext,
+            caller: Option<&::oxplow_domain::Caller>,
+        ) -> Result<serde_json::Value, $crate::IpcError> {
+            let request = $crate::RpcRequest { ctx, caller };
             // The renderer omits the body for no-arg commands; normalize
             // `null`/absent to an empty object so the (possibly empty)
             // Args struct still deserializes.
@@ -104,18 +137,18 @@ macro_rules! rpc_dispatch {
             // (`IpcError::command_run_id`), so the window's record links the run.
             let (out, audited) = ::oxplow_app::commands::tracking_failed_run(Box::pin(async move { match name {
                 $(
-                    $cname => {
+                    stringify!($rname) => {
                         #[derive(serde::Deserialize)]
                         #[serde(rename_all = "camelCase")]
                         struct Args {
-                            $( $cfield : $cfty ),*
+                            $( $rfield : $rfty ),*
                         }
-                        let Args { $( $cfield ),* } = serde_json::from_value(args).map_err(|e| {
+                        let Args { $( $rfield ),* } = serde_json::from_value(args).map_err(|e| {
                             $crate::IpcError::invalid(format!("bad args for {name}: {e}"))
                         })?;
                         // Boxed, like each arm: dispatch holds one arm's future at a
                         // time, so none may size the whole state machine.
-                        let out = Box::pin($ccore(ctx $(, $cfield )*)).await?;
+                        let out: $rret = Box::pin($rcore(&request $(, $rfield )*)).await?;
                         serde_json::to_value(out).map_err(|e| {
                             $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
                         })
@@ -170,7 +203,7 @@ macro_rules! rpc_dispatch {
         /// sync with the Tauri specta surface (a command that exists only
         /// as a Tauri adapter 404s under `POST /ipc/:name`).
         pub fn registered_command_names() -> &'static [&'static str] {
-            &[ $( $cname, )* $( $name, )* $( stringify!($gname), )* ]
+            &[ $( stringify!($rname), )* $( $name, )* $( stringify!($gname), )* ]
         }
     };
 }
@@ -188,10 +221,10 @@ macro_rules! rpc_dispatch {
 macro_rules! oxplow_command_table {
     ($callback:path) => {
         $callback! {
-            ctx {
+            req {
                 // terminal — the agent-spawn path needs plugin_runtime
-                "open_terminal_session" => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 },
-                "restart_agent_terminal" => $crate::commands::terminal::restart_agent_terminal { uri: String },
+                open_terminal_session => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 } -> ::oxplow_app::terminal_sessions::AttachResult,
+                restart_agent_terminal => $crate::commands::terminal::restart_agent_terminal { uri: String } -> (),
             }
             svc {
             }

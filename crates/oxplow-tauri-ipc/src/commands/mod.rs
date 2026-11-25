@@ -23,7 +23,6 @@ pub mod page_refs;
 pub mod page_visit;
 pub mod search;
 pub mod streams;
-pub mod terminal;
 pub mod threads;
 pub mod usage;
 pub mod webview;

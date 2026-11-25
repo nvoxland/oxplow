@@ -675,10 +675,16 @@ export const commands = {
 	 */
 	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
 	/**
-	 *  Open a renderer-attached terminal session: the agent CLI or a shell,
-	 *  run directly in a PTY, named by its URI (`oxplow_rpc::commands::terminal`).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	openTerminalSession: (uri: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { uri, cols, rows })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
 	restartAgentTerminal: (uri: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("restart_agent_terminal", { uri })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
