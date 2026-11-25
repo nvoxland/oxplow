@@ -15,33 +15,46 @@ pub mod devices;
 /// device's place among the connected ones, and its window's tab report.
 /// Only the connection's current socket lets them go when it closes: a page
 /// load keeps its connection across reconnects, so a replaced socket's late
-/// close must leave the window that took its place alone.
+/// close must leave the window that took its place alone. A new page load of
+/// the device takes over (`devices::ClientDevices::connected`): the one it
+/// replaces stops being shown to agents at once, and its socket is told to
+/// close ([`SocketLease::replaced`]).
 pub struct SocketLease {
     _runs: crate::pages::open_runs::PageClient,
     services: std::sync::Arc<crate::Services>,
     device: oxplow_domain::DeviceId,
     connection: oxplow_domain::ConnectionId,
-    socket: devices::Socket,
+    socket: devices::SocketHandle,
 }
 
 impl SocketLease {
-    /// `connection` of `descriptor`'s device opened a socket.
+    /// `connection` of `descriptor`'s device opened a socket; refused for a
+    /// page load another one of its device replaced.
     pub fn open(
         services: &std::sync::Arc<crate::Services>,
         descriptor: oxplow_domain::DeviceDescriptor,
         connection: oxplow_domain::ConnectionId,
-    ) -> Self {
+    ) -> Result<Self, devices::Replaced> {
         let device = descriptor.id.clone();
-        let socket = services
+        let opened = services
             .client_devices
-            .connected(descriptor, connection.clone());
-        Self {
+            .connected(descriptor, connection.clone())?;
+        if let Some(old) = &opened.replaced {
+            services.client_reports.forget(old);
+        }
+        Ok(Self {
             _runs: services.page_runs.connect_client(connection.as_str()),
             services: services.clone(),
             device,
             connection,
-            socket,
-        }
+            socket: opened.socket,
+        })
+    }
+
+    /// Resolves once another page load of the device takes over: the socket
+    /// then closes, saying it was replaced.
+    pub async fn replaced(&self) {
+        self.socket.replaced().await
     }
 }
 
@@ -50,7 +63,7 @@ impl Drop for SocketLease {
         if self
             .services
             .client_devices
-            .closed(&self.device, &self.connection, self.socket)
+            .closed(&self.device, &self.connection, self.socket.id())
         {
             self.services.client_reports.forget(&self.connection);
         }

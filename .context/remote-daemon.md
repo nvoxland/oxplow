@@ -359,7 +359,30 @@ headers on a WebSocket). The daemon checks them as it checks the headers and
 refuses a socket that names them wrongly; one with neither owns no page runs.
 While a socket is open its device is in `Services::client_devices`
 (`crates/oxplow-app/src/client_reports/devices.rs`, memory only), with the newest
-name and kind it gave; it leaves when its last connection closes.
+name and kind it gave; it leaves when its connection's socket closes.
+
+### One window per device
+
+A device keeps one page load per project: per-device state (its stream,
+its thread, its tabs) has one window to follow. The first socket of a new
+connection takes over its device, in the socket upgrade's callback (a failed
+upgrade replaces nothing; `client_reports::SocketLease::open`):
+
+- the connection it replaces is told: its socket closes with code 4001
+  ("replaced", `devices::REPLACED_CLOSE_CODE`), and its tab report goes at
+  once;
+- a replaced connection is refused from then on: `/ipc` answers `REPLACED`
+  (`IpcError::replaced`) and a new socket closes at once with 4001. A
+  replaced id never comes back.
+
+The page stops reconnecting on either (`transport.ts`: the `replaced`
+connection state, `socketCloseMeaning`, `isReplacedError`) and shows "oxplow is
+open in another tab" over everything (`components/ReplacedScreen.tsx`, in
+`window/WindowProviders.tsx`). Use it here loads the page again: a new
+connection, which takes the device back. A reconnect of the same page load is
+the same connection and replaces nothing. The Mac app is one device, with one
+window per project, so it never meets this. Two browsers, two profiles or two
+addresses of the host are separate devices.
 
 ## Known v1 gaps
 

@@ -133,6 +133,19 @@ async fn ipc_handler(
             return (StatusCode::OK, Json(envelope)).into_response();
         }
     };
+    // A page load another one of its device replaced may ask nothing more.
+    if let Some(caller) = &caller {
+        if state
+            .ctx
+            .services
+            .client_devices
+            .check(&caller.connection)
+            .is_err()
+        {
+            let envelope = oxplow_rpc::ipc_envelope(Err(oxplow_rpc::IpcError::replaced()));
+            return (StatusCode::OK, Json(envelope)).into_response();
+        }
+    }
     let args = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
     // A request the UI makes is one a person waits on: its database work
     // isn't held back by background work's (`oxplow_db::interactive`).
@@ -249,10 +262,40 @@ async fn events_ws(
     };
     let forwarders = subscribe(&state);
     let services = state.ctx.services.clone();
-    let owner = named.map(|(descriptor, connection)| {
-        oxplow_app::client_reports::SocketLease::open(&services, descriptor, connection)
-    });
-    ws.on_upgrade(move |socket| events_stream(socket, forwarders, services, owner))
+    // The page load takes over its device once the upgrade is done: a
+    // failed upgrade replaces nothing.
+    ws.on_upgrade(move |mut socket| async move {
+        let owner = match named
+            .map(|(descriptor, connection)| {
+                oxplow_app::client_reports::SocketLease::open(&services, descriptor, connection)
+            })
+            .transpose()
+        {
+            Ok(owner) => owner,
+            Err(_) => {
+                let _ = socket.send(replaced_close()).await;
+                return;
+            }
+        };
+        events_stream(socket, forwarders, services, owner).await
+    })
+}
+
+/// The close frame that tells a page its page load was replaced.
+fn replaced_close() -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code: oxplow_app::client_reports::devices::REPLACED_CLOSE_CODE,
+        reason: "replaced".into(),
+    }))
+}
+
+/// Resolves once `owner`'s page load is replaced; never for a socket that
+/// names no device.
+async fn replaced(owner: &Option<oxplow_app::client_reports::SocketLease>) {
+    match owner {
+        Some(owner) => owner.replaced().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// One channel's subscription, waiting for the socket's queue to forward
@@ -346,7 +389,7 @@ async fn events_stream(
     socket: WebSocket,
     subscriptions: [Forwarder; 3],
     services: std::sync::Arc<oxplow_app::Services>,
-    _owner: Option<oxplow_app::client_reports::SocketLease>,
+    owner: Option<oxplow_app::client_reports::SocketLease>,
 ) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
@@ -363,6 +406,10 @@ async fn events_stream(
                 }
                 None => break,
             },
+            () = replaced(&owner) => {
+                let _ = sink.send(replaced_close()).await;
+                break;
+            }
             msg = inbound.next() => match msg {
                 // Inbound traffic is terminal input, ping and close —
                 // commands go over /ipc. None/Close ends the stream.
@@ -1120,14 +1167,20 @@ mod tests {
             .unwrap();
         const ONE: &str = "con-11111111-1111-4111-8111-111111111111";
         const TWO: &str = "con-22222222-2222-4222-8222-222222222222";
-        let url = |connection| {
+        // Two devices: one device keeps one window per project.
+        const OTHER: &str = "dev-2b4e28ba-2fa1-11d2-883f-0016d3cca427";
+        let url = |device, connection| {
             format!(
-                "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={connection}&name=Mac&kind=desktop",
+                "ws://{}/events?token={UI_TOKEN}&device={device}&connection={connection}&name=Mac&kind=desktop",
                 daemon.bind_addr
             )
         };
-        let (mut one, _) = tokio_tungstenite::connect_async(url(ONE)).await.unwrap();
-        let (mut two, _) = tokio_tungstenite::connect_async(url(TWO)).await.unwrap();
+        let (mut one, _) = tokio_tungstenite::connect_async(url(DEVICE, ONE))
+            .await
+            .unwrap();
+        let (mut two, _) = tokio_tungstenite::connect_async(url(OTHER, TWO))
+            .await
+            .unwrap();
         let ctx = oxplow_rpc::RpcContext {
             services: svc.clone(),
             plugin_runtime: None,
@@ -1154,7 +1207,7 @@ mod tests {
             &oxplow_rpc::RpcRequest {
                 ctx: &ctx,
                 caller: Some(&oxplow_domain::Caller {
-                    device: oxplow_domain::DeviceId::parse(DEVICE).unwrap(),
+                    device: oxplow_domain::DeviceId::parse(OTHER).unwrap(),
                     connection: oxplow_domain::ConnectionId::parse(TWO).unwrap(),
                 }),
             },
@@ -1176,6 +1229,63 @@ mod tests {
         .expect("the disconnected window's runs are released");
         assert!(svc.page_runs.get(&second.run_id).is_some());
         two.close(None).await.unwrap();
+    }
+
+    /// A device keeps one page load: a new one takes over, the older one's
+    /// socket closes saying it was replaced, and the older one is refused
+    /// from then on, on `/ipc` and on a new socket.
+    #[tokio::test]
+    async fn a_new_page_load_of_a_device_replaces_the_older() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const OLD: &str = "con-11111111-1111-4111-8111-111111111111";
+        const NEW: &str = "con-22222222-2222-4222-8222-222222222222";
+        let url = |connection| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={connection}&name=Mac&kind=desktop",
+                daemon.bind_addr
+            )
+        };
+        let closed_replaced = |frame: Option<
+            Result<tokio_tungstenite::tungstenite::Message, _>,
+        >| {
+            matches!(
+                frame,
+                Some(Ok(tokio_tungstenite::tungstenite::Message::Close(Some(close))))
+                    if u16::from(close.code) == oxplow_app::client_reports::devices::REPLACED_CLOSE_CODE
+            )
+        };
+        let (mut old, _) = tokio_tungstenite::connect_async(url(OLD)).await.unwrap();
+        let (_new, _) = tokio_tungstenite::connect_async(url(NEW)).await.unwrap();
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), old.next())
+            .await
+            .expect("the older socket hears it was replaced");
+        assert!(
+            closed_replaced(frame),
+            "the older socket closes as replaced"
+        );
+
+        let ask = |connection: &'static str| {
+            client()
+                .post(format!("http://{}/ipc/list_streams", daemon.bind_addr))
+                .header("oxplow-device", DEVICE)
+                .header("oxplow-connection", connection)
+                .json(&serde_json::json!({}))
+                .send()
+        };
+        let refused: serde_json::Value = ask(OLD).await.unwrap().json().await.unwrap();
+        assert_eq!(refused["error"]["code"], "REPLACED", "{refused}");
+        let answered: serde_json::Value = ask(NEW).await.unwrap().json().await.unwrap();
+        assert_eq!(answered["status"], "ok", "{answered}");
+
+        let (mut again, _) = tokio_tungstenite::connect_async(url(OLD)).await.unwrap();
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), again.next())
+            .await
+            .expect("a replaced page load's new socket is refused");
+        assert!(closed_replaced(frame), "and never comes back");
     }
 
     /// A page load keeps its connection across reconnects, so its new socket

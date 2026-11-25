@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isReplacedError,
+  REPLACED_CLOSE_CODE,
+  socketCloseMeaning,
   invokeRoute,
   ipcRequest,
   listenRoute,
@@ -334,4 +337,19 @@ describe("filesLocalFrom", () => {
   test("the launcher's projects are on this machine", () => {
     expect(filesLocalFrom({ shell: true, kind: "launcher", stored: null, injected: null })).toBe(true);
   });
+});
+
+// A socket the daemon closes as replaced (another page load of this device
+// took over) is not a drop: the window stops and says so. A refused token
+// stays refused; anything else is a drop to retry.
+test("what a socket's close means", () => {
+  expect(socketCloseMeaning(REPLACED_CLOSE_CODE, false)).toBe("replaced");
+  expect(socketCloseMeaning(1006, false)).toBe("retry");
+  expect(socketCloseMeaning(1006, true)).toBe("refused");
+});
+
+test("a REPLACED answer is the replaced page load's", () => {
+  expect(isReplacedError({ code: "REPLACED", message: "replaced" })).toBe(true);
+  expect(isReplacedError({ code: "INVALID", message: "no" })).toBe(false);
+  expect(isReplacedError(null)).toBe(false);
 });

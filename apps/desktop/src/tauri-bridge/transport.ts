@@ -360,6 +360,8 @@ export async function invoke<T>(name: string, args?: Record<string, unknown>): P
     | { status: "ok"; data: T }
     | { status: "error"; error: unknown };
   if (envelope.status === "ok") return envelope.data;
+  // Another page load of this device took over: this window stops.
+  if (isReplacedError(envelope.error)) markReplaced();
   throw envelope.error;
 }
 
@@ -375,9 +377,45 @@ let reconnectDelayMs = 500;
 /// Remote connection lifecycle, for the reconnect banner. "up" fires
 /// on every successful (re)connect; "down" on every drop; "refused" once,
 /// when the daemon refuses this window's token — after which the
-/// socket isn't opened or retried, since no retry fixes a wrong token.
+/// socket isn't opened or retried, since no retry fixes a wrong token;
+/// "replaced" once, when another page load of this device took over (the
+/// daemon keeps one per device, `client_reports::devices`) — after which
+/// the socket isn't opened or retried either.
 /// Local mode never fires any.
-export type RemoteConnectionState = "up" | "down" | "refused";
+export type RemoteConnectionState = "up" | "down" | "refused" | "replaced";
+
+/// The close code the daemon gives a replaced page load's socket
+/// (`client_reports::devices::REPLACED_CLOSE_CODE`).
+export const REPLACED_CLOSE_CODE = 4001;
+
+/// What a socket's close means: this page load was replaced, the daemon
+/// refused the token, or a drop to wait out and retry. Pure; exported for
+/// tests.
+export function socketCloseMeaning(code: number, tokenRefused: boolean): "replaced" | "refused" | "retry" {
+  if (code === REPLACED_CLOSE_CODE) return "replaced";
+  if (tokenRefused) return "refused";
+  return "retry";
+}
+
+/// Whether a call's error says this page load was replaced.
+export function isReplacedError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "REPLACED";
+}
+
+let replaced = false;
+
+/// Whether another page load of this device took over: this window asks
+/// nothing more until it is loaded again.
+export function isReplaced(): boolean {
+  return replaced;
+}
+
+function markReplaced(): void {
+  if (replaced) return;
+  replaced = true;
+  socket?.close();
+  notifyConnectionState("replaced");
+}
 
 /// What a call says when the daemon refused this window's token.
 export const TOKEN_REFUSED =
@@ -455,7 +493,7 @@ export function handleSocketOpen(): void {
 }
 
 function ensureSocket(): void {
-  if (remoteBase === null || socket !== null || tokenRefused) return;
+  if (remoteBase === null || socket !== null || tokenRefused || replaced) return;
   // Browsers can't set headers on a WebSocket; the token rides the query.
   const wsUrl = eventsUrl(remoteBase, remoteToken, getDevice(), getUiClientId());
   const ws = new WebSocket(wsUrl);
@@ -481,11 +519,17 @@ function ensureSocket(): void {
     flushFrames(ws, waitingFrames);
     handleSocketOpen();
   };
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     socket = null;
     waitingFrames.length = 0;
-    // A refused token isn't a drop: nothing to wait out or retry.
-    if (tokenRefused) return;
+    // A refused token or a replaced page load isn't a drop: nothing to
+    // wait out or retry.
+    const meaning = socketCloseMeaning(event.code, tokenRefused);
+    if (meaning === "replaced") {
+      markReplaced();
+      return;
+    }
+    if (meaning === "refused" || replaced) return;
     notifyConnectionState("down");
     // Backoff reconnect; the RemoteConnectionBanner drives the
     // user-facing state off the notifications above.

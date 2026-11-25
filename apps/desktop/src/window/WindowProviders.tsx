@@ -3,6 +3,7 @@ import { useAlerts } from "../components/Alerts/useAlerts.js";
 import { useAlertToasts } from "../components/Alerts/useAlertToasts.js";
 import { PanelLayoutProvider } from "../components/Panels/PanelLayoutContext.js";
 import { PanelRunsProvider } from "../components/Panels/PanelRunsContext.js";
+import { ReplacedScreen } from "../components/ReplacedScreen.js";
 import { LiveOriginResolver } from "../tabs/liveOrigin.js";
 import { current as currentEntry, type OriginItem, type Session } from "../tabs/session.js";
 
@@ -22,7 +23,8 @@ export interface WindowProvidersProps {
 /** What every shell's window sits in: one owner of every extension panel's
  *  runs (read by the rail, the status bar's bell and the Alerts page), the
  *  viewer's left-nav layout, the live origins of the shown thread's tabs,
- *  and a toast as each new thing needs the person. */
+ *  a toast as each new thing needs the person, and the screen that says
+ *  another page load of this device took over. */
 export function WindowProviders({ streamId, threadId, session, onLiveItems, onReviewAlerts, children }: WindowProvidersProps) {
   return (
     <PanelRunsProvider streamId={streamId} threadId={threadId}>
@@ -40,6 +42,7 @@ export function WindowProviders({ streamId, threadId, session, onLiveItems, onRe
         })}
         <AlertToasts onReview={onReviewAlerts} />
         {children}
+        <ReplacedScreen />
       </PanelLayoutProvider>
     </PanelRunsProvider>
   );
