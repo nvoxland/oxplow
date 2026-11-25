@@ -206,7 +206,7 @@ its right-click menu where `failing` is set. A "Problems" line is one more
 ## Columns
 
 `columns: [{ key, label?, width?, format?, link?, select?, highlight?,
-expand?, icon?, tone?, unit?, when?, parents? }]` (a column the viz doesn't list still
+expand?, icon?, tone?, badges?, unit?, when?, parents? }]` (a column the viz doesn't list still
 exists for actions and links).
 
 - `width` is pixels; the rest share the space. `format`: `date`,
@@ -226,9 +226,14 @@ exists for actions and links).
 - `format: lanes`: `{ key: <id column>, format: lanes, parents: <column> }`
   on a `table` draws each row's part of a graph, like `git log --graph`.
   `parents` is a result column holding a JSON array of ids, first parent
-  first. The loader must give each child before its parents (newest
-  first). Not with `group` or `depth`. `lanes` needs `parents` and
+  first. The table draws each child before its parents, otherwise in the
+  loader's order (newest first). Not with `group` or `depth`. `lanes` needs `parents` and
   `parents` needs `lanes`. An agent's page text leaves this column out.
+- `badges: <column>`: that column's labels as pills before the cell's text, each in its tone (default accent)
+  (a commit's branches and tags). Its value is a JSON array of strings or
+  `{ "text": ..., "tone"?: ..., "hint"?: ... }`; build it in SQL with
+  `json_group_array(name)`. Leave the badges column out of `columns`. An
+  agent reads it as a column of its own, after this one.
 - `format: items`: the value is a JSON array of items, each a string or
   `{ "text": ..., "hint"?: ..., "uri"?: ... }`, drawn inline separated by
   " · " in a `detail` or `sections` fact, a `table` or `list` cell. `hint`
@@ -266,7 +271,10 @@ shows that many of a group's rows, then "+N more" (it grows the panel), and
 `grown: { Ready: 10 }` does the same in the grown panel (there "+N more"
 opens the panel's page); a group not named shows all, and a page shows all; `emphasis: <column>` highlights rows whose value
 is truthy; `reveal: <column>` (`list`, `table`) marks the row whose value is
-truthy the same way and scrolls it into view when first drawn; `depth: <column>` nests (a full-width list draws a parent and
+truthy the same way and scrolls it into view when first drawn;
+`single_line: true` (`table`) keeps each row on one line, a long cell cut
+with "…" (its whole text on hover): for a log-like table of long
+subjects; `depth: <column>` nests (a full-width list draws a parent and
 the deeper rows after it as one panel; a rail panel's list and a table
 indent); `edge: <column>` (a tone: `danger`,
 `warning`, `success`, `accent`, `muted`) draws a coloured bar down the row's

@@ -559,7 +559,15 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   filters and the links.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
-`tone`, `width`, `format`, `parents`, `highlight`, `select`, `expand`, `when`.
+`tone`, `badges`, `width`, `format`, `parents`, `highlight`, `select`, `expand`, `when`.
+
+- `badges: <column>` draws that column's labels as pills before the cell's
+  text (a commit's branches and tags, as `git log` puts `(main)` first), each
+  outlined and tinted in its `tone` (the accent when it names none). The value is a JSON array, as
+  `marks` reads it: each element a string or `{ "text", "tone"?, "hint"? }`.
+  The column must be in the result (`viz_column_problems`). An agent's page
+  text reads it as a column of its own, after this one, joined by spaces
+  (`viz_text.rs` `shown`/`value`).
 
 - `when: <column>` on a `detail`'s column draws the fact only while that
   column of the row is truthy (the same rule as an action's `when`): a
@@ -569,8 +577,10 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - `format: lanes` (`{ key: <id column>, format: lanes, parents: <column> }`,
   `viz: table` only): draws, for each row, its part of the lanes of the
   graph the rows form. The `parents` column of a row is a JSON array of
-  ids, first parent first. The rows are drawn in the order the loader
-  gives; each child must come before its parents (newest first). It is
+  ids, first parent first. The rows are drawn each child before its
+  parents, otherwise in the loader's order, as `git log --date-order`
+  does (`childrenFirst`, `inLaneOrder` in `lanes.ts`): a loader ordering
+  by time can put a parent first, and its lane would never close. It is
   refused with `group` or `depth`. `lanes` needs `parents`, and `parents`
   needs `lanes`; `parents` must be a result column (`lanes_problem` in
   `extensions.rs`; `lanes.ts`, `LaneCell.tsx`). An agent's page text
@@ -656,7 +666,11 @@ at the panel's row cap. A page and an agent's read show every row
 (`capGroups`, `VizView.rows.test.tsx`); `emphasis` (`list` / `table` /
 `tree`) highlights rows with a truthy value; `reveal: <column>` (`list` /
 `table`) marks the row whose column is truthy as `emphasis` does and
-scrolls it into view (nearest) when first drawn (`rowRevealed`); `depth` (`list` / `table`) is
+scrolls it into view (nearest) when first drawn (`rowRevealed`);
+`single_line: true` (`table` only) keeps each row on one line: every cell
+is cut to its column with "…", its whole text on hover, and a cell's
+`badges` stay whole before its cut text (`ox-cell-text` in
+`oxplow-kit.css`; a cut column lays the table out fixed); `depth` (`list` / `table`) is
 a whole number 0–8 that nests: in a full-width `list` a row followed by
 deeper rows is their parent, and the two are one raised panel (the kit's
 `ox-nest`, as the Work board's epics: the parent row its top line, with

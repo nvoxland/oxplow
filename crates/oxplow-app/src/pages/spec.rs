@@ -926,6 +926,13 @@ pub struct PageColumn {
     /// `success`, `warning`, `danger` or `muted` (anything else is plain).
     #[serde(default)]
     pub tone: Option<String>,
+    /// A column of the same row holding short labels drawn as pills before
+    /// the cell's text (a commit's branches and tags): a JSON array, each
+    /// element a string or `{ "text": …, "tone"?: …, "hint"?: … }`, as
+    /// `marks` reads. An agent reads them as a column of their own, after
+    /// this one.
+    #[serde(default)]
+    pub badges: Option<String>,
     /// Its width in pixels; the columns without one share the rest.
     #[serde(default)]
     pub width: Option<u32>,
@@ -2355,6 +2362,11 @@ pub struct VizConfig {
     /// For `list` / `table`: a column whose truthy value marks the row, as
     /// `emphasis` does, and brings it into view when it is drawn.
     pub reveal: Option<String>,
+    /// For `table`: each row on one line, a cell too long for its column
+    /// cut with "…" (its whole text a hover away), so rows line up as a
+    /// log does.
+    #[serde(default)]
+    pub single_line: bool,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
     /// For `list` / `table`: a column whose value is a tone (`danger`,

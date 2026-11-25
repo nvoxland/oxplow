@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { laneLayout, parentsOf } from "./lanes.js";
+import { childrenFirst, laneLayout, parentsOf } from "./lanes.js";
 
 // `format: lanes`: each row's part of the lanes of the graph the rows form,
 // as `git log --graph` keeps them, in the order the rows are drawn.
@@ -49,4 +49,18 @@ test("a parents cell is a JSON array of ids; anything else is none", () => {
   expect(parentsOf(null)).toEqual([]);
   expect(parentsOf("not json")).toEqual([]);
   expect(parentsOf('["a",null]')).toEqual(["a"]);
+});
+
+test("rows draw children before parents, otherwise in their order", () => {
+  // b's parent a was committed later than b, so the loader put it first.
+  const order = childrenFirst([
+    { id: "a", parents: [] },
+    { id: "c", parents: ["b"] },
+    { id: "b", parents: ["a"] },
+    { id: "x", parents: [] },
+  ]);
+  expect(order).toEqual([1, 2, 0, 3]);
+  // In that order, one lane: no lane waits for a parent already drawn.
+  const nodes = [{ id: "a", parents: [] }, { id: "c", parents: ["b"] }, { id: "b", parents: ["a"] }, { id: "x", parents: [] }];
+  expect(laneLayout(order.map((i) => nodes[i]!)).width).toBe(1);
 });

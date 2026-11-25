@@ -457,6 +457,16 @@ fn value(run: &VizRun, r: &[SqlCell], i: usize) -> String {
         .get(i)
         .and_then(|key| run.config.columns.iter().find(|c| &c.key == key))
         .and_then(|c| c.format);
+    // A column's `badges` read as its marks.
+    let badges = run.result.columns.get(i).is_some_and(|key| {
+        run.config
+            .columns
+            .iter()
+            .any(|c| c.badges.as_ref() == Some(key))
+    });
+    if badges {
+        return marks(c);
+    }
     match format {
         Some(ColumnFormat::Items) => items(c),
         Some(ColumnFormat::Marks) => marks(c),
@@ -576,9 +586,16 @@ fn shown(run: &VizRun) -> Vec<(usize, String)> {
         run.config
             .columns
             .iter()
-            .filter_map(|c| {
-                let i = run.result.columns.iter().position(|k| k == &c.key)?;
-                Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
+            .flat_map(|c| {
+                let at = |key: &String| run.result.columns.iter().position(|k| k == key);
+                let Some(i) = at(&c.key) else {
+                    return vec![];
+                };
+                // Its `badges` read as a column of their own, after it.
+                let badges = c.badges.as_ref().and_then(|b| Some((at(b)?, b.clone())));
+                std::iter::once((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
+                    .chain(badges)
+                    .collect()
             })
             .collect()
     };
@@ -1361,6 +1378,7 @@ mod tests {
                 group: None,
                 emphasis: None,
                 reveal: None,
+                single_line: false,
                 depth: None,
                 edge: None,
                 fills: false,
@@ -1740,6 +1758,7 @@ mod tests {
             unit: None,
             icon: None,
             tone: None,
+            badges: None,
             width: None,
             format: None,
             highlight: None,
@@ -1815,6 +1834,7 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: None,
                     highlight: None,
@@ -1862,6 +1882,7 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: None,
                     highlight: None,
@@ -1898,6 +1919,7 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format,
                     highlight: None,
@@ -1938,6 +1960,7 @@ mod tests {
                         unit: None,
                         icon: None,
                         tone: None,
+                        badges: None,
                         width: None,
                         format,
                         highlight: None,
@@ -1961,6 +1984,42 @@ mod tests {
         assert!(!text.contains("abc1234"), "{text}");
     }
 
+    /// A column's `badges` are pills beside its text in the app; an agent
+    /// reads them as a column of their own, after it, as marks read.
+    #[test]
+    fn a_columns_badges_read_as_a_column_after_it() {
+        let r = with(
+            run(
+                Viz::Table,
+                None,
+                &["subject", "refs", "author"],
+                vec![vec![t("First work"), t(r#"["main","v1.0"]"#), t("Ann")]],
+            ),
+            |l| {
+                let col = |key: &str, badges: Option<&str>| crate::pages::spec::PageColumn {
+                    key: key.into(),
+                    label: None,
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    badges: badges.map(str::to_string),
+                    width: None,
+                    format: None,
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                    when: None,
+                    parents: None,
+                };
+                l.columns = vec![col("subject", Some("refs")), col("author", None)];
+            },
+        );
+        let text = render(&r, &Resolved::default());
+        assert!(text.contains("subject | refs | author"), "{text}");
+        assert!(text.contains("First work | main v1.0 | Ann"), "{text}");
+    }
+
     /// A `marks` column reads as its marks joined by spaces, a hint in
     /// parentheses (`1A (added) 2M`); its tones are only how it looks.
     #[test]
@@ -1976,6 +2035,7 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: Some(crate::pages::spec::ColumnFormat::Marks),
                     highlight: None,
@@ -2018,6 +2078,7 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: Some(crate::pages::spec::ColumnFormat::Source),
                     highlight: None,

@@ -79,3 +79,13 @@ test("reveal marks the row whose column is truthy and brings it into view", () =
     HTMLElement.prototype.scrollIntoView = original;
   }
 });
+
+test("a lanes table draws a parent the loader put first after its child, so no lane waits for it", () => {
+  const run = runOf();
+  // a (the root) was committed after b, so it comes first.
+  run.result.rows = [["a", "[]", "Main work", 0], ["b", '["a"]', "Side work", 0]];
+  const view = render(<VizView run={run} />);
+  const text = [...view.container.querySelectorAll("tbody tr")].map((tr) => tr.textContent);
+  expect(text).toEqual(["Side work", "Main work"]);
+  expect(new Set(view.getAllByTestId("viz-lanes").map((c) => c.getAttribute("width")))).toEqual(new Set(["30"]));
+});

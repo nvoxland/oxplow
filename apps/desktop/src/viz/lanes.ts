@@ -68,6 +68,55 @@ export function laneLayout(nodes: LaneNode[]): { rows: LaneRow[]; width: number 
   return { rows, width };
 }
 
+/** The order to draw `nodes` in (their indexes): each child before its
+ *  parents, otherwise in the order given, as `git log --date-order` keeps
+ *  commits. A loader orders by time, and a parent can be newer than its
+ *  child (a clock, a rebase); drawn first, its lane would wait for nothing. */
+export function childrenFirst(nodes: LaneNode[]): number[] {
+  const at = new Map(nodes.map((n, i) => [n.id, i]));
+  // How many of each node's children the rows hold and aren't drawn yet.
+  const waiting = nodes.map(() => 0);
+  for (const n of nodes) for (const p of new Set(n.parents)) {
+    const i = at.get(p);
+    if (i !== undefined) waiting[i]!++;
+  }
+  // The nodes whose children are drawn, lowest index last (popped first).
+  const ready = nodes.map((_, i) => i).filter((i) => waiting[i] === 0).reverse();
+  const order: number[] = [];
+  while (ready.length > 0) {
+    const i = ready.pop()!;
+    order.push(i);
+    for (const p of new Set(nodes[i]!.parents)) {
+      const j = at.get(p);
+      if (j === undefined || --waiting[j]! > 0) continue;
+      // Keep `ready` sorted high to low.
+      let k = ready.length;
+      while (k > 0 && ready[k - 1]! < j) k--;
+      ready.splice(k, 0, j);
+    }
+  }
+  // A cycle can't be drawn as lanes; its rows keep their order, last.
+  if (order.length < nodes.length) {
+    const drawn = new Set(order);
+    nodes.forEach((_, i) => drawn.has(i) || order.push(i));
+  }
+  return order;
+}
+
+/** `result` with its rows in `childrenFirst` order when `columns` has a
+ *  `format: lanes` column; otherwise `result` itself. */
+export function inLaneOrder<R extends { columns: string[]; rows: SqlCell[][] }>(
+  columns: readonly { key: string; format?: string | null; parents?: string | null }[],
+  result: R,
+): R {
+  const lanes = columns.find((c) => c.format === "lanes");
+  const id = lanes ? result.columns.indexOf(lanes.key) : -1;
+  if (!lanes || id === -1) return result;
+  const parents = lanes.parents ? result.columns.indexOf(lanes.parents) : -1;
+  const order = childrenFirst(result.rows.map((row) => ({ id: String(row[id] ?? ""), parents: parentsOf(parents === -1 ? undefined : row[parents]) })));
+  return order.every((i, k) => i === k) ? result : { ...result, rows: order.map((i) => result.rows[i]!) };
+}
+
 /** A `parents` cell: a JSON array of ids; anything else holds none. */
 export function parentsOf(cell: SqlCell | undefined): string[] {
   if (typeof cell !== "string" || cell === "") return [];

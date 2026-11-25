@@ -42,9 +42,11 @@ loaders:
       ),
       ordered AS (
         SELECT c.sha, c.subject, c.author, c.committed_at, c.parents,
-               (SELECT group_concat(name, ', ') FROM (
-                  SELECT b.name AS name FROM v_branch b WHERE b.kind = 'local' AND b.head_sha = c.sha
-                  UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = c.sha)) AS refs,
+               (SELECT CASE WHEN count(*) > 0 THEN json_group_array(json(ref)) END FROM (
+                  SELECT json_object('text', b.name, 'tone',
+                           CASE WHEN b.name = (SELECT branch FROM v_stream WHERE id = :stream_id) THEN 'success' ELSE 'accent' END) AS ref
+                  FROM v_branch b WHERE b.kind = 'local' AND b.head_sha = c.sha
+                  UNION ALL SELECT json_object('text', t.name, 'tone', 'warning') FROM v_tag t WHERE t.sha = c.sha)) AS refs,
                c.sha = :reveal_sha AS revealed,
                row_number() OVER (ORDER BY c.committed_at DESC, c.sha) AS n
         FROM v_commit c JOIN reach USING (sha)
@@ -69,9 +71,11 @@ loaders:
           JOIN v_commit c ON c.sha = on_branch.sha, json_each(c.parents) p
       )
       SELECT c.sha, c.subject, c.author, c.committed_at,
-             (SELECT group_concat(name, ', ') FROM (
-                SELECT b.name AS name FROM v_branch b WHERE b.kind = 'local' AND b.head_sha = c.sha
-                UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = c.sha)) AS refs
+             (SELECT CASE WHEN count(*) > 0 THEN json_group_array(json(ref)) END FROM (
+                SELECT json_object('text', b.name, 'tone',
+                         CASE WHEN b.name = (SELECT branch FROM v_stream WHERE id = :stream_id) THEN 'success' ELSE 'accent' END) AS ref
+                FROM v_branch b WHERE b.kind = 'local' AND b.head_sha = c.sha
+                UNION ALL SELECT json_object('text', t.name, 'tone', 'warning') FROM v_tag t WHERE t.sha = c.sha)) AS refs
       FROM v_commit c JOIN reach USING (sha)
       WHERE (:branch IS NULL OR :branch = '' OR c.sha IN (SELECT sha FROM on_branch))
         AND (:author = '' OR c.author = :author)
@@ -104,6 +108,7 @@ view:
     when: { empty: [q, author, branch] }
     from: graph
     viz: table
+    single_line: true
     reveal: revealed
     columns:
     - { key: sha, format: lanes, parents: parents }
@@ -112,9 +117,7 @@ view:
       link:
         kind: commit
         from: sha
-    - key: refs
-      label: Refs
-      width: 160
+      badges: refs
     - key: author
       label: Author
       width: 160
@@ -129,6 +132,7 @@ view:
     when: { not_empty: [q, author, branch] }
     from: history
     viz: table
+    single_line: true
     columns:
     - key: subject
       label: Commit
@@ -136,9 +140,7 @@ view:
         kind: commit
         from: sha
       highlight: q
-    - key: refs
-      label: Refs
-      width: 160
+      badges: refs
     - key: author
       label: Author
       width: 160

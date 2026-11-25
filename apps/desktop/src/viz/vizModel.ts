@@ -38,6 +38,9 @@ export interface DisplayColumn {
   iconIndex: number | null;
   /** Position of the column naming the cell's tone. */
   toneIndex: number | null;
+  /** Position of the column of labels drawn as pills after the cell's
+   *  text (`PageColumn.badges`). */
+  badgesIndex?: number | null;
   /** Its width in pixels, when the viz fixes one. */
   width: number | null;
   /** How its value reads (`PageColumn.format`). */
@@ -105,6 +108,7 @@ export function displayColumns(viz: VizConfig, resultColumns: string[]): Display
       unitIndex: at(c.unit),
       iconIndex: at(c.icon),
       toneIndex: at(c.tone),
+      ...(c.badges ? { badgesIndex: at(c.badges) } : {}),
       width: c.width ?? null,
       format: c.format ?? null,
       highlight: c.highlight ?? null,

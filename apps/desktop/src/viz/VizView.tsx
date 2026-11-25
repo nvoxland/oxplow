@@ -9,7 +9,7 @@ import { FormSourceContext, useFormSource, type FormSource } from "./formSource.
 import { useVizPages } from "./vizPages.js";
 import { VizActionRunnerContext, useVizActionRunner, type VizActionRunner } from "./vizActionRunner.js";
 import type { ActionOption, ActionOptions } from "./vizModel.js";
-import { laneLayout, parentsOf } from "./lanes.js";
+import { inLaneOrder, laneLayout, parentsOf } from "./lanes.js";
 import { LaneCell, lanesWidth } from "./LaneCell.js";
 import { TabModal } from "../components/TabModal.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
@@ -579,7 +579,9 @@ function RowsBody({
   const capsGroups = Object.keys(groupCaps).length > 0;
   // A tree caps the rows it shows, not the rows it has: folding frees rows.
   const capsShown = viz.viz === "tree" || capsGroups;
-  const limited = capsShown ? run.result : limitRows(run.result, maxRows);
+  // A `lanes` column draws each child before its parents.
+  const ordered = useMemo(() => inLaneOrder(run.config.columns, run.result), [run.config.columns, run.result]);
+  const limited = capsShown ? ordered : limitRows(ordered, maxRows);
   const past = run.result.rows.length - limited.rows.length;
   // The rows under a parent folded away (a `depth` viz: an epic's
   // children), kept in this step's history state like the groups'.
@@ -725,7 +727,10 @@ function RowsBody({
       text
     );
     const opens = c.expand ? expanded.has(expansionKey(c, row)) : false;
-    if (!tone && !icon && mine.length === 0 && !c.expand) return body;
+    // Its `badges`: another column's labels, as pills before the text, where
+    // a cut text can't hide them (as `git log` puts `(main)` first).
+    const pills = c.badgesIndex == null ? [] : (markList(row[c.badgesIndex] ?? null) ?? []);
+    if (!tone && !icon && mine.length === 0 && pills.length === 0 && !c.expand) return body;
     // The expand glyph leads the cell and stays on its first line: the
     // text wraps beside it, never under it.
     return (
@@ -745,7 +750,20 @@ function RowsBody({
           </button>
         ) : null}
         {icon ? <VizIcon spec={icon} tone={tone} /> : null}
-        <span style={{ minWidth: 0 }}>{body}</span>
+        {pills.map((p, i) => (
+          <span
+            key={`b${i}`}
+            data-testid="viz-cell-badge"
+            className="ox-badge ox-cell-badge"
+            title={p.hint}
+            style={{ color: toneColor(p.tone ?? "accent") ?? toneColor("accent")! }}
+          >
+            {p.text}
+          </span>
+        ))}
+        <span className="ox-cell-text" style={{ minWidth: 0 }}>
+          {body}
+        </span>
         {mine.map((b, i) => (
           <RefBadge key={i} label={b.label} tone="label" color={safeColor(b.color) ?? undefined} title={`from ${b.extension}`} />
         ))}
@@ -1362,6 +1380,7 @@ function Viz({
           rowMenu={rowMenu}
           view={rowsView}
           header={!viz.hideHeader}
+          singleLine={viz.singleLine}
           {...(viz.reveal ? { revealed: (row: SqlCell[]) => rowRevealed(viz, result.columns, row) } : {})}
         />
       );
@@ -2213,6 +2232,8 @@ interface RowsVizProps {
   header?: boolean;
   /** The row `reveal` names, brought into view when it is drawn. */
   revealed?: (row: SqlCell[]) => boolean;
+  /** A table's rows each on one line, a long cell cut (`single_line`). */
+  singleLine?: boolean;
 }
 
 /** The rows in drawing order, each with its index in the result (its
@@ -2368,7 +2389,7 @@ function BoardViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   );
 }
 
-function TableViz({ rows, cols, cell, rowMenu, view, header, revealed }: RowsVizProps) {
+function TableViz({ rows, cols, cell, rowMenu, view, header, revealed, singleLine = false }: RowsVizProps) {
   // Each row with its index in the result: its test id.
   type Row = [SqlCell[], number];
   // A `lanes` column: the graph the drawn rows form, in their order.
@@ -2404,6 +2425,8 @@ function TableViz({ rows, cols, cell, rowMenu, view, header, revealed }: RowsViz
           render: ([row]) => cell(row, c),
         },
   );
+  // One line per row: every cell cut to its column, its whole text on hover.
+  if (singleLine) for (const c of columns) Object.assign(c, { wrap: "nowrap", truncate: true });
   // The `reveal` row comes into view when it is first drawn.
   const tableRef = useRef<HTMLDivElement | null>(null);
   const revealedRow = revealed ? rows.find((row) => revealed(row)) : undefined;

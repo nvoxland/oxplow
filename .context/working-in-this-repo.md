@@ -312,7 +312,9 @@ the same filters (`bun run test:fast -p oxplow-git symlink`) and still
 writes `target/nextest/default/junit.xml`, so the red→green progression
 lands in the panel — it just skips coverage instrumentation, which is the
 slow part (~11s for the full suite vs milliseconds for one filtered test).
-`bun run test:fast:ts` is the frontend counterpart. Bare `cargo test` /
+`bun run test:fast:ts` is the frontend counterpart, and it takes files
+the same way (`bun run test:fast:ts src/viz/lanes.test.ts`, paths from
+`apps/desktop/`). Bare `cargo test` /
 `bun test` emit **no reports**, so the run shows only the command and none
 of the tests. The
 Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo

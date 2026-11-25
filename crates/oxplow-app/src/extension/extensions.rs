@@ -3874,6 +3874,9 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
             "`reveal` is only for `list` and `table`, not `{viz}`"
         ));
     }
+    if cfg.single_line && cfg.viz != Viz::Table {
+        return Some(format!("`single_line` is only for `table`, not `{viz}`"));
+    }
     lanes_problem(cfg, &viz)
 }
 
@@ -4982,6 +4985,7 @@ fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
         keys.extend(c.unit.iter());
         keys.extend(c.icon.iter());
         keys.extend(c.tone.iter());
+        keys.extend(c.badges.iter());
         keys.extend(c.parents.iter());
         if let Some(link) = c.link.as_ref() {
             keys.extend(link.from.iter());
@@ -5089,16 +5093,16 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
-    /// A `lanes` column's `parents` and a `reveal` column must be in the
-    /// loader's result, as any column a viz names.
+    /// A `lanes` column's `parents`, a column's `badges` and a `reveal`
+    /// column must be in the loader's result, as any column a viz names.
     #[test]
-    fn a_lanes_columns_parents_and_reveal_are_result_columns() {
+    fn a_lanes_columns_parents_badges_and_reveal_are_result_columns() {
         let page = crate::pages::schema::parse_page(
             "acme",
             "acme",
             "p",
             "pages/p.yaml",
-            "title: T\nloaders:\n  q: { rows: [{ id: a }] }\nview:\n  viz: table\n  from: q\n  reveal: shown\n  columns:\n    - { key: id, format: lanes, parents: parents }\n",
+            "title: T\nloaders:\n  q: { rows: [{ id: a }] }\nview:\n  viz: table\n  from: q\n  reveal: shown\n  columns:\n    - { key: id, format: lanes, parents: parents, badges: refs }\n",
             crate::pages::schema::PageKind::Page,
         )
         .unwrap();
@@ -5110,6 +5114,12 @@ mod tests {
             problems
                 .iter()
                 .any(|p| p.starts_with("column `parents` isn't in the query result")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("column `refs` isn't in the query result")),
             "{problems:?}"
         );
         assert!(
@@ -10014,6 +10024,9 @@ commands:
                 ("h", &viz_page("", "SELECT 1 AS g", "viz: table\ngroup: { by: g, compact: { Ready: 2 } }\n")),
                 // A coloured edge is a list's or a table's row.
                 ("i", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l", "viz: tree\ntree: { id: id, parent: p, label: l }\nedge: l\n")),
+                // One line per row is a table's: its cells cut to one line.
+                ("j", &viz_page("", "SELECT 1 AS id", "viz: list\nsingle_line: true\n")),
+                ("k", &viz_page("", "SELECT 1 AS id", "viz: table\nsingle_line: true\n")),
             ],
             "",
         );
@@ -10042,6 +10055,11 @@ commands:
         assert_eq!(a.columns[0].tone.as_deref(), Some("hue"));
         assert_eq!(a.actions[0].group.as_deref(), Some("Ready"));
         assert!(node(&ext, "t").is_some(), "a tree may emphasize");
+        assert!(
+            node(&ext, "k")
+                .expect("a single-line table loads")
+                .single_line
+        );
         for (slug, needle) in [
             ("b", "`group` is only for `list`, `table` and `board`"),
             ("c", "missing field `by`"),
@@ -10051,6 +10069,7 @@ commands:
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
             ("h", "`group.compact` and `group.grown` are only for `list`"),
             ("i", "`edge` is only for `list` and `table`"),
+            ("j", "`single_line` is only for `table`"),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(

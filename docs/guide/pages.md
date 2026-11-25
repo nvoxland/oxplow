@@ -150,10 +150,10 @@ section above their subsections; Contents nests both levels.
 ### Grouping and styling rows
 
 `group: { by: <column> }` puts rows under a heading per value;
-`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `depth:
+`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `single_line: true` (a table) keeps each row on one line and cuts a long cell with "…"; `depth:
 <column>` indents. A column's `icon: <column>` draws an icon named by that
 column's value, and `tone: <column>` colours the cell (`accent`, `success`,
-`warning`, `danger`, `muted`).
+`warning`, `danger`, `muted`). A column's `badges: <column>` draws that column's labels (a JSON array, such as a commit's branches and tags) as pills before the cell's text, each in its `tone`.
 
 ### Actions
 

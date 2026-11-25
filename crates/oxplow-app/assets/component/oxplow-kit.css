@@ -204,6 +204,11 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .monaco-editor .ox-code-mark { background: var(--accent-soft-bg); }
 .monaco-editor .ox-code-mark-margin { box-shadow: inset 3px 0 0 var(--accent); }
 .ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A column's `badges`: pills in their tone (the colour set on the pill),
+   outlined and tinted with it, so a branch or tag stands out in its row. */
+.ox-cell-badge { flex-shrink: 0; border-color: currentColor; background: color-mix(in srgb, currentColor 14%, transparent); font-weight: var(--weight-medium); line-height: var(--leading-tight); }
+/* A cut cell of parts (pills, then its text): the text is cut, the pills stay whole. */
+.ox-truncate .ox-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Document pages: a title, an intro, then sections. A section is a
    heading over a rule, no box (document style); sections stack apart. */

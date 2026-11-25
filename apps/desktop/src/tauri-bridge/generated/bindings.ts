@@ -5029,6 +5029,14 @@ export type PageColumn = {
 	 *  `success`, `warning`, `danger` or `muted` (anything else is plain).
 	 */
 	tone?: string | null,
+	/**
+	 *  A column of the same row holding short labels drawn as pills before
+	 *  the cell's text (a commit's branches and tags): a JSON array, each
+	 *  element a string or `{ "text": …, "tone"?: …, "hint"?: … }`, as
+	 *  `marks` reads. An agent reads them as a column of their own, after
+	 *  this one.
+	 */
+	badges?: string | null,
 	/**  Its width in pixels; the columns without one share the rest. */
 	width?: number | null,
 	/**
@@ -6867,6 +6875,12 @@ export type VizConfig_Deserialize = {
 	 *  `emphasis` does, and brings it into view when it is drawn.
 	 */
 	reveal: string | null,
+	/**
+	 *  For `table`: each row on one line, a cell too long for its column
+	 *  cut with "…" (its whole text a hover away), so rows line up as a
+	 *  log does.
+	 */
+	singleLine?: boolean,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
@@ -6951,6 +6965,12 @@ export type VizConfig_Serialize = {
 	 *  `emphasis` does, and brings it into view when it is drawn.
 	 */
 	reveal: string | null,
+	/**
+	 *  For `table`: each row on one line, a cell too long for its column
+	 *  cut with "…" (its whole text a hover away), so rows line up as a
+	 *  log does.
+	 */
+	singleLine: boolean,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
