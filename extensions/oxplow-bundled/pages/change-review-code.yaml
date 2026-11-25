@@ -1,10 +1,14 @@
 title: Code
 description: What a change did to the code's shape. Read it to see which functions grew, which public API moved and which blocks were copied.
-label: Code
+label: '{{row.tab}}'
 params:
 - name: change_id
   label: Change
 loaders:
+  name:
+    sql: |
+      -- The tab's name ({{row.tab}} in the label): this loader comes first.
+      SELECT 'Code · ' || name AS tab FROM v_oxplow_review_change_name WHERE change_id = CAST(:change_id AS INTEGER)
   functions:
     sql: |
       SELECT f.path, f.start_line AS line,

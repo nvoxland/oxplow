@@ -244,6 +244,13 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     (`v_oxplow_review_check`: "Done", "1 running", "1 failed", "1 off", "1 did
     not run", or "None ran") and which language packs are off for the files it changed (from
     `v_language`, with a link to turn each on).
+  - **The tabs name the change** (`review_change_name`,
+    `v_oxplow_review_change_name`): "Review · a1b2c3d Fix the parser", "Tests
+    · …", "Code · …", "Tests signals · …". A commit is its short sha and
+    subject, a request or a turn the first line of its prompt cut at a word
+    near 40 characters, the worktree's "uncommitted changes". Each page's
+    first loader, `name`, gives the `tab` its label reads, so two reviews
+    never share a tab name.
   - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),
     never the union itself: every row with the project's severity for its
     kind from the setting `review.signals` (`[{ signal, severity: high |

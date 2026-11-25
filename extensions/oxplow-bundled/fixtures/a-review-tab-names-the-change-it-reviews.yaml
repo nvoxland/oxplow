@@ -1,0 +1,37 @@
+# A review's tabs name the change they review, so two reviews never share
+# a tab name: a request by the first line of its prompt, cut at a word near
+# 40 characters, a commit by its short sha and subject.
+given:
+  - observe: { snapshot: { trigger: manual, files: [{ path: src/a.rs, hash: h0 }] } }
+  - observe:
+      turn:
+        prompt: "Make the review tab name the change it reviews\nso two reviews never share one"
+        tools:
+          - { name: Edit, kind: edit, paths: [src/a.rs], ok: true }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/a.rs, hash: h1 }] } }
+  - observe: { analyze: { kind: request, requestId: req1 } }
+  - observe: { turn: { prompt: add b, write: { path: src/b.rs, body: "fn b() {}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/b.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: Name the tab }, bind: commit }
+  - observe: { commit: { sha: $commit.rev, subject: Name the tab } }
+  - observe: { analyze: { kind: commit, sha: $commit.rev } }
+steps:
+  - when: { page: change-review, params: { change_id: 1 } }
+    expect: { label: "Review · Make the review tab name the change it…" }
+  - when: { page: change-review-tests, params: { change_id: 1 } }
+    expect: { label: "Tests · Make the review tab name the change it…" }
+  - when: { page: change-review-code, params: { change_id: 1 } }
+    expect: { label: "Code · Make the review tab name the change it…" }
+  - when: { page: change-review-signals, params: { change_id: 1, area: tests } }
+    expect: { label: "Tests signals · Make the review tab name the change it…" }
+  - when: { page: change-review-signals, params: { change_id: 1 } }
+    expect: { label: "Signals · Make the review tab name the change it…" }
+  # A commit is named by its first seven characters and its subject.
+  - when:
+      sql: |
+        SELECT c.kind, n.name = substr(c.target, 1, 7) || ' Name the tab' AS by_sha_and_subject
+        FROM v_oxplow_review_change_name n JOIN v_change c ON c.id = n.change_id
+        WHERE n.change_id = 2
+    expect:
+      rows:
+        - { kind: commit, by_sha_and_subject: 1 }

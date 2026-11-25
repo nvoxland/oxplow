@@ -238,6 +238,12 @@ datasets:
       - { name: why, type: "", doc: "Its size and how many places it repeats." }
       - { name: uri, type: "", doc: "NULL." }
       - { name: related, type: "", doc: "Every place it repeats, each a link to those lines." }
+  - name: review_change_name
+    version: 1
+    description: "What a change review's tabs call the change: a commit's short sha and subject, a request's or a turn's first prompt line (cut at a word near 40 characters, then `…`), `uncommitted changes` for the worktree's."
+    fields:
+      - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
+      - { name: name, type: TEXT, doc: "The change's name for a tab." }
   - name: review_signal_shown
     version: 3
     description: "The change review's signals as the pages show them: every row of `v_oxplow_review_signal` (every extension's sources) with the severity the project set for its kind in `review.signals`, and without the kinds set `off`."

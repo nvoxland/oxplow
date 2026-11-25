@@ -1,6 +1,6 @@
 title: Review
 description: What to look at in one analysed change, worst first. Every review signal (oxplow-bundled's and other extensions') on one list, grouped by file, beside what the change was asked to do.
-label: Review
+label: '{{row.tab}}'
 params:
 - name: change_id
   label: Change
@@ -8,6 +8,10 @@ answers:
 - {"question":"What should I look at first in this change?","params":{"change_id":1}}
 - {"question":"Did the agent weaken any tests?","params":{"change_id":1}}
 loaders:
+  name:
+    sql: |
+      -- The tab's name ({{row.tab}} in the label): this loader comes first.
+      SELECT 'Review · ' || name AS tab FROM v_oxplow_review_change_name WHERE change_id = CAST(:change_id AS INTEGER)
   change:
     sql: |
       -- What the change was asked to do, from what made it: a request's or a

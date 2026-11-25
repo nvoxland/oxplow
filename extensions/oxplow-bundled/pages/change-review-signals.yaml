@@ -1,6 +1,6 @@
 title: Signals
 description: The review signals of one change, or of one of its areas, under their files, the worst file first. Narrow them by severity or source to work through one kind at a time.
-label: '{{param.area}} signals'
+label: '{{row.tab}}'
 params:
 - name: change_id
   label: Change
@@ -18,6 +18,10 @@ params:
   role: filter
   default: ''
 loaders:
+  name:
+    sql: |
+      -- The tab's name ({{row.tab}} in the label): this loader comes first.
+      SELECT CASE WHEN coalesce(:area, '') = '' THEN 'Signals' ELSE upper(substr(:area, 1, 1)) || substr(:area, 2) || ' signals' END || ' · ' || name AS tab FROM v_oxplow_review_change_name WHERE change_id = CAST(:change_id AS INTEGER)
   signals:
     sql: |
       -- An empty filter means all. One heading per file (`file`), the worst
