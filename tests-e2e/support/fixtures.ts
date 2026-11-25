@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "@playwright/test";
 
 import { expectNoHorizontalOverflow } from "./ui.js";
 import { deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
@@ -158,14 +158,16 @@ class Daemons {
 
 /** Another client of `daemon`: a browser context of its own (its own
  *  storage, as another device has), at `viewport`, connected to the same
- *  daemon. The caller closes `context`. */
+ *  daemon; `options` adds to the context (`hasTouch` for a touch screen).
+ *  The caller closes `context`. */
 export async function client(
   browser: Browser,
   baseURL: string,
   daemon: Daemon,
   viewport = { width: 1280, height: 800 },
+  options: BrowserContextOptions = {},
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ storageState: connectedTo(baseURL, daemon.base, daemon.token), viewport });
+  const context = await browser.newContext({ ...options, storageState: connectedTo(baseURL, daemon.base, daemon.token), viewport });
   return { context, page: await context.newPage() };
 }
 

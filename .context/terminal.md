@@ -400,6 +400,36 @@ Locked by `input_written_before_the_session_exists_arrives_once_it_does`,
 Each `onData` is its own message, so a bare Escape and the Enter after it
 are two PTY writes, as they were typed. Nothing merges keys any more.
 
+## On a touch screen: the touch bar
+
+An on-screen keyboard has no Esc, Tab, Ctrl or arrow keys, and an agent's
+prompts need them (Claude's "trust this folder" is answered with the
+arrows). So while the main pointer is coarse (`useCoarsePointer`,
+`(pointer: coarse)`, following a change), `TerminalView` draws
+`TerminalTouchBar` under the surface, for a shell and an agent alike.
+
+- **Keys** (`terminal/touchKeys.ts`): Esc, Shift+Tab, Tab, Ctrl and the four
+  arrows, sent through the session's `input` as the bytes a hardware
+  keyboard sends. The arrows follow the program's cursor-key mode
+  (`term.modes.applicationCursorKeysMode`: `ESC O A` in a full-screen
+  program or menu, `ESC [ A` in a shell). Esc also calls the agent's
+  `onInterrupt`, as a typed Escape does.
+- **Ctrl** is a toggle: the next key typed becomes its control character
+  (`ctrlOf`: a letter or one of `@[\]^_` and space), then it turns off. A
+  whole word that a keyboard's suggestion types at once goes as it is.
+- **The focus stays in the terminal:** each key cancels its pointer and mouse
+  down, so the on-screen keyboard stays open.
+- **Compose** opens a real text field, where the keyboard's dictation and its
+  long-press paste work (the terminal's own paste needs the clipboard API,
+  which a page on plain HTTP lacks). Insert pastes the text with `term.paste`
+  (bracketed when the program asked) and presses no Enter: what the person
+  composes waits in the input until they send it. In the field Enter adds a
+  line, Cmd/Ctrl+Enter inserts, Escape cancels.
+
+Locked by `touchKeys.test.ts`, `TerminalTouchBar.test.tsx` and the e2e
+`agent/terminal-touch.spec.ts` (a touch context: Up recalls history, Ctrl
+then c interrupts, Compose inserts without Enter; a mouse gets no bar).
+
 ## When a session ends or goes away
 
 **Restart Terminal** is available in Quick Open while an agent terminal

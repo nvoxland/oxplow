@@ -1,11 +1,16 @@
 /// One terminal on screen: its surface, its session, and what the session
 /// says when it isn't running — ended or failed to start
 /// (Start Again / Retry), or unable to resume a saved conversation (Retry,
-/// Start Fresh). The agent's parts are `agent`'s; a shell has none.
+/// Start Fresh). On a touch screen, the keys an on-screen keyboard lacks
+/// (`TerminalTouchBar`). The agent's parts are `agent`'s; a shell has none.
 import { useRef, useState, type CSSProperties } from "react";
+import type { Terminal } from "@xterm/xterm";
 
+import { useCoarsePointer } from "../coarsePointer.js";
 import { exitBanner } from "../components/terminalSession.js";
 import { TerminalSurface } from "./TerminalSurface.js";
+import { TerminalTouchBar } from "./TerminalTouchBar.js";
+import { ctrlOf } from "./touchKeys.js";
 import { useShown } from "./useShown.js";
 import { useTerminalSession } from "./useTerminalSession.js";
 
@@ -36,18 +41,33 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
     conversation: agent?.conversation ?? null,
   });
   const detach = useRef<(() => void) | null>(null);
+  const term = useRef<Terminal | null>(null);
   const [confirmFresh, setConfirmFresh] = useState(false);
+  const touch = useCoarsePointer();
+  // The touch bar's Ctrl: it applies to the next key typed, then turns off.
+  const [ctrl, setCtrl] = useState(false);
+  const ctrlOn = useRef(false);
+  ctrlOn.current = ctrl;
   const banner = session.ended ? exitBanner(session.ended) : null;
   return (
     <div ref={boxRef} data-testid="terminal-view" data-uri={uri} style={boxStyle}>
       <TerminalSurface
         shown={shown}
         uri={uri}
-        onOpened={(term) => {
+        onOpened={(opened) => {
+          term.current = opened;
           detach.current?.();
-          detach.current = session.attach(term);
+          detach.current = session.attach(opened);
         }}
-        onData={session.input}
+        onData={(data) => {
+          if (ctrlOn.current) {
+            setCtrl(false);
+            ctrlOn.current = false;
+            session.input(ctrlOf(data) ?? data);
+            return;
+          }
+          session.input(data);
+        }}
         onBinary={session.binary}
         onResize={session.resize}
         onInterrupt={agent?.onInterrupt}
@@ -56,6 +76,20 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
         onOpenFile={onOpenFile}
         isLinkablePath={isLinkablePath}
       />
+      {touch ? (
+        <TerminalTouchBar
+          send={session.input}
+          applicationCursor={() => term.current?.modes.applicationCursorKeysMode ?? false}
+          ctrl={ctrl}
+          onCtrl={setCtrl}
+          onEscape={agent?.onInterrupt}
+          onInsert={(text) => {
+            // A paste: bracketed when the program asked for it, and no Enter.
+            term.current?.paste(text);
+            term.current?.focus();
+          }}
+        />
+      ) : null}
       {banner ? (
         <div data-testid="terminal-ended" style={bannerStyle}>
           <span>{banner.text}</span>
