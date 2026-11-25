@@ -31,6 +31,8 @@ import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels"
 import { SHELL_COMMANDS } from "./generated/shellCommands";
 import { shellStorage } from "../shellStorage.js";
 import { getUiClientId } from "../uiClientId.js";
+import { getDevice } from "../device.js";
+import { readWindowContext, type WindowContext } from "../windowContext.js";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
 /// the wire `channel` value in each frame. Sourced from the shared
@@ -45,25 +47,7 @@ const RESYNC_AFTER_MS = 1000;
 /// asserts the generated file still matches).
 const SHELL_COMMAND_SET: ReadonlySet<string> = new Set<string>(SHELL_COMMANDS);
 
-/// What the shell injects into every window it creates, before any page
-/// script runs. Absent in a plain-browser session.
-export type WindowContext = {
-  base: string | null;
-  /// The daemon's UI token (only this window's renderer gets it).
-  token?: string | null;
-  kind: string;
-  projectDir: string | null;
-};
-
-function readWindowContext(): WindowContext | null {
-  try {
-    const injected = (globalThis as { __OXPLOW__?: WindowContext }).__OXPLOW__;
-    if (injected && typeof injected === "object") return injected;
-  } catch {
-    // No window object (bun tests) — fall through.
-  }
-  return null;
-}
+export type { WindowContext };
 
 /// Which kind of window this renderer is in ("project" | "launcher" |
 /// "setup"), or null when the shell didn't create it (a plain browser
@@ -292,7 +276,13 @@ const UNLOAD_CALLS = new Set(["unregister_client_host"]);
 export function ipcRequest(name: string, args: Record<string, unknown> | undefined, token: string | null): RequestInit {
   return {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+      // Who is asking: the daemon reads both or neither.
+      "Oxplow-Device": getDevice().id,
+      "Oxplow-Connection": getUiClientId(),
+    },
     body: JSON.stringify(args ?? null),
     keepalive: UNLOAD_CALLS.has(name),
   };

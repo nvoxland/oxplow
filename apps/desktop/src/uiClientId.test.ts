@@ -20,3 +20,7 @@ test("a new page load is a new window, whatever session storage holds", () => {
   expect(before()).toBe("before-reload");
   expect(after()).toBe("after-reload");
 });
+
+test("the default id is con-<uuid>", () => {
+  expect(createUiClientId()()).toMatch(/^con-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+});

@@ -13,6 +13,8 @@ use thiserror::Error;
 
 pub mod collectors;
 pub mod core_settings;
+pub mod device;
+pub use device::{this_device, ThisDevice};
 pub mod list_edit;
 pub mod settings;
 pub use list_edit::append_list_entry;

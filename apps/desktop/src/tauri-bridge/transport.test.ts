@@ -19,6 +19,7 @@ import {
   flushFrames,
   eventsUrl,
 } from "./transport";
+import { getUiClientId } from "../uiClientId";
 import { EVENT_CHANNELS } from "./channels";
 import { SHELL_COMMANDS } from "./generated/shellCommands";
 
@@ -216,6 +217,17 @@ describe("a window closing", () => {
     expect(ipcRequest("unregister_client_host", { client: "c" }, null).keepalive).toBe(true);
     expect(ipcRequest(PROJECT_COMMAND, undefined, "t").keepalive).toBe(false);
     expect(ipcRequest(PROJECT_COMMAND, undefined, "t").headers).toMatchObject({ Authorization: "Bearer t" });
+  });
+
+  test("every request says who asks: the device and the connection", () => {
+    const headers = ipcRequest(PROJECT_COMMAND, undefined, null).headers as Record<string, string>;
+    expect(headers["Oxplow-Device"]).toMatch(/^dev-[0-9a-f-]{36}$/);
+    expect(headers["Oxplow-Connection"]).toMatch(/^con-[0-9a-f-]{36}$/);
+    expect(headers["Oxplow-Connection"]).toBe(getUiClientId());
+  });
+
+  test("a shell-only command still goes to the shell, not over HTTP", () => {
+    expect(invokeRoute(SHELL_COMMAND, DAEMON, true)).toBe("tauri");
   });
 });
 

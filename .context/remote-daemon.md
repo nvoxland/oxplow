@@ -340,6 +340,15 @@ app, across its socket's reconnects). The client makes both ids;
 - A request with no caller reads per-device state as its defaults and may
   not write it.
 
+The frontend makes the ids. `device.ts` (`getDevice()`, once per page load)
+takes the Mac app's device from the shell's injected `window.__OXPLOW__.device`
+(the shell makes it once and keeps it in `device.json` in the global config
+dir, `oxplow_config::this_device`, named after the Mac; every project window
+gets the same one),
+or, in a browser, keeps a `dev-<uuid>` in `shellStorage` (`oxplow.device`);
+`uiClientId.ts` makes the `con-<uuid>`. `tauri-bridge/transport.ts` adds both
+headers to every HTTP invoke; the event socket still sends only `client=`.
+
 ## Known v1 gaps
 
 - **Picking a different project** = restarting the daemon with a

@@ -333,6 +333,7 @@ fn show_launcher(app: &tauri::AppHandle) {
             token: None,
             kind: windows::KIND_LAUNCHER,
             project_dir: None,
+            device: None,
         },
     ) {
         tracing::error!(error = %e, "could not open the launcher window");
@@ -353,6 +354,7 @@ fn show_setup(app: &tauri::AppHandle, dir: &Path) {
             token: None,
             kind: windows::KIND_SETUP,
             project_dir: Some(&dir_str),
+            device: None,
         },
     ) {
         tracing::error!(error = %e, "could not open the setup window");

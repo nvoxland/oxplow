@@ -1,0 +1,24 @@
+/// The shell's window context, read apart from the transport so the
+/// device id can use it without importing the API layer.
+
+/// What the shell injects into every window it creates, before any page
+/// script runs. Absent in a plain-browser session.
+export type WindowContext = {
+  base: string | null;
+  /// The daemon's UI token (only this window's renderer gets it).
+  token?: string | null;
+  kind: string;
+  projectDir: string | null;
+  /// The Mac app's device: its id is kept by the shell across runs.
+  device?: { id: string; name: string };
+};
+
+export function readWindowContext(): WindowContext | null {
+  try {
+    const injected = (globalThis as { __OXPLOW__?: WindowContext }).__OXPLOW__;
+    if (injected && typeof injected === "object") return injected;
+  } catch {
+    // No window object (bun tests) — fall through.
+  }
+  return null;
+}

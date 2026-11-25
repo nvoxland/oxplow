@@ -146,6 +146,10 @@ pub struct WindowContext<'a> {
     /// The project this window is for — the dir being opened, or the
     /// dir being offered for setup.
     pub project_dir: Option<&'a str>,
+    /// This install's device (`oxplow_config::this_device`): the Mac app is
+    /// one device for all its windows, and a project window sends it on
+    /// every request. `None` for the launcher and setup screens.
+    pub device: Option<&'a oxplow_config::ThisDevice>,
 }
 
 /// The `initialization_script` for a window. Built through `serde_json`
@@ -156,6 +160,7 @@ pub fn initialization_script(ctx: &WindowContext<'_>) -> String {
         "token": ctx.token,
         "kind": ctx.kind,
         "projectDir": ctx.project_dir,
+        "device": ctx.device,
     });
     // Frozen: this is the shell's statement about the window, not
     // renderer state.
@@ -211,10 +216,32 @@ pub struct ShellWindows {
     /// The global restore set, or `None` when the config dir can't be
     /// resolved (then the session simply isn't persisted).
     session: Option<oxplow_config::SessionProjects>,
+    /// This install's device, made once and kept in the global config dir;
+    /// `None` when that dir can't be resolved or written.
+    device: Option<oxplow_config::ThisDevice>,
     /// Set once the whole app is quitting, so the per-window teardown
     /// stops rewriting the restore set — Cmd-Q with three windows open
     /// must bring all three back.
     quitting: std::sync::atomic::AtomicBool,
+}
+
+/// The name a person gave this Mac (System Settings › General › About),
+/// else its host name: the device's name until the person renames it.
+fn computer_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Ok(out) = std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+    {
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if out.status.success() && !name.is_empty() {
+            return name;
+        }
+    }
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "This computer".into())
 }
 
 impl Default for ShellWindows {
@@ -224,6 +251,11 @@ impl Default for ShellWindows {
             supervisor: oxplow_app::daemon_supervisor::DaemonSupervisor::default(),
             session: oxplow_config::global_config_dir()
                 .map(|d| oxplow_config::SessionProjects::new(d.join("session.json"))),
+            device: oxplow_config::global_config_dir().and_then(|d| {
+                oxplow_config::this_device(&d.join("device.json"), computer_name)
+                    .map_err(|e| tracing::warn!(error = %e, "could not keep this install's device"))
+                    .ok()
+            }),
             quitting: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -303,6 +335,7 @@ impl ShellWindows {
                 token: Some(&endpoint.token),
                 kind: KIND_PROJECT,
                 project_dir: Some(&dir_str),
+                device: self.device.as_ref(),
             },
         );
         if let Err(e) = built {
@@ -586,8 +619,10 @@ mod tests {
             token: None,
             kind: KIND_LAUNCHER,
             project_dir: None,
+            device: None,
         });
         assert!(script.contains("window.__OXPLOW__ ="), "{script}");
+        assert!(script.contains("\"device\":null"), "{script}");
         assert!(script.contains("\"base\":null"), "{script}");
         assert!(script.contains("\"kind\":\"launcher\""), "{script}");
         assert!(script.contains("\"projectDir\":null"), "{script}");
@@ -595,12 +630,25 @@ mod tests {
 
     #[test]
     fn initialization_script_carries_the_daemon_base_and_project() {
+        let device = oxplow_config::ThisDevice {
+            id: oxplow_domain::DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427").unwrap(),
+            name: "Studio".into(),
+        };
         let script = initialization_script(&WindowContext {
             base: Some("http://127.0.0.1:60331"),
             token: Some("t0k"),
             kind: KIND_PROJECT,
             project_dir: Some("/Users/me/src/oxplow"),
+            device: Some(&device),
         });
+        // The Mac app is one device for all its windows: each project
+        // window is told which, and sends it on every request.
+        assert!(
+            script.contains(
+                "\"device\":{\"id\":\"dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427\",\"name\":\"Studio\"}"
+            ),
+            "{script}"
+        );
         assert!(
             script.contains("\"base\":\"http://127.0.0.1:60331\""),
             "{script}"
@@ -623,6 +671,7 @@ mod tests {
             token: None,
             kind: KIND_LAUNCHER,
             project_dir: None,
+            device: None,
         });
         let payload = script
             .strip_prefix("window.__OXPLOW__ = Object.freeze(")

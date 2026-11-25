@@ -564,7 +564,7 @@ an older HTTP report cannot arrive after a newer roster and close its runs.
 Runs belong to their window's `client`; reports prune only that client's
 previously acknowledged runs which are now absent. The event socket's
 `client` query param names the same id used by logs, reports and the
-client host (`uiClientId.ts`: one per page load, in memory; independent of the API/transport import graph), and its
+client host (`uiClientId.ts`: `con-<uuid>`, one per page load, in memory; independent of the API/transport import graph), and its
 disconnect and client expiry reclaim owned runs. A reconnect clears the
 old roster and reopens its held runs; stale open replies are fenced out and
 closed instead of resurrecting old ids. A dataset change keeps the loaders it didn't reach:
