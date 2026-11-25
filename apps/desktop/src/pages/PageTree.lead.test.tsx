@@ -39,3 +39,26 @@ test("leadOf: the first row's text, none when missing, null or blank", () => {
   expect(leadOf(r(["d"], [], "d"))).toBeNull();
   expect(leadOf(r(["d"], [["x"]], null))).toBeNull();
 });
+
+// A lead is Markdown unless it says `format: text`: a commit message's
+// paragraphs, lists and `code` read as such; a text lead keeps its `*` and
+// its line breaks as written.
+test("a lead draws as Markdown by default, and as text with its line breaks when it says so", () => {
+  const message = "Add the option\n\n- `chartable: true` on a table\n- a view\nsaved as one";
+  const formatted = fakePage(
+    node.stack("s", [
+      node.viz("md", "msg", { viz: "detail", columns: [{ key: "fact" }], lead: "description" } as never, { title: "Md" }),
+      node.viz("txt", "msg", { viz: "detail", columns: [{ key: "fact" }], lead: "description", leadFormat: "text" } as never, { title: "Txt" }),
+    ]),
+  );
+  const r = fakeRun(formatted, { loaders: { msg: loader(["description", "fact"], [[message, "1"]]) } });
+  const { getByTestId } = render(<PageTree run={r} runId="run-1" />);
+  const md = getByTestId("node-md-lead");
+  expect(md.querySelectorAll("li")).toHaveLength(2);
+  expect(md.querySelector("code")!.textContent).toBe("chartable: true");
+  expect(md.querySelectorAll("p").length).toBeGreaterThan(0);
+  const txt = getByTestId("node-txt-lead");
+  expect(txt.querySelector("li")).toBeNull();
+  expect(txt.textContent).toBe(message);
+  expect(txt.style.whiteSpace).toBe("pre-line");
+});

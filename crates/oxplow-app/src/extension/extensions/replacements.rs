@@ -61,7 +61,7 @@ pub const OXPLOWS_OWN: &str = "oxplow";
 /// task's state: that tracker's own states) shows only the
 /// replacement of `provider_extension`, the extension bringing the
 /// provider whose thing it shows; none keeps oxplow's own. An unbound one
-/// (the Board, the list, the history graph) shows the person's choice, or
+/// (the Board, the list) shows the person's choice, or
 /// with none the only candidate; several and no choice keep oxplow's own.
 pub fn chosen<'a>(
     candidates: &[&'a UiReplacement],
@@ -374,20 +374,19 @@ mod tests {
     fn a_target_is_replaced_once_per_extension() {
         let ext = load(
             "",
-            "    - { page: graph, at: vcs.history.graph }\n    - { page: graph, at: vcs.history.graph }\n",
+            "    - { page: board, at: task.board }\n    - { page: board, at: task.board }\n",
         );
         assert!(said(&ext).contains("already replaced"), "{:?}", ext.errors);
         assert_eq!(ext.ui.replacements.len(), 1);
     }
 
-    /// A target core owns (its capability's implementation is oxplow's
-    /// own, `vcs`) isn't bound to a provider: any extension — a shared
-    /// one, oxplow-bundled — may replace it, and the person chooses among
-    /// several (`replacements:`). It carries the host page's view it
-    /// shares, Git History's filters.
+    /// A target core owns (a model oxplow's own task store fills) isn't
+    /// bound to a provider: any extension — a shared one, oxplow-bundled —
+    /// may replace it, and the person chooses among several (`replacements:`). It carries the
+    /// host page's view it shares, the Work page's filters.
     #[test]
     fn an_unbound_target_needs_no_provider_and_a_shared_extension_may_replace_it() {
-        let ext = load("", "    - { page: graph, at: vcs.history.graph }\n");
+        let ext = load("", "    - { page: board, at: task.board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
@@ -395,7 +394,7 @@ mod tests {
                 .iter()
                 .map(|r| (r.target.as_str(), r.bound_to_provider, r.view.join(",")))
                 .collect::<Vec<_>>(),
-            vec![("vcs.history.graph", false, "q,author,branch".to_string())]
+            vec![("task.board", false, "show,priority,q".to_string())]
         );
     }
 

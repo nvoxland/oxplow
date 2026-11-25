@@ -33,9 +33,9 @@ afterEach(() => {
   version = "v-1";
 });
 
-const run = (custom: VizRun["viz"]["custom"]) =>
+const run = (custom: VizRun["config"]["custom"], sizing: "content" | "fill" = "content") =>
   ({
-    config: { id: "x/burn", extension: "x", title: "Burn", custom },
+    config: { id: "x/burn", extension: "x", title: "Burn", custom, sizing },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   }) as unknown as VizRun;
@@ -43,9 +43,9 @@ const run = (custom: VizRun["viz"]["custom"]) =>
 const fallback = <div data-testid="the-table">table</div>;
 
 // P6b.D4: the frame is sandboxed to scripts and forms, at its loaded
-// bundle's URL, marked custom; with no component, or no daemon, the table
+// bundle's URL, with no chip naming whose it is (About says); with no component, or no daemon, the table
 // shows.
-test("the component's frame is sandboxed to scripts and forms, at its loaded bundle, marked custom", async () => {
+test("the component's frame is sandboxed to scripts and forms, at its loaded bundle, with no chip", async () => {
   const view = render(
     <CustomComponentViz run={run({ component: "burndown", props: null })} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
   );
@@ -54,9 +54,28 @@ test("the component's frame is sandboxed to scripts and forms, at its loaded bun
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
   expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-1/");
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
-  // A third party's component says whose it is, in plain words.
-  expect(view.getByTestId("custom-component-badge").textContent).toBe("by x");
+  // Whose it is shows in the page's About, not as a chip on the page.
+  expect(view.queryByTestId("custom-component-badge")).toBeNull();
   expect(view.queryByTestId("the-table")).toBeNull();
+});
+
+// A component sizes as its declaration says (the run carries it): `content`
+// is as tall as what it draws, the page scrolling; `fill` takes the page's
+// height. Neither is a bordered card.
+test("a content component's frame is its content's height; a fill one stretches", async () => {
+  const content = render(
+    <CustomComponentViz run={run({ component: "burndown", props: null }, "content")} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
+  );
+  const grown = await content.findByTestId("custom-component-frame");
+  expect(["none", "0 0 auto"]).toContain(grown.style.flex);
+  expect(grown.style.borderStyle.startsWith("none")).toBe(true);
+  cleanup();
+  const fill = render(
+    <CustomComponentViz run={run({ component: "burndown", props: null }, "fill")} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
+  );
+  const filled = await fill.findByTestId("custom-component-frame");
+  expect(filled.style.flex === "1" || filled.style.flex === "1 1 0%").toBe(true);
+  expect(filled.style.borderStyle.startsWith("none")).toBe(true);
 });
 
 test("no component or no daemon shows the table, loading nothing", () => {

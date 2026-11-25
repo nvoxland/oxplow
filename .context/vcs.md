@@ -226,10 +226,16 @@ put in `topoOrder` — every child before its parents, else newest first:
 commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (
 the dashboard finds the head commit by sha, not as the first row). Git
-History's own view is that plain list (`CommitList`); the lane graph is
-oxplow-bundled's `history-graph` component, replacing it through
-`vcs.history.graph` (`.context/extensions-slots.md` "Replacements"), whose page
-runs the same walk and whose script does the same `topoOrder`; the
+History's own view is foundation's `git-history` page: the lane graph
+(a table with a `lanes` column while no filter is set, its loader reading
+down to the revealed commit; the table draws each child before its
+parents, `childrenFirst`), a table of the matches while one is. A file's
+or folder's history is the same page with `path` in its URI's `?` (a
+resource param, so it opens a tab of its own named "<file> history"; every
+link to a file's history opens it), each match with the path's lines added and
+removed (the whole commit's with no path); it draws no lanes, because a
+file's commits aren't a connected graph without `git log`'s parent
+rewriting. The
 branch picker, compare list and new-stream form read `v_branch` /
 `v_tag`. `v_branch.stream_id` is the stream whose workspace has the
 branch checked out, read from that workspace's head at each refresh —

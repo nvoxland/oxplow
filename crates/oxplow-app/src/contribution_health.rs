@@ -203,7 +203,7 @@ enum Kind {
     Collector,
     Effect,
     /// A language of an extension's `languages:`: off, it leaves the language
-    /// set at the next publication.
+    /// set at the next activation.
     Language,
 }
 
@@ -271,9 +271,9 @@ async fn enable_one(
     Ok(health.get(&key).await?)
 }
 
-/// A language back on changes what is published (the language set): ask for
-/// the next publication.
-fn republish_for(
+/// A language back on changes what is activated (the language set): ask for
+/// the next activation.
+fn reactivate_for(
     kind: Kind,
     activation: &Weak<crate::extension::extension_activation::ExtensionActivation>,
 ) {
@@ -322,7 +322,7 @@ pub fn enable_op(
                     kind: kind.as_str(),
                 };
                 let row = enable_one(&health, &providers, key, kind, &actor.source()).await?;
-                republish_for(kind, &activation);
+                reactivate_for(kind, &activation);
                 Ok(HandlerOutput {
                     result: serde_json::to_value(row).expect("row serializes"),
                     ..HandlerOutput::default()
@@ -334,7 +334,7 @@ pub fn enable_op(
 
 /// `oxplow.contribution.disable { namespace, kind, contribution }`: a person
 /// turns one contribution off on this machine without turning its extension
-/// off: a language (it leaves the language set at the next publication, its
+/// off: a language (it leaves the language set at the next activation, its
 /// files parse no more and `v_language.enabled` says 0), a collector (it
 /// doesn't run) or an effect (it doesn't react). A provider instance is
 /// turned off in Settings, not here. The inverse is `oxplow.contribution.enable`.
@@ -378,7 +378,7 @@ pub fn disable_op(
                 health
                     .disable(&key, &format!("turned off by {}", actor.source()))
                     .await?;
-                republish_for(kind, &activation);
+                reactivate_for(kind, &activation);
                 Ok(HandlerOutput {
                     result: serde_json::json!({
                         "namespace": key.namespace,
@@ -450,7 +450,7 @@ pub fn enable_all_op(
                     };
                     enabled
                         .extend(enable_one(&health, &providers, key, kind, &actor.source()).await?);
-                    republish_for(kind, &activation);
+                    reactivate_for(kind, &activation);
                 }
                 Ok(HandlerOutput {
                     result: serde_json::json!({ "enabled": enabled }),

@@ -2,7 +2,7 @@
 //! immutable copy of its source in the store, named by the source's hash —
 //! and which one each extension runs now (`active`). The app records a row
 //! when it copies a deployment, marks the active ones in the transaction
-//! that publishes an extension generation, and forgets rows it prunes. Read
+//! that activates an extension generation, and forgets rows it prunes. Read
 //! as `v_extension_deployment` (`.context/extensions-deploy.md` "Deployments").
 
 use oxplow_domain::DomainError;

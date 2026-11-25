@@ -34,9 +34,10 @@ loaders:
     - key: head_revision
   detail:
     sql: |
-      -- The message whole, subject first; the parents as facts: the first
+      -- The subject heads the section and the body (Markdown, as commit
+      -- messages are written) is its lead; the parents as facts: the first
       -- is the line the commit sits on, the second (a merge's) what came in.
-      SELECT subject, CASE WHEN body = '' THEN subject ELSE subject || char(10, 10) || body END AS message,
+      SELECT subject, body,
              author || CASE WHEN email = '' THEN '' ELSE ' <' || email || '>' END AS author,
              committed_at, sha,
              CASE WHEN :in_history THEN 'Yes' ELSE 'No' END AS on_branch,
@@ -77,9 +78,10 @@ view:
   stack:
   - id: detail
     title: About
+    title_from: subject
     from: detail
     viz: detail
-    lead: message
+    lead: body
     columns:
     - key: committed_at
       label: Date

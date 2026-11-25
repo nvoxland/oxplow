@@ -35,7 +35,11 @@ datasets:
       - { name: interest, type: "", doc: "Review priority (a real number); higher means look here first." }
       - { name: reasons, type: "", doc: "Why it's high, `; `-separated ('' for a routine file)." }
   - name: co_change_pair
-    version: 1
+    version: 2
+    # A file's partners are looked up by its path, once per file of a
+    # change: the key is the stored table's primary key, so that lookup is
+    # an index probe, not a read of every pair (v2).
+    key: [path, other]
     # "The last 180 days" moves with the clock, not with a write.
     materialize: { every: 1h }
     description: "Files usually committed together: each pair (both ways round) that shared at least 3 commits of 50 files or fewer in the last 180 days."
@@ -724,7 +728,6 @@ ui:
   # A task's page shows the agent's tokens on it and what another
   # thread shares with it.
   mounts:
-    - { page: history-graph, at: vcs.history.graph, version: 2 }
     # The request summary's tasks (foundation's page reads no task).
     - { page: request-tasks, at: oxplow/request-summary.sections, position: { after: request }, title: Tasks }
     - { page: contribution-repair, at: oxplow/contribution-health.repair }
@@ -897,15 +900,14 @@ commands:
     needs: [sql.read]
     access: write
 custom_components:
-  - id: history-graph
-    title: Git History
-    description: Switch between a commit list and a graph of the same history.
   # The Work board: the tasks as cards in a column per stage, its own
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
   - id: board
     title: Board
     description: "The tasks as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
     bundle: dist/board
+    # Its columns scroll themselves: it takes the page's height.
+    size: fill
     commands: [oxplow.tasks.assign, oxplow.tasks.reorder]
     # Whichever store holds a card answers these: the board names no store's command.
     action_points: [oxplow/task.move, oxplow/task.edit, oxplow/task.unparent, oxplow/task.delete]

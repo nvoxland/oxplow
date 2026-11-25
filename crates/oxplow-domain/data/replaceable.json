@@ -65,23 +65,5 @@
     "view": [],
     "label": "page body",
     "about": "A knowledge page's body (the `body` node of the `knowledge-page` page): `uri` is the page. Its About, referenced files, backlinks, comments and mounts stay oxplow's. The extension that fills the knowledge model as the page's own store (the URI's `store`) replaces it: oxwiki draws its pages' text as an editor, a store that keeps its pages read-only leaves oxplow's own read-only text."
-  },
-  {
-    "target": "vcs.history.graph",
-    "capability": "vcs",
-    "bound_to_provider": false,
-    "version": 2,
-    "props": [
-      "head_sha",
-      "reveal_sha",
-      "limit"
-    ],
-    "view": [
-      "q",
-      "author",
-      "branch"
-    ],
-    "label": "history graph",
-    "about": "The commit history's graph (`GitHistoryPage`, the Git dashboard): `head_sha` the stream's head, `reveal_sha` a commit to scroll to and mark (or null), `limit` how many commits. Its view is Git History's filters (`q`, `author`, `branch`; v2), which core's own list reads too. Core's own is a plain list; the graph is oxplow-bundled's component."
   }
 ]

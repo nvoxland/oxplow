@@ -5,7 +5,7 @@
 //! keeps the engine — the matching, comment stripping and counting — and
 //! names no framework or language's rules.
 //!
-//! Built from the published extensions at each publication and swapped
+//! Built from the extensions of the generation at each activation and swapped
 //! whole (`extension_activation`, beside the language set), so a change
 //! analysis reads one consistent set and never a manifest.
 

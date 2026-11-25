@@ -99,6 +99,102 @@ fn a_section_needs_a_title_and_hide_title_keeps_it_unseen() {
     assert!(!by_id("more"));
 }
 
+/// A node may be shown only while params are empty (`when: { empty: [..] }`)
+/// or only while one of them is set (`not_empty`, its opposite). It names
+/// the page's own params, one key, a list that isn't empty.
+#[test]
+fn a_node_when_names_params_that_are_empty_or_not() {
+    let head = "title: T\nparams: [{ name: q, role: filter, default: '' }, { name: who, role: filter, default: '' }]\nloaders:\n  a: { rows: [{ x: 1 }] }\n";
+    let ok = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: all, title: All, hide_title: true, when: {{ empty: [q, who] }}, viz: table, from: a }}\n    - {{ id: found, title: Found, hide_title: true, when: {{ not_empty: [q, who] }}, viz: table, from: a }}\n"
+    ))
+    .expect("loads");
+    let kids = ok.view.children();
+    assert_eq!(
+        kids[0].when,
+        Some(NodeWhen::Empty(vec!["q".into(), "who".into()]))
+    );
+    assert_eq!(
+        kids[1].when,
+        Some(NodeWhen::NotEmpty(vec!["q".into(), "who".into()]))
+    );
+    let refuses = |when: &str, says: &str| {
+        let why = refused(&format!(
+            "{head}view:\n  stack:\n    - {{ id: all, title: All, when: {when}, viz: table, from: a }}\n"
+        ));
+        assert!(why.contains(says), "{when}: {why}");
+        assert!(why.contains("node `all`"), "{when}: {why}");
+    };
+    refuses("{ empty: [gone] }", "`gone` isn't a param of this page");
+    refuses(
+        "{ set: [q] }",
+        "`when` is `{ empty: [params] }` or `{ not_empty: [params] }`",
+    );
+    refuses(
+        "{ empty: [q], not_empty: [who] }",
+        "`when` is `{ empty: [params] }`",
+    );
+    refuses("{ empty: [] }", "names at least one param");
+    refuses("q", "`when` is `{ empty: [params] }`");
+}
+
+/// A `lanes` column draws a DAG's lanes from its row's id (`key`) and the
+/// column `parents` names; one needs the other. It draws the rows in the
+/// order given, so it is only for a `table` that keeps that order (no
+/// `group`, no `depth`).
+#[test]
+fn a_lanes_column_names_its_parents_on_a_table_in_order() {
+    let head = "title: T\nloaders:\n  q: { rows: [{ id: a, parents: '[]' }] }\n";
+    let ok = page(&format!(
+        "{head}view:\n  viz: table\n  from: q\n  columns:\n    - {{ key: id, format: lanes, parents: parents }}\n"
+    ))
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &ok.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.columns[0].parents.as_deref(), Some("parents"));
+    let refuses = |view: &str, says: &str| {
+        let why = refused(&format!("{head}view:\n{view}"));
+        assert!(why.contains(says), "{view}: {why}");
+    };
+    refuses(
+        "  viz: table\n  from: q\n  columns:\n    - { key: id, format: lanes }\n",
+        "column `id`: `format: lanes` needs `parents: <column>`",
+    );
+    refuses(
+        "  viz: table\n  from: q\n  columns:\n    - { key: id, parents: parents }\n",
+        "column `id`: `parents` is for a `format: lanes` column",
+    );
+    refuses(
+        "  viz: table\n  from: q\n  group: { by: id }\n  columns:\n    - { key: id, format: lanes, parents: parents }\n",
+        "`format: lanes` draws the rows in their order: not with `group` or `depth`",
+    );
+    refuses(
+        "  viz: board\n  from: q\n  columns:\n    - { key: id, format: lanes, parents: parents }\n",
+        "`format: lanes` is only for `table`, not `board`",
+    );
+}
+
+/// `reveal: <column>` marks the row whose column is truthy and brings it
+/// into view; it is for a `list` or `table`.
+#[test]
+fn reveal_names_a_column_on_a_list_or_table() {
+    let head = "title: T\nloaders:\n  q: { rows: [{ id: a, shown: 1 }] }\n";
+    let ok = page(&format!(
+        "{head}view: {{ viz: table, from: q, reveal: shown }}\n"
+    ))
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &ok.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.reveal.as_deref(), Some("shown"));
+    let why = refused(&format!("{head}view: {{ viz: tree, from: q, reveal: shown, tree: {{ id: id, parent: id, label: id }} }}\n"));
+    assert!(
+        why.contains("`reveal` is only for `list` and `table`, not `tree`"),
+        "{why}"
+    );
+}
+
 /// A loader's SQL is read with the one SQL tokenizer: an apostrophe in a
 /// comment doesn't hide the loaders and params after it, a word or
 /// `:param` in a comment or a string isn't read, and a quoted identifier
@@ -1220,6 +1316,7 @@ fn a_viz_keeps_its_lead_column() {
         panic!("a viz");
     };
     assert_eq!(config.lead.as_deref(), Some("d"));
+    assert_eq!(config.lead_format, None, "unset: Markdown");
     assert_eq!(
         config
             .role_columns()
@@ -1228,6 +1325,28 @@ fn a_viz_keeps_its_lead_column() {
             .count(),
         1
     );
+}
+
+/// A lead reads as Markdown unless it says `format: text` (a log line, a
+/// command: text whose `*` and `_` are meant as written).
+#[test]
+fn a_lead_names_its_format_in_its_long_form() {
+    let p = page(
+        "title: T\nloaders:\n  q: { rows: [{ d: x }] }\nview: { viz: detail, from: q, lead: { column: d, format: text } }\n",
+    )
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.lead.as_deref(), Some("d"));
+    assert_eq!(
+        config.lead_format,
+        Some(crate::pages::spec::TextFormat::Text)
+    );
+    assert!(page(
+        "title: T\nloaders:\n  q: { rows: [{ d: x }] }\nview: { viz: detail, from: q, lead: { column: d, format: html } }\n",
+    )
+    .is_err());
 }
 
 // --- the parse loader ---------------------------------------------------

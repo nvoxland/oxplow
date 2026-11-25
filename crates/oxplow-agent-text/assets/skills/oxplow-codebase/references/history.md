@@ -3,8 +3,9 @@
 Quick answers about the repository's history, one page each, read with
 `oxplow_run_page { page, params }`:
 
-- `file-history { path, limit }` — the commits touching one file on the
-  stream's branch alone (the page names the branch).
+- `git-history { path, limit }` — the commits touching a file, or any
+  file under a folder, on the stream's branch alone, each with the path's
+  lines added and removed (`q`, `author` and `branch` narrow it further).
 - `recent-commits { limit }` — the latest on the stream's branch alone.
 - `snapshots { stream?, limit }` — snapshots with parent, trigger and
   whether they went over their time budget (every stream's when none is named).

@@ -138,7 +138,7 @@ pub fn commit_index(dir: &Path, message: &str) -> String {
         .to_string()
 }
 
-/// Deploy every extension source the test wrote and publish the new
+/// Deploy every extension source the test wrote and activate the new
 /// generation, and assert that nothing was held back. Fixtures activate once when built (as boot does);
 /// a test that writes extension files after that calls this.
 pub async fn activate(svc: &Arc<crate::Services>) {

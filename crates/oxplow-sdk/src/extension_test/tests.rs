@@ -3195,10 +3195,11 @@ steps:
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
-/// A window that draws no frames (the display locked or asleep) leaves
-/// a fixture's `ui` steps, and the steps after them, not run, with why,
-/// never failed. The shell is
-/// a stand-in that says so, as the harness's page does.
+/// A window that draws no frames (the display locked or asleep, or a
+/// window macOS doesn't show) leaves a fixture's `ui` steps, and the steps
+/// after them, not run, with why — what the page saw and what the window
+/// said of itself — never failed. The shell is a stand-in that says so, as
+/// the harness's page and the app's window do.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_that_draws_nothing_leaves_the_ui_steps_unrun() {
@@ -3210,6 +3211,9 @@ async fn a_window_that_draws_nothing_leaves_the_ui_steps_unrun() {
         r#"#!/bin/sh
 base="${2%/harness/}"
 post() { curl -s -X POST -H 'content-type: application/json' -d "$2" "$base$1"; }
+echo "harness-window: occlusion=hidden active_space=yes visible=yes" >&2
+echo "some other line of the engine's" >&2
+post /harness/record '{"kind":"drawingSeen","value":{"waitedMs":10003,"visibility":"hidden","focused":false,"width":1280,"height":800}}' >/dev/null
 post /harness/record '{"kind":"drawing","value":false}' >/dev/null
 while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; esac; done
 "#,
@@ -3235,6 +3239,15 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
             .any(|w| w.contains("the steps after them, aren't run") && w.contains("display")),
         "{:?}",
         report.skipped
+    );
+    // Why: what the page saw, and what the window said of itself.
+    let why = report.skipped_lines().join("\n");
+    assert!(
+        why.contains("no frame in 10 s")
+            && why.contains("page hidden, not focused, 1280×800")
+            && why.contains("window: occlusion=hidden active_space=yes visible=yes")
+            && !why.contains("other line"),
+        "{why}"
     );
     // The case is skipped, never passed: the Tests panel shows it unrun.
     let case = report
@@ -3278,6 +3291,9 @@ async fn a_window_that_draws_nothing_fails_the_ui_steps_when_ui_is_required() {
         r#"#!/bin/sh
 base="${2%/harness/}"
 post() { curl -s -X POST -H 'content-type: application/json' -d "$2" "$base$1"; }
+echo "harness-window: occlusion=hidden active_space=yes visible=yes" >&2
+echo "some other line of the engine's" >&2
+post /harness/record '{"kind":"drawingSeen","value":{"waitedMs":10003,"visibility":"hidden","focused":false,"width":1280,"height":800}}' >/dev/null
 post /harness/record '{"kind":"drawing","value":false}' >/dev/null
 while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; esac; done
 "#,

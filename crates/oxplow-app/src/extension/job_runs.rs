@@ -146,8 +146,8 @@ impl JobRuns {
             .map_err(|_| job_problem())
     }
 
-    pub(crate) fn publish_registry(&self, registry: Arc<JobOperationRegistry>) {
-        self.operations.publish(registry);
+    pub(crate) fn activate_registry(&self, registry: Arc<JobOperationRegistry>) {
+        self.operations.activate(registry);
     }
 
     /// Public author path, called inside an audited native command transaction.

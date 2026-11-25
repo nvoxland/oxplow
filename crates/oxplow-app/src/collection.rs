@@ -215,6 +215,10 @@ const RUN_TRIGGER: &str = "on-report";
 pub struct ShellRun<'a> {
     pub command: &'a str,
     pub exit_code: Option<i64>,
+    /// How long the call took, as the harness timed it: a test run's
+    /// `duration_ms`. A command moved to the background reports only
+    /// the time until it moved.
+    pub duration_ms: Option<i64>,
 }
 
 /// What recording a coverage report came to, so a caller can say why
@@ -2277,7 +2281,7 @@ impl CollectionService {
                 thread,
                 bash.command,
                 bash.exit_code,
-                (None, None, None, None),
+                (bash.duration_ms, None, None, None),
                 "observed",
                 &source,
                 report.as_ref(),
@@ -7441,6 +7445,7 @@ mod tests {
             ShellRun {
                 command: cmd,
                 exit_code: Some(exit_code),
+                duration_ms: None,
             }
         }
 

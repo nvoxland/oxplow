@@ -861,7 +861,7 @@
   var GLOBAL_CONTRIBUTIONS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);
 
   // src/viz/componentBridge.ts
-  var BRIDGE_PROTOCOL = 13;
+  var BRIDGE_PROTOCOL = 14;
   var rowsOf = (r, error = null) => ({
     columns: r.columns,
     rows: r.rows,
@@ -912,6 +912,12 @@
           type: "request",
           request: { id: m.id, method: "navigate", uri: m.uri, newTab: m.newTab === true, replace: m.replace === true }
         };
+      case "reveal": {
+        const at = (v) => typeof v === "number" && Number.isFinite(v);
+        if (!at(m.top) || !at(m.bottom) || m.bottom < m.top)
+          return null;
+        return { type: "request", request: { id: m.id, method: "reveal", top: m.top, bottom: m.bottom } };
+      }
       case "markdown":
         if (typeof m.text !== "string" || m.inline !== undefined && typeof m.inline !== "boolean")
           return null;
@@ -1075,6 +1081,10 @@
             reply(r.id, null);
           else
             fail(r.id, "INVALID", "A component may open oxplow's pages only.");
+          return;
+        case "reveal":
+          deps.reveal?.(r.top, r.bottom);
+          reply(r.id, null);
           return;
         case "markdown":
           try {
@@ -11696,19 +11706,29 @@
       return pageData(run, def.config.custom?.props ?? null, nodeRunOf(run, def));
     return pageData(run, def?.kind === "component" ? def.props : null);
   }
-  function drawsFrames(wait = 2000) {
-    return new Promise((drew) => {
-      const timer = setTimeout(() => drew(false), wait);
+  function drawsFrames(wait = 1e4) {
+    const from = performance.now();
+    const seen = () => ({
+      waitedMs: Math.round(performance.now() - from),
+      visibility: document.visibilityState,
+      focused: document.hasFocus(),
+      width: window.innerWidth,
+      height: window.innerHeight
+    });
+    return new Promise((done) => {
+      const timer = setTimeout(() => done({ drew: false, seen: seen() }), wait);
       requestAnimationFrame(() => {
         clearTimeout(timer);
-        drew(true);
+        done({ drew: true, seen: seen() });
       });
     });
   }
   async function runHarness(server, frame, agent, frames = drawsFrames) {
-    const drawing = await frames();
-    server.record("drawing", drawing);
-    if (!drawing) {
+    const { drew, seen } = await frames();
+    if (!drew)
+      server.record("drawingSeen", seen);
+    server.record("drawing", drew);
+    if (!drew) {
       while ((await server.next(null)).op !== "done")
         ;
       return;
@@ -11758,7 +11778,8 @@
           setTitle: record("title"),
           setActions: record("actions"),
           setViewParams: record("viewParams"),
-          setHistoryState: record("historyState")
+          setHistoryState: record("historyState"),
+          reveal: (top, bottom) => server.record("reveal", { top, bottom })
         }, fed, start.view);
         frame.contentWindow?.postMessage(initMessage(fed, {}, start.page, start.view), "*", [channel.port2]);
         mounted(bridge);

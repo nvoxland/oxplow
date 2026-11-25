@@ -20,18 +20,24 @@ import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js
 export interface ExtensionProblem {
   name: string;
   errors: string[];
+  /** When it last failed (ISO): the newest of its contributions' failures;
+   *  null when only a load error or an approval waits (they have no time). */
+  at: string | null;
 }
 
-/** One row per problem (`name`, `problem`), in the page's order, gathered
- *  per extension in the order each first appears. */
+/** One row per problem (`name`, `problem`, `at`), in the page's order,
+ *  gathered per extension in the order each first appears, at the newest. */
 export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {
   const name = result.columns.indexOf("name");
   const problem = result.columns.indexOf("problem");
+  const when = result.columns.indexOf("at");
   const out = new Map<string, ExtensionProblem>();
   for (const row of result.rows) {
     const n = String(row[name]);
-    const p = out.get(n) ?? { name: n, errors: [] };
+    const p = out.get(n) ?? { name: n, errors: [], at: null };
     p.errors.push(String(row[problem] ?? ""));
+    const at = when >= 0 && row[when] != null ? String(row[when]) : null;
+    if (at && (!p.at || Date.parse(at) > Date.parse(p.at))) p.at = at;
     out.set(n, p);
   }
   return [...out.values()];
@@ -39,18 +45,23 @@ export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {
 
 /** The problems, one row each, as the Extension problems page reads them.
  *  Health is the namespace's: a row is listed under the extension that
- *  declares the contribution now. */
-export const PROBLEMS_SQL = `SELECT name, problem FROM (
+ *  declares the contribution now. A failing effect whose reaction can be
+ *  retried is left out: Alerts lists it as a failed reaction, whose Retry
+ *  fixes both. A disabled one stays (a retry doesn't run it). */
+export const PROBLEMS_SQL = `SELECT name, problem, at FROM (
   SELECT COALESCE((SELECT c.extension FROM v_contribution c WHERE c.uri = h.uri),
                   (SELECT x.name FROM v_extension x WHERE x.namespace = h.namespace ORDER BY x.name LIMIT 1)) AS name,
          1 AS rank, h.kind || ' ' || h.contribution || ' ' ||
          CASE h.state WHEN 'disabled' THEN 'stopped after ' || coalesce(h.reason, 'repeated failures')
-                      ELSE 'is failing, ' || h.consecutive_failures || ' in a row' END AS problem
+                      ELSE 'is failing, ' || h.consecutive_failures || ' in a row' END AS problem,
+         h.updated_at AS at
   FROM v_contribution_health h WHERE h.state <> 'ok'
+    AND NOT (h.kind = 'effect' AND h.state = 'failing' AND EXISTS (
+      SELECT 1 FROM v_effect_run r WHERE r.contribution = h.uri AND r.latest = 1 AND r.retryable = 1))
   UNION ALL
-  SELECT e.name, 2, json_extract(j.value, '$.shown') FROM v_extension e, json_each(e.errors) j
+  SELECT e.name, 2, json_extract(j.value, '$.shown'), NULL FROM v_extension e, json_each(e.errors) j
   UNION ALL
-  SELECT e.name, 3, 'needs your approval to run' FROM v_extension e WHERE json_array_length(e.pending) > 0
+  SELECT e.name, 3, 'needs your approval to run', NULL FROM v_extension e WHERE json_array_length(e.pending) > 0
 ) ORDER BY name, rank`;
 
 /** What an Alerts row says. */

@@ -24,28 +24,28 @@ test("a hosted view is the listed keys of its page's view, and its own history s
   const writes: Record<string, string | null>[] = [];
   render(
     <PageNavigationContext.Provider
-      value={nav({ q: "fix", days: 7, sha: "abc" }, { picked: 1, "component:vcs.history.graph": { scroll: 4 } }, states)}
+      value={nav({ q: "fix", days: 7, sha: "abc" }, { picked: 1, "component:task.board": { scroll: 4 } }, states)}
     >
-      <Probe keys={["q", "author", "days"]} scope="vcs.history.graph" write={(p) => writes.push(p)} />
+      <Probe keys={["q", "priority", "days"]} scope="task.board" write={(p) => writes.push(p)} />
     </PageNavigationContext.Provider>,
   );
   expect(seen!.viewParams).toEqual({ q: "fix", days: "7" });
   expect(seen!.historyState).toEqual({ scroll: 4 });
-  act(() => seen!.setViewParams({ q: null, author: "ann" }));
-  expect(writes).toEqual([{ q: null, author: "ann" }]);
+  act(() => seen!.setViewParams({ q: null, priority: "high" }));
+  expect(writes).toEqual([{ q: null, priority: "high" }]);
   act(() => seen!.setHistoryState({ open: ["a"] }));
-  expect(states).toEqual([{ "component:vcs.history.graph": { scroll: 4, open: ["a"] } }]);
+  expect(states).toEqual([{ "component:task.board": { scroll: 4, open: ["a"] } }]);
 });
 
 test("a key outside a hosted view is refused, and nothing is written", () => {
   const writes: Record<string, string | null>[] = [];
   render(
     <PageNavigationContext.Provider value={nav({}, {}, [])}>
-      <Probe keys={["q", "author", "branch"]} scope="vcs.history.graph" write={(p) => writes.push(p)} />
+      <Probe keys={["show", "priority", "q"]} scope="task.board" write={(p) => writes.push(p)} />
     </PageNavigationContext.Provider>,
   );
   expect(() => seen!.setViewParams({ q: "x", sha: "abc" })).toThrow(
-    "`sha` isn't in vcs.history.graph's view (q, author, branch).",
+    "`sha` isn't in task.board's view (show, priority, q).",
   );
   expect(writes).toEqual([]);
 });
@@ -56,11 +56,11 @@ test("a hosted view writes by patching the tab's view", () => {
   const n = { ...nav({}, {}, []), patchViewParams: (p: unknown) => patches.push(p) } as unknown as PageNavigation;
   render(
     <PageNavigationContext.Provider value={n}>
-      <Probe keys={["q", "author"]} scope="vcs.history.graph" />
+      <Probe keys={["q", "priority"]} scope="task.board" />
     </PageNavigationContext.Provider>,
   );
-  act(() => seen!.setViewParams({ q: "fix", author: null }));
-  expect(patches).toEqual([{ q: "fix", author: undefined }]);
+  act(() => seen!.setViewParams({ q: "fix", priority: null }));
+  expect(patches).toEqual([{ q: "fix", priority: undefined }]);
 });
 
 // A component that is the page has the whole entry.

@@ -237,7 +237,8 @@ hook + MCP wiring):
   reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
   **The recording is a pump reactor, not part of the hook.**
   The ingest logs `agent.tool.finished` (for a `shell` call, its whole
-  `command` and `exit_code`, the output in `event_content`); the
+  `command`, `exit_code` and `duration_ms`, the output in `event_content`;
+  the duration is the run's `v_test_run.duration_ms`); the
   `collection` async consumer (`crates/oxplow-app/src/post_tool_reactors.rs`)
   runs `CollectionService::on_shell_run` with them, whatever harness ran it. A run's
   recording can outlive the hook's 5 s budget (a debug-build junit ingest +

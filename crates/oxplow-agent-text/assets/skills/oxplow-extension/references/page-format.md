@@ -135,6 +135,12 @@ looking at.** Don't hardcode ids.
   person: it rides the `#` like a filter but the rail never draws it (a
   display-mode page, `for:`, may take one). Never write `role: selection`: a column's `select`
   makes it.
+- A param that a link sets to say what the page is about (a file, a
+  knowledge page, an extension) is a `resource`, not a `filter`: a link
+  with another value then opens its own tab, instead of turning the open
+  tab into other content. Give the page a `label` naming it
+  (`'{{param.path|basename}} history'`); with the param empty, the tab
+  says the page's title.
 - Every param is drawn in the page's rail. Put a param on a page only when
   a person would change it.
 

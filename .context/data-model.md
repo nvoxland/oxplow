@@ -219,13 +219,13 @@ closures are synchronous, so they can't await another gated call and permits
 never nest. The in-memory test pool is `max_size(1)`, so the whole suite runs
 through a **one-permit** gate — a standing stress of that property.
 
-**Host generation publication.** `Database::transaction_with_publication` runs
+**Host generation activation.** `Database::transaction_with_activation` runs
 on the blocking worker under the normal write permit, with an explicit
-`PublicationTransaction::commit`. It lets the host retain synchronous registry
-reservations through SQL commit and subsequent map publication. Success without
+`ActivationTransaction::commit`. It lets the host retain synchronous registry
+reservations through SQL commit and subsequent map activation. Success without
 commit is rejected and rolled back. Only precommit storage contention retries;
 postcommit errors and panics never retry. The caller must exclude readers and
-leave that boundary unavailable if postcommit publication fails. Process/network
+leave that boundary unavailable if postcommit activation fails. Process/network
 work is forbidden in this callback. A worker-owned drop guard flushes committed
 table-change notifications even if the awaiting caller is cancelled or the
 worker unwinds. Thin callers are denied both the helper and its commit method.
@@ -2310,7 +2310,7 @@ to use its separate CAS store above. See [settings.md](./settings.md) and
 [extensions-manifest.md](./extensions-manifest.md) for the runtime contracts.
 
 Metric declaration upserts expose caller-transaction helpers for coherent
-extension generation publication. Their async wrappers use the same helpers;
+extension generation activation. Their async wrappers use the same helpers;
 measure capture-scope and dimension promotion changes retain their transactional
 cube invalidation/fencing. Metric specs, dimensions, measures and available
 catalog metadata can therefore commit with candidate views and vocabulary.

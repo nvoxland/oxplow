@@ -64,21 +64,29 @@ impl CatalogSnapshot {
     /// What a candidate activates: this load, with each enabled extension
     /// that can't load (its own errors, a blocked contract, or a required
     /// import of one that isn't there) replaced by its version in
-    /// `published`, the generation active now, or left out when it has
+    /// `active`, the generation active now, or left out when it has
     /// none. The rest activate together, so one broken extension never holds
     /// back the others; oxplow's own required one too. Returns the held
     /// extensions and why.
     ///
     /// `failed` names extensions whose preparation failed in an earlier
     /// attempt at this candidate: each is held the same way, and one whose
-    /// last working version failed too stays out.
+    /// last working version failed too stays out. `disabled` names the
+    /// languages turned off on this machine: one holds no names, so an
+    /// extension whose language claims one is held only by a language that
+    /// is on (`language_set::conflicts`).
     pub(crate) fn admitted(
         &self,
-        published: Option<&CatalogSnapshot>,
+        active: Option<&CatalogSnapshot>,
         failed: &Failed,
+        disabled: &crate::extension::language_set::DisabledLanguages,
     ) -> (Arc<CatalogSnapshot>, VocabularyErrors) {
+        let conflicts = crate::extension::language_set::conflicts(&self.extensions, disabled);
         let can_load = |e: &Extension| {
-            e.errors.is_empty() && !e.public_contracts.blocked && !failed.0.contains_key(&e.name)
+            e.errors.is_empty()
+                && !e.public_contracts.blocked
+                && !failed.0.contains_key(&e.name)
+                && !conflicts.contains_key(&e.name)
         };
         let may_keep_last = |e: &Extension| {
             e.errors.is_empty()
@@ -94,12 +102,19 @@ impl CatalogSnapshot {
                 admitted.push(extension.clone());
                 continue;
             }
-            let last = published.and_then(|p| {
+            let last = active.and_then(|p| {
                 p.extensions()
                     .iter()
                     .find(|e| e.name == extension.name && e.enabled && may_keep_last(e))
             });
             let mut why: Vec<Diagnostic> = extension.errors.clone();
+            why.extend(
+                conflicts
+                    .get(&extension.name)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
             if let Some(f) = failed.0.get(&extension.name) {
                 why.extend(f.reasons.iter().cloned());
             }
@@ -178,7 +193,7 @@ impl CatalogSnapshot {
             "{}+held({})@{}",
             self.source_generation,
             names.join(","),
-            published.map_or("none", |p| p.generation())
+            active.map_or("none", |p| p.generation())
         );
         (
             Arc::new(CatalogSnapshot {
@@ -274,7 +289,7 @@ pub struct ExtensionCatalog {
     /// The changes to it an activation is staging: part of what
     /// [`Self::snapshot`] loads until that activation ends.
     pending: Arc<Mutex<LiveChanges>>,
-    /// Last atomically published primary-project declarations. Raw loads stay
+    /// Last atomically activated primary-project declarations. Raw loads stay
     /// available for authoring and candidate validation.
     active: Mutex<Option<Arc<CatalogSnapshot>>>,
     /// Full loads performed; tests read it to prove a hit parses nothing.
@@ -355,7 +370,7 @@ impl ExtensionCatalog {
     }
 
     /// A private catalog whose only generation is `candidate`, for staging
-    /// it before it is published.
+    /// it before it is activated.
     pub(crate) fn staged(&self, project_dir: &Path, candidate: Arc<CatalogSnapshot>) -> Self {
         let catalog = Self {
             project: Some(project_dir.to_path_buf()),
@@ -365,18 +380,18 @@ impl ExtensionCatalog {
             staged: true,
             ..Self::default()
         };
-        catalog.publish_active(candidate);
+        catalog.activate_snapshot(candidate);
         catalog
     }
 
     /// Replace the active primary-project catalog after coordinated
-    /// generation publication. This never changes the raw load cache.
+    /// generation activation. This never changes the raw load cache.
     /// The generation last activated, if one has been.
     pub(crate) fn active(&self) -> Option<Arc<CatalogSnapshot>> {
         self.active.lock().clone()
     }
 
-    pub(crate) fn publish_active(&self, snapshot: Arc<CatalogSnapshot>) {
+    pub(crate) fn activate_snapshot(&self, snapshot: Arc<CatalogSnapshot>) {
         *self.active.lock() = Some(snapshot);
         self.runtime_changed();
     }
@@ -387,8 +402,8 @@ impl ExtensionCatalog {
     }
 
     /// Set the live set: at startup from the active deployments recorded
-    /// for the project, and after each full publication from what it
-    /// published (a core-only baseline leaves it as it is).
+    /// for the project, and after each full activation from what it
+    /// activated (a core-only baseline leaves it as it is).
     pub(crate) fn set_live(&self, live: BTreeMap<String, String>) {
         *self.live.lock() = live;
     }
@@ -424,7 +439,7 @@ impl ExtensionCatalog {
     }
 
     /// Runtime declarations under `root`. An activated primary project reads
-    /// its published snapshot; authoring roots and standalone callers read
+    /// its active snapshot; authoring roots and standalone callers read
     /// current files. Use `snapshot` explicitly for candidate preparation.
     pub fn get(&self, root: &Path) -> Arc<Vec<Extension>> {
         self.runtime_snapshot(root).extensions.clone()
@@ -530,7 +545,7 @@ impl ExtensionCatalog {
     /// (commands, capabilities, providers, models) must hold a generation
     /// pin (`ExtensionActivation::read`, or a run's pin): tests assert one is
     /// in scope. A revocation gate that has to answer even while a
-    /// publication waits uses [`Self::live_snapshot`].
+    /// activation waits uses [`Self::live_snapshot`].
     pub fn runtime_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
         #[cfg(test)]
         assert!(
@@ -554,9 +569,9 @@ impl ExtensionCatalog {
 
     /// The same declarations as [`Self::runtime_snapshot`], read as a
     /// revocation gate: whether an owner is still enabled and current
-    /// right now, to refuse a callback, a job's publication or a run built
+    /// right now, to refuse a callback, a job's activation or a run built
     /// against a generation that has since moved. Such a check must not
-    /// wait on a publication (which waits on its readers), so it holds no
+    /// wait on an activation (which waits on its readers), so it holds no
     /// pin and decides nothing about which generation other maps are at.
     pub fn live_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
         let Some(project) = self.project.as_deref() else {
@@ -711,7 +726,7 @@ fn fingerprint_generation(fingerprint: &Fingerprint) -> String {
     format!("{:016x}", h.digest())
 }
 
-/// The active deployments of a published load (`name → hash`).
+/// The active deployments of an active load (`name → hash`).
 pub(crate) fn live_of(extensions: &[Extension]) -> BTreeMap<String, String> {
     extensions
         .iter()
@@ -748,7 +763,7 @@ fn walk(dir: &Path, out: &mut Fingerprint, extensions_root: bool) {
         return;
     };
     for entry in entries.flatten() {
-        // The loader skips hidden extension folders. Publication staging
+        // The loader skips hidden extension folders. Activation staging
         // must not appear as a new loaded catalog generation either.
         if extensions_root && entry.file_name().to_string_lossy().starts_with('.') {
             continue;
@@ -814,7 +829,10 @@ mod tests {
             &manifest("edited", "one"),
         );
         let catalog = ExtensionCatalog::new();
-        let (first, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        let (first, held) =
+            catalog
+                .snapshot(dir.path())
+                .admitted(None, &Failed::new(), &Default::default());
         assert!(held.is_empty(), "{held:?}");
         assert_eq!(names(&first), ["edited:one", "good:one"]);
 
@@ -834,9 +852,11 @@ mod tests {
             ".oxplow/extensions/fresh/extension.yaml",
             &format!("{}bogus: 1\n", manifest("fresh", "one")),
         );
-        let (next, held) = catalog
-            .snapshot(dir.path())
-            .admitted(Some(&first), &Failed::new());
+        let (next, held) = catalog.snapshot(dir.path()).admitted(
+            Some(&first),
+            &Failed::new(),
+            &Default::default(),
+        );
         assert_eq!(names(&next), ["edited:one", "good:two"]);
         assert_eq!(held.keys().collect::<Vec<_>>(), ["edited", "fresh"]);
         assert!(
@@ -878,12 +898,15 @@ mod tests {
             from_source: ["oxplow-foundation".to_string()].into(),
             ..ExtensionCatalog::default()
         };
-        let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        let (good, held) =
+            catalog
+                .snapshot(dir.path())
+                .admitted(None, &Failed::new(), &Default::default());
         assert!(held.is_empty(), "{held:?}");
         let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
         std::fs::write(to.join("extension.yaml"), format!("{manifest}bogus: 1\n")).unwrap();
         let broken = catalog.snapshot(dir.path());
-        let (kept, held) = broken.admitted(Some(&good), &Failed::new());
+        let (kept, held) = broken.admitted(Some(&good), &Failed::new(), &Default::default());
         assert!(
             held["oxplow-foundation"]
                 .iter()
@@ -896,7 +919,7 @@ mod tests {
             .find(|e| e.name == "oxplow-foundation")
             .unwrap();
         assert!(running.errors.is_empty());
-        let (out, held) = broken.admitted(None, &Failed::new());
+        let (out, held) = broken.admitted(None, &Failed::new(), &Default::default());
         assert!(held.contains_key("oxplow-foundation"));
         assert!(!out
             .extensions()
@@ -934,7 +957,10 @@ mod tests {
             );
         }
         let catalog = ExtensionCatalog::new();
-        let (admitted, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        let (admitted, held) =
+            catalog
+                .snapshot(dir.path())
+                .admitted(None, &Failed::new(), &Default::default());
         assert_eq!(names(&admitted), ["alone:d", "fine:d"]);
         assert_eq!(held.keys().collect::<Vec<_>>(), ["chained", "needy"]);
         assert!(

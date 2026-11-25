@@ -31,6 +31,7 @@ import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { SignInCompletion } from "../tauri-bridge/generated/bindings.js";
 import { createSignInHost } from "./hostSignIn.js";
 import { pageDefinitionChanged } from "./rerun.js";
+import { revealInFrame } from "./revealInFrame.js";
 import {
   componentMayOpen,
   createBridgeHost,
@@ -104,18 +105,6 @@ export function useComponentBundle(componentKey: string | null, base: string | n
   const version = current?.version ?? null;
   const src = base && version ? componentBundleUrl(base, version) : null;
   return { loadKey, version, src, error: current?.error ?? null };
-}
-
-/** Whose a component is, in plain words ("by github"): marked only for
- *  an extension that isn't oxplow's own (`bundled`), since an
- *  oxplow-shipped page needs no chip. */
-export function CustomBadge({ extension, bundled = false }: { extension: string; bundled?: boolean }) {
-  if (bundled) return null;
-  return (
-    <span data-testid="custom-component-badge" style={badgeStyle} title={`${extension}'s own component, sandboxed`}>
-      by {extension}
-    </span>
-  );
 }
 
 /** One frame at one bundle URL and its bridge, fed `data` (`vizData`
@@ -310,6 +299,10 @@ export function ComponentFrame({
         },
         querySql: (sql, params) => runComponentSql(component, sql, params, streamId, version),
         markdown: async (text, inline) => markdownTree(text, inline, await liveTreeDeps()),
+        // A part of it into view: the frame can't scroll its page.
+        reveal: (top, bottom) => {
+          if (frameRef.current) revealInFrame(frameRef.current, top, bottom);
+        },
         pageMemoryGet: async (key) => {
           await memoryRef.current.ready;
           return memoryRef.current.get(memoryScope, key) ?? null;
@@ -374,7 +367,7 @@ export function ComponentFrame({
         referrerPolicy="no-referrer"
         src={src}
         onLoad={onLoad}
-        style={page ? (height !== null ? { ...sizedFrameStyle, height } : pageFrameStyle) : fit ? { ...fitFrameStyle, height: fitHeight ?? 80 } : frameStyle}
+        style={page ? (height !== null ? { ...sizedFrameStyle, height } : fillFrameStyle) : fit ? { ...fitFrameStyle, height: fitHeight ?? 80 } : fillFrameStyle}
       />
       {failure ? (
         <div style={noteStyle}>
@@ -401,19 +394,9 @@ export function ComponentFrame({
   );
 }
 
-export const badgeStyle: CSSProperties = {
-  alignSelf: "flex-start",
-  fontSize: 10,
-  padding: "0 6px",
-  borderRadius: 999,
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-};
-// It grows to fill a page that gives it room (a replaced history), and is
-// never shorter than a card's worth.
-const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
-// A page's frame is the page: no card border.
-const pageFrameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 0, border: "none" };
+// A frame that fills (a page's, a `size: fill` component's) is the page's
+// body, as a table is: no card border.
+const fillFrameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 0, border: "none" };
 // A section's frame: its content's height, no card border.
 const fitFrameStyle: CSSProperties = { width: "100%", flex: "none", minHeight: 40, border: "none" };
 // A page's frame above what the page draws under it: its content's height.

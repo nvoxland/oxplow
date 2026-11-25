@@ -194,7 +194,7 @@ not match `src/a.rs` (SQLite's own `GLOB` has no `**`, so it can't). The
 compiled glob is kept per statement. With it, `v_file_kind_rule` (V55
 `file_kind_rule_decl`: `kind`, `glob`, `label`, `extension`) says what kind of
 file a path is: one row per glob of every enabled extension's `file_kinds:`
-(restated with each published generation) and of the project's
+(restated with each activated generation) and of the project's
 `oxplow.files.kinds` (extension `project-settings`, restated when the
 setting changes and at boot):
 `SELECT DISTINCT kind FROM v_file_kind_rule WHERE glob_match(glob, :path)`.
@@ -418,7 +418,7 @@ It also restates enabled contribution descriptors. With prepared capabilities,
 capability rows and switch events join that same savepoint and vocabulary uses
 the planned task-tracker recognizer. Mismatched catalog identities are rejected.
 It makes no outer commit or runtime swap. The returned vocabulary can be exposed
-only after committed, coordinated generation publication.
+only after committed, coordinated generation activation.
 
 This API does not change the existing partial-load background compiler: it
 continues to use `compile_extension_datasets`. The full generation coordinator
@@ -483,7 +483,8 @@ its `dataset_input` followed through live datasets down to tables (and to a
 materialized input's own table) — re-run when the registry (`dataset`,
 `dataset_input`) changes. One whose SELECT, contract or input tables
 changed is re-registered, so its first recompute fills it: a contract
-can change under an unchanged SELECT (an input's column changed type),
+(its columns and its key) can change under an unchanged SELECT (an
+input's column changed type, a key was added), a clocked one included,
 and the compiler then recreates the table empty. A recompute refills the table, whole, in one
 transaction, after its inputs have been quiet for the coalesce window
 (or three windows after the first change when they never go quiet), and
@@ -1646,7 +1647,7 @@ still need an audit for complete reader coverage.
 Entity collector completion requests coordinated reactivation only when the
 registered entity schema differs from the signature captured with the active
 generation (view, version, SQL, columns and key). Ordinary data changes keep the
-published runtime and provider processes. Until a generation is activated,
+active runtime and provider processes. Until a generation is activated,
 dataset consumers compile against the current fingerprint.
 
 ## Shared models (contract, being built)

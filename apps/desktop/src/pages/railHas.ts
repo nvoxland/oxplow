@@ -39,6 +39,43 @@ function titleOf(run: PageRun, at: RunNode): string | null {
   return def?.title || (def?.kind === "embed" || !def ? (at.embed?.page.title ?? null) : null);
 }
 
+/** The vizzes that take the page's height when they are all of it: a
+ *  history list should not sit five rows tall in an empty page. A custom
+ *  component isn't one: it fills only when it declares `size: fill` (the
+ *  run then marks its viz `fills`), else it is as tall as what it draws. */
+const FILLS_ALONE: ReadonlySet<string> = new Set(["table", "list", "tree"]);
+
+/** The one node the run shows as its page's body: its view, or the only
+ *  child the run shows of a view that is a stack (a node's `when` keeps the
+ *  others out of the run). */
+function wholeNode(run: PageRun): string | null {
+  const tree = run.tree;
+  if (run.page.view.kind !== "stack") return tree.id;
+  return tree.children.length === 1 ? tree.children[0]!.id : null;
+}
+
+/** Whether node `id` is the whole of its page's body. */
+function isWholePage(run: PageRun, id: string): boolean {
+  return run.tree.id === id || wholeNode(run) === id;
+}
+
+/** Whether viz node `id` takes its page's height: its viz always does (a
+ *  file, a terminal, a component that declares `size: fill`), or it is a
+ *  table, list or tree that is the whole page. `PageTree` fills the node and `PageHost` the body
+ *  around it by this one rule. */
+export function vizFills(run: PageRun, id: string): boolean {
+  const def = nodeById(run.page, id);
+  return def?.kind === "viz" && (def.config.fills || (FILLS_ALONE.has(def.config.viz) && isWholePage(run, id)));
+}
+
+/** Whether the page's body is one viz that fills only because it is all of
+ *  the page (`vizFills` and not `viewFills`): the body takes the height, the
+ *  page keeps its width and rail. */
+export function aloneFills(run: PageRun): boolean {
+  const only = wholeNode(run);
+  return only !== null && vizFills(run, only);
+}
+
 /** Whether the page's body may have markdown headings Contents lists: a
  *  markdown viz (its text is data the run can't read here) or static
  *  markdown with an `##` or `###` heading. */

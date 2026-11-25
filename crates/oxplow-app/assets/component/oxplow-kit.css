@@ -204,6 +204,13 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .monaco-editor .ox-code-mark { background: var(--accent-soft-bg); }
 .monaco-editor .ox-code-mark-margin { box-shadow: inset 3px 0 0 var(--accent); }
 .ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A column's `badges`: pills in their tone (the colour set on the pill),
+   outlined and tinted with it, so a branch or tag stands out in its row. */
+.ox-cell-badge { border-color: currentColor; background: color-mix(in srgb, currentColor 14%, transparent); font-weight: var(--weight-medium); line-height: var(--leading-tight); max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The pills at the cell's end, after its text, on its first line. */
+.ox-cell-badges { margin-left: auto; flex-shrink: 0; display: inline-flex; gap: var(--space-1); align-self: center; }
+/* A cut cell of parts (its text, then pills): the text is cut, the pills stay. */
+.ox-truncate .ox-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Document pages: a title, an intro, then sections. A section is a
    heading over a rule, no box (document style); sections stack apart. */
@@ -290,6 +297,8 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .ox-section-help { display: inline-flex; align-items: center; margin-left: var(--space-2); color: var(--text-muted); vertical-align: middle; cursor: help; }
 .ox-section-help:hover { color: var(--text-secondary); }
 .ox-section-desc { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-sm); }
+/* A lead of more than one block (a commit message's body) reads in the body's colour. */
+.ox-section-desc.ox-section-lead { color: var(--text-primary); }
 .ox-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
 
 /* A row above a list: its filter, then its actions. */

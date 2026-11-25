@@ -10,10 +10,10 @@ given:
       refs:
         branches: [{ name: main, head: c3, stream: 1 }]
         heads: [{ stream: 1, sha: c3 }]
-when: { page: oxplow/file-history, params: { stream_id: 1, path: src, limit: 20 } }
+when: { page: oxplow/git-history, params: { stream_id: 1, path: src } }
 expect:
   loaders:
-    file_history:
+    history:
       rows:
-        - { sha: c2, change: null, additions: 2, deletions: 1, added: "+2", removed: "−1" }
-        - { sha: c1, change: "2 files", additions: 3, deletions: 0, added: "+3", removed: "−0" }
+        - { sha: c2, change: null, additions: 2, deletions: 1 }
+        - { sha: c1, change: "2 files", additions: 3, deletions: 0 }

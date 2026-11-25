@@ -159,7 +159,7 @@ load is held back, as boot holds it: the deploy prints why and still
 succeeds, so `run:dev` starts oxplow (a required one failing, or the one
 named, fails it). It refuses while oxplow holds the project
 (the instance lock: a running daemon keeps the live set in memory and its
-next publication would undo it), so quit oxplow, deploy, then start it.
+next activation would undo it), so quit oxplow, deploy, then start it.
 With foundation running, deploy from inside oxplow instead
 (`oxplow.extension.deploy`, or Deploy in the Extensions page): it
 replaces what runs at once, no restart. Nothing deploys on its own: a
@@ -284,7 +284,7 @@ request's "Coverage & tests" panel.
 | Only files under `extensions/` or `.oxplow/extensions/` | `bun run test:ext [<name>]` — seconds, no compile; `bun run test:ext <name> --only <fixture>[,…]` runs the check and just those fixtures while you iterate |
 | A Rust crate | `bun run test:fast -p <crate> [filter]` |
 | `apps/desktop/src` | `bun run test:fast:ts` (and `bun run e2e` for a user path) |
-| Core and an extension together | both: `test:ext` rebuilds through `cargo run` first (and builds `oxplow-script-worker` first: a fixture's scripts run in it, from `target/debug/`) |
+| Core and an extension together | both: `test:ext` rebuilds through `cargo run` first (and builds `oxplow-script-worker` first: a fixture's scripts run in it, from `target/debug/`). `test:fast` doesn't run any extension's fixtures, the shipped ones included: a core change that could break one needs `test:ext` too |
 | Ready to push | `test:collect` with `lint:collect`, once |
 
 An extension's behavior is a fixture in its extension, written first
@@ -312,7 +312,9 @@ the same filters (`bun run test:fast -p oxplow-git symlink`) and still
 writes `target/nextest/default/junit.xml`, so the red→green progression
 lands in the panel — it just skips coverage instrumentation, which is the
 slow part (~11s for the full suite vs milliseconds for one filtered test).
-`bun run test:fast:ts` is the frontend counterpart. Bare `cargo test` /
+`bun run test:fast:ts` is the frontend counterpart, and it takes files
+the same way (`bun run test:fast:ts src/viz/lanes.test.ts`, paths from
+`apps/desktop/`). Bare `cargo test` /
 `bun test` emit **no reports**, so the run shows only the command and none
 of the tests. The
 Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo

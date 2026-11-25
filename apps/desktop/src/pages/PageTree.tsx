@@ -25,6 +25,7 @@ import { pageTabRef } from "../tabs/pageRefs.js";
 import { actionHelp, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
+import { vizFills } from "./railHas.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, Page, PageRun, RunNode, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageActionContext, PageFormsContext, useNodeActions, useNodeForms } from "./useNodeActions.js";
@@ -223,24 +224,14 @@ function titleFromRow(run: PageRun, def: ReturnType<typeof nodeById>): string | 
  * branch: terminals only start once their surface has a visible size. */
 function fillsNode(run: PageRun, at: RunNode): boolean {
   const def = nodeById(run.page, at.id);
-  if (def?.kind === "viz") return def.config.fills || (FILLS_ALONE.has(def.config.viz) && isWholePage(run, at.id));
+  if (def?.kind === "viz") return vizFills(run, at.id);
+  // A component that declares `size: fill` takes the page's height.
+  if (def?.kind === "component") return def.sizing === "fill";
   if (def?.kind === "stack" && at.children.length === 1) {
     // A stack of one is its child's height.
     return fillsNode(run, at.children[0]!);
   }
   return (def?.kind === "stack" || def?.kind === "switch") && at.children.some((child) => fillsNode(run, child));
-}
-
-/** The vizzes that take the page's height when they are all of it: a
- *  history list should not sit five rows tall in an empty page. */
-const FILLS_ALONE: ReadonlySet<string> = new Set(["table", "list", "tree", "custom"]);
-
-/** Whether node `id` is the whole of its page's body: its view, or the only
- *  node of a view that is a stack. */
-function isWholePage(run: PageRun, id: string): boolean {
-  const view = run.page.view;
-  if (view.id === id) return true;
-  return view.kind === "stack" && view.children.length === 1 && view.children[0]!.id === id;
 }
 
 /** A node's root: where `#node=` lands. */
@@ -388,12 +379,8 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
     <VizActionRunnerContext.Provider value={runner}>
     <FormSourceContext.Provider value={forms}>
     <VizPagesContext.Provider value={pages}>
-      {lead ? (
-        <p className="ox-section-desc" data-testid={`node-${id}-lead`}>
-          {lead}
-        </p>
-      ) : null}
-      {showAs && def.config.viz === "table" && def.from !== null && !compact ? (
+      {lead ? <Lead id={id} text={lead} format={vizRun.config.leadFormat ?? "markdown"} /> : null}
+      {showAs && def.config.viz === "table" && def.config.chartable && def.from !== null && !compact ? (
         <TablePresentation
           key={`${run.page.id}:${id}`}
           id={id}
@@ -413,6 +400,20 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
     </FormSourceContext.Provider>
     </VizActionRunnerContext.Provider>
   );
+}
+
+/** A node's lead under its heading: Markdown (a commit message's
+ *  paragraphs, lists and `code`) or, with `format: text`, the text as
+ *  written with its line breaks. One paragraph reads as the muted
+ *  description; more (a message's body) in the body's colour, since a
+ *  long muted block is hard to read. */
+function Lead({ id, text, format }: { id: string; text: string; format: "markdown" | "text" }) {
+  const long = /\n\s*\n|\n\s*([-*+]|\d+\.)\s/.test(text);
+  const className = long ? "ox-section-desc ox-section-lead" : "ox-section-desc";
+  if (format === "text") {
+    return <p className={className} data-testid={`node-${id}-lead`} style={{ whiteSpace: "pre-line" }}>{text}</p>;
+  }
+  return <Markdown value={text} className={className} testId={`node-${id}-lead`} />;
 }
 
 /** A node's `lead`: the first row's text of its column, a paragraph under

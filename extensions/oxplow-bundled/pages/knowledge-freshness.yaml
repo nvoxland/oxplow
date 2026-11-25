@@ -1,16 +1,16 @@
 title: Knowledge Freshness
 description: "The files a knowledge page cites, the ones that changed first, each with the snapshot it was pinned to and whether the file has changed since."
 icon: book-open
-category: Knowledge
+label: '{{param.id}} freshness'
 needs:
 - model:oxplow/knowledge_record
 params:
+# The knowledge page whose citations these are (its URI's `?`): each
+# page's freshness is a tab of its own.
 - name: store
-  role: filter
   label: Store
   default: oxwiki
 - name: id
-  role: filter
   label: Knowledge page (its id)
 answers:
 - {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"knowledge"}

@@ -15,7 +15,7 @@ const PAGE_SIZE: usize = 64;
 const TICK: Duration = Duration::from_secs(1);
 const FAILURE_BACKOFF: Duration = Duration::from_secs(5);
 
-/// One project-level scheduler. Construct only after the host has published a
+/// One project-level scheduler. Construct only after the host has activated a
 /// coherent active catalog and exact operation registry.
 pub struct JobRunScheduler {
     store: SqliteJobRunStore,

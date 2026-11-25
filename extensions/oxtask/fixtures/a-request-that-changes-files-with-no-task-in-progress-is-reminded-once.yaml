@@ -11,7 +11,7 @@ when: { sql: "SELECT kind, message FROM v_agent_nudge" }
 expect:
   rows:
     - kind: oxtask/untracked-work
-      message: "This request changed files, and no task is in progress on this thread. If it is work the person will want to see on the Work panel, take or file its task and move it to in progress (the `track-work` skill); a small fix needs none."
+      message: "This request changed files, and no task is in progress on this thread. Unless it is a small fix (one or two files: a typo, a one-line change), take or file its task and move it to in progress, so the person sees it on the Work panel (the `track-work` skill)."
 steps:
   - given:
       - observe: { turn: { prompt: Fix the farewell, tools: [{ name: Edit, kind: edit, paths: [farewell.txt], ok: true }, { name: Edit, kind: edit, paths: [farewell2.txt], ok: true }] } }

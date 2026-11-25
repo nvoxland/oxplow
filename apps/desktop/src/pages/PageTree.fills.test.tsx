@@ -50,3 +50,30 @@ test("the only node of a stack fills; one of several does not", () => {
   const b = render(<PageTree run={two} runId="r" />);
   expect(fills(b.getByTestId("node-rows"))).toBe(false);
 });
+
+// A node's `when` keeps a node out of the run: of two in a stack, the one
+// the run shows is all of the page, and fills it.
+test("the one node a run shows of a stack of two fills", () => {
+  const page = fakePage(
+    node.stack("s", [
+      node.viz("rows", "rows", { viz: "table", columns: [{ key: "a" }] }, { title: "Rows" }),
+      node.viz("more", "rows", { viz: "table", columns: [{ key: "a" }] }, { title: "More" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: rows, tree: { id: "s", children: [{ id: "more", children: [], embed: null, error: null, replacedBy: null, actionPoint: null }], embed: null, error: null, replacedBy: null, actionPoint: null } as never });
+  const view = render(<PageTree run={run} runId="r" />);
+  expect(fills(view.getByTestId("node-more"))).toBe(true);
+});
+
+// A custom component sizes as it declares (the run carries `sizing`): a
+// lone `content` one is as tall as what it draws, and the page scrolls; a
+// `fill` one takes the page's height (the run marks its viz `fills`).
+test("a lone custom viz fills only when its component fills", () => {
+  const custom = (fills: boolean) =>
+    fakeRun(fakePage(node.viz("c", "rows", { viz: "custom", custom: { component: "c", props: null }, sizing: fills ? "fill" : "content", fills } as never)), { loaders: rows });
+  const content = render(<PageTree run={custom(false)} runId="r" />);
+  expect(fills(content.getByTestId("node-c"))).toBe(false);
+  cleanup();
+  const fill = render(<PageTree run={custom(true)} runId="r" />);
+  expect(fills(fill.getByTestId("node-c"))).toBe(true);
+});

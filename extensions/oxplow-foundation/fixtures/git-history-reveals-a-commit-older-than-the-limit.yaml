@@ -1,0 +1,17 @@
+# A commit to reveal is loaded even when it is older than `limit` (the graph
+# reads down to it, keeping the rows in order for the lanes) and marked.
+given:
+  - observe: { commit: { sha: aaaaaaa, at: "2026-01-01T00:00:00Z", subject: First work } }
+  - observe: { commit: { sha: bbbbbbb, at: "2026-01-02T00:00:00Z", subject: Second work, parents: [aaaaaaa] } }
+  - observe: { commit: { sha: ccccccc, at: "2026-01-03T00:00:00Z", subject: Third work, parents: [bbbbbbb] } }
+when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: ccccccc, limit: 1, reveal_sha: aaaaaaa } }
+expect:
+  loaders:
+    graph:
+      rows:
+        - { sha: ccccccc, revealed: 0 }
+        - { sha: bbbbbbb, revealed: 0 }
+        - { sha: aaaaaaa, revealed: 1 }
+steps:
+  - params: { stream_id: 1, head_sha: ccccccc, limit: 1, reveal_sha: '' }
+    expect: { loaders: { graph: { rows: [{ sha: ccccccc }] } } }

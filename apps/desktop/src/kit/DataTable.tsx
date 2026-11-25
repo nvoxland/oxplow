@@ -59,13 +59,17 @@ function cuts(c: Pick<DataColumn<unknown>, "truncate" | "width">): boolean {
 /** A cut cell's hover: its whole text, only when the cut hides some. */
 function showWhole(e: React.MouseEvent<HTMLTableCellElement>) {
   const td = e.currentTarget;
-  if (td.scrollWidth > td.clientWidth) td.title = td.textContent ?? "";
+  // A cell of parts (its text, then pills) cuts its text, not itself.
+  const text = td.querySelector<HTMLElement>(".ox-cell-text");
+  const cut = (el: HTMLElement) => el.scrollWidth > el.clientWidth;
+  if (cut(td) || (text !== null && cut(text))) td.title = td.textContent ?? "";
   else td.removeAttribute("title");
 }
 
 /** The one table: core pages and viz nodes draw rows through it. */
 export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetail, cellStyle, header = true, testId, tableProps }: DataTableProps<R>) {
-  const fixed = columns.some((c) => c.width !== undefined);
+  // A cut column needs a fixed layout too: an automatic one grows to fit.
+  const fixed = columns.some((c) => c.width !== undefined || c.truncate === true);
   const parts: readonly { key: string; heading: ReactNode | null; rows: readonly R[] }[] =
     groups ?? [{ key: "", heading: null, rows: rows ?? [] }];
   let index = 0;

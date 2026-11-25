@@ -1203,16 +1203,16 @@ datasets:
   tests:
     - { not_null: event_type }
 - name: replaceable
-  version: 5
+  version: 6
   key: [target]
   description: "The core sub-components an extension may replace with a page (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
   fields:
-    - { name: "target", type: "TEXT", doc: "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`, `vcs.history.graph`." }
+    - { name: "target", type: "TEXT", doc: "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`." }
     - { name: "capability", type: "TEXT", doc: "What it belongs to: a capability (`vcs`), or `model:<owner>/<model>` for a shared model's items (`model:oxplow/task_record`)." }
     - { name: "bound", type: "INTEGER", doc: "1 when only the extension that holds the item may replace it: its own provider's, or the one that fills the model as the item's store (a task's states); 0 when any extension may, and the person chooses." }
     - { name: "version", type: "INTEGER", doc: "The contract's version; a declaration may pin it (`version:`)." }
     - { name: "props", type: "TEXT", doc: "JSON array of the prop names the replacement page is given and must declare as `params`." }
-    - { name: "view", type: "TEXT", doc: "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`q`, `author`, `branch` for `vcs.history.graph`). (v2)" }
+    - { name: "view", type: "TEXT", doc: "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`show`, `priority`, `q` for `task.board`). (v2)" }
     - { name: "label", type: "TEXT", doc: "What a person calls it (\"board\", \"detail editor\")." }
   tests:
     - { not_null: target }
@@ -1400,7 +1400,7 @@ datasets:
     - { name: "time_ms", type: "", doc: "Its duration, when the report gave one." }
     - { name: "message", type: "", doc: "What a failed case's report said went wrong: its failure message, then its body (the assertion and where it happened). NULL for a case that didn't fail, one whose report said nothing, and a failure past the per-run cap (64 KB of messages per run, 4 KB each, a cut one ending in `…`)." }
 - name: test_run
-  version: 5
+  version: 6
   description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts."
   fields:
     - { name: "id", type: "INTEGER", doc: "Run id; `oxplow:oxplow/run?id=<id>` is how a run is cited." }
@@ -1412,7 +1412,7 @@ datasets:
     - { name: "failed", type: "", doc: "Tests failed (NULL when not reported)." }
     - { name: "skipped", type: "", doc: "Tests skipped (NULL when not reported)." }
     - { name: "total", type: "", doc: "Tests run in total (NULL when not reported)." }
-    - { name: "duration_ms", type: "", doc: "Wall-clock duration, if known." }
+    - { name: "duration_ms", type: "", doc: "How long the run took, in milliseconds: the shell call's time as its harness measured it; NULL when the harness gave none. A command moved to the background has only the time until it moved. (v6: recorded)" }
     - { name: "provenance", type: "TEXT", doc: "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)." }
     - { name: "source", type: "TEXT", doc: "What recorded it (`hook`, `mcp`, …)." }
     - { name: "branch", type: "TEXT", doc: "Branch checked out when it ran." }
@@ -2351,7 +2351,7 @@ datasets:
     - { name: "page", type: "TEXT", doc: "The page it shows there (`<extension>/<slug>`)." }
     - { name: "description", type: "TEXT", doc: "What the mount does, in a sentence." }
 - name: custom_component
-  version: 2
+  version: 3
   key: [uri]
   description: "Each custom component an enabled extension draws with its own code (`custom_components:`), with what it may reach. Read live from the catalog."
   fields:
@@ -2363,6 +2363,7 @@ datasets:
     - { name: "bundle", type: "TEXT", doc: "The folder in the extension that holds its code." }
     - { name: "commands", type: "TEXT", doc: "The commands it may invoke, as a JSON array." }
     - { name: "sql", type: "TEXT", doc: "`read` when it runs its own read-only SQL over the datasets; NULL otherwise." }
+    - { name: "size", type: "TEXT", doc: "How it sizes on a page (`size:`): `content`, as tall as what it draws, the page scrolling; `fill`, the page's height, scrolling itself. (v3)" }
 - name: replacement
   version: 3
   key: [target, extension]

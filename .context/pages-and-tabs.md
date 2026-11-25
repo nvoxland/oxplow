@@ -230,7 +230,9 @@ split by hand (`oxplow:oxplow/task?id=tsk42&provider=oxtask`). A web
 page's id is its URL. A tab's view (`#lines=…`, a filter, a pick) rides in
 the id after `#` but is not its identity: the `?` names what the page
 shows, the `#` how it shows it, and the identity is the id without its
-`#` (`identityOf`). A `[[…]]` link, a `page_ref` row, a backlink and a tab
+`#` (`identityOf`); a param a link sets to name the content is therefore
+a `resource` param, in the `?`, so it opens its own tab
+(extensions-pages.md "role"). A `[[…]]` link, a `page_ref` row, a backlink and a tab
 all agree on one string. **Tabs match on more than identity: a tab shows
 an identity in a display mode** (`modeOf`: the `#oxplow.renderer` value,
 `""` when the view names none — the default). The Text view of a file and
@@ -339,7 +341,7 @@ the alert and a count) is the first loader its *author* declared
 
 ## Page files
 
-The catalog's runtime publication listener also invalidates every open
+The catalog's runtime activation listener also invalidates every open
 page run. Reloading only the extension metadata leaves runs with no SQL
 loaders (a dashboard of embeds or a markdown page) on their old definition
 after deploy. The existing listener sends `page_runs.notify_everything()`
@@ -468,7 +470,9 @@ inline page offers Save as Page for any valid node tree,
 including inline rows and multiple loaders.
 
 **Show as** on a page table renders the same loaded rows as Table, List,
-Number, Bar, Line, or Treemap. Only the page's own tables offer it: an
+Number, Bar, Line, or Treemap. Only a table that says `chartable: true`
+offers it (a table of records has nothing to chart), and only the page's
+own: an
 embedded page's tables (a dashboard tile, an Alerts section) are that
 page's. The shell keeps the choice and its column roles in the tab entry's
 history state. **Save as Page** takes the selected presentation and the
@@ -477,7 +481,8 @@ original page's loader using the params the person set (the tab's, not
 what the page resolved: a default such as `head_sha` stays a default, so a
 page saved from Git History follows new commits). A temporary shown view
 carries its original loader definitions into the saved page. Number uses
-the chosen column of the first row.
+the chosen column of the first row. A view saved as a table is
+`chartable` itself.
 
 **Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve in
 this order (supplied, else the viewer's context, else the default;
@@ -913,8 +918,8 @@ margin; an embed or a slot takes its title from the page it shows):
   `operations` (with an `expand` into `alerts-operation`) and `extensions`
   nodes, with `embed`s of `alerts-deliveries` and `alerts-reactions`.
   `git-history` (params `stream_id`, `q`, `author`, `branch`, `head_sha`,
-  `reveal_sha`, `limit`): a `table` with the `vcs.history.graph`
-  replaceable. `local-history` (params `stream_id`, `mode` `recent` |
+  `reveal_sha`, `limit`): a `table` with a `lanes` column while no filter is
+  set, a `table` of the matches while one is. `local-history` (params `stream_id`, `mode` `recent` |
   `by-commit`, and `all`, which lifts the caps — the rail's, so no "View
   all" step to go Back from): two `table`s. `uncommitted-changes` (param
   `stream_id`; the working change, `kind = 'working' AND target = ''`):
@@ -1809,8 +1814,8 @@ pick) is the list's own (`useListNav`); only a pick is a selection, and
 **A component inside a page shares the page's view only where its host
 says which keys** (`viz/hostedView.ts`; `.context/extensions-components.md` "Whose
 view a component has"): a replacement the keys its target's contract
-lists (the history graph: Git History's `q`, `author`, `branch`, the
-same ones core's commit list reads), a page's own component all of
+lists (the board: the Work page's `show`, `priority`, `q`, the same
+ones oxplow's own board reads), a page's own component all of
 the page's params (`"all"`). Its history state is its own object in the entry
 (`component:<scope>`). A tile or a slot gives none.
 

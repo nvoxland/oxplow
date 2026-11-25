@@ -444,9 +444,9 @@ pub(crate) mod test_support {
         (ctx, dir)
     }
 
-    /// Publish the generation the files written and the config changed since
+    /// Activate the generation the files written and the config changed since
     /// ask for, as the owner of generations does on the change.
-    pub async fn publish(ctx: &crate::RpcContext) {
+    pub async fn activate(ctx: &crate::RpcContext) {
         // Only deployed extensions run: deploy the sources the test wrote
         // (but not ones the person turned off; one that doesn't load is
         // left out, as an activation holds it back).

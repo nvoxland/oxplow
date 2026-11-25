@@ -20,7 +20,7 @@ Everything oxplow tracks is exposed as read-only SQL views: `v_oxplow_task`
 
 Open **Catalog** from the launcher to find datasets. Open a dataset to
 see its definition and the data it reads, or select **Dataset data** to
-browse its rows. On a page table, pick **Show as** to switch to a list,
+browse its rows. On a table of data, pick **Show as** to switch to a list,
 number, or chart. Choose the chart's columns, then use **Save as Page**
 to keep that view live.
 
@@ -150,10 +150,10 @@ section above their subsections; Contents nests both levels.
 ### Grouping and styling rows
 
 `group: { by: <column> }` puts rows under a heading per value;
-`emphasis: <column>` highlights rows whose value is truthy; `depth:
+`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `lead: <column>` puts a row's text under a section's heading, as Markdown (`lead: { column: <column>, format: text }` shows it as written); `single_line: true` (a table) keeps each row on one line and cuts a long cell with "…"; `chartable: true` (a table) offers **Show as** and **Save as Page** on it, for rows worth charting; `depth:
 <column>` indents. A column's `icon: <column>` draws an icon named by that
 column's value, and `tone: <column>` colours the cell (`accent`, `success`,
-`warning`, `danger`, `muted`).
+`warning`, `danger`, `muted`). A column's `badges: <column>` draws that column's labels (a JSON array, such as a commit's branches and tags) as pills at the right end of the cell, each in its `tone`.
 
 ### Actions
 
@@ -264,7 +264,14 @@ the commands it declares, and it is fed its page's data.
 custom_components:
   - id: burndown
     commands: [oxtask.task.move]    # commands it may run
+    size: content                   # content (default) or fill
 ```
+
+`size` is how tall the frame is. With `content` the frame is as tall as what
+the component draws (no border, the page scrolls). With `fill` the frame
+takes the page's height and the component scrolls itself. To scroll the page
+so a part of the component shows, call `component.reveal({ top, bottom })`
+(pixels from the component's top).
 
 ```yaml
 # pages/burndown.yaml
@@ -354,7 +361,7 @@ inside the frame.
 ### A custom page
 
 A component can also be a whole page: a page whose view is one `component`
-node. It fills the page under oxplow's own bar, which still draws the
+node. With `size: fill` it fills the page under oxplow's own bar, which still draws the
 title, back and forward, bookmarks and the page's actions.
 
 ```yaml
@@ -404,7 +411,7 @@ live, with Save as Page and Pin to Dashboard when it is one viz over one
 fails rejects `INVALID` with `field: "/loaders/<loader>/sql"`. A component is
 fed its page's data: `component.data` holds each loader's `{ columns,
 rows, truncated }` by name, `component.params` what they ran with, and
-`onUpdate(({ data, params, changed }) => …)` hears each change. While one shows, the frame takes its content's height:
+`onUpdate(({ data, params, changed }) => …)` hears each change. While one shows, the frame takes its content's height (`size: content`):
 leave `html` and `body` at `height: auto`. A page can also have a `rail:` node tree: oxplow
 draws it in the page's rail, and a row it picks sets the page's view
 param, which the component hears through `onViewParams`. Bundled's Work
@@ -452,8 +459,8 @@ draws them itself; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. Some views also share
-their page's view params: Git History's graph (`vcs.history.graph`) has
-the page's `q`, `author` and `branch`, so a custom graph reads them from
+their page's view params: the Work board (`task.board`) has
+the page's `show`, `priority` and `q`, so a custom board reads them from
 `component.viewParams`, writes them with `setViewParams` and follows
 `onViewParams` — the same address oxplow's own page keeps. A `viz: custom` view that
 changes items needs its commands declared like any component, and the

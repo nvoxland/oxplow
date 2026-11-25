@@ -9,7 +9,7 @@ afterEach(cleanup);
 const page = fakePage(node.viz("items", "items"));
 const links = [
   { title: "Collectors", uri: "oxplow:oxplow/page?page=oxplow/collectors", description: "Every collector." },
-  { title: "Extension problems", uri: "oxplow:oxplow/page?page=oxplow/extension-problems#extension=acme", description: null },
+  { title: "Extension problems", uri: "oxplow:oxplow/page?extension=acme&page=oxplow/extension-problems", description: null },
 ];
 const run = fakeRun(page, { loaders: { items: loader([], []) }, seeAlso: links });
 

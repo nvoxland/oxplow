@@ -313,6 +313,33 @@ pub enum ArgSource {
     Literal(#[specta(type = oxplow_domain::Json)] serde_json::Value),
 }
 
+/// A viz node's `lead`: its column, or its column and how it reads.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum LeadDecl {
+    Column(String),
+    With {
+        column: String,
+        #[serde(default)]
+        format: Option<crate::pages::spec::TextFormat>,
+    },
+}
+
+impl LeadDecl {
+    fn column(self) -> String {
+        match self {
+            LeadDecl::Column(c) | LeadDecl::With { column: c, .. } => c,
+        }
+    }
+
+    fn format(&self) -> Option<crate::pages::spec::TextFormat> {
+        match self {
+            LeadDecl::Column(_) => None,
+            LeadDecl::With { format, .. } => *format,
+        }
+    }
+}
+
 /// When a loader that reads outside the published datasets runs again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
@@ -478,8 +505,69 @@ pub struct Node {
     pub replaceable: Option<String>,
     /// A grid child's size.
     pub size: Option<TileSize>,
+    /// It shows only while its params say (`when:`); none shows always. A
+    /// hidden node is not in the run, and its loaders don't run.
+    pub when: Option<NodeWhen>,
     #[serde(flatten)]
     pub kind: NodeKind,
+}
+
+/// When a node shows, by the page's params (`when:`). A param is empty
+/// when it has no value, null, or text that is blank.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeWhen {
+    /// While every one is empty: `when: { empty: [q, author] }`.
+    Empty(Vec<String>),
+    /// While one of them is set: `when: { not_empty: [q, author] }`, the
+    /// opposite of `empty`.
+    NotEmpty(Vec<String>),
+}
+
+impl NodeWhen {
+    /// Whether the node shows with `params`.
+    pub fn holds(&self, params: &BTreeMap<String, SqlCell>) -> bool {
+        let empty = |name: &String| match params.get(name) {
+            None | Some(SqlCell::Null(_)) => true,
+            Some(SqlCell::Text(t)) => t.trim().is_empty(),
+            Some(_) => false,
+        };
+        match self {
+            NodeWhen::Empty(names) => names.iter().all(empty),
+            NodeWhen::NotEmpty(names) => !names.iter().all(empty),
+        }
+    }
+
+    fn names(&self) -> &[String] {
+        match self {
+            NodeWhen::Empty(names) | NodeWhen::NotEmpty(names) => names,
+        }
+    }
+}
+
+/// A node's `when:`, read: one of its two keys over a list of the page's
+/// params.
+fn parse_when(value: serde_yaml::Value, params: &[PageParam]) -> Result<NodeWhen, String> {
+    const SHAPE: &str = "`when` is `{ empty: [params] }` or `{ not_empty: [params] }`";
+    let map = value.as_mapping().filter(|m| m.len() == 1).ok_or(SHAPE)?;
+    let (key, list) = map.iter().next().ok_or(SHAPE)?;
+    let names: Vec<String> = serde_yaml::from_value(list.clone()).map_err(|_| SHAPE.to_string())?;
+    let when = match key.as_str() {
+        Some("empty") => NodeWhen::Empty(names),
+        Some("not_empty") => NodeWhen::NotEmpty(names),
+        _ => return Err(SHAPE.to_string()),
+    };
+    if when.names().is_empty() {
+        return Err("`when` names at least one param".to_string());
+    }
+    if let Some(gone) = when
+        .names()
+        .iter()
+        .find(|n| !params.iter().any(|p| &p.name == *n))
+    {
+        return Err(format!("`when`: `{gone}` isn't a param of this page"));
+    }
+    Ok(when)
 }
 
 impl Node {
@@ -502,6 +590,19 @@ impl Node {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Every node below it, `self` included, to change.
+    pub fn for_each_mut(&mut self, f: &mut impl FnMut(&mut Node)) {
+        f(self);
+        if let NodeKind::Stack { children }
+        | NodeKind::Grid { children }
+        | NodeKind::Switch { children, .. } = &mut self.kind
+        {
+            for c in children {
+                c.for_each_mut(f);
+            }
         }
     }
 
@@ -545,6 +646,10 @@ pub enum NodeKind {
         component: String,
         #[specta(type = Option<oxplow_domain::Json>)]
         props: Option<serde_json::Value>,
+        /// How it sizes, as its declaration's `size:` says: the run fills
+        /// it in. (`size` is a grid tile's.)
+        #[serde(default)]
+        sizing: crate::pages::spec::ComponentSize,
     },
     /// A named action point (`action_point: <id>`, `context:`): the
     /// commands that joined it, drawn by the shell as nothing, a button or
@@ -673,9 +778,10 @@ struct VizFile {
     /// The rows start folded under a count; a click opens them.
     #[serde(default)]
     fold: bool,
-    /// A column whose first row's text is a paragraph under the heading.
+    /// A column whose first row's text is a paragraph under the heading:
+    /// `lead: <column>`, or `lead: { column, format: markdown | text }`.
     #[serde(default)]
-    lead: Option<String>,
+    lead: Option<LeadDecl>,
     #[serde(default)]
     chart: Option<VizChart>,
     #[serde(default)]
@@ -712,6 +818,12 @@ struct VizFile {
     group: Option<VizGroup>,
     #[serde(default)]
     emphasis: Option<String>,
+    #[serde(default)]
+    reveal: Option<String>,
+    #[serde(default)]
+    single_line: bool,
+    #[serde(default)]
+    chartable: bool,
     #[serde(default)]
     depth: Option<String>,
     #[serde(default)]
@@ -1612,6 +1724,15 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     let collapsible = flag(&mut map, "collapsible")?;
     let link = take_str(&mut map, "link")?;
     let replaceable = take_str(&mut map, "replaceable")?;
+    let when = map
+        .remove("when")
+        .map(|v| {
+            parse_when(v, ctx.params).map_err(|why| match &id {
+                Some(id) => format!("node `{id}`: {why}"),
+                None => why,
+            })
+        })
+        .transpose()?;
     let size = map
         .remove("size")
         .map(serde_yaml::from_value::<TileSize>)
@@ -1733,6 +1854,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
             NodeKind::Component {
                 component: c.id,
                 props: c.props,
+                sizing: Default::default(),
             },
         )
     } else {
@@ -1750,6 +1872,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         link,
         replaceable,
         size,
+        when,
         kind,
     })
 }
@@ -1789,7 +1912,8 @@ fn leaf_viz(
         empty: f.empty,
         hide_header: f.hide_header,
         fold: f.fold,
-        lead: f.lead,
+        lead_format: f.lead.as_ref().and_then(LeadDecl::format),
+        lead: f.lead.map(LeadDecl::column),
         chart: f.chart,
         tree: f.tree,
         timeline: f.timeline,
@@ -1808,10 +1932,14 @@ fn leaf_viz(
         custom: f.custom,
         group: f.group,
         emphasis: f.emphasis,
+        reveal: f.reveal,
+        single_line: f.single_line,
+        chartable: f.chartable,
         depth: f.depth,
         edge: f.edge,
         fills: f.viz.fills(),
         actions,
+        sizing: None,
         origin: ctx.origin.clone(),
     };
     // A custom viz's component is the extension's: checked where it loads.

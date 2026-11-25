@@ -125,12 +125,19 @@ export function tabLabel(
   const label = page.label ?? "";
   const reads = /\{\{\s*row\./.test(label);
   if (reads && !row) return page.title;
+  // A label whose every field is empty is the page itself, unnamed: its
+  // title, never the label's other words alone ("{{param.path}} history").
+  let fields = 0;
+  let empty = 0;
   const filled = label.replace(/\{\{\s*(param|row)\.([a-z0-9_]+)((?:\s*\|\s*[a-z]+)*)\s*\}\}/g, (_, scope: string, name: string, filters: string) => {
     const v = (scope === "row" ? row : params)?.[name];
     let text = v === null || v === undefined ? "" : String(v);
     for (const f of filters.split("|").map((x) => x.trim()).filter(Boolean)) text = LABEL_FILTERS[f]?.(text) ?? text;
+    fields++;
+    if (text.trim() === "") empty++;
     return text;
   });
+  if (fields > 0 && empty === fields) return page.title;
   return filled.trim() || page.title;
 }
 

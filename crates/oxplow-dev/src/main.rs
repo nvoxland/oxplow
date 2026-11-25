@@ -227,7 +227,13 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
                 .read(|c| oxplow_db::extension_deployment_store::list_tx(c, None))
                 .await
                 .map_err(|e| e.to_string())?;
-            let next = oxplow_app::extension::extension_deploy::next_boot(project, &rows).await?;
+            // The languages turned off on this machine, which boot reads.
+            let disabled = oxplow_app::extension::language_set::turned_off(&db)
+                .await
+                .map_err(|e| e.to_string())?;
+            let next =
+                oxplow_app::extension::extension_deploy::next_boot(project, &rows, &disabled)
+                    .await?;
             let mut out: Vec<String> = next
                 .runs
                 .iter()

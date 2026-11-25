@@ -63,9 +63,15 @@ view:
 - `switch: { param, children }` shows the one child whose `id` equals the
   param's value (else the first). The param is a filter, drawn in the rail.
   Loaders only hidden children show do not run. Children may be switches.
+- `when:` on any node shows it only while params say: `when: { empty: [q,
+  author] }` while every listed param is empty (absent, null or blank),
+  `when: { not_empty: [q, author] }` while one is set. Two nodes with the
+  opposite `when` are "this view until a filter is set, that one after"
+  (Git History: its graph, then its table of matches). A hidden node's
+  loaders do not run. Each name must be a param of the page.
 - `{ markdown: "text" }`: static text. `{ component: { id, props } }`: one of
   the extension's custom components, fed the page's loaders
-  (`commands-and-forms.md`).
+  (`commands-and-forms.md`). Its size comes from the component's `size:`.
 
 ## `viz`
 
@@ -79,9 +85,13 @@ rows draws its `empty:` line instead of its fields.
 themselves.
 `fold: true` starts the rows closed under a row count, for a long list
 nobody reads by default.
-`lead: <column>` puts that column's first-row text as a plain paragraph
-under the node's heading, above its viz: what a thing is, above its facts
-(null or blank draws nothing, no gap).
+`lead: <column>` puts that column's first-row text under the node's
+heading, above its viz: what a thing is, above its facts (null or blank
+draws nothing, no gap). It reads as Markdown (paragraphs, lists, `code`: a
+commit message, a description); `lead: { column: <column>, format: text }`
+shows it as written, line breaks kept, for text whose `*` or `_` are
+literal (a log line, a command). With `title_from: <column>` the row names
+the heading too (a commit: its subject heads, its body is the lead).
 
 - `table`: rows. `list`: one line per row, headlined by the first column
   (in a rail panel, one dense line, the other columns small beside it).
@@ -158,7 +168,9 @@ under the node's heading, above its viz: what a thing is, above its facts
   extension's settings (`commands-and-forms.md` "Editing your settings on
   a page").
 - `custom`: `custom: { component: <id>, props }`, a sandboxed component;
-  reach for it only when no built-in viz fits.
+  reach for it only when no built-in viz fits. Its size comes from the
+  component's `size:` in `custom_components:` (`content`, the default: as
+  tall as what it draws; `fill`: the page's height, the component scrolls).
 
 An inline page (`markdown-blocks.md`) may not use `form`, `approvals`,
 `terminal`, `editor`, `custom`, actions, components or slots.
@@ -198,7 +210,7 @@ its right-click menu where `failing` is set. A "Problems" line is one more
 ## Columns
 
 `columns: [{ key, label?, width?, format?, link?, select?, highlight?,
-expand?, icon?, tone?, unit?, when? }]` (a column the viz doesn't list still
+expand?, icon?, tone?, badges?, unit?, when?, parents? }]` (a column the viz doesn't list still
 exists for actions and links).
 
 - `width` is pixels; the rest share the space. `format`: `date`,
@@ -207,7 +219,7 @@ exists for actions and links).
   JSON array of numbers), `badge` (a pill in the column's `tone`),
   `markdown` (inline markdown on its line: emphasis, code and links, a
   wikilink by its title; a description's `first_sentence(body)`), `items`,
-  `marks` and `source` (below). It changes only what the person sees;
+  `marks`, `lanes` and `source` (below). It changes only what the person sees;
   agents read the raw values (but for `items`, `marks` and `source`).
 - `format: marks`: short marks drawn tight, each in its own colour, a JSON
   array of strings or `{ "text": ..., "tone"?: ..., "hint"?: ..., "gap"?: true }` (tone:
@@ -215,6 +227,17 @@ exists for actions and links).
   it starts a new group, a dot before it). For
   counts that read by colour: `4A 5M · +179 −175 · 2U`. An agent reads them joined
   by spaces.
+- `format: lanes`: `{ key: <id column>, format: lanes, parents: <column> }`
+  on a `table` draws each row's part of a graph, like `git log --graph`.
+  `parents` is a result column holding a JSON array of ids, first parent
+  first. The table draws each child before its parents, otherwise in the
+  loader's order (newest first). Not with `group` or `depth`. `lanes` needs `parents` and
+  `parents` needs `lanes`. An agent's page text leaves this column out.
+- `badges: <column>`: that column's labels as pills before the cell's text, each in its tone (default accent)
+  (a commit's branches and tags). Its value is a JSON array of strings or
+  `{ "text": ..., "tone"?: ..., "hint"?: ... }`; build it in SQL with
+  `json_group_array(name)`. Leave the badges column out of `columns`. An
+  agent reads it as a column of its own, after this one.
 - `format: items`: the value is a JSON array of items, each a string or
   `{ "text": ..., "hint"?: ..., "uri"?: ... }`, drawn inline separated by
   " · " in a `detail` or `sections` fact, a `table` or `list` cell. `hint`
@@ -251,7 +274,14 @@ under a heading per value. On a `list` in a rail panel, `compact: { Ready: 2 }`
 shows that many of a group's rows, then "+N more" (it grows the panel), and
 `grown: { Ready: 10 }` does the same in the grown panel (there "+N more"
 opens the panel's page); a group not named shows all, and a page shows all; `emphasis: <column>` highlights rows whose value
-is truthy; `depth: <column>` nests (a full-width list draws a parent and
+is truthy; `reveal: <column>` (`list`, `table`) marks the row whose value is
+truthy the same way and scrolls it into view when first drawn;
+`single_line: true` (`table`) keeps each row on one line, a long cell cut
+with "…" (its whole text on hover): for a log-like table of long
+subjects; `chartable: true` (`table`) offers the person **Show as** (list,
+number, bar, line, treemap) and **Save as Page** on it: set it when the
+rows are data worth charting (counts, values over time, a query's
+result), not on a table of records; `depth: <column>` nests (a full-width list draws a parent and
 the deeper rows after it as one panel; a rail panel's list and a table
 indent); `edge: <column>` (a tone: `danger`,
 `warning`, `success`, `accent`, `muted`) draws a coloured bar down the row's

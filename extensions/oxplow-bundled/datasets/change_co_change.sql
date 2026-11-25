@@ -3,8 +3,8 @@
 -- top three co-changers in `co_change_pair` — are all absent from the
 -- change.
 -- One select over the change's own files: the last commit touching a path
--- and its top partners are looked up by path (the commit index and the pair
--- table are indexed by it), so a filter on `change_id` reads only that
+-- and its top partners are looked up by path (the commit index is indexed
+-- by it, and the pair table's key starts with it), so a filter on `change_id` reads only that
 -- change's files. A CTE read twice (a dormant arm and a partners arm) would
 -- be computed for every change first.
 SELECT i.change_id, i.path,

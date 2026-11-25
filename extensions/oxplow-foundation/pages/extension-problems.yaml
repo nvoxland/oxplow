@@ -1,12 +1,15 @@
 title: Extension problems
 description: "Everything wrong with an extension, a subsection each under its name: contributions that failed or stopped after failing, permissions waiting for approval, and load errors."
 icon: triangle-alert
+label: '{{param.extension}} problems'
 category: System
 keywords: failing disabled repair collector effect provider
 params:
+# The extension whose problems these are (its URI's `?`): each one's are a
+# tab of their own; none, every extension's.
 - name: extension
-  role: view
   label: Extension
+  default: ''
 answers:
 - {"question":"Which extension providers or collectors are failing or disabled, and why?","params":{},"skill":"oxplow-extension"}
 - {"question":"What is wrong with this extension?","about":"oxplow/extension","params":{"extension":"oxplow-foundation"},"skill":"oxplow-extension"}

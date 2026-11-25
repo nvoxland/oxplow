@@ -59,7 +59,7 @@ commands:
 (`snapshots`) or one of its features (`snapshots.contents`) that
 must be active, or a shared model with a live store
 (`model:oxplow/task_record`): met while some enabled extension or running
-provider instance fills it (`CapabilityRegistry` keeps each publication's
+provider instance fills it (`CapabilityRegistry` keeps each activation's
 live models; `Active::unmet`). Task guidance gates on the task model this
 way once tasks are a model's.
 
@@ -231,13 +231,13 @@ live extensions (one bus, like providers — a
 command registers when its extension is deployed), one
 namespace at a time, all-or-nothing; registered by the generation at boot and on the
 extension catalog's change signal (`ExtensionCatalog::changes`, P7.B6):
-a deploy, rollback, enable or disable publishes it, and the
+a deploy, rollback, enable or disable raises it, and the
 `config.extensions` reactor fires it for the `extensions` key.
 Editing a source fires nothing. The extension datasets, the provider registry and
 the metric catalog follow the same signal; a namespace something else
 already holds (a provider) is refused and kept as the extension's
 `problem`. Replacement is prepared against a cloned command registry and
-published with one write-lock swap; rejection keeps the previous command batch.
+activated with one write-lock swap; rejection keeps the previous command batch.
 Missing/disabled sources are removed. Registration tracks namespace, declarations,
 package version and catalog identity, so provenance changes rebuild the batch
 without requiring a script change. Each handler captures version and generation
@@ -345,9 +345,9 @@ implementations:
   holds text, not bytes (the tree is text files only: a binary, non-UTF-8 or
   oversize file isn't in it), `len(text)` counts characters, and two
   builtins give what a file's bytes are: `xxh3_128(text)` (the blob store's
-  identity of the text's UTF-8 bytes) and `utf8_len(text)` (their count). Its adapter is prepared and published with the
+  identity of the text's UTF-8 bytes) and `utf8_len(text)` (their count). Its adapter is prepared and activated with the
   generation's other runtime adapters (`PreparedRuntimeAdapters`,
-  `ProviderRegistry::prepare_scripts` / `publish_scripts`); one a host
+  `ProviderRegistry::prepare_scripts` / `activate_scripts`); one a host
   refuses holds the extension back (`activation.script_implementation`).
   **Refused at load**, each its own code: `implementation.script_no_verbs`
   (a capability with no contract), `script_id` (an id its refs can't
@@ -414,7 +414,7 @@ implementations:
   providers, one per Rust kind under the kind's name, each at its API's
   default URL; foundation is required, so
   `CapabilityRegistry::new` registers nothing for them. The harnesses are
-  registered by declaration (`harnesses::prepare_built_ins`, published by the
+  registered by declaration (`harnesses::prepare_built_ins`, activated by the
   generation → `Services.harnesses`, an `oxplow_domain::agent::registry::HarnessRegistry`).
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
@@ -487,8 +487,8 @@ skills:
   configuration reader (`extension_generation::configuration_readers`, the
   one list of them; a dataset's `config()` is the other): a write of the
   extension's settings changes `ConfigSignature`, so
-  `request_config_refresh` (on `command.executed`) republishes, and the
-  publication runs `refresh_agent_text`. A running session keeps the skill
+  `request_config_refresh` (on `command.executed`) activates again, and the
+  activation runs `refresh_agent_text`. A running session keeps the skill
   list it started with (harness behavior); a new one gets the new set.
 - **Installed.** Each spawn writes what's offered into the runtime
   (each harness's `launch`, `crates/oxplow-harnesses`); boot, an
@@ -579,10 +579,14 @@ advisories:
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxtask ships one hint: `untracked-work` (post-tool-use,
-  `once_per: request`, while the task model has a live store: the request has
-  a recorded edit and no linked task, and the thread has no task in
-  progress; the `track-work` skill says what to do). Shared Work shows
+- oxtask ships two hints, both post-tool-use and `once_per: request`, while
+  the task model has a live store, the request has no linked task and the
+  thread has no task in progress: `untracked-work` at the request's first
+  recorded edit (it names a small fix as one or two files), and
+  `untracked-work-grown` once the request has changed 5 files, with the
+  count. The first comes when the work looks smallest, so an agent that
+  judged it small hears again once it isn't. The `track-work` skill says
+  what to do. Shared Work shows
   overlapping edits and Agent Interface shows advisory effectiveness.
   **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never
@@ -623,7 +627,7 @@ context:
   setting of the extension's own holds, checked at load and at delivery
   as a skill's `when:` (settings that can't be read are a failed reading:
   nothing is sent and nothing taken back). Read at each delivery, so a
-  settings write needs no republish: a context is not a configuration
+  settings write needs no reactivation: a context is not a configuration
   reader.
 - **The query** is the extension's SQL (`config('/ptr')` reads its own
   settings). Its first row's `text`, trimmed, is what the agent is told;

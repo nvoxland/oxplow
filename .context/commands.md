@@ -53,17 +53,17 @@ one write lock; any rejection preserves every prior command and holder. An
 empty command set removes its source. Commands already resolved keep their Arc
 handlers. This boundary covers the command registry, not SQL datasets or the other
 extension registries. `prepare_namespaces` validates a candidate off the active
-registry lock; `publish_namespaces` accepts it only on the exact registry used
+registry lock; `activate_namespaces` accepts it only on the exact registry used
 for preparation. Every successful registration/replacement/removal advances an
 allocation identity retained by candidates, avoiding revision wraparound and ABA.
-An intervening mutation or publication on another bus returns Unavailable and
-leaves the active registry intact. Publication remains an in-memory operation,
+An intervening mutation or activation on another bus returns Unavailable and
+leaves the active registry intact. Activation remains an in-memory operation,
 not a DB commit boundary.
 
 The native generation coordinator can reserve a checked command candidate and
 its extension owner metadata before SQL commit, then apply the replacement while
 retaining both locks through the remaining generation maps. Until the first generation is
-activated (boot's `initialize`), command publication keeps its optimistic
+activated (boot's `initialize`), command activation keeps its optimistic
 checks. The command bus, SQL gateway, AI service, capability registry and
 provider registry are built holding the project's activation boundary (a part
 built alone, as the CLI's checks do, has its own, which nothing has
@@ -79,7 +79,7 @@ collector run or a provider call. Its run carries no pin
 bus retains its previous behavior. Production Services adopt the same boundary
 as the SQL gateway and provider registry during boot.
 
-Extension commands are staged together from one CatalogSnapshot and published
+Extension commands are staged together from one CatalogSnapshot and activated
 as one fenced registry candidate by the generation coordinator (activation) —
 the only path that registers them. An enabled extension that fails to stage is
 held back on its own (the generation names it in its problems); partially
@@ -87,7 +87,7 @@ parsed command lists never replace prior handlers. Namespace/shortcut
 validation spans all sources. Disabled/removed sources are withdrawn in the
 same candidate, and captured command contexts have a live owner check so
 already-routed handlers cannot preserve that authority. A catalog change during
-staging rejects publication and the owner stages again. Raw filesystem
+staging rejects activation and the owner stages again. Raw filesystem
 snapshots remain authoring inputs. `unregister_source` removes one source's (an extension disabled, an
 external provider stopped), freeing a namespace left empty. Migration V26 rewrote
 history (command runs, proposals, `command.*` payloads) from the old two-part
@@ -435,11 +435,11 @@ and
 the scope in its `needs`; the manifest says the rest. oxplow's own
 are declared in **`oxplow-foundation`** — a shipped extension that is
 **required** (`BundledExtension::required`: it can't be disabled). Its
-commands are staged and published with each generation like any
+commands are staged and activated with each generation like any
 extension's, from its active deployment (the shipped one, or one deployed
 while developing oxplow), so deploying it with a new command registers
 that command at once; nothing runs a command before the first activation
-publishes. Each runs as its extension's contribution (an
+completes. Each runs as its extension's contribution (an
 extension-scoped operation — configuration, state, jobs — finds its owner
 that way), so foundation's command runs are `oxplow-foundation`'s
 `v_contribution_run` rows like any extension's. An extension may declare a command over the same operation in
@@ -915,7 +915,7 @@ by registry category and searches key, title, description and public values.
 
 **Backend reactions** use canonical keys in `config.changed`: workspace filters
 watch `oxplow.generated.*`, provider reconciliation watches
-`oxplow.extensionInstances` and `oxplow.activeProviders.*`, extension publication
+`oxplow.extensionInstances` and `oxplow.activeProviders.*`, extension activation
 watches extension definitions and enablement, and metric retention watches its
 registered keys. The renderer's `ConfigChanged` refreshes live setting reads.
 

@@ -116,6 +116,9 @@ Where it lives, and what is loaded:
   `{{…}}` is refused (`label_refs`).
   A label that shortens a path with `{{param.x|basename}}` (Editor, Directory, Diff) is
   also the tab's hover: the whole path (`tabHint`, `WindowTab.hint`).
+  A label whose every `{{…}}` is empty is the page's title, not its other
+  words alone: Git History's `'{{param.path|basename}} history'` is
+  "Git History" with no path (`tabLabel`).
   Check warns (`page.label_column`) when a `{{row.col}}` names a column the
   first loader's dry run doesn't return: a loader reads only the ones declared
   before it, so that loader can't move; it returns the column instead.
@@ -211,6 +214,14 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   component draws its own controls declares them so (the Work board) (`ParamRole::rides_view`
   is the one test for "rides the `#`"). A `filter`, `selection` or `view`
   param found in a `?` is refused.
+  **A param a link sets to name what the page shows is a `resource`**, never
+  a filter: a file's history (Git History's `path`), a knowledge page's
+  freshness (`store`, `id`), an extension's problems (`extension`). A tab
+  is reused for a URI with the same `?` (`identityOf`, pages-and-tabs.md
+  "page ids"), so a filter set by a link turns the person's open tab into
+  other content. A filter is what the person narrows in the rail. A
+  renderer (`for:`) is the exception: it runs with its resource's URI
+  params, so its own settings ride the `#` (Changes' `start`/`end`).
 - **`options_from`** makes a choice whose options rows list: `value`,
   `label`, optional `group`. It names a **query** (`<slug>` of the
   extension or `<namespace>/<slug>`, its last loader; `…#<loader>` for
@@ -338,7 +349,14 @@ those. A catalog change (a deploy) re-runs every open run
 `view:` is one node, usually a `stack`. Every node has an `id` (default:
 its loader, embedded page, slot or component; else `stack`, `stack-2`, …),
 unique in the page. `#node=<id>` in a link lands on it. `title`,
-`replaceable` and `size` are on any node. An embedded page's nodes are
+`replaceable` and `size` are on any node, and `when`: `when: { empty: [q,
+author] }` shows the node only while every listed param is empty (absent,
+null or blank text), `when: { not_empty: [..] }` only while one is set
+(`NodeWhen`, `pages/schema.rs`). A hidden node is not in the run, so its
+loaders don't run (`hidden_loaders`), and the one node shown of a stack
+counts as the whole page (`railHas.ts` `wholeNode`). Each name is one of the
+page's params, or the page doesn't load. Git History is the case: the graph
+while nothing filters, the table of matches while something does. An embedded page's nodes are
 `<embed-id>/<node-id>`; `oxplow_run_page` text prints each node under
 `[node <id>]` (`pages/text.rs`).
 
@@ -367,11 +385,20 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
   `fold: true`: the rows start closed under a row count (a `<details>` the
   desktop draws around the viz); a click opens them. For a long list that is
   rarely read. A list row leaves out a cell with no value, not a dash.
-  `lead: <column>`: the first row's text of that column is a plain paragraph
-  under the node's heading and above its viz (what a thing is, above its
-  facts); null or blank draws nothing. It is a column of the loader, checked
-  in a dry run like a role block's; the desktop draws it in `VizNode`
-  (`leadOf`) and `text.rs` writes it under the heading.
+  `lead: <column>`: the first row's text of that column is drawn under the
+  node's heading and above its viz (what a thing is, above its facts); null
+  or blank draws nothing. It reads as Markdown through the one `Markdown`
+  component (a commit message's paragraphs and lists, a description's
+  `code`); `lead: { column, format: text }` (`VizConfig.lead_format`,
+  `TextFormat`) draws it as written with its line breaks (`pre-line`), for
+  text whose `*`, `_` or `#` are literal. One paragraph is the muted
+  `ox-section-desc`; more than one block (a blank line or a list) reads in
+  the body's colour (`ox-section-lead`). Only the lead takes a format: a
+  heading is one line, and the ⓘ `description` is a hover. It is a column
+  of the loader, checked in a dry run like a role block's; the desktop
+  draws it in `VizNode` (`leadOf`, `Lead`) and `text.rs` writes the raw
+  text under the heading either way. The commit page heads its section
+  with the subject (`title_from`) and leads with the body.
 
 **Vizes** (`Viz`): `table`, `list` (in a compact view, a rail panel, each
 row one dense line: the headline, then the other columns small beside it,
@@ -558,13 +585,33 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   filters and the links.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
-`tone`, `width`, `format`, `highlight`, `select`, `expand`, `when`.
+`tone`, `badges`, `width`, `format`, `parents`, `highlight`, `select`, `expand`, `when`.
+
+- `badges: <column>` draws that column's labels as pills at the right end of
+  the cell (a commit's branches and tags), so every row's text starts in the
+  same place; each is outlined and tinted in its `tone` (the accent when it
+  names none), at most 12em wide with the full label on hover. The value is a JSON array, as
+  `marks` reads it: each element a string or `{ "text", "tone"?, "hint"? }`.
+  The column must be in the result (`viz_column_problems`). An agent's page
+  text reads it as a column of its own, after this one, joined by spaces
+  (`viz_text.rs` `shown`/`value`).
 
 - `when: <column>` on a `detail`'s column draws the fact only while that
   column of the row is truthy (the same rule as an action's `when`): a
   merge's second parent on a merge alone. A null value with no `when`
   reads "(none)".
 
+- `format: lanes` (`{ key: <id column>, format: lanes, parents: <column> }`,
+  `viz: table` only): draws, for each row, its part of the lanes of the
+  graph the rows form. The `parents` column of a row is a JSON array of
+  ids, first parent first. The rows are drawn each child before its
+  parents, otherwise in the loader's order, as `git log --date-order`
+  does (`childrenFirst`, `inLaneOrder` in `lanes.ts`): a loader ordering
+  by time can put a parent first, and its lane would never close. It is
+  refused with `group` or `depth`. `lanes` needs `parents`, and `parents`
+  needs `lanes`; `parents` must be a result column (`lanes_problem` in
+  `extensions.rs`; `lanes.ts`, `LaneCell.tsx`). An agent's page text
+  leaves the lanes column out.
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
   (kinds: `task`, `file`, `knowledge`, `commit`, `metric`, `request`,
   `page`, `diff-at`, `compare`). `page` opens any oxplow URI. `request`
@@ -608,7 +655,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   value), `items` (a JSON array of
   strings or `{text, hint?, uri?}`, drawn inline separated by " · ", the
   hint on hover, the uri a link; an agent reads `text (hint) · text`),
-  `source` (who caused the row, a JSON object `{kind, label, uri?}` with
+  `lanes` (a table only: the row's part of the lanes of the graph the rows
+  form, like `git log --graph`; see below), `source` (who caused the row, a JSON object `{kind, label, uri?}` with
   `kind` one of `agent`, `you`, `extension`, `page`: the `SourceChip`
   every Alerts row uses, its kind's icon and label, a link with a `uri`;
   an agent reads `agent in <label>`, `extension <label>`, `You`). It
@@ -643,7 +691,18 @@ more", which grows the panel, or, grown, opens the page its header opens. A
 group not named shows every row, and a list that caps its groups isn't cut
 at the panel's row cap. A page and an agent's read show every row
 (`capGroups`, `VizView.rows.test.tsx`); `emphasis` (`list` / `table` /
-`tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
+`tree`) highlights rows with a truthy value; `reveal: <column>` (`list` /
+`table`) marks the row whose column is truthy as `emphasis` does and
+scrolls it into view (nearest) when first drawn (`rowRevealed`);
+`single_line: true` (`table` only) keeps each row on one line: every cell
+is cut to its column with "…", its whole text on hover, and a cell's
+`badges` stay whole at its right end (`ox-cell-text` in
+`oxplow-kit.css`; a cut column lays the table out fixed);
+`chartable: true` (`table` only) says the rows are data a chart can draw
+(counts, values over time, a dataset's or a file's rows), so the page
+offers **Show as** and its **Save as Page** on that table
+(`TablePresentation`); a table of records (a log, problems, runs) leaves
+it off, the default, since none of the other presentations helps there; `depth` (`list` / `table`) is
 a whole number 0–8 that nests: in a full-width `list` a row followed by
 deeper rows is their parent, and the two are one raised panel (the kit's
 `ox-nest`, as the Work board's epics: the parent row its top line, with

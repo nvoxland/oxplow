@@ -294,7 +294,7 @@ that don't support recursive mode.
 An extension that keeps files under `.oxplow/` declares the folder with
 `files: [{ path: .oxplow/<name>, access: write, watch: true }]`; the
 primary's watch follows it though git ignores it
-(`oxplow_fs_watch::set_declared_watched_folders`, published per generation),
+(`oxplow_fs_watch::set_declared_watched_folders`, activated per generation),
 and the extension's `files:` trigger hears a change in it. oxwiki's
 `.oxplow/oxwiki/` is one: its collector converges every page file — an agent's
 direct write, a person's edit — into the knowledge model's rows. See

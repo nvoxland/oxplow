@@ -259,7 +259,7 @@ impl<'a> PageRunner<'a> {
     ) -> Result<PageRun, DomainError> {
         let page = match req.target {
             RunTarget::Page(id) => self.find(&id)?,
-            RunTarget::Spec(page) => page.as_ref().clone(),
+            RunTarget::Spec(page) => self.sized(page.as_ref().clone()),
         };
         let mut memo = seed;
         let mut budget = ResultBudget::new(MAX_RESULT_BYTES);
@@ -278,16 +278,29 @@ impl<'a> PageRunner<'a> {
     }
 
     fn find(&self, id: &str) -> Result<Page, DomainError> {
-        if let Some(page) = self
+        let page = match self
             .draft
             .as_ref()
             .and_then(|d| d.pages.iter().find(|p| p.id == id))
         {
-            return Ok(page.clone());
-        }
-        self.catalog
-            .find_page(self.root, id)
-            .map_err(|_| DomainError::Invalid(format!("no page `{id}`")))
+            Some(page) => page.clone(),
+            None => self
+                .catalog
+                .find_page(self.root, id)
+                .map_err(|_| DomainError::Invalid(format!("no page `{id}`")))?,
+        };
+        Ok(self.sized(page))
+    }
+
+    /// `page` with its components' sizes, as declared: it lays out before
+    /// their frames load. (A frame loads its component from the main
+    /// checkout, a draft's too.)
+    fn sized(&self, mut page: Page) -> Page {
+        crate::extension::extensions::custom_components::size_components(
+            &mut page,
+            &self.catalog.unpinned(self.root, "a page's component sizes"),
+        );
+        page
     }
 
     fn run_page<'r>(
@@ -808,7 +821,7 @@ impl<'a> PageRunner<'a> {
                     let mut before: Vec<(String, RunNode)> = Vec::new();
                     let mut after: Vec<(String, RunNode)> = Vec::new();
                     let mut resolved: Vec<RunNode> = Vec::new();
-                    for c in children.iter() {
+                    for c in children.iter().filter(|c| node_shown(c, params)) {
                         let NodeKind::Slot { name } = &c.kind else {
                             let r = self
                                 .resolve(page, c, params, loaders, ctx, viewer, memo, budget, depth)
@@ -1378,6 +1391,11 @@ pub fn rows_of(value: serde_json::Value) -> SqlQueryResult {
 
 /// The child of a switch on `param` in view: the one whose id is its
 /// value, else the first.
+/// Whether `node` shows with `params`: its `when`, when it has one.
+fn node_shown(node: &Node, params: &BTreeMap<String, SqlCell>) -> bool {
+    node.when.as_ref().is_none_or(|w| w.holds(params))
+}
+
 fn in_view<'n>(
     param: &str,
     children: &'n [Node],
@@ -1405,6 +1423,9 @@ fn hidden_loaders(page: &Page, params: &BTreeMap<String, SqlCell>) -> Vec<String
         }
     }
     fn visible(node: &Node, params: &BTreeMap<String, SqlCell>, out: &mut Vec<String>) {
+        if !node_shown(node, params) {
+            return;
+        }
         match &node.kind {
             NodeKind::Viz { from: Some(f), .. } => out.push(f.clone()),
             NodeKind::Switch { param, children } => {

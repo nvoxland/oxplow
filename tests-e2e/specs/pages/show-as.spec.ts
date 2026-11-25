@@ -8,7 +8,7 @@ params: [{ name: q }]
 loaders:
   results:
     sql: SELECT '2026-01-01' AS day, :q AS label, 7 AS total, 3 AS tax
-view: { stack: [{ id: results, title: Results, viz: table, from: results }] }
+view: { stack: [{ id: results, title: Results, viz: table, chartable: true, from: results }] }
 `;
 
 test("a page table can change presentation and keep a live saved view", async ({ page, daemon }) => {

@@ -138,6 +138,7 @@ view:
     empty: No agent tokens recorded in this range.
   - title: By model
     viz: table
+    chartable: true
     from: by_model
     columns:
     - { key: agent, label: Agent }
@@ -150,6 +151,7 @@ view:
     empty: No agent tokens recorded in this range.
   - title: Threads that used the most
     viz: table
+    chartable: true
     from: by_thread
     columns:
     - { key: thread, label: Thread, link: { kind: page, from: thread_uri } }
@@ -162,6 +164,7 @@ view:
     empty: No agent tokens recorded in this range.
   - title: Requests that used the most
     viz: table
+    chartable: true
     from: by_request
     columns:
     - { key: prompt, label: Request, link: { kind: request, from: request_id } }
@@ -174,6 +177,7 @@ view:
   - title: oxplow's own model calls
     description: Calls oxplow made itself (summaries, decisions, extension jobs), not the coding agents'.
     viz: table
+    chartable: true
     from: oxplow_calls
     columns:
     - { key: role, label: Role }
@@ -187,6 +191,7 @@ view:
     empty: oxplow made no model calls of its own in this range.
   - title: Pages you opened most
     viz: table
+    chartable: true
     from: top_pages
     columns:
     - { key: page, label: Page, link: { kind: page, from: page_id } }

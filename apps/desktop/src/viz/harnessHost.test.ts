@@ -84,18 +84,42 @@ test("the harness mounts the bundle with the page's rows and speaks the real bri
   expect(s.results).toEqual([null, null, { count: 2 }]);
 });
 
-test("a window that draws no frames (a locked or sleeping display) is reported, and nothing is mounted", async () => {
+const seen = { waitedMs: 10000, visibility: "hidden", focused: false, width: 1280, height: 800 };
+
+test("a window that draws no frames is reported with what its page saw, and nothing is mounted", async () => {
   const s = scene([]);
   let started = false;
   const server = { ...s.server, start: async () => ((started = true), s.server.start()) };
-  await runHarness(server, s.frame, s.agent, async () => false);
-  expect(s.calls).toEqual([{ kind: "drawing", value: false }]);
+  await runHarness(server, s.frame, s.agent, async () => ({ drew: false, seen }));
+  // What the page saw first: the run says why the window drew nothing.
+  expect(s.calls).toEqual([
+    { kind: "drawingSeen", value: seen },
+    { kind: "drawing", value: false },
+  ]);
   expect(started).toBe(false);
 });
 
 test("a window that draws says so before it mounts", async () => {
   const s = scene([]);
-  await runHarness(s.server, s.frame, s.agent, async () => true);
+  await runHarness(s.server, s.frame, s.agent, async () => ({ drew: true, seen: { ...seen, waitedMs: 16, visibility: "visible" } }));
   expect(s.calls[0]).toEqual({ kind: "drawing", value: true });
   expect(s.calls).toContainEqual({ kind: "ready", value: true });
+});
+
+// It waits up to `wait` for a frame and says what the page saw then: how long
+// it waited, whether the page was visible (WebKit hides an occluded window's
+// page), focused, and how big.
+test("drawsFrames says what the page saw when no frame came", async () => {
+  const realRaf = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (() => 0) as typeof requestAnimationFrame;
+  try {
+    const { drawsFrames } = await import("./harnessHost.js");
+    const out = await drawsFrames(30);
+    expect(out.drew).toBe(false);
+    expect(out.seen.waitedMs).toBeGreaterThanOrEqual(25);
+    expect(typeof out.seen.visibility).toBe("string");
+    expect(typeof out.seen.focused).toBe("boolean");
+  } finally {
+    globalThis.requestAnimationFrame = realRaf;
+  }
 });

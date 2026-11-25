@@ -17,7 +17,7 @@ pub struct PreparedHarnesses {
 }
 
 impl PreparedHarnesses {
-    pub fn publish(self, registry: &HarnessRegistry) {
+    pub fn activate(self, registry: &HarnessRegistry) {
         registry.set_declared(self.harnesses);
     }
 }
@@ -238,7 +238,7 @@ pub(crate) fn declared_instance_settings(
 #[cfg(test)]
 mod tests {
     fn register(registry: &HarnessRegistry, declared: &[Implementation]) {
-        prepare_built_ins(declared).publish(registry);
+        prepare_built_ins(declared).activate(registry);
     }
 
     use super::*;

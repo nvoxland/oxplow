@@ -9,6 +9,8 @@ import { FormSourceContext, useFormSource, type FormSource } from "./formSource.
 import { useVizPages } from "./vizPages.js";
 import { VizActionRunnerContext, useVizActionRunner, type VizActionRunner } from "./vizActionRunner.js";
 import type { ActionOption, ActionOptions } from "./vizModel.js";
+import { inLaneOrder, laneLayout, parentsOf } from "./lanes.js";
+import { LaneCell, lanesWidth } from "./LaneCell.js";
 import { TabModal } from "../components/TabModal.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -56,6 +58,7 @@ import {
   type RowNest,
   foldedAway,
   rowEmphasized,
+  rowRevealed,
   rowGroups,
   capGroups,
   rowRef,
@@ -342,8 +345,6 @@ interface VizViewProps {
   /** For a `viz: custom` viz: its host's view, where the host shares
    *  one with its component (a replacement, a viz's own page). */
   componentView?: HostedView | null;
-  /** A `viz: custom` component's frame fits its content's height: a section of a document. */
-  fitCustom?: boolean;
   /** Set one of the viz's params (a row click on a column that
    *  `select`s it, with the row it picked); without it, rows are no
    *  picks. */
@@ -553,7 +554,6 @@ function RowsBody({
   onCustomFailure,
   onCustomReady,
   componentView = null,
-  fitCustom = false,
   onSetParam,
   marks,
   tree = null,
@@ -570,7 +570,9 @@ function RowsBody({
   const capsGroups = Object.keys(groupCaps).length > 0;
   // A tree caps the rows it shows, not the rows it has: folding frees rows.
   const capsShown = viz.viz === "tree" || capsGroups;
-  const limited = capsShown ? run.result : limitRows(run.result, maxRows);
+  // A `lanes` column draws each child before its parents.
+  const ordered = useMemo(() => inLaneOrder(run.config.columns, run.result), [run.config.columns, run.result]);
+  const limited = capsShown ? ordered : limitRows(ordered, maxRows);
   const past = run.result.rows.length - limited.rows.length;
   // The rows under a parent folded away (a `depth` viz: an epic's
   // children), kept in this step's history state like the groups'.
@@ -716,13 +718,18 @@ function RowsBody({
       text
     );
     const opens = c.expand ? expanded.has(expansionKey(c, row)) : false;
-    if (!tone && !icon && mine.length === 0 && !c.expand) return body;
+    // Its `badges`: another column's labels, as pills at the cell's end:
+    // every row's text starts in one place, and a cut text can't hide them.
+    const pills = c.badgesIndex == null ? [] : (markList(row[c.badgesIndex] ?? null) ?? []);
+    if (!tone && !icon && mine.length === 0 && pills.length === 0 && !c.expand) return body;
     // The expand glyph leads the cell and stays on its first line: the
     // text wraps beside it, never under it.
     return (
       <span
         data-tone={tone ? String(toneName) : undefined}
-        style={{ display: "inline-flex", alignItems: "flex-start", gap: 4, maxWidth: "100%", color: tone ?? undefined }}
+        // With pills, the cell's whole width: the text from its start, the
+        // pills at its end.
+        style={{ display: pills.length > 0 ? "flex" : "inline-flex", alignItems: "flex-start", gap: 4, maxWidth: "100%", color: tone ?? undefined }}
       >
         {c.expand ? (
           <button
@@ -736,7 +743,24 @@ function RowsBody({
           </button>
         ) : null}
         {icon ? <VizIcon spec={icon} tone={tone} /> : null}
-        <span style={{ minWidth: 0 }}>{body}</span>
+        <span className="ox-cell-text" style={{ minWidth: 0 }}>
+          {body}
+        </span>
+        {pills.length > 0 ? (
+          <span className="ox-cell-badges">
+            {pills.map((p, i) => (
+              <span
+                key={`b${i}`}
+                data-testid="viz-cell-badge"
+                className="ox-badge ox-cell-badge"
+                title={p.hint ? `${p.text}: ${p.hint}` : p.text}
+                style={{ color: toneColor(p.tone ?? "accent") ?? toneColor("accent")! }}
+              >
+                {p.text}
+              </span>
+            ))}
+          </span>
+        ) : null}
         {mine.map((b, i) => (
           <RefBadge key={i} label={b.label} tone="label" color={safeColor(b.color) ?? undefined} title={`from ${b.extension}`} />
         ))}
@@ -1059,7 +1083,7 @@ function RowsBody({
           const own = viz.actions.filter((a) => a.fact === key && offeredWholePage(a, result));
           return own.length > 0 ? own.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />) : null;
         }}
-        {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }}
+        {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, onSetParam, isPage }}
         tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null, cap: compact ? (maxRows ?? null) : null, onMore } : null}
       />
       {compact && past > 0 ? <MoreRow count={past} onMore={onMore} /> : null}
@@ -1215,7 +1239,6 @@ function Viz({
   onCustomFailure,
   onCustomReady,
   componentView,
-  fitCustom,
   tree,
   onSetParam,
   isPage,
@@ -1244,7 +1267,6 @@ function Viz({
   onCustomFailure?(reason: string): void;
   onCustomReady?(): void;
   componentView: HostedView | null;
-  fitCustom: boolean;
   isPage: boolean;
 }) {
   // A page file's `custom` viz is fed its page's loaders.
@@ -1342,13 +1364,23 @@ function Viz({
           onFailure={onCustomFailure}
           onReady={onCustomReady}
           view={componentView}
-          fit={fitCustom}
           data={fed}
         />
       );
     case "table":
     default:
-      return <TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} header={!viz.hideHeader} />;
+      return (
+        <TableViz
+          rows={result.rows}
+          cols={cols}
+          cell={cell}
+          rowMenu={rowMenu}
+          view={rowsView}
+          header={!viz.hideHeader}
+          singleLine={viz.singleLine}
+          {...(viz.reveal ? { revealed: (row: SqlCell[]) => rowRevealed(viz, result.columns, row) } : {})}
+        />
+      );
   }
 }
 
@@ -2195,6 +2227,10 @@ interface RowsVizProps {
   view?: RowsView;
   /** A table's header row; on unless the viz says `hide_header`. */
   header?: boolean;
+  /** The row `reveal` names, brought into view when it is drawn. */
+  revealed?: (row: SqlCell[]) => boolean;
+  /** A table's rows each on one line, a long cell cut (`single_line`). */
+  singleLine?: boolean;
 }
 
 /** The rows in drawing order, each with its index in the result (its
@@ -2350,26 +2386,60 @@ function BoardViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   );
 }
 
-function TableViz({ rows, cols, cell, rowMenu, view, header }: RowsVizProps) {
+function TableViz({ rows, cols, cell, rowMenu, view, header, revealed, singleLine = false }: RowsVizProps) {
   // Each row with its index in the result: its test id.
   type Row = [SqlCell[], number];
-  const columns: DataColumn<Row>[] = cols.map((c) => ({
-    key: c.key,
-    label: c.label,
-    width: c.width ?? undefined,
-    wrap: columnWrap(
-      c.format,
-      c.unitIndex !== null,
-      rows.map((row) => formatCell(row[c.index] ?? null, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format)),
-    ),
-    render: ([row]) => cell(row, c),
-  }));
+  // A `lanes` column: the graph the drawn rows form, in their order.
+  const lanesCol = cols.find((c) => c.format === "lanes") ?? null;
+  const lanes = useMemo(() => {
+    if (lanesCol === null) return null;
+    const { rows: laid, width } = laneLayout(
+      rows.map((row) => ({ id: String(row[lanesCol.index] ?? ""), parents: parentsOf(lanesCol.parentsIndex == null ? undefined : row[lanesCol.parentsIndex]) })),
+    );
+    return { byRow: new Map(rows.map((row, i) => [row, laid[i]!])), width };
+  }, [rows, lanesCol]);
+  const columns: DataColumn<Row>[] = cols.map((c) =>
+    c === lanesCol && lanes
+      ? {
+          key: c.key,
+          label: "",
+          width: lanesWidth(lanes.width),
+          wrap: "nowrap",
+          render: ([row]) => {
+            const laid = lanes.byRow.get(row);
+            return laid ? <LaneCell row={laid} width={lanes.width} /> : null;
+          },
+        }
+      : {
+          key: c.key,
+          label: c.label,
+          width: c.width ?? undefined,
+          wrap: columnWrap(
+            c.format,
+            c.unitIndex !== null,
+            rows.map((row) => formatCell(row[c.index] ?? null, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format)),
+          ),
+          render: ([row]) => cell(row, c),
+        },
+  );
+  // One line per row: every cell cut to its column, its whole text on hover.
+  if (singleLine) for (const c of columns) Object.assign(c, { wrap: "nowrap", truncate: true });
+  // The `reveal` row comes into view when it is first drawn.
+  const tableRef = useRef<HTMLDivElement | null>(null);
+  const revealedRow = revealed ? rows.find((row) => revealed(row)) : undefined;
+  const revealedAt = revealedRow === undefined ? null : rows.indexOf(revealedRow);
+  useEffect(() => {
+    if (revealedAt === null) return;
+    const el = tableRef.current?.querySelector<HTMLElement>('[data-reveal="true"]');
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [revealedAt]);
   // Rows whose click opens a form end in its button.
   if (view?.rowButton && rows.some((row) => view.rowButton!(row) !== null)) {
     columns.push({ key: "__row-button", label: "", width: 40, truncate: false, wrap: "nowrap", render: ([row]) => view.rowButton!(row) });
   }
   const parts = sections(rows, view);
   return (
+    <div ref={tableRef} style={{ display: "contents" }}>
     <DataTable<Row>
       testId="viz-table"
       header={header}
@@ -2393,17 +2463,21 @@ function TableViz({ rows, cols, cell, rowMenu, view, header }: RowsVizProps) {
             undefined,
           ...rowMenu(row),
           ...(look.props as RowProps),
+          ...(revealed?.(row) ? { "data-reveal": "true" } : {}),
         };
       }}
-      cellStyle={([row], _c, j) => {
+      cellStyle={([row], c, j) => {
         const look = j === 0 ? (view?.rowLook(row) ?? noLook) : noLook;
         const style = {
+          // The lanes run the row's full height: no padding, the lines placed in it.
+          ...(lanesCol !== null && c.key === lanesCol.key ? { padding: 0, position: "relative" as const } : {}),
           ...(look.indent ? { paddingLeft: `calc(var(--space-2) + ${look.indent}px)` } : {}),
           ...(look.edge ? { borderLeft: `3px solid ${look.edge}` } : {}),
         };
         return Object.keys(style).length > 0 ? style : undefined;
       }}
     />
+    </div>
   );
 }
 

@@ -32,7 +32,7 @@ import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageParam, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageRail, PageRailTree, railTreeLast, switchSections } from "./PageRail.js";
-import { contentsHas, railHas, viewFills } from "./railHas.js";
+import { aloneFills, contentsHas, railHas, viewFills } from "./railHas.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../viz/ComponentFrame.js";
 import type { FrameAction } from "../viz/componentBridge.js";
@@ -227,6 +227,10 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const dashboard = page?.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled ? page.id : null;
   const editableDashboard = useDashboardWritable(dashboard);
   const fills = run ? whole || viewFills(run) : false;
+  // The body takes the page's height whenever its viz does: also a lone
+  // table, list, tree or custom component, which keeps the page's width
+  // and rail (`fills` decides those).
+  const bodyFills = fills || (run ? aloneFills(run) : false);
   // The nav bar carries the title, always: a switch page's is the section in
   // view, a writable dashboard's renames it in place.
   const shownTitle = run ? sectionTitle(run) ?? title : title;
@@ -242,7 +246,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       testId="page-host"
       title={navTitle}
       width={full ? "full" : "reading"}
-      fill={fills}
+      fill={bodyFills}
       actions={pageActions}
       seeAlso={run && run.seeAlso.length > 0 ? { links: run.seeAlso, open: (uri) => onOpenPage?.({ id: uri }) } : undefined}
       pin={pageKey.page && page && onOpenPage ? { tile: { kind: "page", page: page.id, params: run!.params, title: page.title }, onOpenPage } : undefined}
@@ -275,7 +279,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           data-testid="page-file"
           data-stale={stale ? "true" : undefined}
           aria-busy={stale || undefined}
-          style={fills ? fillStyle : undefined}
+          style={bodyFills ? fillStyle : undefined}
         >
           {actions.pending ? (
             <CommandConfirm

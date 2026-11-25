@@ -32,7 +32,7 @@ loaders:
                 FROM (SELECT value FROM json_each(d.overlapping_files) LIMIT 8)) AS overlaps,
              uri('oxplow/page', 'page', 'oxplow/branch-commits', 'base', d.base,
                  'head', d.head, 'stream_id', d.stream_id) AS comparison_uri,
-             CASE WHEN b.head_sha IS NOT NULL THEN 'Open in History Graph' END AS graph_label,
+             CASE WHEN b.head_sha IS NOT NULL THEN 'Open in Git History' END AS graph_label,
              CASE WHEN b.head_sha IS NOT NULL THEN
                uri_view(uri('oxplow/page', 'page', 'oxplow/git-history',
                             'stream_id', d.stream_id, 'head_sha', b.head_sha),

@@ -49,7 +49,7 @@ type Loaded = HashMap<(u64, usize), Result<TsLanguage, String>>;
 ///
 /// Memoised by the module's content for the life of the process: tree-sitter's
 /// store adds each load's memory to a 128 MB budget and never gives it back, so
-/// loading the same file at every publication would, after about a hundred
+/// loading the same file at every activation would, after about a hundred
 /// loads of a large grammar, refuse it. A grammar is loaded in a store of its
 /// own that is dropped after the load; the language then instantiates in
 /// whichever store parses with it.
@@ -231,7 +231,7 @@ mod tests {
         assert!(STORE.with(|s| s.borrow().is_some()));
     }
 
-    /// The same grammar loaded over and over (every publication builds the
+    /// The same grammar loaded over and over (every activation builds the
     /// language set again) must not run the process out of wasm memory:
     /// tree-sitter's store never gives a load's memory back.
     #[test]

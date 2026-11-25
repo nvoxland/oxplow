@@ -14312,6 +14312,91 @@
         }
       ],
       "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Run id; `oxplow:oxplow/run?id=<id>` is how a run is cited."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread whose agent ran it, if known."
+        },
+        {
+          "name": "command",
+          "type": "",
+          "doc": "The command that was run."
+        },
+        {
+          "name": "exit_code",
+          "type": "",
+          "doc": "Its exit code, if known."
+        },
+        {
+          "name": "passed",
+          "type": "",
+          "doc": "Tests passed (NULL when not reported)."
+        },
+        {
+          "name": "failed",
+          "type": "",
+          "doc": "Tests failed (NULL when not reported)."
+        },
+        {
+          "name": "skipped",
+          "type": "",
+          "doc": "Tests skipped (NULL when not reported)."
+        },
+        {
+          "name": "total",
+          "type": "",
+          "doc": "Tests run in total (NULL when not reported)."
+        },
+        {
+          "name": "duration_ms",
+          "type": "",
+          "doc": "How long the run took, in milliseconds: the shell call's time as its harness measured it; NULL when the harness gave none. A command moved to the background has only the time until it moved. (v6: recorded)"
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What recorded it (`hook`, `mcp`, …)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was recorded (RFC 3339)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran in (v_agent_turn.id), if it ran in one."
+        }
+      ],
+      "key": []
     }
   },
   "thread": {
@@ -26265,6 +26350,48 @@
       "key": [
         "target"
       ]
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`."
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "What it belongs to: a capability (`vcs`), or `model:<owner>/<model>` for a shared model's items (`model:oxplow/task_record`)."
+        },
+        {
+          "name": "bound",
+          "type": "INTEGER",
+          "doc": "1 when only the extension that holds the item may replace it: its own provider's, or the one that fills the model as the item's store (a task's states); 0 when any extension may, and the person chooses."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "The contract's version; a declaration may pin it (`version:`)."
+        },
+        {
+          "name": "props",
+          "type": "TEXT",
+          "doc": "JSON array of the prop names the replacement page is given and must declare as `params`."
+        },
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`show`, `priority`, `q` for `task.board`). (v2)"
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What a person calls it (\"board\", \"detail editor\")."
+        }
+      ],
+      "key": [
+        "target"
+      ]
     }
   },
   "job_run": {
@@ -35933,6 +36060,58 @@
           "name": "sql",
           "type": "TEXT",
           "doc": "`read` when it runs its own read-only SQL over the datasets; NULL otherwise."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its `v_contribution.uri`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id, which a page's `component` node names."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What a person calls it; its id when it has no title."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what it is (`description:` in `custom_components:`); NULL when its declaration says nothing."
+        },
+        {
+          "name": "bundle",
+          "type": "TEXT",
+          "doc": "The folder in the extension that holds its code."
+        },
+        {
+          "name": "commands",
+          "type": "TEXT",
+          "doc": "The commands it may invoke, as a JSON array."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "`read` when it runs its own read-only SQL over the datasets; NULL otherwise."
+        },
+        {
+          "name": "size",
+          "type": "TEXT",
+          "doc": "How it sizes on a page (`size:`): `content`, as tall as what it draws, the page scrolling; `fill`, the page's height, scrolling itself. (v3)"
         }
       ],
       "key": [

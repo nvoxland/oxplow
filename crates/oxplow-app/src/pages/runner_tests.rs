@@ -104,6 +104,65 @@ async fn a_switch_runs_only_the_child_in_view() {
     );
 }
 
+/// A node's `when` keeps it out of the run while its params say so: the
+/// one shown is the only child, and the hidden one's loader doesn't run.
+/// Blank text is empty.
+#[tokio::test]
+async fn a_node_when_shows_it_only_while_its_params_say() {
+    let (_dir, svc) = fixture().await;
+    let ids =
+        |r: &PageRun| -> Vec<String> { r.tree.children.iter().map(|c| c.id.clone()).collect() };
+    let r = run(&svc, "acme/chosen", &[]).await;
+    assert_eq!(ids(&r), ["every"]);
+    assert!(
+        !r.loaders.contains_key("found"),
+        "the hidden node's loader doesn't run"
+    );
+    let r = run(&svc, "acme/chosen", &[("q", SqlCell::Text("  ".into()))]).await;
+    assert_eq!(ids(&r), ["every"]);
+    let r = run(&svc, "acme/chosen", &[("q", SqlCell::Text("fix".into()))]).await;
+    assert_eq!(ids(&r), ["found"]);
+    assert!(
+        !r.loaders.contains_key("every"),
+        "the hidden node's loader doesn't run"
+    );
+}
+
+/// A custom component says how it sizes (`size:` in `custom_components:`);
+/// the run carries it on each viz and node that shows it, so the page lays
+/// out before the frame loads: `fill` takes the page's height (the viz
+/// fills), `content` (the default) is as tall as what it draws.
+#[tokio::test]
+async fn a_run_carries_each_custom_components_declared_size() {
+    use crate::pages::spec::ComponentSize;
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "gamma/sized", &[]).await;
+    let viz = |id: &str| match &r
+        .page
+        .nodes()
+        .into_iter()
+        .find(|n| n.id == id)
+        .unwrap()
+        .kind
+    {
+        crate::pages::schema::NodeKind::Viz { config, .. } => (*config).clone(),
+        _ => panic!("a viz"),
+    };
+    let board = viz("board");
+    assert_eq!(board.sizing, Some(ComponentSize::Fill));
+    assert!(board.fills, "a component that fills makes its viz fill");
+    let chart = viz("chart");
+    assert_eq!(chart.sizing, Some(ComponentSize::Content));
+    assert!(!chart.fills);
+    let node = r.page.nodes().into_iter().find(|n| n.id == "node").unwrap();
+    match &node.kind {
+        crate::pages::schema::NodeKind::Component { sizing, .. } => {
+            assert_eq!(*sizing, ComponentSize::Fill)
+        }
+        _ => panic!("a component node"),
+    }
+}
+
 /// A loader only a choice's `options_from` names feeds the rail's list
 /// and a form's open, on demand: a run of the page doesn't run it. One a
 /// node also shows still runs.

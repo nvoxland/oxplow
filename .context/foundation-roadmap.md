@@ -473,9 +473,9 @@ and retains prior handlers on registration failure with their original provenanc
 The bus also supplies atomic multi-source replacement, and the DB supplies
 strict dataset-set replacement with structured rejection and savepoint rollback.
 Command reconciliation now stages all enabled replacements from one catalog
-snapshot, publishes with a registry identity fence, and rejects enabled load
+snapshot, activates with a registry identity fence, and rejects enabled load
 errors instead of exposing a partial command set. Explicit disable/removal and
-live owner guards remain independent of candidate acceptance. Publication races
+live owner guards remain independent of candidate acceptance. Activation races
 restage up to three times. A prepared database candidate now composes strict
 dataset and vocabulary replacement from one catalog snapshot; rejection of either
 restores both inside the caller's transaction. Vocabulary candidates also reject
@@ -485,7 +485,7 @@ one captured state; prepared capability replacements fence registry/choice
 changes. The database candidate also includes contribution descriptors and
 optional planned capability rows/switch events, with vocabulary recognition from
 that planned selection. Provider preparation, native/external adapters, immutable component bundles,
-strict database/metric publication and pinned runtime reads now join one boot
+strict database/metric activation and pinned runtime reads now join one boot
 activation owner. A required-bundled repair baseline precedes full activation;
 rejection retains the baseline/last coherent generation. Raw candidates and
 runtime metadata are separate, with immediate disable/removal revocation.

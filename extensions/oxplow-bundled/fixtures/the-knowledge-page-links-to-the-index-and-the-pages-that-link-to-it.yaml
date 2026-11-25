@@ -10,6 +10,6 @@ when: { page: knowledge-page, params: { uri: "oxplow:oxplow/knowledge?id=otters&
 expect:
   see_also:
     - { title: Knowledge, uri: "oxplow:oxplow/page?page=knowledge" }
-    - { title: Knowledge Freshness, uri: "oxplow:oxplow/page?page=knowledge-freshness#id=otters&store=oxwiki" }
+    - { title: Knowledge Freshness, uri: "oxplow:oxplow/page?id=otters&page=knowledge-freshness&store=oxwiki" }
     - { title: Feed the otters, uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
     - { title: Holts, uri: "oxplow:oxplow/knowledge?id=holts&store=oxwiki" }

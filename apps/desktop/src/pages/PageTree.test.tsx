@@ -340,19 +340,25 @@ test("a section's title_from names it from its row", () => {
   expect(container.querySelector('[data-node="none"] .ox-section-title')!.textContent).toBe("Fallback");
 });
 
-// "Show as" is the page's own: a table of an embedded page (a dashboard
-// tile, an Alerts section) is that page's, and gets no toolbar.
-test("show as is offered on the page's own tables, not on an embedded page's", () => {
+// "Show as" is a chartable table's, and the page's own: a table of an
+// embedded page (a dashboard tile, an Alerts section) is that page's, and a
+// table of records (a log, a list of problems) has nothing to chart.
+test("show as is offered on the page's own chartable tables only", () => {
   const inner = fakeRun(
-    fakePage(node.viz("notes", "notes", { columns: [{ key: "note" }] }), { id: "acme/notes" }),
+    fakePage(node.viz("notes", "notes", { columns: [{ key: "note" }], chartable: true }), { id: "acme/notes" }),
     { loaders: { notes: loader(["note"], [["n1"]]) } },
   );
   const run = fakeRun(
-    fakePage(node.stack("s", [node.viz("items", "items", { columns: [{ key: "id" }] }), node.embed("side", "acme/notes")])),
+    fakePage(node.stack("s", [
+      node.viz("items", "items", { columns: [{ key: "id" }], chartable: true }),
+      node.viz("log", "items", { columns: [{ key: "id" }] }),
+      node.embed("side", "acme/notes"),
+    ])),
     { loaders: { items: loader(["id"], [["a"]]) }, embeds: { side: inner } },
   );
   const { queryByTestId } = render(<PageTree run={run} runId="run-1" showAs={{ given: {} }} />);
   expect(queryByTestId("show-as-items")).not.toBeNull();
+  expect(queryByTestId("show-as-log")).toBeNull();
   expect(queryByTestId("show-as-notes")).toBeNull();
   expect(queryByTestId("show-as-side/notes")).toBeNull();
 });

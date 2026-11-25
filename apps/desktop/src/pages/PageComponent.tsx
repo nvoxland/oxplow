@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import type { Stream } from "../api.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { SaveViewForm } from "./SaveViewForm.js";
-import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../viz/ComponentFrame.js";
+import { ComponentFrame, noteStyle, useComponentBundle, type BridgeHost } from "../viz/ComponentFrame.js";
 import { pageData, type FrameAction, type PageInit, type ShownRows } from "../viz/componentBridge.js";
 import { useFrameForms } from "../viz/frameForms.js";
 import { useHostedView } from "../viz/hostedView.js";
@@ -74,9 +74,10 @@ export function ComponentNode({
     );
   }
   const src = bundle.src!;
+  // As its declaration says: as tall as what it draws, or the page's height.
+  const fills = def.kind === "component" && def.sizing === "fill";
   return (
-    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <CustomBadge extension={run.page.extension} bundled={run.page.origin?.bundled === true} />
+    <div data-testid="custom-component" style={fills ? fillNodeStyle : nodeStyle}>
       <ComponentFrame
         key={src}
         src={src}
@@ -88,7 +89,7 @@ export function ComponentNode({
         readyTimeoutMs={readyTimeoutMs}
         onFail={(why) => setFailed({ src, reason: why })}
         formDeps={forms.forms}
-        fit
+        fit={!fills}
       />
       {forms.element}
     </div>
@@ -165,9 +166,12 @@ export function ComponentPage({
     );
   }
   const src = bundle.src!;
+  // A `content` component is as tall as what it says it draws, and the page
+  // scrolls; a `fill` one is the page, unless a view is shown under it.
+  const grows = !(def.kind === "component" && def.sizing === "fill");
+  const sized = grows || Boolean(inline.shown);
   return (
-    <div data-testid="custom-component" style={{ ...pageStyle, overflowY: inline.shown ? "auto" : undefined }}>
-      <CustomBadge extension={run.page.extension} bundled={run.page.origin?.bundled === true} />
+    <div data-testid="custom-component" style={{ ...pageStyle, overflowY: sized ? "auto" : undefined }}>
       {/* Keyed by its URL: another version mounts a new frame. */}
       <ComponentFrame
         key={src}
@@ -180,7 +184,7 @@ export function ComponentPage({
         formDeps={forms.forms}
         view={view}
         hostRef={host.hostRef}
-        height={inline.shown ? (height ?? 120) : null}
+        height={sized ? (height ?? 120) : null}
         title={run.page.title}
         streamId={streamId}
         readyTimeoutMs={readyTimeoutMs}
@@ -290,4 +294,7 @@ export function ShownView({
 }
 
 const pageStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: "100%" };
+/** A component node: as tall as its frame, or the page's height. */
+const nodeStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
+const fillNodeStyle: CSSProperties = { ...nodeStyle, flex: 1, minHeight: 0 };
 const specStyle: CSSProperties = { padding: "12px 16px", borderTop: "1px solid var(--border-subtle)" };

@@ -4598,6 +4598,15 @@
             "null"
           ],
           "default": null
+        },
+        "size": {
+          "description": "`content` (the default): its frame is as tall as what it draws and\nthe page scrolls. `fill`: it takes the page's height and scrolls\nitself (a board's columns).",
+          "default": "content",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ComponentSize"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -4610,6 +4619,21 @@
       "type": "string",
       "enum": [
         "read"
+      ]
+    },
+    "ComponentSize": {
+      "description": "How a custom component sizes (`size:` in `custom_components:`).",
+      "oneOf": [
+        {
+          "description": "As tall as what it draws: its frame grows with it and the page\nscrolls.",
+          "type": "string",
+          "const": "content"
+        },
+        {
+          "description": "It takes the page's height and scrolls itself (a board's columns).",
+          "type": "string",
+          "const": "fill"
+        }
       ]
     }
   },

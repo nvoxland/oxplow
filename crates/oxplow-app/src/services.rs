@@ -51,7 +51,7 @@ pub struct Sources {
 
 impl Sources {
     /// Sources with nothing to give but the language `languages` (the
-    /// published set, `svc.languages.current()`), which every run gets.
+    /// active set, `svc.languages.current()`), which every run gets.
     pub fn new(languages: Arc<oxplow_code_metrics::Languages>) -> Self {
         Self {
             tree: None,

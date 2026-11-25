@@ -271,7 +271,7 @@ mod program_collectors {
         fx: &ThreadFixture,
     ) -> Result<crate::collector_runner::CollectorRunReport, RunCollectorError> {
         let root = fx.svc.layout.project_dir.clone();
-        // What was written (or edited) since is published first.
+        // What was written (or edited) since is activated first.
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let collectors = Collectors::of(&fx.svc, &root);
         run_collector(

@@ -3869,6 +3869,48 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
             "`emphasis` is only for `list`, `table` and `tree`, not `{viz}`"
         ));
     }
+    if cfg.reveal.is_some() && !rows {
+        return Some(format!(
+            "`reveal` is only for `list` and `table`, not `{viz}`"
+        ));
+    }
+    if cfg.single_line && cfg.viz != Viz::Table {
+        return Some(format!("`single_line` is only for `table`, not `{viz}`"));
+    }
+    if cfg.chartable && cfg.viz != Viz::Table {
+        return Some(format!("`chartable` is only for `table`, not `{viz}`"));
+    }
+    lanes_problem(cfg, &viz)
+}
+
+/// A `lanes` column and its `parents` go together, on a `table` that draws
+/// its rows in the order given (a list has no column cells to line up).
+fn lanes_problem(cfg: &VizConfig, viz: &str) -> Option<String> {
+    use crate::pages::spec::ColumnFormat;
+    for c in &cfg.columns {
+        let lanes = c.format == Some(ColumnFormat::Lanes);
+        if lanes && c.parents.is_none() {
+            return Some(format!(
+                "column `{}`: `format: lanes` needs `parents: <column>`",
+                c.key
+            ));
+        }
+        if !lanes && c.parents.is_some() {
+            return Some(format!(
+                "column `{}`: `parents` is for a `format: lanes` column",
+                c.key
+            ));
+        }
+        if lanes && cfg.viz != Viz::Table {
+            return Some(format!("`format: lanes` is only for `table`, not `{viz}`"));
+        }
+        if lanes && (cfg.group.is_some() || cfg.depth.is_some()) {
+            return Some(
+                "`format: lanes` draws the rows in their order: not with `group` or `depth`"
+                    .to_string(),
+            );
+        }
+    }
     None
 }
 
@@ -4946,6 +4988,8 @@ fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
         keys.extend(c.unit.iter());
         keys.extend(c.icon.iter());
         keys.extend(c.tone.iter());
+        keys.extend(c.badges.iter());
+        keys.extend(c.parents.iter());
         if let Some(link) = c.link.as_ref() {
             keys.extend(link.from.iter());
             keys.extend(link.line.iter());
@@ -5052,6 +5096,42 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// A `lanes` column's `parents`, a column's `badges` and a `reveal`
+    /// column must be in the loader's result, as any column a viz names.
+    #[test]
+    fn a_lanes_columns_parents_badges_and_reveal_are_result_columns() {
+        let page = crate::pages::schema::parse_page(
+            "acme",
+            "acme",
+            "p",
+            "pages/p.yaml",
+            "title: T\nloaders:\n  q: { rows: [{ id: a }] }\nview:\n  viz: table\n  from: q\n  reveal: shown\n  columns:\n    - { key: id, format: lanes, parents: parents, badges: refs }\n",
+            crate::pages::schema::PageKind::Page,
+        )
+        .unwrap();
+        let crate::pages::schema::NodeKind::Viz { config, .. } = &page.view.kind else {
+            panic!("a viz");
+        };
+        let problems = viz_column_problems(config, &["id".to_string()]);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("column `parents` isn't in the query result")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("column `refs` isn't in the query result")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("reveal column `shown` isn't in the query result")),
+            "{problems:?}"
+        );
+    }
 
     /// A Settings category id is one namespace's: the first by name keeps
     /// it; a later one's declaration of it is dropped, with a load error.
@@ -9952,6 +10032,12 @@ commands:
                 ("h", &viz_page("", "SELECT 1 AS g", "viz: table\ngroup: { by: g, compact: { Ready: 2 } }\n")),
                 // A coloured edge is a list's or a table's row.
                 ("i", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l", "viz: tree\ntree: { id: id, parent: p, label: l }\nedge: l\n")),
+                // One line per row is a table's: its cells cut to one line.
+                ("j", &viz_page("", "SELECT 1 AS id", "viz: list\nsingle_line: true\n")),
+                ("k", &viz_page("", "SELECT 1 AS id", "viz: table\nsingle_line: true\n")),
+                // Only a table offers "Show as": a list's rows are not a chart's.
+                ("l", &viz_page("", "SELECT 1 AS id", "viz: list\nchartable: true\n")),
+                ("m", &viz_page("", "SELECT 1 AS id", "viz: table\nchartable: true\n")),
             ],
             "",
         );
@@ -9980,6 +10066,16 @@ commands:
         assert_eq!(a.columns[0].tone.as_deref(), Some("hue"));
         assert_eq!(a.actions[0].group.as_deref(), Some("Ready"));
         assert!(node(&ext, "t").is_some(), "a tree may emphasize");
+        assert!(
+            node(&ext, "k")
+                .expect("a single-line table loads")
+                .single_line
+        );
+        assert!(node(&ext, "m").expect("a chartable table loads").chartable);
+        assert!(
+            !node(&ext, "k").unwrap().chartable,
+            "a table is not chartable unless it says so"
+        );
         for (slug, needle) in [
             ("b", "`group` is only for `list`, `table` and `board`"),
             ("c", "missing field `by`"),
@@ -9989,6 +10085,8 @@ commands:
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
             ("h", "`group.compact` and `group.grown` are only for `list`"),
             ("i", "`edge` is only for `list` and `table`"),
+            ("j", "`single_line` is only for `table`"),
+            ("l", "`chartable` is only for `table`"),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(

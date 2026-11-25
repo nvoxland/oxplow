@@ -68,6 +68,7 @@ view:
     title: Oxplow MCP Tool Calls
     from: interface_tool_calls
     viz: table
+    chartable: true
     columns:
     - { key: tool, label: Tool, link: { kind: page, from: calls_uri } }
     - { key: harness, label: Harness }
@@ -79,6 +80,7 @@ view:
     title: Agent Command Runs
     from: interface_commands
     viz: table
+    chartable: true
     columns:
     - { key: command, label: Command, link: { kind: page, from: errors_uri } }
     - { key: runs, label: Completed, format: integer }
@@ -91,6 +93,7 @@ view:
     title: All-time Hints
     from: interface_hints
     viz: table
+    chartable: true
     columns:
     - { key: hint, label: Hint }
     - { key: evaluated, label: Evaluated, format: integer }

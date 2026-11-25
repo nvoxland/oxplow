@@ -121,6 +121,10 @@ export function tablePageYaml({ run, loader, display, title, given, columns, inl
     } : {}),
     ...(run.page.refresh ? { refresh: true } : {}),
     loaders,
-    view: { viz: display.viz, from, ...(chart ? { chart } : {}), ...(written.length ? { columns: written } : {}) },
+    // Saved as a table, it stays one the person can show as a chart.
+    view: {
+      viz: display.viz, from, ...(display.viz === "table" ? { chartable: true } : {}),
+      ...(chart ? { chart } : {}), ...(written.length ? { columns: written } : {}),
+    },
   });
 }

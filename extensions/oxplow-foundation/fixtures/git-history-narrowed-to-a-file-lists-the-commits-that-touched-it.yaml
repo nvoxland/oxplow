@@ -1,0 +1,29 @@
+# A file's history (the editor's History link, Git ▸ Show History): Git
+# History narrowed by `path` lists the commits that touched the file, newest
+# first, with the file's change in each: created, deleted or renamed said in
+# a word, a modification by its counts alone, the lines added in green and
+# removed in red. Only the stream's own history: a commit on another branch
+# is left out; a limit cuts it. With no path, the change is the whole
+# commit's.
+given:
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: added, additions: 1 }, { path: z.rs, status: added, additions: 1 }] } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: a.rs, status: modified, additions: 2, deletions: 1 }] } }
+  - observe: { commit: { sha: c3, at: "2026-01-03T00:00:00Z", author: cat, subject: elsewhere, parents: [c1], files: [{ path: a.rs, status: modified, additions: 5 }] } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: c2, stream: 1 }, { name: side, head: c3 }]
+        heads: [{ stream: 1, sha: c2 }]
+when: { page: oxplow/git-history, params: { stream_id: 1, path: a.rs } }
+expect:
+  nodes: [{ id: history, viz: table }]
+  loaders:
+    history:
+      rows:
+        - { sha: c2, change: null, additions: 2, deletions: 1, lines: '[{"text":"+2","tone":"success"},{"text":"−1","tone":"danger"}]' }
+        - { sha: c1, change: created, additions: 1, deletions: 0, lines: '[{"text":"created","tone":"muted"},{"text":"+1","tone":"success"},{"text":"−0","tone":"danger"}]' }
+steps:
+  - params: { stream_id: 1, path: a.rs, limit: 1 }
+    expect: { loaders: { history: { rows: [{ sha: c2 }] } } }
+  # No path, a search: each commit's whole change.
+  - params: { stream_id: 1, path: '', limit: 500, q: first }
+    expect: { loaders: { history: { rows: [{ sha: c1, change: 2 files, additions: 2, deletions: 0 }] } } }

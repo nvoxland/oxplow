@@ -84,5 +84,6 @@ view:
   - id: rows
     title: Rows
     viz: table
+    chartable: true
     from: data
     empty: The dataset has no rows for this filter.

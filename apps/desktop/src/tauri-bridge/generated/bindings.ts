@@ -1557,6 +1557,13 @@ export type ColumnFormat =
  */
 "marks" |
 /**
+ *  The lanes of the graph the rows form, as `git log --graph` draws
+ *  them: the column's value is the row's id and `parents` names the
+ *  column of its parents' ids. For a `table`, whose rows are drawn in the
+ *  order given, each child before its parents. An agent reads no lanes.
+ */
+"lanes" |
+/**
  *  Who caused it (a JSON object `{ "kind": "agent" | "you" |
  *  "extension" | "page", "label": …, "uri"?: … }`): a small chip with
  *  the kind's icon, a link when it has a `uri` (an agent's thread, an
@@ -1813,6 +1820,16 @@ export type CommitRefLabel = {
 
 export type CommitRefLabelKind = "branch" | "tag";
 
+/**  How a custom component sizes (`size:` in `custom_components:`). */
+export type ComponentSize =
+/**
+ *  As tall as what it draws: its frame grows with it and the page
+ *  scrolls.
+ */
+"content" |
+/**  It takes the page's height and scrolls itself (a board's columns). */
+"fill";
+
 /**
  *  `when: { config: <pointer>, in: [<values>] }`: a contribution that is
  *  there only while a setting of its extension's own configuration is one
@@ -1971,6 +1988,11 @@ export type CustomComponent_Deserialize = {
 	 *  `None` when its declaration says nothing.
 	 */
 	description?: string | null,
+	/**
+	 *  How it sizes on a page: as tall as what it draws (`content`, the
+	 *  default) or the page's height, scrolling itself (`fill`).
+	 */
+	size?: ComponentSize,
 };
 
 /**
@@ -2006,6 +2028,11 @@ export type CustomComponent_Serialize = {
 	 *  `None` when its declaration says nothing.
 	 */
 	description?: string | null,
+	/**
+	 *  How it sizes on a page: as tall as what it draws (`content`, the
+	 *  default) or the page's height, scrolling itself (`fill`).
+	 */
+	size: ComponentSize,
 };
 
 /**
@@ -4075,63 +4102,86 @@ export type NodeKind = NodeKind_Serialize | NodeKind_Deserialize;
 
 export type NodeKind_Deserialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; config: VizConfig_Deserialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "viz"; from: string | null; config: VizConfig_Deserialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; text?: never } |
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never } |
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never } |
 /**  One of the extension's custom components, given the page's data. */
-({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
+({ kind: "component"; component: string; props: unknown | null;
+/**
+ *  How it sizes, as its declaration's `size:` says: the run fills
+ *  it in. (`size` is a grid tile's.)
+ */
+sizing?: ComponentSize }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
 /**
  *  A named action point (`action_point: <id>`, `context:`): the
  *  commands that joined it, drawn by the shell as nothing, a button or
  *  a menu. `context` is bound as an embed's params are.
  */
-({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
+({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; sizing?: never; text?: never };
 
 export type NodeKind_Serialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; config: VizConfig_Serialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "viz"; from: string | null; config: VizConfig_Serialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; text?: never } |
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
+({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never } |
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; sizing?: never } |
 /**  One of the extension's custom components, given the page's data. */
-({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
+({ kind: "component"; component: string; props: unknown | null;
+/**
+ *  How it sizes, as its declaration's `size:` says: the run fills
+ *  it in. (`size` is a grid tile's.)
+ */
+sizing: ComponentSize }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
 /**
  *  A named action point (`action_point: <id>`, `context:`): the
  *  commands that joined it, drawn by the shell as nothing, a button or
  *  a menu. `context` is bound as an embed's params are.
  */
-({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
+({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; sizing?: never; text?: never };
+
+/**
+ *  When a node shows, by the page's params (`when:`). A param is empty
+ *  when it has no value, null, or text that is blank.
+ */
+export type NodeWhen =
+/**  While every one is empty: `when: { empty: [q, author] }`. */
+({ empty: string[] }) & { notEmpty?: never } |
+/**
+ *  While one of them is set: `when: { not_empty: [q, author] }`, the
+ *  opposite of `empty`.
+ */
+({ notEmpty: string[] }) & { empty?: never };
 
 /**  A node of a page's view. */
 export type Node_Deserialize = {
@@ -4174,6 +4224,11 @@ export type Node_Deserialize = {
 	replaceable: string | null,
 	/**  A grid child's size. */
 	size: TileSize | null,
+	/**
+	 *  It shows only while its params say (`when:`); none shows always. A
+	 *  hidden node is not in the run, and its loaders don't run.
+	 */
+	when: NodeWhen | null,
 } & NodeKind_Deserialize;
 
 /**  A node of a page's view. */
@@ -4217,6 +4272,11 @@ export type Node_Serialize = {
 	replaceable: string | null,
 	/**  A grid child's size. */
 	size: TileSize | null,
+	/**
+	 *  It shows only while its params say (`when:`); none shows always. A
+	 *  hidden node is not in the run, and its loaders don't run.
+	 */
+	when: NodeWhen | null,
 } & NodeKind_Serialize;
 
 /**
@@ -4998,6 +5058,14 @@ export type PageColumn = {
 	 *  `success`, `warning`, `danger` or `muted` (anything else is plain).
 	 */
 	tone?: string | null,
+	/**
+	 *  A column of the same row holding short labels drawn as pills before
+	 *  the cell's text (a commit's branches and tags): a JSON array, each
+	 *  element a string or `{ "text": …, "tone"?: …, "hint"?: … }`, as
+	 *  `marks` reads. An agent reads them as a column of their own, after
+	 *  this one.
+	 */
+	badges?: string | null,
 	/**  Its width in pixels; the columns without one share the rest. */
 	width?: number | null,
 	/**
@@ -5028,6 +5096,11 @@ export type PageColumn = {
 	 *  only on a merge. The same word, with the same rule, as an action's.
 	 */
 	when?: string | null,
+	/**
+	 *  For `format: lanes`: the column of the same row holding its
+	 *  parents' ids (a JSON array, first parent first).
+	 */
+	parents?: string | null,
 };
 
 /**  A page that didn't run for want of a capability. */
@@ -6373,6 +6446,12 @@ export type TestDecl = {
 	sql?: string | null,
 };
 
+/**
+ *  How a block of text reads in the UI: Markdown, or plain text with its
+ *  line breaks kept (text whose `*`, `_` and `#` are meant as written).
+ */
+export type TextFormat = "markdown" | "text";
+
 export type Thread = {
 	id: ThreadId,
 	stream_id: StreamId,
@@ -6803,6 +6882,13 @@ export type VizConfig_Deserialize = {
 	 *  facts). Null or empty: nothing is drawn.
 	 */
 	lead: string | null,
+	/**
+	 *  How the lead reads when its YAML says (`lead: { column, format }`):
+	 *  unset is Markdown (a commit message's paragraphs and lists, a
+	 *  description's `code`); `text` is the text with its line breaks
+	 *  kept. An agent reads the raw text either way.
+	 */
+	leadFormat: TextFormat | null,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,
@@ -6828,6 +6914,23 @@ export type VizConfig_Deserialize = {
 	 *  highlights the row.
 	 */
 	emphasis: string | null,
+	/**
+	 *  For `list` / `table`: a column whose truthy value marks the row, as
+	 *  `emphasis` does, and brings it into view when it is drawn.
+	 */
+	reveal: string | null,
+	/**
+	 *  For `table`: each row on one line, a cell too long for its column
+	 *  cut with "…" (its whole text a hover away), so rows line up as a
+	 *  log does.
+	 */
+	singleLine?: boolean,
+	/**
+	 *  For `table`: its rows are data a chart can draw, so the page offers
+	 *  "Show as" (table, list, number, bar, line, treemap) and Save as
+	 *  Page. A table of records (a log, a list of problems) leaves it off.
+	 */
+	chartable?: boolean,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
@@ -6845,6 +6948,12 @@ export type VizConfig_Deserialize = {
 	fills: boolean,
 	/**  Commands the viz offers, as buttons or row actions (P6.B1). */
 	actions: PageAction_Deserialize[],
+	/**
+	 *  For `custom`: how its component sizes, as its declaration's `size:`
+	 *  says; none on any other viz. The run fills it in
+	 *  (`size_components`); a page doesn't write it.
+	 */
+	sizing?: ComponentSize | null,
 	/**  Where it comes from: the file that runs and the source to edit. */
 	origin: PageProvenance,
 };
@@ -6876,6 +6985,13 @@ export type VizConfig_Serialize = {
 	 *  facts). Null or empty: nothing is drawn.
 	 */
 	lead: string | null,
+	/**
+	 *  How the lead reads when its YAML says (`lead: { column, format }`):
+	 *  unset is Markdown (a commit message's paragraphs and lists, a
+	 *  description's `code`); `text` is the text with its line breaks
+	 *  kept. An agent reads the raw text either way.
+	 */
+	leadFormat: TextFormat | null,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,
@@ -6901,6 +7017,23 @@ export type VizConfig_Serialize = {
 	 *  highlights the row.
 	 */
 	emphasis: string | null,
+	/**
+	 *  For `list` / `table`: a column whose truthy value marks the row, as
+	 *  `emphasis` does, and brings it into view when it is drawn.
+	 */
+	reveal: string | null,
+	/**
+	 *  For `table`: each row on one line, a cell too long for its column
+	 *  cut with "…" (its whole text a hover away), so rows line up as a
+	 *  log does.
+	 */
+	singleLine: boolean,
+	/**
+	 *  For `table`: its rows are data a chart can draw, so the page offers
+	 *  "Show as" (table, list, number, bar, line, treemap) and Save as
+	 *  Page. A table of records (a log, a list of problems) leaves it off.
+	 */
+	chartable: boolean,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
@@ -6918,6 +7051,12 @@ export type VizConfig_Serialize = {
 	fills: boolean,
 	/**  Commands the viz offers, as buttons or row actions (P6.B1). */
 	actions: PageAction_Serialize[],
+	/**
+	 *  For `custom`: how its component sizes, as its declaration's `size:`
+	 *  says; none on any other viz. The run fills it in
+	 *  (`size_components`); a page doesn't write it.
+	 */
+	sizing?: ComponentSize | null,
 	/**  Where it comes from: the file that runs and the source to edit. */
 	origin: PageProvenance,
 };

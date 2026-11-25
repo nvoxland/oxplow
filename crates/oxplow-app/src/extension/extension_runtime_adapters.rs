@@ -61,17 +61,17 @@ impl PreparedRuntimeAdapters {
         })
     }
 
-    /// Infallible map publication without resolving active selections. The
+    /// Infallible map activation without resolving active selections. The
     /// coordinator must exclude readers and competing writers across these
     /// swaps and the database commit. This method alone does not establish a
     /// coherent activation boundary.
-    pub(crate) fn publish_maps(self, svc: &Services) {
-        self.harnesses.publish(&svc.harnesses);
+    pub(crate) fn activate_maps(self, svc: &Services) {
+        self.harnesses.activate(&svc.harnesses);
         self.snapshots
-            .publish(&svc.snapshots, &svc.snapshot_captures);
-        self.models.publish(svc.ai.providers());
-        svc.providers.publish_scripts(self.scripts);
-        svc.jobs.publish_registry(self.jobs);
+            .activate(&svc.snapshots, &svc.snapshot_captures);
+        self.models.activate(svc.ai.providers());
+        svc.providers.activate_scripts(self.scripts);
+        svc.jobs.activate_registry(self.jobs);
     }
 
     /// Follow explicit selections from the prepared capability candidate,

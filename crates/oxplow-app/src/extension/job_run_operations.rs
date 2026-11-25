@@ -210,7 +210,7 @@ pub struct JobOperationRegistry {
     operations: Vec<Arc<RegisteredJobOperation>>,
 }
 
-/// The host's published registry handle. Generation readers retain selected
+/// The host's active registry handle. Generation readers retain selected
 /// immutable registrations; only the activation owner replaces this map.
 #[derive(Clone)]
 pub struct JobOperations {
@@ -228,7 +228,7 @@ impl JobOperations {
         self.registry.read().clone()
     }
 
-    pub(crate) fn publish(&self, registry: Arc<JobOperationRegistry>) {
+    pub(crate) fn activate(&self, registry: Arc<JobOperationRegistry>) {
         *self.registry.write() = registry;
     }
 }

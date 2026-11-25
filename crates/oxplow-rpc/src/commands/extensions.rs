@@ -216,7 +216,7 @@ mod tests {
     async fn lists_gets_runs_and_validates_pages() {
         let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
-        crate::test_support::publish(&svc).await;
+        crate::test_support::activate(&svc).await;
 
         let exts = crate::dispatch("list_extensions", json!({}), &svc)
             .await
@@ -286,13 +286,13 @@ mod tests {
     async fn every_stream_shows_the_main_worktrees_extensions() {
         let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
-        crate::test_support::publish(&svc).await;
+        crate::test_support::activate(&svc).await;
         write(
             &svc.layout.project_dir,
             ".oxplow/local.yaml",
             "oxplow.extensions.oxplow-bundled.enabled: false\n",
         );
-        crate::test_support::publish(&svc).await;
+        crate::test_support::activate(&svc).await;
         let parent = tempfile::tempdir().unwrap();
         let side = parent.path().join("side");
         let stream = worktree_stream(&svc, &side).await;
@@ -335,7 +335,7 @@ mod tests {
     async fn a_missing_page_is_refused() {
         let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
-        crate::test_support::publish(&svc).await;
+        crate::test_support::activate(&svc).await;
         let err = crate::dispatch("get_page", json!({ "id": "demo/nope" }), &svc)
             .await
             .unwrap_err();

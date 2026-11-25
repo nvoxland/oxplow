@@ -4,7 +4,7 @@
 //! and the language-server suggestions parse and name files with. Core
 //! names no language; a project's set is the packs it turned on.
 //!
-//! Built from the published extensions at each publication and swapped
+//! Built from the extensions of the generation at each activation and swapped
 //! whole (`extension_activation`, beside the model registry), so a reader
 //! holds one consistent set for as long as it works.
 
@@ -24,6 +24,19 @@ pub fn of(extensions: &[Extension]) -> (Languages, Vec<LanguageProblem>) {
 /// The language contributions turned off on this machine (`contribution_health`
 /// rows of kind `language`), by (namespace, language id).
 pub type DisabledLanguages = std::collections::BTreeSet<(String, String)>;
+
+/// The languages turned off on this machine, from `db`'s contribution health.
+pub async fn turned_off(
+    db: &oxplow_db::Database,
+) -> Result<DisabledLanguages, oxplow_domain::DomainError> {
+    Ok(oxplow_db::SqliteContributionHealthStore::new(db.clone())
+        .list()
+        .await?
+        .into_iter()
+        .filter(|r| r.kind == "language" && r.state == "disabled")
+        .map(|r| (r.namespace, r.contribution))
+        .collect())
+}
 
 /// [`of`] without the languages `disabled` names: turning one language
 /// contribution off drops it from the set as turning its extension off would.
@@ -53,6 +66,41 @@ pub fn of_without(
         })
         .collect();
     Languages::build(&sources)
+}
+
+/// The extensions an activation holds for their languages: one whose
+/// language claims a name, alias, LSP id or file extension an earlier
+/// extension's language holds (the order of [`of`]), by name, with a
+/// `language.conflict` error naming the earlier. A language turned off on
+/// this machine (`disabled`) holds nothing, so turning it off frees its
+/// names. A language that doesn't build is its own extension's error at load.
+pub(crate) fn conflicts(
+    extensions: &[Extension],
+    disabled: &DisabledLanguages,
+) -> std::collections::BTreeMap<String, Vec<oxplow_domain::diagnostic::Diagnostic>> {
+    let mut out: std::collections::BTreeMap<String, Vec<_>> = Default::default();
+    let (_, problems) = of_without(extensions, disabled);
+    for p in problems
+        .into_iter()
+        .filter(|p| p.message.contains("already belongs to another language"))
+    {
+        let Some(ext) = extensions.iter().find(|e| e.name == p.extension) else {
+            continue;
+        };
+        out.entry(ext.name.clone()).or_default().push(
+            oxplow_domain::diagnostic::Diagnostic::error(
+                "language.conflict",
+                format!(
+                    "language `{}` can't be declared: {}",
+                    p.language, p.message
+                ),
+            )
+            .at("extension.yaml", None)
+            .contribution(format!("{}/{}", ext.namespace, p.language))
+            .fix("give it another id, alias or file extension, or turn off the language or the extension that holds them"),
+        );
+    }
+    out
 }
 
 /// Every language the extensions that ship with oxplow declare, enabled or
@@ -190,8 +238,8 @@ impl LanguagesHandle {
     }
 
     /// [`swap`](Self::swap), saying whether what is indexed by the set needs
-    /// restating: its first publication, or a set whose fingerprint moved.
-    pub fn publish(&self, languages: Languages) -> bool {
+    /// restating: its first activation, or a set whose fingerprint moved.
+    pub fn activate(&self, languages: Languages) -> bool {
         let moved = self.current().fingerprint() != languages.fingerprint();
         let first = !self.1.swap(true, std::sync::atomic::Ordering::SeqCst);
         self.swap(languages);
@@ -235,6 +283,43 @@ mod tests {
             "the earlier keeps `.rs`"
         );
         assert!(set.by_name("zeta").is_none());
+    }
+
+    /// A language turned off on this machine frees its names at the next
+    /// activation: the later extension that claims one of them is no longer
+    /// held, and its language takes the files.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_language_turned_off_frees_its_names_for_a_later_extension() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/zeta-rust");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: zeta-rust\nintent: { purpose: t, origin: null, examples: [] }\nlanguages:\n  - { id: zeta, title: Zeta, extensions: [rs] }\n",
+        )
+        .unwrap();
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.contribution.disable",
+                serde_json::json!({ "namespace": "oxplow", "kind": "language", "contribution": "rust" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(svc).await;
+        assert!(
+            !problems.contains_key("zeta-rust"),
+            "nothing holds `.rs` now: {problems:?}"
+        );
+        assert_eq!(
+            svc.languages
+                .current()
+                .declared_for_path("src/a.rs")
+                .map(|l| l.name().to_string()),
+            Some("zeta".to_string())
+        );
     }
 
     /// `v_language` lists every language every loaded extension declares,
@@ -282,7 +367,7 @@ mod tests {
 
     /// A language is a contribution: it is listed with its URI, and turning
     /// one off (its health row, as a failing contribution's) drops just it
-    /// from the set at the next publication, as turning its extension off
+    /// from the set at the next activation, as turning its extension off
     /// would drop them all; turning it on brings it back.
     #[tokio::test]
     async fn a_disabled_language_contribution_leaves_the_set() {
@@ -368,7 +453,7 @@ mod tests {
     }
 
     /// A person turns one language off with the command: it leaves the set
-    /// at the next publication, `v_language` says it is off while its
+    /// at the next activation, `v_language` says it is off while its
     /// extension is on, and undoing the command turns it back on.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_turns_one_language_off_and_undoing_turns_it_on() {

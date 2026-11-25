@@ -33,9 +33,12 @@
 // `openForm`, and signs in for a provider's credential with `signIn`. A page may also hand
 // oxplow an inline page (its YAML) to draw under it with the kit
 // (`showView`): oxplow runs it, keeps it live and offers Pin to
-// Dashboard; the library tells oxplow the page's content height, so
-// the frame sits at its content's height above what oxplow draws (leave
-// `html` and `body` at `height: auto` for that).
+// Dashboard. The library tells oxplow the component's content height, so
+// a component declared `size: content` (the default) is as tall as what it
+// draws and its page scrolls, and a page's frame sits at its content's
+// height above what oxplow draws (leave `html` and `body` at `height: auto`
+// for that); `reveal` brings a part of it into view. A `size: fill` one
+// takes the page's height and scrolls itself.
 //
 // A component keeps no state of its own (a frame has no storage); oxplow
 // keeps each kind, named by its scope:
@@ -60,7 +63,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 13;
+  const PROTOCOL = 14;
 
   // The elements renderMarkdown draws; anything else leaves its text.
   const MARKDOWN_TAGS = new Set([
@@ -197,6 +200,11 @@
           newTab: !!(options && options.newTab),
           replace: !!(options && options.replace),
         }),
+      // Bring a part of the component (`top` and `bottom`, px from its own
+      // top) into view, as `scrollIntoView` would: a component as tall as
+      // what it draws (`size: content`) scrolls with its page, which its
+      // frame can't scroll. A host that can't scroll leaves it be.
+      reveal: (part) => call({ method: "reveal", top: part.top, bottom: part.bottom }),
       // Run read-only SQL over oxplow's datasets (`?1` parameters): needs
       // `sql: read` on the component. Resolves `{ columns, rows, truncated }`.
       querySql: (sql, params) => call({ method: "querySql", sql, params: params || [] }),

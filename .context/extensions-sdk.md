@@ -532,7 +532,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
     command step the host settles (`Host::settle`): every async consumer
     hears what was logged (`EventPump::settle_all`) — the config reactors,
     registered as at boot, among them — and a generation one asked for is
-    published (`ExtensionActivation::serve_pending`, what the owner does
+    activated (`ExtensionActivation::serve_pending`, what the owner does
     after its debounce). So `oxplow.capability.choose` is in effect for
     the next run, as it would be for a person.
   - **One oxplow per example that makes data.** An example with `given`,

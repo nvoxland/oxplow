@@ -122,6 +122,29 @@ impl Viz {
     }
 }
 
+/// How a custom component sizes (`size:` in `custom_components:`).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ComponentSize {
+    /// As tall as what it draws: its frame grows with it and the page
+    /// scrolls.
+    #[default]
+    Content,
+    /// It takes the page's height and scrolls itself (a board's columns).
+    Fill,
+}
+
 /// A `custom` viz's component and the props it starts with.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -903,6 +926,13 @@ pub struct PageColumn {
     /// `success`, `warning`, `danger` or `muted` (anything else is plain).
     #[serde(default)]
     pub tone: Option<String>,
+    /// A column of the same row holding short labels drawn as pills before
+    /// the cell's text (a commit's branches and tags): a JSON array, each
+    /// element a string or `{ "text": …, "tone"?: …, "hint"?: … }`, as
+    /// `marks` reads. An agent reads them as a column of their own, after
+    /// this one.
+    #[serde(default)]
+    pub badges: Option<String>,
     /// Its width in pixels; the columns without one share the rest.
     #[serde(default)]
     pub width: Option<u32>,
@@ -929,6 +959,31 @@ pub struct PageColumn {
     /// only on a merge. The same word, with the same rule, as an action's.
     #[serde(default)]
     pub when: Option<String>,
+    /// For `format: lanes`: the column of the same row holding its
+    /// parents' ids (a JSON array, first parent first).
+    #[serde(default)]
+    pub parents: Option<String>,
+}
+
+/// How a block of text reads in the UI: Markdown, or plain text with its
+/// line breaks kept (text whose `*`, `_` and `#` are meant as written).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TextFormat {
+    #[default]
+    Markdown,
+    Text,
 }
 
 /// How a column's value reads in the UI. An agent reads the raw value.
@@ -971,6 +1026,11 @@ pub enum ColumnFormat {
     /// a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
     /// agent reads them joined by spaces, a hint in parentheses.
     Marks,
+    /// The lanes of the graph the rows form, as `git log --graph` draws
+    /// them: the column's value is the row's id and `parents` names the
+    /// column of its parents' ids. For a `table`, whose rows are drawn in the
+    /// order given, each child before its parents. An agent reads no lanes.
+    Lanes,
     /// Who caused it (a JSON object `{ "kind": "agent" | "you" |
     /// "extension" | "page", "label": …, "uri"?: … }`): a small chip with
     /// the kind's icon, a link when it has a `uri` (an agent's thread, an
@@ -2309,6 +2369,11 @@ pub struct VizConfig {
     /// the node's heading, above its viz (what a thing is, above its
     /// facts). Null or empty: nothing is drawn.
     pub lead: Option<String>,
+    /// How the lead reads when its YAML says (`lead: { column, format }`):
+    /// unset is Markdown (a commit message's paragraphs and lists, a
+    /// description's `code`); `text` is the text with its line breaks
+    /// kept. An agent reads the raw text either way.
+    pub lead_format: Option<TextFormat>,
     /// Columns a chart viz draws from.
     pub chart: Option<VizChart>,
     pub tree: Option<VizTree>,
@@ -2332,6 +2397,19 @@ pub struct VizConfig {
     /// For `list` / `table` / `tree`: a column whose truthy value
     /// highlights the row.
     pub emphasis: Option<String>,
+    /// For `list` / `table`: a column whose truthy value marks the row, as
+    /// `emphasis` does, and brings it into view when it is drawn.
+    pub reveal: Option<String>,
+    /// For `table`: each row on one line, a cell too long for its column
+    /// cut with "…" (its whole text a hover away), so rows line up as a
+    /// log does.
+    #[serde(default)]
+    pub single_line: bool,
+    /// For `table`: its rows are data a chart can draw, so the page offers
+    /// "Show as" (table, list, number, bar, line, treemap) and Save as
+    /// Page. A table of records (a log, a list of problems) leaves it off.
+    #[serde(default)]
+    pub chartable: bool,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
     /// For `list` / `table`: a column whose value is a tone (`danger`,
@@ -2345,6 +2423,11 @@ pub struct VizConfig {
     pub fills: bool,
     /// Commands the viz offers, as buttons or row actions (P6.B1).
     pub actions: Vec<PageAction>,
+    /// For `custom`: how its component sizes, as its declaration's `size:`
+    /// says; none on any other viz. The run fills it in
+    /// (`size_components`); a page doesn't write it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sizing: Option<ComponentSize>,
     /// Where it comes from: the file that runs and the source to edit.
     pub origin: PageProvenance,
 }
@@ -2498,6 +2581,7 @@ impl VizConfig {
             }
         }
         out.extend(self.emphasis.iter().map(|k| ("emphasis", k)));
+        out.extend(self.reveal.iter().map(|k| ("reveal", k)));
         out.extend(self.depth.iter().map(|k| ("depth", k)));
         out.extend(self.edge.iter().map(|k| ("edge", k)));
         out

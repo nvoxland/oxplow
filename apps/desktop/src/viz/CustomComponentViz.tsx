@@ -5,14 +5,14 @@
 /// confirmation shown here, never in the frame) and navigation. A frame
 /// that never says `ready`, or navigates itself away, is torn down and the
 /// viz's table shows instead — as it does with no daemon to serve the
-/// bundle. Marked "custom" so the person knows it isn't oxplow's own.
+/// bundle. Whose it is shows in the page's About, not on the page.
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { VizRun } from "../tauri-bridge/generated/bindings.js";
 import { vizData, type HostedData } from "./componentBridge.js";
-import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle } from "./ComponentFrame.js";
+import { ComponentFrame, noteStyle, useComponentBundle } from "./ComponentFrame.js";
 import { useFrameForms } from "./frameForms.js";
 import type { HostedView } from "./hostedView.js";
 
@@ -23,7 +23,6 @@ export function CustomComponentViz({
   onFailure,
   onReady,
   view = null,
-  fit = false,
   data,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
@@ -42,8 +41,6 @@ export function CustomComponentViz({
   /** Its host's view, where the host shares one (a replacement, a viz's
    *  own page); none in a tile or a slot. */
   view?: HostedView | null;
-  /** The frame is as tall as its content says: a section of a document. */
-  fit?: boolean;
   /** What it is fed (a page node's: every loader of its page); none: the
    *  viz's own rows. */
   data?: HostedData | null;
@@ -95,7 +92,6 @@ export function CustomComponentViz({
   }
   return (
     <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-      <CustomBadge extension={run.config.extension} bundled={run.config.origin?.bundled === true} />
       {/* Keyed by its URL: another version (an edited bundle) mounts a new
           frame, whose first load is its own — never the old frame
           navigating away. */}
@@ -112,7 +108,7 @@ export function CustomComponentViz({
         onReady={onReady}
         view={view}
         formDeps={frameForms.forms}
-        fit={fit}
+        fit={run.config.sizing !== "fill"}
       />
       {frameForms.element}
     </div>

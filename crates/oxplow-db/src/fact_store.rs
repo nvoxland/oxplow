@@ -583,7 +583,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
     })
 }
 
-/// Compose catalog publication in a caller-owned transaction.
+/// Compose catalog activation in a caller-owned transaction.
 pub fn upsert_measure_tx(
     tx: &rusqlite::Transaction<'_>,
     m: &NewMeasure,
@@ -654,7 +654,7 @@ pub fn upsert_measure_tx(
     Ok(id)
 }
 
-/// Compose catalog publication in a caller-owned transaction.
+/// Compose catalog activation in a caller-owned transaction.
 pub fn upsert_dimension_tx(
     tx: &rusqlite::Transaction<'_>,
     d: &NewDimension,
@@ -699,7 +699,7 @@ pub fn upsert_dimension_tx(
     Ok(())
 }
 
-/// Compose catalog publication in a caller-owned transaction.
+/// Compose catalog activation in a caller-owned transaction.
 pub fn upsert_spec_tx(
     tx: &rusqlite::Transaction<'_>,
     s: &NewMetricSpec,

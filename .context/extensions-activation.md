@@ -1,6 +1,6 @@
 # Extensions: Activation, candidates and repair
 
-Health, disable and repair, and how a catalog snapshot is prepared and published (commands, vocabulary, runtime adapters, ingress). Part of the extensions docs; the terms and the index of docs are in [extensions.md](./extensions.md).
+Health, disable and repair, and how a catalog snapshot is prepared and activated (commands, vocabulary, runtime adapters, ingress). Part of the extensions docs; the terms and the index of docs are in [extensions.md](./extensions.md).
 
 ## Health, disable and repair (P7.C1–C3)
 
@@ -63,12 +63,12 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   instance is turned off in Settings; person only, undoable: its inverse is
   `enable`) writes the same `disabled` health row an automatic disable does,
   with the reason "turned off by <who>". A language turned off leaves the
-  language set at the next publication (`language_set::of_without`; the
+  language set at the next activation (`language_set::of_without`; the
   command asks for one), its files parse no more, and `v_language.enabled`
-  says 0 while its extension is on. A disabled language still holds its
-  id, aliases and file extensions in the conflict check
-  (`hold_language_conflicts` reads declarations): turn off its extension to
-  free them.
+  says 0 while its extension is on. A disabled language holds no id,
+  alias or file extension in the conflict check
+  (`language_set::conflicts`), so an extension held for claiming one runs
+  at the next activation.
 - **In the app (C3).** the Extensions page shows one health line per
   contribution under its extension (`contributionHealth.ts`, live over
   `v_contribution_health`): `OK` with its average time, a missed schedule and
@@ -92,21 +92,21 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   first, fix, check, test, `oxplow.collector.sync` — and run
   `oxplow.contribution.enable` (or `enable_all`) once the fix holds.
 
-## Command candidate publication
+## Command candidate activation
 
 Extension commands now stage as one enabled-source batch from a CatalogSnapshot.
 Enabled non-required declarations with load errors reject the candidate, even
 when their loader retained some valid commands. Building handlers does not
-publish or execute them. Registry preparation validates all namespaces, IDs and
-shortcuts; publication checks the original registry allocation identity and the
+activate or execute them. Registry preparation validates all namespaces, IDs and
+shortcuts; activation checks the original registry allocation identity and the
 current catalog fingerprint. Any intervening registration/removal/replacement
-requires restaging. Reconciliation yields and retries publication races up to
+requires restaging. Reconciliation yields and retries activation races up to
 three times; persistent contention records diagnostics.
 
 Rejected candidates retain previous command handlers for the remaining owners.
 Disabled or removed sources are withdrawn independently, and captured command
 RunContexts recheck that their owner is still enabled before execution. The
-standalone command boundary remains separately usable; boot publishes its
+standalone command boundary remains separately usable; boot activates its
 candidate with dataset views, vocabulary, providers and UI metadata through the
 generation coordinator. Runtime lookup uses the active catalog rather than
 promoting current filesystem declarations. State hosts still enforce their
@@ -120,7 +120,7 @@ Enabled load errors reject preparation. `PreparedVocabulary::replace_tx` uses
 a savepoint and rejects the complete set on any event/ref/subscription or
 recognizer diagnostic, restoring event contracts, retention and resource rows.
 A changed recorded event schema and a shared wikilink prefix are candidate
-errors; a candidate never publishes a partial result.
+errors; a candidate never activates a partial result.
 
 `PreparedExtensionDatabase` captures datasets, vocabulary and enabled contribution
 descriptors from the same snapshot, and every entity the enabled collectors
@@ -135,7 +135,7 @@ savepoint: any diagnostic or storage failure restores the whole candidate.
 `prepare_with_capabilities` also includes prepared capability rows and switch
 events, rejecting mismatched catalog identities. Vocabulary then uses the
 candidate's planned recognizers rather than the old live selection.
-It returns a vocabulary for publication only after the outer transaction commits.
+It returns a vocabulary for activation only after the outer transaction commits.
 Storage or rollback errors require the caller to abort; logical diagnostics stay
 separate from retryable contention. This helper executes no external work.
 
@@ -147,10 +147,10 @@ coordinator. CapabilityRegistry holds core, declarations and external-instance m
 under one lock. Each read resolves selection, features, hidden command namespaces,
 recognition and database rows from one captured state. Candidate preparation
 copies that state, replaces declarations without registering adapters, and derives
-all candidate selections/rows from it. Publication checks an allocation identity
+all candidate selections/rows from it. Activation checks an allocation identity
 and the supplied host config's resolved choices/provenance before a single swap;
 intervening mutations, another registry or changed choices require restaging.
-Candidate publication fences config and catalog identity. Capability reads use
+Candidate activation fences config and catalog identity. Capability reads use
 the active catalog's immediate disable/removal overlay and the config choices
 captured with the last committed capability candidate; staging remains based on
 the frozen candidate state. External instance metadata is captured; process and
@@ -160,7 +160,7 @@ Provider resolution captures config/provider choice with project/global credenti
 scope in one merged mapping, and uses one catalog declaration snapshot per
 generation. A disabled bundled owner cannot be shadowed by a project namesake.
 These checks preserve owner/scope identity during preparation; they do not
-coordinate provider process/adaptor publication with the other registries.
+coordinate provider process/adaptor activation with the other registries.
 
 **Capability candidates.** `PreparedCapabilities`
 (`crates/oxplow-app/src/capabilities.rs`) freezes candidate declarations,
@@ -171,7 +171,7 @@ one captured implementation list, so feature resolution never rereads a
 newer registry halfway through, and the selection and fallback rules are
 the registry's own. Preparation starts no adapters or providers. Its
 transaction helper restates the capability rows and switch events, rolling
-back on failure. Publication checks the original allocation identity and
+back on failure. Activation checks the original allocation identity and
 the supplied config's resolved choices and provenance; a changed registry
 or config requires restaging. A prepared candidate conveys no authority.
 `PreparedExtensionDatabase` can include those rows and switch events with
@@ -183,13 +183,13 @@ the datasets, vocabulary and contribution descriptors in one savepoint
 `PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
 harness, snapshot and model-provider
 maps without changing running registries. It rejects enabled load errors and
-strict AI factory failures before any map publication. Script/gate objects
+strict AI factory failures before any map activation. Script/gate objects
 are constructed but no process, handshake, network call or paid probe runs.
 External adapters/processes remain the provider lifecycle owner's work.
 
-Each adapter subsystem exposes prepare/publish only (no separate register
+Each adapter subsystem exposes prepare/activate only (no separate register
 helper); partial factory skipping, where it applies, is logged.
-The boot coordinator publishes the prepared aggregate under the shared activation
+The boot coordinator activates the prepared aggregate under the shared activation
 fence, with compatible SQL and command readers. Capability and command
 reservations are held across the commit and map swaps. A required-bundled core
 baseline is active before strict full activation: baseline failure prevents the
@@ -212,7 +212,7 @@ renders each under its extension's source folder
 (`vocabulary_reactor::render_problems`). A held extension's declarations
 are its last working ones; its scripts are read from disk as they are now.
 A failure later in staging that names one extension — a dataset whose SQL
-doesn't compile (checked inside the publication transaction, which rolls
+doesn't compile (checked inside the activation transaction, which rolls
 back), a provider or capability that can't stage — holds that extension the
 same way (`extension_catalog::Failed`) and the candidate is staged again; if
 its last working version fails too, it is left out. A failure that names no
@@ -220,8 +220,9 @@ held-able extension (the host) rejects the candidate. A command namespace
 collision names only the source refused and the one it collided with
 (`commands::NamespaceRefusal`). A language that claims a name, file extension or
 LSP id an earlier extension's language holds is a `language.conflict` error of
-the later extension (`descriptors::hold_language_conflicts`, in
-`check_catalog`), which names the earlier and holds it. The active catalog is separate from raw
+the later extension (`language_set::conflicts`, checked as the candidate is
+admitted, with the languages turned off on this machine holding nothing),
+which names the earlier and holds it. The active catalog is separate from raw
 candidate loads; its `source_generation` preserves the raw fingerprint. Runtime catalog reads use
 the committed snapshot and apply immediate explicit-disable and missing-folder
 revocation without loading edited declarations.
@@ -229,35 +230,35 @@ revocation without loading edited declarations.
 `ExtensionActivation::activate` now joins the prepared database, commands,
 capabilities, native and external adapters, vocabulary, collection feeds and
 component bundles under one owned reader/writer boundary. External processes
-start and validate before SQL publication; the running-map reservation is acquired
+start and validate before SQL activation; the running-map reservation is acquired
 before the DB permit, then held through commit and adapter swaps. Retired processes
 shut down, successful startup health is recorded and initial sync is queued after
-the publication transaction and reader boundary are released. Command owner metadata, command handlers, host config
+the activation transaction and reader boundary are released. Command owner metadata, command handlers, host config
 and capability state are reserved on the blocking worker before commit and held
 through all map swaps. Knowledge/snapshot follow policies use the candidate's captured
 selection, avoiding recursive capability/config reads while those locks are held.
 Precommit rejection retains the previous active snapshot. A panic after the
 commit (the in-memory maps part swapped, the boundary refusing readers) is
 recovered at once: the database is the truth, so the activation stages the
-generation again from it and publishes that, which clears `unavailable`; if
+generation again from it and activates that, which clears `unavailable`; if
 that fails too, the boundary stays unavailable and the failure is a `<host>`
 problem in the Extensions page. Cancelling the async caller does not release
 the worker's writer while it can still commit. Test hooks (`panic_at`) inject
-the panic right after the commit or after the maps and providers are published,
+the panic right after the commit or after the maps and providers are activated,
 any number of times, so both points and the failed restage are pinned
-(`a_panic_after_the_maps_are_published_recovers_the_generation`,
+(`a_panic_while_activating_is_recovered_wherever_it_lands`,
 `a_panic_on_the_restage_too_leaves_the_boundary_unavailable`).
 Activations serialize on one lock: a second `activate` waits and both return the
 same generation, and an edit landing while a candidate is staged rejects that
-publication ("catalog changed while activation was staged"); the next one
+activation ("catalog changed while activation was staged"); the next one
 carries the edit.
 
-**Who a publication waits for.** Every pin is listed while it's held, with
+**Who an activation waits for.** Every pin is listed while it's held, with
 what holds it (a run's contribution or actor and run id, or the reading
 future's type for a bare `read`) and since when: `ExtensionActivation::readers`.
-A publication waiting on readers logs that list every 10 s, keeping its one
+An activation waiting on readers logs that list every 10 s, keeping its one
 write future (its place in the fair lock's queue). Pinned by
-`a_waiting_publication_names_the_readers_it_waits_for` and
+`a_waiting_activation_names_the_readers_it_waits_for` and
 `a_panic_after_commit_recovers_the_generation`.
 
 `GenerationPin` is host-only and conveys no authority. RunContext can retain an
@@ -267,16 +268,16 @@ deadlock a parent query. SQL and command entrypoints pin before query materializ
 or command lookup; page/effect/event-consumer paths use the same reader scope, and
 host workers carry the concrete pin in RunContext. Task-local scopes alone do not
 propagate into spawned tasks. Provider host-call registration is cancellation-safe
-across candidate publication. Native/background and synchronous metadata
+across candidate activation. Native/background and synchronous metadata
 entrypoints still need a complete audit. Metric declaration rows now join the
-publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
+activation transaction; state-value recapture remains a post-activation reader. The renderer receives the metadata change signal of the activation;
 a deploy, a rollback or a config change triggers candidate preparation (file changes never do). Until the first
 generation is activated (boot's `initialize`, before ingress opens), no reader is
-served: the generation is the only publisher of commands, datasets, vocabulary,
+served: the generation is what activates commands, datasets, vocabulary,
 providers and capabilities.
 
 Custom component preparation hashes each bundle's files in its deployment and
-keeps their names, never their bytes. Publication swaps the whole active bundle
+keeps their names, never their bytes. Activation swaps the whole active bundle
 map and adds its bundles to the process's loaded versions, which a previous
 frame is still served from while its deployment is on disk. A retained frame
 from a different activated generation must reload before invoking a query or
@@ -290,7 +291,7 @@ Extension listings enter the same generation scope as commands and SQL. A failed
 candidate adds owner diagnostics to the committed metadata; newly discovered
 packages remain visible for repair with all runtime contributions cleared.
 Clearing rejection diagnostics emits a runtime change signal. Candidate bundle
-and owner catalog publication precede external-provider admission under the
+and owner catalog activation precede external-provider admission under the
 writer, so callback live checks cannot mistake a just-admitted owner for the
 previous generation. Callback registrations use a drop guard: cancellation
 releases retained run contexts and their generation pins. Explicit stop, disable,
@@ -311,9 +312,9 @@ active, so a new unpinned reader fails the suite where it first runs.
   declaration, a lookup by name, a listing). The `reason` says why that is
   enough — typically that what it starts pins for itself.
 - `live_snapshot(root)`: a revocation gate — is this owner still enabled and
-  current now — for callbacks, job authorization and publication, a provider's
+  current now — for callbacks, job authorization and activation, a provider's
   start check, secret ownership, and the generation stamp of a new run. It
-  must answer while a publication waits on readers, so it holds no pin.
+  must answer while an activation waits on readers, so it holds no pin.
 - `ExtensionCatalog::staged`: the private catalog one candidate is prepared
   in (metric declarations); it is no generation a reader could straddle.
 
@@ -321,7 +322,7 @@ Collector scheduling and fact-collector lookup retain a reader before selecting
 declarations. A carried RunContext pin can re-enter a reader on another task
 without acquiring a second fair-lock reader behind a waiting writer. Entity-run
 notifications compare the current entity view/version/SQL/column/key contracts
-with the signature captured in the publication transaction. Data-only runs do
+with the signature captured in the activation transaction. Data-only runs do
 not restart providers; changed entity schemas request one coherent candidate.
 Provider initial sync and entity-state metric recapture do not themselves emit
 collector-run completion events.

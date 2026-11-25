@@ -457,6 +457,16 @@ fn value(run: &VizRun, r: &[SqlCell], i: usize) -> String {
         .get(i)
         .and_then(|key| run.config.columns.iter().find(|c| &c.key == key))
         .and_then(|c| c.format);
+    // A column's `badges` read as its marks.
+    let badges = run.result.columns.get(i).is_some_and(|key| {
+        run.config
+            .columns
+            .iter()
+            .any(|c| c.badges.as_ref() == Some(key))
+    });
+    if badges {
+        return marks(c);
+    }
     match format {
         Some(ColumnFormat::Items) => items(c),
         Some(ColumnFormat::Marks) => marks(c),
@@ -551,7 +561,8 @@ fn table(run: &VizRun) -> String {
 
 /// The displayed columns (the UI's `displayColumns`): the declared ones in
 /// their order with their labels, else every result column — never the
-/// row-styling ones (`group.by`, `emphasis`, `depth`).
+/// row-styling ones (`group.by`, `emphasis`, `reveal`, `depth`) nor a
+/// `lanes` column (how the rows look, not what they say).
 fn shown(run: &VizRun) -> Vec<(usize, String)> {
     let styling: Vec<&String> = run
         .config
@@ -559,7 +570,15 @@ fn shown(run: &VizRun) -> Vec<(usize, String)> {
         .iter()
         .map(|g| &g.by)
         .chain(run.config.emphasis.iter())
+        .chain(run.config.reveal.iter())
         .chain(run.config.depth.iter())
+        .chain(
+            run.config
+                .columns
+                .iter()
+                .filter(|c| c.format == Some(crate::pages::spec::ColumnFormat::Lanes))
+                .map(|c| &c.key),
+        )
         .collect();
     let all: Vec<(usize, String)> = if run.config.columns.is_empty() {
         run.result.columns.iter().cloned().enumerate().collect()
@@ -567,9 +586,16 @@ fn shown(run: &VizRun) -> Vec<(usize, String)> {
         run.config
             .columns
             .iter()
-            .filter_map(|c| {
-                let i = run.result.columns.iter().position(|k| k == &c.key)?;
-                Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
+            .flat_map(|c| {
+                let at = |key: &String| run.result.columns.iter().position(|k| k == key);
+                let Some(i) = at(&c.key) else {
+                    return vec![];
+                };
+                // Its `badges` read as a column of their own, after it.
+                let badges = c.badges.as_ref().and_then(|b| Some((at(b)?, b.clone())));
+                std::iter::once((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
+                    .chain(badges)
+                    .collect()
             })
             .collect()
     };
@@ -1351,12 +1377,17 @@ mod tests {
                 custom: None,
                 group: None,
                 emphasis: None,
+                reveal: None,
+                single_line: false,
+                chartable: false,
                 depth: None,
                 edge: None,
                 fills: false,
+                sizing: None,
                 actions: Vec::new(),
                 origin: Default::default(),
                 lead: None,
+                lead_format: None,
             },
             params: BTreeMap::new(),
             result: SqlQueryResult {
@@ -1729,12 +1760,14 @@ mod tests {
             unit: None,
             icon: None,
             tone: None,
+            badges: None,
             width: None,
             format: None,
             highlight: None,
             select: None,
             expand: None,
             when: when.map(str::to_string),
+            parents: None,
         };
         let one = with(
             run(
@@ -1803,12 +1836,14 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: None,
                     highlight: None,
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 }];
             },
         );
@@ -1849,12 +1884,14 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: None,
                     highlight: None,
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 }];
             },
         );
@@ -1884,12 +1921,14 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format,
                     highlight: None,
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 };
                 l.columns = vec![
                     col("perms", Some(crate::pages::spec::ColumnFormat::Items)),
@@ -1901,6 +1940,86 @@ mod tests {
             render(&r, &Resolved::default()),
             "**perms**: plain · sql.read (may run its own SQL) · to\n**other**: [1]"
         );
+    }
+
+    /// A `lanes` column is how the rows look, not what they say: an agent
+    /// reads the table without it.
+    #[test]
+    fn a_lanes_column_is_left_out_of_the_text() {
+        let r = with(
+            run(
+                Viz::Table,
+                None,
+                &["sha", "parents", "subject"],
+                vec![vec![t("abc1234"), t("[]"), t("First work")]],
+            ),
+            |l| {
+                let col =
+                    |key: &str, format, parents: Option<&str>| crate::pages::spec::PageColumn {
+                        key: key.into(),
+                        label: None,
+                        link: None,
+                        unit: None,
+                        icon: None,
+                        tone: None,
+                        badges: None,
+                        width: None,
+                        format,
+                        highlight: None,
+                        select: None,
+                        expand: None,
+                        when: None,
+                        parents: parents.map(str::to_string),
+                    };
+                l.columns = vec![
+                    col(
+                        "sha",
+                        Some(crate::pages::spec::ColumnFormat::Lanes),
+                        Some("parents"),
+                    ),
+                    col("subject", None, None),
+                ];
+            },
+        );
+        let text = render(&r, &Resolved::default());
+        assert!(text.contains("First work"), "{text}");
+        assert!(!text.contains("abc1234"), "{text}");
+    }
+
+    /// A column's `badges` are pills beside its text in the app; an agent
+    /// reads them as a column of their own, after it, as marks read.
+    #[test]
+    fn a_columns_badges_read_as_a_column_after_it() {
+        let r = with(
+            run(
+                Viz::Table,
+                None,
+                &["subject", "refs", "author"],
+                vec![vec![t("First work"), t(r#"["main","v1.0"]"#), t("Ann")]],
+            ),
+            |l| {
+                let col = |key: &str, badges: Option<&str>| crate::pages::spec::PageColumn {
+                    key: key.into(),
+                    label: None,
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    badges: badges.map(str::to_string),
+                    width: None,
+                    format: None,
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                    when: None,
+                    parents: None,
+                };
+                l.columns = vec![col("subject", Some("refs")), col("author", None)];
+            },
+        );
+        let text = render(&r, &Resolved::default());
+        assert!(text.contains("subject | refs | author"), "{text}");
+        assert!(text.contains("First work | main v1.0 | Ann"), "{text}");
     }
 
     /// A `marks` column reads as its marks joined by spaces, a hint in
@@ -1918,12 +2037,14 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: Some(crate::pages::spec::ColumnFormat::Marks),
                     highlight: None,
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 }];
             },
         );
@@ -1959,12 +2080,14 @@ mod tests {
                     unit: None,
                     icon: None,
                     tone: None,
+                    badges: None,
                     width: None,
                     format: Some(crate::pages::spec::ColumnFormat::Source),
                     highlight: None,
                     select: None,
                     expand: None,
                     when: None,
+                    parents: None,
                 };
                 l.columns = vec![col("by"), col("ext"), col("you"), col("other")];
             },

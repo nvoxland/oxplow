@@ -1,6 +1,6 @@
 //! The languages oxplow's packs declare, read from their source folders:
 //! for tests in this crate and the ones over it (a test has no running
-//! publication). Not for production: it reads this checkout's
+//! activation). Not for production: it reads this checkout's
 //! `extensions/` folder.
 
 use std::path::{Path, PathBuf};

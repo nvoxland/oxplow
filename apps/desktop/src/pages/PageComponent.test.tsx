@@ -73,7 +73,7 @@ test("a component node is fed every loader of its page, its params and props, an
   expect(loads).toEqual(["acme/chart"]);
   const { init, port, received } = await startFrame(frame);
   expect(init).toMatchObject({
-    protocol: 13,
+    protocol: 14,
     run: null,
     data: { items: { columns: ["id"], rows: [["a"]], truncated: false } },
     params: { q: "x" },
@@ -131,4 +131,32 @@ test("a page whose view is one component fills the page: its title and actions a
     fireEvent.click(fit);
   });
   await waitFor(() => expect(received).toContainEqual({ type: "action", id: "fit" }));
+});
+
+// A component sizes as it declares (the run carries `sizing`): a `content`
+// node is as tall as what it draws; a `fill` one takes the page's height.
+test("a component node fills only when its component declares fill", async () => {
+  const page = (sizing: "content" | "fill") =>
+    fakeRun(fakePage(node.stack("stack", [{ ...node.component("chart", "chart"), sizing } as never])), {});
+  const content = render(<PageTree run={page("content")} runId="r" streamId="str1" />);
+  const grown = await content.findByTestId("custom-component-frame");
+  expect(["none", "0 0 auto"]).toContain(grown.style.flex);
+  cleanup();
+  const fill = render(<PageTree run={page("fill")} runId="r" streamId="str1" />);
+  const filled = await fill.findByTestId("custom-component-frame");
+  expect(filled.style.flex === "1" || filled.style.flex === "1 1 0%").toBe(true);
+  expect(fill.getByTestId("node-chart").style.flex === "1" || fill.getByTestId("node-chart").style.flex === "1 1 0%").toBe(true);
+});
+
+// A whole page that is a `content` component is as tall as what it draws,
+// as it says (`size`), and the page scrolls; a `fill` one is the page.
+test("a content component page takes the height its frame says", async () => {
+  const run = fakeRun(fakePage({ ...node.component("chart", "chart"), sizing: "content" } as never, { title: "Chart" }), {});
+  const { runs } = fakePageRuns(run);
+  const view = render(<PageHost pageKey={{ page: "acme/page", params: {}, streamId: "str1", threadId: "thr1" }} runs={runs} />);
+  const frame = await view.findByTestId("custom-component-frame");
+  const { port } = await startFrame(frame);
+  port.postMessage({ type: "ready" });
+  port.postMessage({ type: "size", height: 1800 });
+  await waitFor(() => expect(frame.style.height).toBe("1800px"));
 });

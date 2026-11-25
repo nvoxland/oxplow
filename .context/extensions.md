@@ -39,7 +39,7 @@ headings inside that doc.
 | Slots, replacements (`ui.mounts`), commands in core menus, decorators | [extensions-slots.md](./extensions-slots.md) |
 | Custom components (the frame, the protocol, testing one) | [extensions-components.md](./extensions-components.md) |
 | Sources and deployments, builds, `extensionSources`, sharing, disabling, reviewing by impact | [extensions-deploy.md](./extensions-deploy.md) |
-| Health, disable and repair; candidate publication, vocabulary generations, runtime adapters, ingress | [extensions-activation.md](./extensions-activation.md) |
+| Health, disable and repair; candidate activation, vocabulary generations, runtime adapters, ingress | [extensions-activation.md](./extensions-activation.md) |
 | Permissions and approval, the run context, services, grants, secret references | [extensions-permissions.md](./extensions-permissions.md) |
 | The event envelope, event types, resources, ordering, effects | [extensions-events.md](./extensions-events.md) |
 | Collectors (sources), contributing metrics, jobs, AI profiles | [extensions-jobs.md](./extensions-jobs.md) |

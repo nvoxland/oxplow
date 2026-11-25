@@ -90,10 +90,10 @@ async fn a_project_setting_changes_a_bundled_datasets_result() {
     assert_eq!(struggles(&fx).await, json!([["src/warm.rs", 3]]));
 }
 
-/// With the owner loop running, a settings write publishes the datasets that
+/// With the owner loop running, a settings write reactivates the datasets that
 /// read it by itself: no restart and no explicit activation.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_settings_change_republishes_the_datasets_that_read_it() {
+async fn a_settings_change_reactivates_the_datasets_that_read_it() {
     let fx = crate::test_fixtures::services_with_thread().await;
     three_edits(&fx).await;
     fx.svc.extension_activation.spawn(&fx.svc);
@@ -117,7 +117,7 @@ async fn a_settings_change_republishes_the_datasets_that_read_it() {
         }
     })
     .await
-    .expect("the dataset republished on its own");
+    .expect("the dataset reactivated on its own");
     assert_eq!(struggles(&fx).await, json!([["src/warm.rs", 3]]));
 }
 

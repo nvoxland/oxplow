@@ -153,9 +153,9 @@ pub struct PreparedSnapshots {
 }
 
 impl PreparedSnapshots {
-    /// Publish these declarations into the provider and capture registries.
+    /// Activate these declarations into the provider and capture registries.
     /// Applying the active policy remains the activation coordinator's job.
-    pub fn publish(self, registry: &SnapshotRegistry, captures: &SnapshotCaptureRegistry) {
+    pub fn activate(self, registry: &SnapshotRegistry, captures: &SnapshotCaptureRegistry) {
         captures.set_serves(self.providers.iter().map(|p| p.id().to_string()));
         registry.set_declared(self.providers);
     }
@@ -268,7 +268,7 @@ pub(crate) fn registry_over(
         .map(|s| s.default.to_string())
         .unwrap_or_default();
     let registry = Arc::new(SnapshotRegistry::new(Arc::new(move || default.clone())));
-    prepare_built_ins(&[], captures, &files).publish(&registry, captures);
+    prepare_built_ins(&[], captures, &files).activate(&registry, captures);
     registry
 }
 
@@ -375,7 +375,7 @@ mod tests {
             Arc::new(move || chosen.lock().unwrap().clone())
         });
         prepare_built_ins(&[], &f.svc.snapshot_captures, &f.svc.snapshot_files())
-            .publish(&registry, &f.svc.snapshot_captures);
+            .activate(&registry, &f.svc.snapshot_captures);
         registry.register(Arc::new(Elsewhere));
 
         apply_active_policy(&registry, &f.svc.snapshot_captures);

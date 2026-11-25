@@ -33,6 +33,9 @@ use tokio::sync::{mpsc, oneshot};
 
 /// The harness's page script (`bun run build:harness`).
 const HOST_JS: &str = include_str!("../assets/harness-host.js");
+/// The prefix of a line the app's window writes on stderr about itself
+/// (`main.rs` `run_harness`): whether macOS shows it.
+pub(crate) const WINDOW_SAYS: &str = "harness-window:";
 /// What the harness puts first in a bundle's page.
 const AGENT_JS: &str = include_str!("../assets/harness-agent.js");
 /// Its name beside the client library, which the bundle's CSP allows.
@@ -94,6 +97,9 @@ struct Shared {
     acted: bool,
     /// Who waits for the last op's result.
     waiting: Option<oneshot::Sender<Value>>,
+    /// What the app's window said of itself on stderr (its
+    /// `harness-window:` lines): whether macOS shows it.
+    window_says: Vec<String>,
 }
 
 struct Ctx {
@@ -161,15 +167,30 @@ impl Harness {
         let server = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        let window = tokio::process::Command::new(shell)
+        let mut window = tokio::process::Command::new(shell)
             .arg("component-harness")
             .arg(format!("http://127.0.0.1:{port}/harness/"))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("the oxplow app at {} didn't start: {e}", shell.display()))?;
+        // What the window says of itself, kept for a run that can't draw;
+        // the rest of its stderr (the engine's) is read and let go.
+        if let Some(stderr) = window.stderr.take() {
+            let ctx = ctx.clone();
+            tokio::spawn(async move {
+                use tokio::io::AsyncBufReadExt;
+                let mut lines = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(said) = line.strip_prefix(WINDOW_SAYS) {
+                        let mut shared = ctx.shared.lock().unwrap_or_else(|e| e.into_inner());
+                        shared.window_says.push(said.trim().to_string());
+                    }
+                }
+            });
+        }
         Ok(Harness {
             ctx,
             ops,
@@ -217,6 +238,45 @@ impl Harness {
             Ok(said)
         })
         .await
+    }
+
+    /// Why the window drew nothing, as far as it and its page said:
+    /// `no frame in 10 s (page hidden, not focused, 1280×800; window:
+    /// occlusion=hidden …)`.
+    pub(crate) fn not_drawn(&self) -> String {
+        let shared = self.shared();
+        let seen = shared
+            .records
+            .iter()
+            .rev()
+            .find(|(kind, _)| kind == "drawingSeen")
+            .map(|(_, v)| v.clone());
+        let mut parts = Vec::new();
+        let mut waited = String::new();
+        if let Some(seen) = seen {
+            if let Some(ms) = seen["waitedMs"].as_f64() {
+                waited = format!(" in {} s", (ms / 1000.0).round());
+            }
+            parts.push(format!(
+                "page {}, {}, {}×{}",
+                seen["visibility"].as_str().unwrap_or("?"),
+                if seen["focused"].as_bool() == Some(true) {
+                    "focused"
+                } else {
+                    "not focused"
+                },
+                seen["width"],
+                seen["height"],
+            ));
+        }
+        if let Some(said) = shared.window_says.last() {
+            parts.push(format!("window: {said}"));
+        }
+        if parts.is_empty() {
+            format!("no frame{waited}")
+        } else {
+            format!("no frame{waited} ({})", parts.join("; "))
+        }
     }
 
     /// What only the shell answers, as asked so far.

@@ -29,7 +29,7 @@ pub fn start_at_head_tx(conn: &Connection, effect: &str, now: &str) -> Result<i6
 /// Where `effect` starts: the seq after which it reads; `None` before it
 /// was ever approved.
 /// Start `effect` after the log's head unless it has started already: a
-/// generation that runs it publishes, the first does. Whether it started
+/// generation that runs it activates, the first does. Whether it started
 /// now.
 pub fn start_if_new_tx(conn: &Connection, effect: &str, now: &str) -> Result<bool, DomainError> {
     let head: i64 = conn

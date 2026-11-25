@@ -23,7 +23,7 @@ loaders:
   # the file's own filesystem and revision.
   related:
     sql: |
-      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      SELECT 'Git History' AS title, uri('oxplow/page', 'page', 'git-history', 'path', :path) AS uri, 1 AS ord
       WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
       UNION ALL
       SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),

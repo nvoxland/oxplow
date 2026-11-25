@@ -1214,7 +1214,7 @@ pub async fn rollback(
     })
 }
 
-/// What follows a publication the activation owner didn't make itself.
+/// What follows an activation the activation owner didn't make itself.
 async fn after_activation(svc: &Arc<Services>) {
     let _ = svc
         .sql
@@ -1608,8 +1608,14 @@ pub struct NextBoot {
 /// (`start`, then the first generation), over copies of those
 /// deployments and the sources where they are. So a deployment an older
 /// oxplow recorded that no longer activates against this one is found
-/// before anyone starts it (`oxplow-dev extension status`).
-pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoot, String> {
+/// before anyone starts it (`oxplow-dev extension status`). `disabled` names
+/// the languages turned off on this machine, which the activation reads as
+/// boot's does.
+pub async fn next_boot(
+    project: &Path,
+    rows: &[DeploymentRow],
+    disabled: &crate::extension::language_set::DisabledLanguages,
+) -> Result<NextBoot, String> {
     let settings = oxplow_config::extension_settings(project);
     let mut names: Vec<String> = settings.enabled();
     for b in crate::bundled_extensions::BUNDLED
@@ -1663,10 +1669,24 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
         .iter()
         .map(|r| (r.name.clone(), r.hash.clone()))
         .collect();
+    let now = Timestamp::now().to_string();
+    let disabled = disabled.clone();
     svc.db
         .transaction(move |tx| {
             for row in &active {
                 store_rows::record_tx(tx, row)?;
+            }
+            for (namespace, language) in &disabled {
+                oxplow_db::contribution_health_store::disable_tx(
+                    tx,
+                    &oxplow_db::contribution_health_store::ContributionKey {
+                        namespace: namespace.clone(),
+                        contribution: language.clone(),
+                        kind: "language",
+                    },
+                    "turned off on this machine",
+                    &now,
+                )?;
             }
             store_rows::set_active_tx(tx, &live)
         })
@@ -3525,7 +3545,7 @@ mod tests {
         for (rel, text) in shipped_with("oxplow-foundation", |t| format!("{t}not_a_key: 1\n")) {
             write(&stale, rel, &text);
         }
-        let next = next_boot(project, &[row("00000000000000ba")])
+        let next = next_boot(project, &[row("00000000000000ba")], &Default::default())
             .await
             .unwrap();
         let why = next
@@ -3554,7 +3574,9 @@ mod tests {
         // Its source, deployed: nothing is held, and it is what runs.
         let hash = extension_store::source_hash(&source).unwrap();
         extension_store::copy_into_store(project, "oxplow-foundation", &source, &hash).unwrap();
-        let next = next_boot(project, &[row(&hash)]).await.unwrap();
+        let next = next_boot(project, &[row(&hash)], &Default::default())
+            .await
+            .unwrap();
         assert!(next.problems.is_empty(), "{:?}", next.problems);
         let runs = &next
             .runs
@@ -3565,6 +3587,60 @@ mod tests {
         assert!(runs.contains(&hash) && !runs.contains("changed"), "{runs}");
         // The project itself was only read.
         assert!(!project.join(".oxplow/local.sqlite").exists());
+    }
+
+    /// The next boot sees the languages turned off on this machine: a later
+    /// extension whose language claims a file extension an earlier one's
+    /// holds is held, until the earlier's language is turned off.
+    #[tokio::test]
+    async fn the_next_boot_frees_the_names_of_a_language_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let project = dir.path();
+        std::fs::create_dir_all(project.join(".oxplow")).unwrap();
+        std::fs::write(
+            project.join(".oxplow/project.yaml"),
+            "oxplow.extensions.alpha-lang.enabled: true\noxplow.extensions.zeta-lang.enabled: true\n",
+        )
+        .unwrap();
+        let mut rows = Vec::new();
+        for (name, id) in [("alpha-lang", "alpha"), ("zeta-lang", "zeta")] {
+            let source = project.join(".oxplow/extensions").join(name);
+            write(
+                &source,
+                "extension.yaml",
+                &format!(
+                    "manifest: 2\nname: {name}\nintent: {{ purpose: t, origin: null, examples: [] }}\nlanguages:\n  - {{ id: {id}, title: {id}, extensions: [zz] }}\n"
+                ),
+            );
+            let hash = extension_store::source_hash(&source).unwrap();
+            extension_store::copy_into_store(project, name, &source, &hash).unwrap();
+            rows.push(DeploymentRow {
+                name: name.into(),
+                hash,
+                deployed_at: "2026-10-19T00:00:00Z".into(),
+                commit: None,
+                dirty: false,
+                source: source.display().to_string(),
+                active: true,
+                permissions: Permissions::default(),
+                build_run: None,
+            });
+        }
+        let next = next_boot(project, &rows, &Default::default())
+            .await
+            .unwrap();
+        let why = next.problems.get("zeta-lang").expect("the later is held");
+        assert!(why.iter().any(|d| d.code == "language.conflict"), "{why:?}");
+        let off = [("alpha_lang".to_string(), "alpha".to_string())]
+            .into_iter()
+            .collect();
+        let next = next_boot(project, &rows, &off).await.unwrap();
+        assert!(
+            !next.problems.contains_key("zeta-lang"),
+            "{:?}",
+            next.problems
+        );
     }
 
     /// `v_extension.errors` for `name`, as the Alerts page reads it.
@@ -3783,7 +3859,7 @@ mod tests {
     }
 
     /// A restart starts from the recorded deployments: the core baseline
-    /// published first doesn't drop them.
+    /// activated first doesn't drop them.
     #[tokio::test]
     async fn a_restart_keeps_what_was_deployed() {
         let fx = crate::test_fixtures::services_with_thread().await;

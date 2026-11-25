@@ -155,13 +155,16 @@ impl PageAt<'_> {
         match harness.drawing().await {
             Ok(true) => {}
             Ok(false) => {
+                let why = harness.not_drawn();
                 harness.close().await;
                 return unrun(
                     report,
                     shown,
-                    "its `ui` steps, and the steps after them, aren't run: the oxplow app's \
-                     window draws nothing while the display is locked or asleep"
-                        .into(),
+                    format!(
+                        "its `ui` steps, and the steps after them, aren't run: the oxplow app's \
+                         window drew {why} — a locked or sleeping display, or a window macOS \
+                         doesn't show"
+                    ),
                     "run it again with the display awake",
                 );
             }
@@ -358,7 +361,7 @@ impl PageAt<'_> {
                     return Err(format!(
                         "{at} at `{path}`, the example expects {want} — fix: the component, or \
                          the step's `expect` (`{{ visible, count, text, title, actions, \
-                         view_params, invoked, navigated, confirmed, forms, shown }}`)"
+                         view_params, invoked, navigated, revealed, confirmed, forms, shown }}`)"
                     ))
                 }
             }
@@ -464,6 +467,8 @@ impl PageAt<'_> {
                 }
                 "invoked" => json!(of("invoked")),
                 "navigated" => json!(of("navigate")),
+                // Each `reveal`, `{ top, bottom }`, in the order asked.
+                "revealed" => json!(of("reveal")),
                 "confirmed" => json!(of("confirm")),
                 "forms" => json!(of("openForm")
                     .into_iter()

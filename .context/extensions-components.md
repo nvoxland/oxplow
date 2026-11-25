@@ -26,8 +26,6 @@ Custom components (the sandboxed frame, protocol, and testing a component). Part
   context menu (it draws `.ox-menu`).
 - **Foundation's only custom component** is the hand-written
   `integrations`.
-- **Git History** includes Bundled's graph component as an alternate view
-  of the commit results. The same page supplies the history filters and data.
 
 A component can send an inline page to core with `showView`. Core draws
 its loaders and nodes below the frame, and **Save as Page** writes that
@@ -95,11 +93,11 @@ the store (a folder and a list of names each, so nothing is dropped).
 Once the deployment is pruned, its files 404 and the frame reloads.
 
 **A hot update reaches a mounted frame.** Activation stages every
-enabled extension's bundles into the generation it publishes
+enabled extension's bundles into the generation it activates
 (`PreparedComponentBundles`), each stamped with that generation. A frame
 whose snapshot belongs to a generation that is no longer active has its
 `querySql` and `invoke` refused. The host loads the bundle again on every
-`extensionsChanged` (sent after an activation publishes,
+`extensionsChanged` (sent after an activation completes,
 `CustomComponentViz`): the same version keeps the frame it has, a new
 one mounts a new frame, and the old version's `invoke` is refused.
 
@@ -122,7 +120,17 @@ custom_components:
     bundle: components/burndown        # default components/<id>; holds index.html
     commands: [oxtask.task.move]
     sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions
+    size: content                      # optional: content (default) | fill
 ```
+
+`size` says how tall the frame is. `content`: as tall as the content the
+component draws (the client library reports its height), no border, the
+page scrolls. `fill`: the frame takes the page's height and the component
+scrolls itself (the Work board declares it). A run fills each `viz: custom`
+and each `component:` node with its component's `sizing` from the
+declaration (`size_components` in `custom_components.rs`), and a `fill`
+custom viz fills the page. A lone `content` custom viz does not.
+`v_custom_component.size` shows it.
 ```yaml
 # pages/burn.yaml
 title: Burndown
@@ -197,8 +205,8 @@ are UI RPCs (`ui` in surface parity).
 at `componentBundleUrl(base, version)` (the daemon's
 `/components/v/<version>/`, once `load_component` answered; a bundle that
 cannot be loaded shows the table and why; with no daemon base —
-`remoteBaseUrl()` null — the page shows its table), under a **custom**
-badge. On the frame's first `load` the host posts `init { protocol, run,
+`remoteBaseUrl()` null — the page shows its table), with no badge (whose
+it is shows in the page's About). On the frame's first `load` the host posts `init { protocol, run,
 data, params, props, page, view, tokens }` (`initMessage`, the one
 builder) with one end of a `MessageChannel` (to `"*"`: the frame's origin
 is opaque; the port goes to that frame alone) and listens on the other
@@ -255,7 +263,10 @@ loader with `field: /loaders/<loader>/sql`. A null spec clears it. While a
 view shows, the frame sits at its content's height: the library posts
 `{ type: size, height }` (a message, not a request, from a
 `ResizeObserver` on its root; a component leaves `html` and `body` at
-`height: auto`). `setTitle`, `setActions` and `showView` are a
+`height: auto`). `component.reveal({ top, bottom })` (protocol 14; px from
+the component's top) asks the host to scroll what holds the frame so that
+part is in view: a sandboxed frame cannot scroll its page
+(`viz/revealInFrame.ts`). `setTitle`, `setActions` and `showView` are a
 whole-page component's. `openForm`, `signIn` and `cancelSignIn` are any
 host's that draws a slideover — a whole page and a component inside a
 page's layout, a settings section included (`viz/frameForms.tsx`,
@@ -313,18 +324,24 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   never seen: on macOS it is shown (WebKit draws no frames for a hidden
   window, or for one off every display, and macOS moves a titled window
   placed off-screen onto a display left of or above the main one) but
-  borderless, fully transparent and click-through (`unseen` in the
-  shell's `main.rs`); elsewhere it goes to -20000, -20000. Found as `OXPLOW_SHELL`, else an
+  borderless, fully transparent and click-through, floating above the
+  person's windows so none covers it (`unseen` in the shell's `main.rs`);
+  elsewhere it goes to -20000, -20000. Found as `OXPLOW_SHELL`, else an
   `oxplow` beside the running program or up to two folders above it. With
   none, the `ui` steps aren't run, nor the steps after them (they read
   what the `ui` steps did): the report lists it under `skipped` and its
   case is **skipped** (`CaseOutcome::Skipped`, a `<skipped>` in the JUnit
   form) — never a pass.
   Likewise when the window draws no frames: WebKit draws none while the
-  display is locked or asleep, so a component that lays itself out never
-  draws. The page asks first (`drawsFrames`: a frame within 2 s) and
-  records `drawing`; `false` leaves the steps, and those after them, not
-  run and the case skipped, never failed (`Harness::drawing`). CI builds the app and runs the tests
+  display is locked or asleep, or for a window macOS marks occluded (one
+  other windows cover: so on macOS the window floats above them), so a
+  component that lays itself out never draws. The page asks first
+  (`drawsFrames`: a frame within 10 s) and records `drawing`; `false`
+  leaves the steps, and those after them, not run and the case skipped,
+  never failed (`Harness::drawing`). The skip says why, as far as it is
+  known: what the page saw (`drawingSeen`: visibility, focus, size, the
+  wait) and what the window said of itself on stderr (`harness-window:
+  occlusion=… active_space=… visible=… screen=…`, `Harness::not_drawn`). CI builds the app and runs the tests
   under `xvfb-run`.
 - **Steps**: `click: <sel>`, `fill: { <sel>: text }`, `key: { on, key }`
   (`Mod+Enter`; a plain `Enter` in a form's `<input>` that nothing stopped
@@ -341,7 +358,7 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   `form: { submit: {..} }` (the next form's values; without, it's closed);
   `expect: { visible, count: { <sel>: n }, text: { <sel>: text | {
   contains } }, title, actions: [ids], view_params, invoked: [{ command,
-  input, ok, result | refused }], navigated, confirmed, forms, shown }`,
+  input, ok, result | refused }], navigated, confirmed, forms, shown, revealed: [{ top, bottom }] }`,
   compared by the one rule and waited for (5 s). A finding names
   `steps[i]: ui[j]` and carries the frame's HTML (4 kB) and the errors
   the agent caught.
@@ -366,8 +383,8 @@ the host's contract names.
   the whole entry: all its params (`patchViewParams`) and its history
   state.
 - A **replacement** has the host page's view params that its target's
-  contract lists (`UiReplacement.view`, `v_replaceable.view`: Git
-  History's `q`, `author`, `branch` for the history graph). These are the
+  contract lists (`UiReplacement.view`, `v_replaceable.view`: the Work
+  page's `show`, `priority`, `q` for the board). These are the
   ones the core part it replaces reads, so the two leave the same
   address. Another key answers `INVALID` naming the contract.
 - A **`viz: custom` node** on a page has the page's non-resource params
@@ -435,7 +452,7 @@ is the reference; `viewParams` / `historyState` are null where the host
 gives no view). A failed request rejects with the host's `{ code,
 message }`. `init` carries `protocol` (`BRIDGE_PROTOCOL` in
 `componentBridge.ts`, `PROTOCOL` in the library — one number, bumped when
-a message's shape changes; now 13), and `connect` rejects a host that
+a message's shape changes; now 14), and `connect` rejects a host that
 speaks another. One app is one library version. `componentClient.test.ts`
 drives the served file against the real `createBridgeHost` and the real
 `init` (`initMessage`, which `CustomComponentViz` posts), so the two

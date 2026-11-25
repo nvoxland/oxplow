@@ -977,7 +977,7 @@ mod tests {
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark the thread.\n    on: [ui.op_failed]\n    where: { label: taken }\n    needs: [sql.read]\n    entry: mark.star\n";
     const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\", \"params\": {\"thread\": x[\"event\"][\"payload\"][\"thread\"]}})\n    uri = x[\"event\"][\"payload\"][\"thread\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
-    /// Write extension `acme` into the project and publish the generation
+    /// Write extension `acme` into the project and activate the generation
     /// that carries it.
     async fn extension(svc: &std::sync::Arc<Services>, effects: &str, files: &[(&str, &str)]) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
@@ -1734,10 +1734,10 @@ mod tests {
         assert_eq!(out.result["outcome"], json!("ok"));
     }
 
-    /// An effect's script parses with the published language set: with
+    /// An effect's script parses with the active language set: with
     /// the Rust pack on, `ast_query(text, "rust", q)` finds both functions.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_effect_script_parses_with_the_published_languages() {
+    async fn an_effect_script_parses_with_the_active_languages() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let script = "def transform(x):\n    return {\"skip\": str(len(ast_query(\"fn a() {}\\nfn b() {}\\n\", \"rust\", \"(function_item) @f\")))}\n";

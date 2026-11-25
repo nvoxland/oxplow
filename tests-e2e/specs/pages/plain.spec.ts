@@ -57,10 +57,12 @@ test("oxplow's pages are complete with every enhancement off", async ({ page, da
   await load(page);
   const host = shown(page).getByTestId("page-host");
 
-  // The VCS pages: their own content.
+  // The VCS pages: their own content. Git History's commits are a table
+  // whose first column draws their lanes.
   await open(page, daemon, "oxplow:oxplow/page?page=git-history");
   await expect(host.getByText("Merge side").first()).toBeVisible();
   await expect(host.getByText("Side work").first()).toBeVisible();
+  await expect(host.getByTestId("viz-lanes").first()).toBeVisible();
   await nothingAdded(page);
 
   await host.getByText("Main work").first().click();

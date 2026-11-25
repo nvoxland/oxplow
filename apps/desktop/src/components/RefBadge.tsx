@@ -13,8 +13,8 @@ const TONE_STYLES: Record<RefBadgeTone, CSSProperties> = {
 };
 
 /**
- * Pill badge for a git ref or short sha. Shared between the git
- * history graph rows and the Local History dashboard's snapshot rows
+ * Pill badge for a git ref or short sha. Shared between the
+ * Local History dashboard's snapshot rows and other ref rows
  * so the visual language for "what commit is this on" is consistent.
  */
 export function RefBadge({ label, tone, color, title }: { label: string; tone: RefBadgeTone; color?: string; title?: string }) {

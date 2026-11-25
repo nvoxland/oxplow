@@ -123,7 +123,7 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
 /// (a pack turned on or off, a language edited, possibly while oxplow was
 /// off), drop the symbols of languages no longer in it and restate every
 /// file of a parseable language from each live stream's latest snapshot.
-/// Boot runs it, and so does each publication that changes the set.
+/// Boot runs it, and so does each activation that changes the set.
 pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
     // One at a time; the set is read after the wait, so a restate that queued
     // behind another starts from the set as it stands then.

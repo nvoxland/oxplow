@@ -7,7 +7,7 @@
 //! which visibility and doc strategy, and the optional import, merge and
 //! duplication facets) and `symbols.scm` / `symbols.yaml` (what a file
 //! defines, [`crate::symbols`]). [`Languages`] is the set the enabled
-//! extensions declare, built at each publication; a [`Language`] is a
+//! extensions declare, built at each activation; a [`Language`] is a
 //! cheap handle into it.
 //!
 //! Per-language *behavior* that data can't say (how Rust spells `pub`, how

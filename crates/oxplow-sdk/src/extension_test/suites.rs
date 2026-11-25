@@ -567,9 +567,9 @@ pub(super) fn kit_search_path(env: &host::HostEnv) -> Vec<std::path::PathBuf> {
     oxplow_app::agent_path::search_path_in(env("PATH").as_deref().map(std::ffi::OsStr::new), &extra)
 }
 
-/// Publish the generation the throwaway project's config and files ask
+/// Activate the generation the throwaway project's config and files ask
 /// for, as the app's owner of generations does on a change.
-pub(super) async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), String> {
+pub(super) async fn activate_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), String> {
     svc.extension_activation
         .activate(svc.clone())
         .await
@@ -633,7 +633,7 @@ pub(super) async fn suite(
             Some(&serde_json::Value::Object(instances)),
         )
         .map_err(|e| e.to_string())?;
-        publish_generation(&svc).await?;
+        activate_generation(&svc).await?;
         match svc
             .providers
             .health(&format!("{}/{}", ext.namespace, spec.id))
@@ -714,7 +714,7 @@ pub(super) async fn script_suite(
                 .active_providers
                 .insert(decl.capability.clone(), decl.id.clone());
         }
-        publish_generation(&svc).await?;
+        activate_generation(&svc).await?;
         capability_suite(&svc, &decl.capability, &decl.id, env).await
     };
     let failed = |e: String| {
@@ -733,7 +733,7 @@ pub(super) async fn script_suite(
 }
 
 /// Run `capability`'s conformance suite on `svc` against its
-/// implementation `id` (an instance's or a script's, already published).
+/// implementation `id` (an instance's or a script's, already active).
 async fn capability_suite(
     svc: &Arc<oxplow_app::Services>,
     capability: &str,
@@ -755,7 +755,7 @@ async fn capability_suite(
                 .map_err(|e| e.to_string())?
                 .active_providers
                 .insert(capability.to_string(), id.to_string());
-            publish_generation(svc).await?;
+            activate_generation(svc).await?;
             oxplow_app::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
             let provider = svc
                 .snapshots

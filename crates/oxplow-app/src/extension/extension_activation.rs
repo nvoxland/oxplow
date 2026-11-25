@@ -1,4 +1,4 @@
-//! Publication and reader boundary for prepared extension generations.
+//! Activation and reader boundary for prepared extension generations.
 //! Boot adopts this boundary before exposing extension runtime consumers.
 
 use std::borrow::Cow;
@@ -22,14 +22,14 @@ struct GenerationState {
     active: Option<Arc<CatalogSnapshot>>,
     unavailable: bool,
     entities: crate::extension::extension_datasets::EntitySignature,
-    /// The configuration the published datasets were compiled against.
+    /// The configuration the active datasets were compiled against.
     configs: crate::extension::extension_generation::ConfigSignature,
 }
 
-/// How often a publication waiting on readers says who they are.
+/// How often an activation waiting on readers says who they are.
 const WAITING_LOG_EVERY: Duration = Duration::from_secs(10);
 
-/// A generation reader as a waiting publication sees it: what holds it
+/// A generation reader as a waiting activation sees it: what holds it
 /// (the run, or the reading future's type) and for how long.
 #[derive(Debug, Clone)]
 pub struct Reader {
@@ -56,7 +56,7 @@ impl Drop for Held {
     }
 }
 
-/// A host-only reader lifetime. Its private guard excludes publication until
+/// A host-only reader lifetime. Its private guard excludes activation until
 /// the last nested run/query releases it. It conveys no service authority.
 #[derive(Clone)]
 pub struct GenerationPin {
@@ -97,10 +97,10 @@ pub struct ExtensionActivation {
     state: Arc<RwLock<GenerationState>>,
     activating: tokio::sync::Mutex<()>,
     requested: tokio::sync::Notify,
-    /// A [`Self::request`] no publication has served yet.
+    /// A [`Self::request`] no activation has served yet.
     pending: std::sync::atomic::AtomicBool,
     spawned: std::sync::atomic::AtomicBool,
-    /// Set once the first generation is published; before it the boundary
+    /// Set once the first generation is activated; before it the boundary
     /// serves the current load.
     activated: std::sync::atomic::AtomicBool,
     problems: parking_lot::Mutex<VocabularyErrors>,
@@ -109,14 +109,14 @@ pub struct ExtensionActivation {
     panics: parking_lot::Mutex<Vec<(PanicPoint, u32)>>,
 }
 
-/// Where in a publication, past its database commit, a test makes the
+/// Where in an activation, past its database commit, a test makes the
 /// worker panic.
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum PanicPoint {
     /// Right after the commit: no in-memory map has been swapped.
     AfterCommit,
-    /// After the maps, catalog and providers are published, before the
+    /// After the maps, catalog and providers are activated, before the
     /// boundary shows the new generation.
     BeforeBoundary,
 }
@@ -126,8 +126,8 @@ impl ExtensionActivation {
         Self::default()
     }
 
-    /// Whether a generation has been published: the owner of command,
-    /// provider and model publication from then on.
+    /// Whether a generation has been activated: the owner of command,
+    /// provider and model activation from then on.
     pub fn is_active(&self) -> bool {
         self.activated.load(std::sync::atomic::Ordering::Acquire)
     }
@@ -138,7 +138,7 @@ impl ExtensionActivation {
         self.requested.notify_one();
     }
 
-    /// Publish now what was asked for — a [`Self::request`], or a catalog
+    /// Activate now what was asked for — a [`Self::request`], or a catalog
     /// whose sources moved past the live set — as the owner
     /// ([`Self::spawn`]) would after its debounce: for a host with no owner
     /// running (a test's throwaway) whose next step needs the change in
@@ -155,14 +155,14 @@ impl ExtensionActivation {
         if !self.pending.load(std::sync::atomic::Ordering::Acquire) && !moved {
             return false;
         }
-        self.publish_requested(svc).await;
+        self.activate_requested(svc).await;
         true
     }
 
-    /// One publication for what was asked for, and what follows a new
+    /// One activation for what was asked for, and what follows a new
     /// generation: the catalog's change signal, the entity states, the
     /// agents' text. A rejected candidate is recorded.
-    async fn publish_requested(&self, svc: Arc<Services>) {
+    async fn activate_requested(&self, svc: Arc<Services>) {
         self.pending
             .store(false, std::sync::atomic::Ordering::Release);
         match self.activate(svc.clone()).await {
@@ -183,7 +183,7 @@ impl ExtensionActivation {
     }
 
     /// The readers holding the generation now, longest-held first: what a
-    /// publication waits for.
+    /// activation waits for.
     pub fn readers(&self) -> Vec<Reader> {
         let mut readers: Vec<Reader> = self
             .readers
@@ -199,13 +199,13 @@ impl ExtensionActivation {
         readers
     }
 
-    /// The next publication panics once its database state has committed.
+    /// The next activation panics once its database state has committed.
     #[cfg(test)]
     pub(crate) fn panic_once_after_commit(&self) {
         self.panic_at(PanicPoint::AfterCommit, 1);
     }
 
-    /// The next `times` publications reaching `point` panic there.
+    /// The next `times` activations reaching `point` panic there.
     #[cfg(test)]
     pub(crate) fn panic_at(&self, point: PanicPoint, times: u32) {
         self.panics.lock().push((point, times));
@@ -240,9 +240,9 @@ impl ExtensionActivation {
         Ok(())
     }
 
-    /// An extension's stored configuration only changes what was published
+    /// An extension's stored configuration only changes what was activated
     /// when something of it reads it (`configuration_readers`: a dataset's
-    /// `config()`, a skill's `when:`): republish when it has.
+    /// `config()`, a skill's `when:`): reactivate when it has.
     pub(crate) async fn request_config_refresh(
         &self,
         _db: &oxplow_db::Database,
@@ -292,7 +292,7 @@ impl ExtensionActivation {
         *self.problems.lock() = missing;
         let changes = LiveChanges::new();
         // An extension that can't activate is held (a bundled one gives way to
-        // the copy that ships); a generation that can't publish at all
+        // the copy that ships); a generation that can't activate at all
         // stops the boot.
         let mut attempts = 0;
         loop {
@@ -335,7 +335,7 @@ impl ExtensionActivation {
     }
 
     /// One serialized owner responds to file/config/entity changes. Consumers
-    /// enqueue work; they never wait for publication while retaining a reader.
+    /// enqueue work; they never wait for activation while retaining a reader.
     pub fn spawn(self: &Arc<Self>, svc: &Arc<Services>) {
         if self.spawned.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return;
@@ -370,7 +370,7 @@ impl ExtensionActivation {
                 let Some(svc) = services.upgrade() else {
                     return;
                 };
-                owner.publish_requested(svc).await;
+                owner.activate_requested(svc).await;
             }
         });
     }
@@ -510,7 +510,7 @@ impl ExtensionActivation {
     }
 
     /// Stage one candidate, then reserve the command/capability/provider maps,
-    /// commit matching SQL and publish the maps while all readers are excluded.
+    /// commit matching SQL and activate the maps while all readers are excluded.
     /// A preparation/SQL rejection leaves the previous pin available. A panic
     /// after SQL commit leaves this boundary unavailable until host recovery.
     /// Provider startup and retired process shutdown happen outside SQL
@@ -534,7 +534,7 @@ impl ExtensionActivation {
     }
 
     /// Activate with `changes` to the live set (a deploy, a rollback, a
-    /// removal). The publication records which deployments are active. An
+    /// removal). The activation records which deployments are active. An
     /// extension `changes` names that doesn't go live is held as any broken
     /// one is (its last working version stays) and its problems are the
     /// error.
@@ -543,14 +543,14 @@ impl ExtensionActivation {
         svc: Arc<Services>,
         changes: &LiveChanges,
     ) -> Result<Arc<CatalogSnapshot>, TxError<VocabularyErrors>> {
-        let published = self.activate_kind(svc, changes).await?;
+        let activated = self.activate_kind(svc, changes).await?;
         let held = self.problems.lock().clone();
         let failed: VocabularyErrors = changes
             .keys()
             .filter_map(|name| held.get(name).map(|why| (name.clone(), why.clone())))
             .collect();
         if failed.is_empty() {
-            Ok(published)
+            Ok(activated)
         } else {
             Err(TxError::Aborted(failed))
         }
@@ -561,7 +561,7 @@ impl ExtensionActivation {
     /// they are now, without an activation: nothing that runs changes. The
     /// file watcher calls it when the extensions folder changes, so a
     /// deleted or added source shows at once. It waits for an activation in
-    /// progress, so a publication's listing is never overwritten by an
+    /// progress, so an activation's listing is never overwritten by an
     /// older one.
     pub async fn restate_sources(
         &self,
@@ -614,9 +614,19 @@ impl ExtensionActivation {
         // the generation's offered set is stale, and another one follows
         // its commit.
         let offer_stale = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (published, retired, mut held) = loop {
-            let (snapshot, mut held) =
-                raw.admitted(svc.extension_catalog.active().as_deref(), &failed);
+        // The language contributions turned off on this machine: read before
+        // the activation holds the database. A language that is off holds no
+        // names in the conflict check (`admitted`) and leaves the set it
+        // activates.
+        let disabled_languages = crate::extension::language_set::turned_off(&svc.db)
+            .await
+            .unwrap_or_default();
+        let (activated, retired, mut held) = loop {
+            let (snapshot, mut held) = raw.admitted(
+                svc.extension_catalog.active().as_deref(),
+                &failed,
+                &disabled_languages,
+            );
             // A deployment of an extension that ships with oxplow that is
             // held with nothing of it running gives way to the copy that
             // ships, and the candidate is admitted again.
@@ -686,33 +696,22 @@ impl ExtensionActivation {
                     live.insert(name.clone(), hash.clone());
                 }
             }
-            // The language contributions turned off on this machine: read
-            // before the publication holds the database, applied to the set it
-            // publishes.
-            let disabled_languages: crate::extension::language_set::DisabledLanguages =
-                oxplow_db::SqliteContributionHealthStore::new(svc.db.clone())
-                    .list()
-                    .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|r| r.kind == "language" && r.state == "disabled")
-                    .map(|r| (r.namespace, r.contribution))
-                    .collect();
             let db = svc.db.clone();
-            let published = snapshot.clone();
+            let activated = snapshot.clone();
             // Move the owned writer into the worker closure. Cancelling the async
             // caller must not open readers while that worker can still commit.
             let boundary = Mutex::new(self.write_waiting_on_readers().await);
             // Provider admission may hold this map while awaiting a DB write. Acquire
-            // it before the DB permit, otherwise the publication worker can deadlock.
+            // it before the DB permit, otherwise the activation worker can deadlock.
             let running = Mutex::new(svc.providers.reserve_running().await);
             let providers = Mutex::new(providers);
             let adapters = Mutex::new(Some(adapters));
             let bundles = Mutex::new(Some(bundles));
             let svc = svc.clone();
             let stale = offer_stale.clone();
+            let disabled_languages = disabled_languages.clone();
             let outcome = db
-                .transaction_with_publication(move |publication| {
+                .transaction_with_activation(move |activation| {
                     let mut boundary = boundary.lock().unwrap_or_else(|error| error.into_inner());
                     let mut commands = svc.extension_commands.reserve(&commands).map_err(|_| {
                         rejected("command registry changed while activation was staged")
@@ -744,24 +743,24 @@ impl ExtensionActivation {
                         .extension_catalog
                         .snapshot(&svc.layout.project_dir)
                         .generation()
-                        != published.source_generation()
+                        != activated.source_generation()
                     {
                         return Err(rejected("catalog changed while activation was staged"));
                     }
                     let chosen: Vec<(String, String)> =
                         live.iter().map(|(n, h)| (n.clone(), h.clone())).collect();
                     oxplow_db::extension_deployment_store::set_active_tx(
-                        publication.transaction()?,
+                        activation.transaction()?,
                         &chosen,
                     )
                     .map_err(TxError::Storage)?;
                     // An effect starts when a generation that runs it
-                    // first publishes: it never reacts to the past.
+                    // first activates: it never reacts to the past.
                     let now = Timestamp::now().to_string();
-                    for ext in published.extensions().iter().filter(|e| e.enabled) {
+                    for ext in activated.extensions().iter().filter(|e| e.enabled) {
                         for effect in &ext.effects {
                             oxplow_db::effect_state_store::start_if_new_tx(
-                                publication.transaction()?,
+                                activation.transaction()?,
                                 &effect.name(),
                                 &now,
                             )
@@ -769,31 +768,31 @@ impl ExtensionActivation {
                         }
                     }
                     let vocabulary =
-                        database.replace_tx(publication.transaction()?, Timestamp::now(), &svc.layout.project_dir, &svc.global_config_dir)?;
-                    metrics.replace_tx(publication.transaction()?)?;
+                        database.replace_tx(activation.transaction()?, Timestamp::now(), &svc.layout.project_dir, &svc.global_config_dir)?;
+                    metrics.replace_tx(activation.transaction()?)?;
                     providers
                         .validate_vocabulary(&vocabulary)
                         .map_err(TxError::Aborted)?;
                     providers.validate_live().map_err(TxError::Aborted)?;
                     let entities =
-                        crate::extension::extension_datasets::entity_signature_tx(publication.transaction()?)?;
+                        crate::extension::extension_datasets::entity_signature_tx(activation.transaction()?)?;
                     let configs = crate::extension::extension_generation::config_signature_tx(
                         &svc.layout.project_dir,
                         &svc.global_config_dir,
-                        published.extensions(),
+                        activated.extensions(),
                     );
                     stale.store(
                         crate::capabilities::offering_implementations_tx(
                             &svc.layout.project_dir,
                             &svc.global_config_dir,
-                            published.extensions(),
+                            activated.extensions(),
                         ) != offered,
                         std::sync::atomic::Ordering::SeqCst,
                     );
                     // Set this before the commit attempt so an unwind in either commit
-                    // or publication cannot expose mismatched database/memory state.
+                    // or activation cannot expose mismatched database/memory state.
                     boundary.unavailable = true;
-                    if let Err(error) = publication.commit() {
+                    if let Err(error) = activation.commit() {
                         boundary.unavailable = false;
                         return Err(TxError::Storage(error));
                     }
@@ -806,7 +805,7 @@ impl ExtensionActivation {
                     svc.models.swap(database.models().clone());
                     let (languages, problems) =
                         crate::extension::language_set::of_without(
-                            published.extensions(),
+                            activated.extensions(),
                             &disabled_languages,
                         );
                     for p in &problems {
@@ -818,10 +817,10 @@ impl ExtensionActivation {
                         );
                     }
                     svc.test_conventions.swap(crate::test_conventions::TestConventions::of(
-                        published.extensions(),
+                        activated.extensions(),
                         std::sync::Arc::new(languages.clone()),
                     ));
-                    if svc.languages.publish(languages) {
+                    if svc.languages.activate(languages) {
                         // The symbol index follows the set (a pack turned on
                         // or off, possibly while oxplow was off).
                         let svc = svc.clone();
@@ -837,28 +836,28 @@ impl ExtensionActivation {
                             });
                         }
                     }
-                    metrics.publish(&svc.metrics);
+                    metrics.activate(&svc.metrics);
                     providers.withdraw_maps();
                     adapters
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())
                         .take()
                         .expect("adapter candidate consumed only after successful commit")
-                        .publish_maps(&svc);
-                    svc.feeds.restate(published.extensions());
+                        .activate_maps(&svc);
+                    svc.feeds.restate(activated.extensions());
                     oxplow_fs_watch::set_declared_watched_folders(
-                        crate::extension::extensions::storage::watched_names(published.extensions()),
+                        crate::extension::extensions::storage::watched_names(activated.extensions()),
                     );
                     bundles
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())
                         .take()
                         .expect("bundle candidate consumed only after successful commit")
-                        .publish(&svc.component_bundles);
-                    svc.extension_catalog.publish_active(published.clone());
+                        .activate(&svc.component_bundles);
+                    svc.extension_catalog.activate_snapshot(activated.clone());
                     svc.extension_catalog.set_live(live.clone());
                     // Admission enables callbacks and their live-owner checks.
-                    // Publish the matching owner catalog before starting them;
+                    // Activate the matching owner catalog before starting them;
                     // readers remain excluded by the owned generation writer.
                     let retired = providers.apply();
                     crate::extension::extension_runtime_adapters::PreparedRuntimeAdapters::follow_selected(
@@ -867,40 +866,40 @@ impl ExtensionActivation {
                     #[cfg(test)]
                     svc.extension_activation
                         .maybe_panic(PanicPoint::BeforeBoundary);
-                    boundary.active = Some(published.clone());
+                    boundary.active = Some(activated.clone());
                     svc.extension_activation
                         .activated
                         .store(true, std::sync::atomic::Ordering::Release);
                     boundary.entities = entities;
                     boundary.configs = configs;
                     boundary.unavailable = false;
-                    Ok((published.clone(), retired))
+                    Ok((activated.clone(), retired))
                 })
                 .await;
             match outcome {
-                Ok((published, retired)) => break (published, retired, held),
+                Ok((activated, retired)) => break (activated, retired, held),
                 // A dataset or vocabulary that doesn't compile is checked in
                 // the transaction, which rolled back: nothing was applied.
                 Err(TxError::Aborted(problems)) if failed.hold(&snapshot, &problems) => {}
-                // Publication panicked after its database state committed,
+                // Activation panicked after its database state committed,
                 // leaving the in-memory maps part swapped and the boundary
                 // refusing readers. The database is the truth: stage the
                 // generation again from it, once.
                 Err(TxError::Storage(error)) if self.state.read().await.unavailable => {
                     if restaged {
                         return Err(rejected(&format!(
-                            "extension publication failed after its database state \
+                            "extension activation failed after its database state \
                              committed, and staging it again failed: {error}"
                         )));
                     }
-                    tracing::error!(%error, "extension publication failed after commit; staging it again");
+                    tracing::error!(%error, "extension activation failed after commit; staging it again");
                     restaged = true;
                 }
                 Err(error) => return Err(error),
             }
         };
         retired.finish().await;
-        // The file kinds this publication wrote: what a corpus leaves out.
+        // The file kinds this activation wrote: what a corpus leaves out.
         crate::extension::language_set::refresh_excluded(&svc).await;
         if offer_stale.load(std::sync::atomic::Ordering::SeqCst) {
             self.request();
@@ -909,7 +908,7 @@ impl ExtensionActivation {
             held.entry(name).or_default().extend(why);
         }
         *self.problems.lock() = held;
-        Ok(published)
+        Ok(activated)
     }
 }
 
@@ -979,7 +978,7 @@ impl ExtensionActivation {
         }
     }
 
-    /// The publication's writer, saying who it waits for while readers
+    /// The activation's writer, saying who it waits for while readers
     /// hold the generation. The one write future is kept, so its place in
     /// the fair lock's queue is too.
     async fn write_waiting_on_readers(&self) -> OwnedRwLockWriteGuard<GenerationState> {
@@ -1039,7 +1038,7 @@ impl ExtensionActivation {
             .await
             .map_err(TxError::Aborted)?;
         // What a setting offers (`when:` on an implementation), read once
-        // for this publication: the adapters and the capability rows agree.
+        // for this activation: the adapters and the capability rows agree.
         let offered =
             crate::capabilities::offering_implementations(svc, snapshot.extensions()).await;
         let adapters =

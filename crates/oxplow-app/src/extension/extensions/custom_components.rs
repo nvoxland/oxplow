@@ -54,6 +54,10 @@ pub struct CustomComponent {
     /// `None` when its declaration says nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// How it sizes on a page: as tall as what it draws (`content`, the
+    /// default) or the page's height, scrolling itself (`fill`).
+    #[serde(default)]
+    pub size: crate::pages::spec::ComponentSize,
 }
 
 /// A `custom_components:` entry as the manifest holds it.
@@ -77,6 +81,11 @@ pub(crate) struct ComponentFile {
     /// One sentence saying what the component is.
     #[serde(default)]
     description: Option<String>,
+    /// `content` (the default): its frame is as tall as what it draws and
+    /// the page scrolls. `fill`: it takes the page's height and scrolls
+    /// itself (a board's columns).
+    #[serde(default)]
+    size: crate::pages::spec::ComponentSize,
 }
 
 /// What a bundle folder holds, as far as loading cares.
@@ -636,10 +645,52 @@ pub fn parse_custom_components(
                     .description
                     .map(|d| d.trim().to_string())
                     .filter(|d| !d.is_empty()),
+                size: c.size,
             }),
         }
     }
     (out, errors)
+}
+
+/// Fill in how each custom component `page` shows sizes, from the
+/// declarations of `extensions`: a `viz: custom`'s `sizing` (and its
+/// `fills`, so the page lays out before the frame loads) and a `component:`
+/// node's `size`. A component is `<extension>/<id>`, or the page's own
+/// extension's `<id>`.
+pub(crate) fn size_components(
+    page: &mut crate::pages::schema::Page,
+    extensions: &[crate::extension::extensions::Extension],
+) {
+    use crate::pages::schema::NodeKind;
+    use crate::pages::spec::ComponentSize;
+    let own = page.extension.clone();
+    let size_of = |name: &str| {
+        let (ext, id) = name.split_once('/').unwrap_or((own.as_str(), name));
+        extensions
+            .iter()
+            .find(|e| e.name == ext)
+            .and_then(|e| e.custom_components.iter().find(|c| c.id == id))
+            .map_or(ComponentSize::default(), |c| c.size)
+    };
+    let mut sized = |node: &mut crate::pages::schema::Node| match &mut node.kind {
+        NodeKind::Viz { config, .. } => {
+            if let Some(name) = config.custom.as_ref().and_then(|c| c.component.as_deref()) {
+                let size = size_of(name);
+                config.sizing = Some(size);
+                if size == ComponentSize::Fill {
+                    config.fills = true;
+                }
+            }
+        }
+        NodeKind::Component {
+            component, sizing, ..
+        } => *sizing = size_of(component),
+        _ => {}
+    };
+    page.view.for_each_mut(&mut sized);
+    if let Some(rail) = page.rail.as_mut() {
+        rail.for_each_mut(&mut sized);
+    }
 }
 
 #[cfg(test)]

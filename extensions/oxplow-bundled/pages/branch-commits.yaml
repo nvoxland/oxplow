@@ -22,7 +22,7 @@ loaders:
               ORDER BY kind LIMIT 1) AS base_sha
   incoming:
     sql: |
-      SELECT sha, subject, author, committed_at, 'Open in History Graph' AS graph_label,
+      SELECT sha, subject, author, committed_at, 'Open in Git History' AS graph_label,
              uri_view(uri('oxplow/page', 'page', 'oxplow/git-history', 'stream_id', stream_id,
                           'head_sha', COALESCE((SELECT head_sha FROM tips), sha)), 'reveal_sha', sha) AS graph_uri
       FROM v_commit_between WHERE base = :base AND head = :head
@@ -30,7 +30,7 @@ loaders:
       ORDER BY committed_at DESC, sha
   outgoing:
     sql: |
-      SELECT sha, subject, author, committed_at, 'Open in History Graph' AS graph_label,
+      SELECT sha, subject, author, committed_at, 'Open in Git History' AS graph_label,
              uri_view(uri('oxplow/page', 'page', 'oxplow/git-history', 'stream_id', stream_id,
                           'head_sha', COALESCE((SELECT base_sha FROM tips), sha)), 'reveal_sha', sha) AS graph_uri
       FROM v_commit_between WHERE base = :head AND head = :base

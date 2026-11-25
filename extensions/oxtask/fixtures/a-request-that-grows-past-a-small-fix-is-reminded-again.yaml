@@ -1,0 +1,36 @@
+# The first reminder comes at a request's first edit, when the work looks
+# smallest. A request that goes on to change 5 files with still no task in
+# progress is reminded once more, with the count: it is no small fix. A
+# request of 4 files gets only the first reminder.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.tasks.set_workflow, input: { workflow: agent_tracks } }
+  - observe:
+      turn:
+        prompt: Add the option
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [b.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [c.rs, d.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [d.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [e.rs], ok: true }
+when: { sql: "SELECT kind, message FROM v_agent_nudge ORDER BY kind" }
+expect:
+  rows:
+    - kind: oxtask/untracked-work
+      message: "This request changed files, and no task is in progress on this thread. Unless it is a small fix (one or two files: a typo, a one-line change), take or file its task and move it to in progress, so the person sees it on the Work panel (the `track-work` skill)."
+    - kind: oxtask/untracked-work-grown
+      message: "This request has now changed 5 files and no task tracks them: that is no small fix. Take or file its task and move it to in progress, so the person sees it on the Work panel (the `track-work` skill)."
+steps:
+  - given:
+      - observe:
+          turn:
+            prompt: Tweak the option
+            tools:
+              - { name: Edit, kind: edit, paths: [g.rs, h.rs], ok: true }
+              - { name: Edit, kind: edit, paths: [i.rs, j.rs], ok: true }
+  - when: { sql: "SELECT kind, count(*) AS n FROM v_agent_nudge GROUP BY kind ORDER BY kind" }
+    expect:
+      rows:
+        - { kind: oxtask/untracked-work, n: 2 }
+        - { kind: oxtask/untracked-work-grown, n: 1 }

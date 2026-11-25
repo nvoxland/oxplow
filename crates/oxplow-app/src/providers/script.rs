@@ -32,7 +32,7 @@
 //! answered).
 //!
 //! **Lifecycle.** Its adapter is prepared with the extension generation's
-//! other runtime adapters (`PreparedRuntimeAdapters`) and published with
+//! other runtime adapters (`PreparedRuntimeAdapters`) and activated with
 //! them; the next generation retires the ones it no longer declares.
 
 use std::path::PathBuf;
@@ -73,7 +73,7 @@ pub struct ScriptEndpoint {
     root: PathBuf,
     /// Where `tree.read` reads: the stream's worktree as it is now.
     trees: Arc<dyn crate::services::TreeSource>,
-    /// The published language set its parsing builtins use.
+    /// The active language set its parsing builtins use.
     languages: crate::extension::language_set::LanguagesHandle,
 }
 
@@ -265,7 +265,7 @@ fn run_verb(
 }
 
 /// The script implementations one catalog generation declares, each
-/// adapted by its capability's host and not yet published.
+/// adapted by its capability's host and not yet activated.
 pub struct PreparedScripts {
     adapters: Vec<((String, String), PreparedProviderCapability)>,
 }
@@ -327,18 +327,18 @@ impl ProviderRegistry {
         }
     }
 
-    /// Publish `prepared`: the scripts the previous generation published
+    /// Activate `prepared`: the scripts the previous generation activated
     /// and this one doesn't keep are retired, then this one's registered.
-    pub(crate) fn publish_scripts(&self, prepared: PreparedScripts) {
-        let mut published = self.published_scripts.lock();
-        for (capability, id) in published.drain(..) {
+    pub(crate) fn activate_scripts(&self, prepared: PreparedScripts) {
+        let mut activated = self.active_scripts.lock();
+        for (capability, id) in activated.drain(..) {
             if let Some(host) = self.host(&capability) {
                 host.retire(&id);
             }
         }
         for (identity, capability) in prepared.adapters {
-            capability.publish();
-            published.push(identity);
+            capability.activate();
+            activated.push(identity);
         }
     }
 }

@@ -90,6 +90,7 @@ impl AsyncEventConsumer for CollectionConsumer {
                 crate::collection::ShellRun {
                     command,
                     exit_code: p["exit_code"].as_i64(),
+                    duration_ms: p["duration_ms"].as_i64(),
                 },
                 crate::collection::RunOrigin::Event(&cause_of(&self.db, event).await?),
             )
@@ -242,6 +243,26 @@ mod tests {
         assert_eq!(run.anchors.turn_id, finished.envelope.anchors.turn_id);
         assert_eq!(run.cause.as_ref(), Some(&finished.envelope.id));
         assert_eq!(run.payload["command"], "cargo test");
+    }
+
+    /// A test run takes its time from the shell call's: the harness's
+    /// `duration_ms` on the finished tool call is `v_test_run.duration_ms`.
+    #[tokio::test]
+    async fn a_test_run_records_how_long_its_shell_call_took() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        let mut body = bash("cargo test");
+        body["duration_ms"] = json!(4200);
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::PostToolUse, body))
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(count(svc, "SELECT duration_ms FROM v_test_run").await, 4200);
     }
 
     /// a run's capture carries the turn its tool call was made in

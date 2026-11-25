@@ -14,7 +14,7 @@
 //!     after: [page_ref.task]    # optional: what it runs after on one event
 //! ```
 //!
-//! It starts when a generation that runs it first publishes — its
+//! It starts when a generation that runs it first activates — its
 //! extension deployed (or a bundled one shipping it) — at the log's head
 //! (`effect_state`): an effect never reacts to what happened before it
 //! started. What it may compose and read is its extension's `permissions:`.
@@ -218,7 +218,7 @@ pub enum Gate {
 }
 
 /// Decide [`Gate`] at event `seq`, given where the effect starts
-/// (`effect_state`: set when a generation with it first publishes).
+/// (`effect_state`: set when a generation with it first activates).
 pub fn gate(start_after: Option<i64>, seq: i64) -> Gate {
     match start_after {
         None => Gate::NotStarted,
@@ -230,7 +230,7 @@ pub fn gate(start_after: Option<i64>, seq: i64) -> Gate {
 /// Start effect `name` after the log's head now, dropping its scheduled
 /// automatic retries: what a test does to have it react to what
 /// it logs next. A generation that first runs an effect starts it in its
-/// publication ([`oxplow_db::effect_state_store::start_if_new_tx`]).
+/// activation ([`oxplow_db::effect_state_store::start_if_new_tx`]).
 pub async fn start_at_head(
     db: &oxplow_db::Database,
     name: &str,
@@ -708,7 +708,7 @@ effects:
         gate(start, seq)
     }
 
-    /// An effect starts when the generation that runs it first publishes —
+    /// An effect starts when the generation that runs it first activates —
     /// its extension's deploy — at the log's head: it never reacts to what
     /// happened before. A later deploy of it keeps where it started.
     #[tokio::test]

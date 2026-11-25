@@ -180,14 +180,15 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      <nav-bar action id>`, `view_params` (the view params a component sets, and
      these, are the page's params for its next run, as the app's tab does), `given`, `confirm: false`, `form: {
      submit: {..} }`, and `expect: { visible, count, text, title, actions,
-     view_params, invoked, navigated, confirmed, forms, shown }` (waited for,
+     view_params, invoked, navigated, confirmed, forms, shown, revealed: [{ top, bottom }] }` (waited for,
      5 s). It drives the page's first component, or `node: <id>`; a
      component inside an embed, a slot mount or a replacement is
      `node: <embed node>/<node>` (or the first found when the page has
      none of its own). It needs the app (`OXPLOW_SHELL`, or the `oxplow` beside
      `$OXPLOW_BIN`); without it, or while the display is locked or asleep
      (the app's window draws nothing then), the report warns that the
-     `ui` steps, and the steps after them, didn't run. With `--require-ui` (CI's run) that is an
+     `ui` steps, and the steps after them, didn't run, with what the
+     window and its page said about why. With `--require-ui` (CI's run) that is an
      error, not a warning, so a run that can't draw fails.
      Write the `ui` fixture first, then the component. A step can also act as a person would: `{ press: {
      action, node?, row?: { uri: $t.uri }, input?, option? } }` presses one of the

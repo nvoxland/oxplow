@@ -276,7 +276,7 @@ struct GlobalCatalog {
     dimensions: Vec<DimensionEntry>,
 }
 
-struct PublishedMetricInputs {
+struct ActiveMetricInputs {
     config: OxplowConfig,
     global: GlobalCatalog,
 }
@@ -305,7 +305,7 @@ pub struct MetricsService {
     /// before, minus the per-event disk read). `Arc` so clones of the service
     /// share one cache (and its invalidations).
     global_catalog: Arc<std::sync::Mutex<Option<GlobalCatalog>>>,
-    published_inputs: Arc<parking_lot::Mutex<Option<Arc<PublishedMetricInputs>>>>,
+    active_inputs: Arc<parking_lot::Mutex<Option<Arc<ActiveMetricInputs>>>>,
     /// The loaded-extensions cache shared with `Services`; a fresh one
     /// for a bare `MetricsService` in tests.
     extensions_cache: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
@@ -474,7 +474,7 @@ impl MetricsService {
             fact_store: None,
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
-            published_inputs: Arc::default(),
+            active_inputs: Arc::default(),
             snapshot_captures: None,
             extensions_cache,
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -545,9 +545,9 @@ impl MetricsService {
     /// first use. The hot read paths call this instead of re-reading the
     /// four global YAML dirs every time.
     fn with_global_catalog<R>(&self, f: impl FnOnce(&GlobalCatalog) -> R) -> R {
-        let published = self.published_inputs.lock().clone();
-        if let Some(published) = published {
-            return f(&published.global);
+        let active = self.active_inputs.lock().clone();
+        if let Some(active) = active {
+            return f(&active.global);
         }
         let mut guard = self
             .global_catalog
@@ -568,7 +568,7 @@ impl MetricsService {
     }
 
     fn read_metric_config(&self) -> OxplowConfig {
-        self.published_inputs
+        self.active_inputs
             .lock()
             .clone()
             .map(|inputs| inputs.config.clone())
@@ -2173,7 +2173,7 @@ impl MetricsService {
                 }
             },
         };
-        // Publication holds the generation for its own short work: no
+        // Activation holds the generation for its own short work: no
         // activation lands between the check of the collector's own
         // extension and its facts.
         let publish = async {
@@ -2935,7 +2935,7 @@ impl crate::event_pump::AsyncEventConsumer for EntityStates {
 mod tests {
 
     /// Switch metrics through the real path — the `oxplow.metric.enable` command —
-    /// then publish the generation the config change asks for.
+    /// then activate the generation the config change asks for.
     async fn enable(svc: &Arc<crate::Services>, keys: &[String], enabled: bool) {
         // The catalog the command checks keys against (boot seeds it).
         svc.commands
@@ -5456,7 +5456,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn a_generation_publishes_configured_measures_and_dimensions() {
+    async fn a_generation_activates_configured_measures_and_dimensions() {
         let (svc, dir) = fixture().await;
         write_project_extension(
             dir.path(),
