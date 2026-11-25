@@ -379,11 +379,20 @@ while nothing filters, the table of matches while something does. An embedded pa
   `fold: true`: the rows start closed under a row count (a `<details>` the
   desktop draws around the viz); a click opens them. For a long list that is
   rarely read. A list row leaves out a cell with no value, not a dash.
-  `lead: <column>`: the first row's text of that column is a plain paragraph
-  under the node's heading and above its viz (what a thing is, above its
-  facts); null or blank draws nothing. It is a column of the loader, checked
-  in a dry run like a role block's; the desktop draws it in `VizNode`
-  (`leadOf`) and `text.rs` writes it under the heading.
+  `lead: <column>`: the first row's text of that column is drawn under the
+  node's heading and above its viz (what a thing is, above its facts); null
+  or blank draws nothing. It reads as Markdown through the one `Markdown`
+  component (a commit message's paragraphs and lists, a description's
+  `code`); `lead: { column, format: text }` (`VizConfig.lead_format`,
+  `TextFormat`) draws it as written with its line breaks (`pre-line`), for
+  text whose `*`, `_` or `#` are literal. One paragraph is the muted
+  `ox-section-desc`; more than one block (a blank line or a list) reads in
+  the body's colour (`ox-section-lead`). Only the lead takes a format: a
+  heading is one line, and the ⓘ `description` is a hover. It is a column
+  of the loader, checked in a dry run like a role block's; the desktop
+  draws it in `VizNode` (`leadOf`, `Lead`) and `text.rs` writes the raw
+  text under the heading either way. The commit page heads its section
+  with the subject (`title_from`) and leads with the body.
 
 **Vizes** (`Viz`): `table`, `list` (in a compact view, a rail panel, each
 row one dense line: the headline, then the other columns small beside it,

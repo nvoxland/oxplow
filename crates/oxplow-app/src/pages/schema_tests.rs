@@ -1316,6 +1316,7 @@ fn a_viz_keeps_its_lead_column() {
         panic!("a viz");
     };
     assert_eq!(config.lead.as_deref(), Some("d"));
+    assert_eq!(config.lead_format, None, "unset: Markdown");
     assert_eq!(
         config
             .role_columns()
@@ -1324,6 +1325,28 @@ fn a_viz_keeps_its_lead_column() {
             .count(),
         1
     );
+}
+
+/// A lead reads as Markdown unless it says `format: text` (a log line, a
+/// command: text whose `*` and `_` are meant as written).
+#[test]
+fn a_lead_names_its_format_in_its_long_form() {
+    let p = page(
+        "title: T\nloaders:\n  q: { rows: [{ d: x }] }\nview: { viz: detail, from: q, lead: { column: d, format: text } }\n",
+    )
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.lead.as_deref(), Some("d"));
+    assert_eq!(
+        config.lead_format,
+        Some(crate::pages::spec::TextFormat::Text)
+    );
+    assert!(page(
+        "title: T\nloaders:\n  q: { rows: [{ d: x }] }\nview: { viz: detail, from: q, lead: { column: d, format: html } }\n",
+    )
+    .is_err());
 }
 
 // --- the parse loader ---------------------------------------------------

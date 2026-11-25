@@ -150,7 +150,7 @@ section above their subsections; Contents nests both levels.
 ### Grouping and styling rows
 
 `group: { by: <column> }` puts rows under a heading per value;
-`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `single_line: true` (a table) keeps each row on one line and cuts a long cell with "…"; `chartable: true` (a table) offers **Show as** and **Save as Page** on it, for rows worth charting; `depth:
+`emphasis: <column>` highlights rows whose value is truthy; `reveal: <column>` marks the row whose value is truthy the same way and scrolls it into view when first drawn; `lead: <column>` puts a row's text under a section's heading, as Markdown (`lead: { column: <column>, format: text }` shows it as written); `single_line: true` (a table) keeps each row on one line and cuts a long cell with "…"; `chartable: true` (a table) offers **Show as** and **Save as Page** on it, for rows worth charting; `depth:
 <column>` indents. A column's `icon: <column>` draws an icon named by that
 column's value, and `tone: <column>` colours the cell (`accent`, `success`,
 `warning`, `danger`, `muted`). A column's `badges: <column>` draws that column's labels (a JSON array, such as a commit's branches and tags) as pills at the right end of the cell, each in its `tone`.

@@ -379,11 +379,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
     <VizActionRunnerContext.Provider value={runner}>
     <FormSourceContext.Provider value={forms}>
     <VizPagesContext.Provider value={pages}>
-      {lead ? (
-        <p className="ox-section-desc" data-testid={`node-${id}-lead`}>
-          {lead}
-        </p>
-      ) : null}
+      {lead ? <Lead id={id} text={lead} format={vizRun.config.leadFormat ?? "markdown"} /> : null}
       {showAs && def.config.viz === "table" && def.config.chartable && def.from !== null && !compact ? (
         <TablePresentation
           key={`${run.page.id}:${id}`}
@@ -404,6 +400,20 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
     </FormSourceContext.Provider>
     </VizActionRunnerContext.Provider>
   );
+}
+
+/** A node's lead under its heading: Markdown (a commit message's
+ *  paragraphs, lists and `code`) or, with `format: text`, the text as
+ *  written with its line breaks. One paragraph reads as the muted
+ *  description; more (a message's body) in the body's colour, since a
+ *  long muted block is hard to read. */
+function Lead({ id, text, format }: { id: string; text: string; format: "markdown" | "text" }) {
+  const long = /\n\s*\n|\n\s*([-*+]|\d+\.)\s/.test(text);
+  const className = long ? "ox-section-desc ox-section-lead" : "ox-section-desc";
+  if (format === "text") {
+    return <p className={className} data-testid={`node-${id}-lead`} style={{ whiteSpace: "pre-line" }}>{text}</p>;
+  }
+  return <Markdown value={text} className={className} testId={`node-${id}-lead`} />;
 }
 
 /** A node's `lead`: the first row's text of its column, a paragraph under

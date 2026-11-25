@@ -313,6 +313,33 @@ pub enum ArgSource {
     Literal(#[specta(type = oxplow_domain::Json)] serde_json::Value),
 }
 
+/// A viz node's `lead`: its column, or its column and how it reads.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum LeadDecl {
+    Column(String),
+    With {
+        column: String,
+        #[serde(default)]
+        format: Option<crate::pages::spec::TextFormat>,
+    },
+}
+
+impl LeadDecl {
+    fn column(self) -> String {
+        match self {
+            LeadDecl::Column(c) | LeadDecl::With { column: c, .. } => c,
+        }
+    }
+
+    fn format(&self) -> Option<crate::pages::spec::TextFormat> {
+        match self {
+            LeadDecl::Column(_) => None,
+            LeadDecl::With { format, .. } => *format,
+        }
+    }
+}
+
 /// When a loader that reads outside the published datasets runs again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
@@ -751,9 +778,10 @@ struct VizFile {
     /// The rows start folded under a count; a click opens them.
     #[serde(default)]
     fold: bool,
-    /// A column whose first row's text is a paragraph under the heading.
+    /// A column whose first row's text is a paragraph under the heading:
+    /// `lead: <column>`, or `lead: { column, format: markdown | text }`.
     #[serde(default)]
-    lead: Option<String>,
+    lead: Option<LeadDecl>,
     #[serde(default)]
     chart: Option<VizChart>,
     #[serde(default)]
@@ -1884,7 +1912,8 @@ fn leaf_viz(
         empty: f.empty,
         hide_header: f.hide_header,
         fold: f.fold,
-        lead: f.lead,
+        lead_format: f.lead.as_ref().and_then(LeadDecl::format),
+        lead: f.lead.map(LeadDecl::column),
         chart: f.chart,
         tree: f.tree,
         timeline: f.timeline,

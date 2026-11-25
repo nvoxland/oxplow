@@ -6415,6 +6415,12 @@ export type TestDecl = {
 	sql?: string | null,
 };
 
+/**
+ *  How a block of text reads in the UI: Markdown, or plain text with its
+ *  line breaks kept (text whose `*`, `_` and `#` are meant as written).
+ */
+export type TextFormat = "markdown" | "text";
+
 export type Thread = {
 	id: ThreadId,
 	stream_id: StreamId,
@@ -6845,6 +6851,13 @@ export type VizConfig_Deserialize = {
 	 *  facts). Null or empty: nothing is drawn.
 	 */
 	lead: string | null,
+	/**
+	 *  How the lead reads when its YAML says (`lead: { column, format }`):
+	 *  unset is Markdown (a commit message's paragraphs and lists, a
+	 *  description's `code`); `text` is the text with its line breaks
+	 *  kept. An agent reads the raw text either way.
+	 */
+	leadFormat: TextFormat | null,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,
@@ -6941,6 +6954,13 @@ export type VizConfig_Serialize = {
 	 *  facts). Null or empty: nothing is drawn.
 	 */
 	lead: string | null,
+	/**
+	 *  How the lead reads when its YAML says (`lead: { column, format }`):
+	 *  unset is Markdown (a commit message's paragraphs and lists, a
+	 *  description's `code`); `text` is the text with its line breaks
+	 *  kept. An agent reads the raw text either way.
+	 */
+	leadFormat: TextFormat | null,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,

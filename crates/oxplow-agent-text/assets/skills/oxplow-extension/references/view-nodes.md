@@ -85,9 +85,13 @@ rows draws its `empty:` line instead of its fields.
 themselves.
 `fold: true` starts the rows closed under a row count, for a long list
 nobody reads by default.
-`lead: <column>` puts that column's first-row text as a plain paragraph
-under the node's heading, above its viz: what a thing is, above its facts
-(null or blank draws nothing, no gap).
+`lead: <column>` puts that column's first-row text under the node's
+heading, above its viz: what a thing is, above its facts (null or blank
+draws nothing, no gap). It reads as Markdown (paragraphs, lists, `code`: a
+commit message, a description); `lead: { column: <column>, format: text }`
+shows it as written, line breaks kept, for text whose `*` or `_` are
+literal (a log line, a command). With `title_from: <column>` the row names
+the heading too (a commit: its subject heads, its body is the lead).
 
 - `table`: rows. `list`: one line per row, headlined by the first column
   (in a rail panel, one dense line, the other columns small beside it).

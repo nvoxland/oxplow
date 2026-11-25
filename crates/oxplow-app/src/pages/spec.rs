@@ -965,6 +965,27 @@ pub struct PageColumn {
     pub parents: Option<String>,
 }
 
+/// How a block of text reads in the UI: Markdown, or plain text with its
+/// line breaks kept (text whose `*`, `_` and `#` are meant as written).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TextFormat {
+    #[default]
+    Markdown,
+    Text,
+}
+
 /// How a column's value reads in the UI. An agent reads the raw value.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -2336,6 +2357,11 @@ pub struct VizConfig {
     /// the node's heading, above its viz (what a thing is, above its
     /// facts). Null or empty: nothing is drawn.
     pub lead: Option<String>,
+    /// How the lead reads when its YAML says (`lead: { column, format }`):
+    /// unset is Markdown (a commit message's paragraphs and lists, a
+    /// description's `code`); `text` is the text with its line breaks
+    /// kept. An agent reads the raw text either way.
+    pub lead_format: Option<TextFormat>,
     /// Columns a chart viz draws from.
     pub chart: Option<VizChart>,
     pub tree: Option<VizTree>,

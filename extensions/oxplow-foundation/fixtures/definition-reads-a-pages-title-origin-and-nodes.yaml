@@ -58,7 +58,7 @@ expect:
               - **About**: Detail of `detail`
                 - columns: committed_at (Date), author (Author), sha (Commit), on_branch (On this branch), parent (Parent), merged (Merged)
                 - when empty: “Commit not found.”
-                - lead: `message`
+                - lead: `body`
               - **Files**: Tree of `files`
                 - columns: path (File)
                 - when empty: “The commit changed no files.”

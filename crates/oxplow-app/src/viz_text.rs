@@ -1387,6 +1387,7 @@ mod tests {
                 actions: Vec::new(),
                 origin: Default::default(),
                 lead: None,
+                lead_format: None,
             },
             params: BTreeMap::new(),
             result: SqlQueryResult {

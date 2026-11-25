@@ -13,7 +13,7 @@ when: { page: oxplow/commit, params: { stream_id: 1, sha: $change.rev } }
 expect:
   loaders:
     row: { rows: [{ change_id: $any, head_revision: $any }] }
-    detail: { rows: [{ subject: add things, message: "add things\n\nwith a body", sha: $change.rev, parent: $any, merged: null }] }
+    detail: { rows: [{ subject: add things, body: with a body, sha: $change.rev, parent: $any, merged: null }] }
     files:
       rows:
         - { path: src/deep/a.rs, status: added, head_revision: $any }
