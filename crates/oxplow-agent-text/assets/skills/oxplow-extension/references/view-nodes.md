@@ -20,7 +20,8 @@ another extension's page may take over) and `size`. A section may also have:
   heading and Contents; `title` stands when there is no row.
 - `collapsible: true`: its heading folds it; the choice is the tab's.
 - `link: <page id>`: an arrow beside its heading opens that page (a bare slug
-  is this extension's). Prefer it to a one-value `group` that only makes a
+  is this extension's) with this page's params of the same names, so a
+  section of a change's page opens another page of that change. Prefer it to a one-value `group` that only makes a
   heading.
 
 **A section needs a `title`.** A section is a child of a `stack`, `grid` or

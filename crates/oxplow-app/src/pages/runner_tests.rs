@@ -50,6 +50,33 @@ async fn see_also_links_resolve_in_order_without_errors() {
     );
 }
 
+/// A section's `link` opens its page with the host's params of the names
+/// that page declares. A loader's column is never one: a section's rows
+/// are not what its page is about. A param the host lacks is left out, and
+/// a section with no `link` has none.
+#[tokio::test]
+async fn a_section_link_carries_the_params_of_its_page() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/linked", &[]).await;
+    let links: Vec<(&str, Option<&str>)> = r
+        .tree
+        .children
+        .iter()
+        .map(|c| (c.id.as_str(), c.link.as_deref()))
+        .collect();
+    assert_eq!(
+        links,
+        [
+            (
+                "to-numbers",
+                Some("oxplow:oxplow/page?n=4&page=acme/numbers")
+            ),
+            ("to-picked", Some("oxplow:oxplow/page?page=acme/picked")),
+            ("plain", None),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn loaders_run_in_order_and_later_ones_read_earlier_ones() {
     let (_dir, svc) = fixture().await;

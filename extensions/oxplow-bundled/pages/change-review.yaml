@@ -92,27 +92,112 @@ loaders:
       LEFT JOIN v_oxplow_change_interest i ON i.change_id = CAST(:change_id AS INTEGER) AND i.path = f.path
       WHERE f.rank <= 2
       ORDER BY f.rank, coalesce(i.interest, 0) DESC, f.path
-  all_signals:
-    sql: |
-      SELECT '[All signals](' || uri('oxplow/page', 'page', 'change-review-signals', 'change_id', CAST(:change_id AS INTEGER)) || ') · '
-             || '[Tests](' || uri('oxplow/page', 'page', 'change-review-tests', 'change_id', CAST(:change_id AS INTEGER)) || ') · '
-             || '[Code](' || uri('oxplow/page', 'page', 'change-review-code', 'change_id', CAST(:change_id AS INTEGER)) || ')' AS text
   by_area:
     sql: |
-      -- `signals` opens the Signals page narrowed to the area; `more` opens
-      -- the page that goes deeper into it (Tests, Code), if there is one.
+      -- Each area opens its Signals page (a tab of its own).
       SELECT area,
              count(*) FILTER (WHERE severity = 'high') AS high,
              count(*) FILTER (WHERE severity = 'medium') AS medium,
              count(*) FILTER (WHERE severity = 'info') AS info,
-             uri('oxplow/page', 'page', 'change-review-signals', 'change_id', CAST(:change_id AS INTEGER)) || '#area=' || area AS signals,
-             CASE WHEN area IN ('tests', 'verification') THEN uri('oxplow/page', 'page', 'change-review-tests', 'change_id', CAST(:change_id AS INTEGER))
-                  WHEN area = 'code' THEN uri('oxplow/page', 'page', 'change-review-code', 'change_id', CAST(:change_id AS INTEGER)) END AS more,
-             CASE WHEN area IN ('tests', 'verification') THEN 'Tests' WHEN area = 'code' THEN 'Code' END AS more_label
+             uri('oxplow/page', 'page', 'change-review-signals', 'change_id', CAST(:change_id AS INTEGER), 'area', area) AS signals
       FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
       GROUP BY area
       ORDER BY CASE area WHEN 'tests' THEN 1 WHEN 'verification' THEN 2 WHEN 'dependencies' THEN 3
                          WHEN 'code' THEN 4 WHEN 'scope' THEN 5 WHEN 'history' THEN 6 ELSE 7 END, area
+  tests_summary:
+    sql: |
+      -- What the change did to its tests, in four facts: enough to tell
+      -- whether to open the Tests page. Only a request has runs and
+      -- coverage: a commit's or a range's facts say so.
+      WITH t AS (
+        SELECT count(*) AS n, sum(tests_before) AS tb, sum(tests_after) AS ta,
+               sum(assertions_before) AS ab, sum(assertions_after) AS aa,
+               sum(skips_before) AS sb, sum(skips_after) AS sa
+        FROM v_change_test_file WHERE change_id = CAST(:change_id AS INTEGER)
+      ),
+      s AS (
+        SELECT count(*) FILTER (WHERE area = 'tests' AND severity = 'high') AS high,
+               count(*) FILTER (WHERE area = 'tests' AND severity = 'medium') AS medium,
+               count(*) FILTER (WHERE signal = 'uncovered-lines') AS uncovered
+        FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
+      ),
+      r AS (
+        SELECT count(*) AS n,
+               (SELECT printf('%d passed, %d failed', r2.passed, r2.failed) FROM v_agent_turn t2
+                JOIN v_test_run r2 ON r2.turn_id = t2.id
+                WHERE c.kind = 'request' AND t2.request_id = CAST(c.target AS INTEGER)
+                ORDER BY r2.captured_at DESC, r2.id DESC LIMIT 1) AS latest,
+               (SELECT r2.failed FROM v_agent_turn t2 JOIN v_test_run r2 ON r2.turn_id = t2.id
+                WHERE c.kind = 'request' AND t2.request_id = CAST(c.target AS INTEGER)
+                ORDER BY r2.captured_at DESC, r2.id DESC LIMIT 1) AS failed,
+               EXISTS (SELECT 1 FROM v_request_observation o
+                       WHERE c.kind = 'request' AND o.request_id = CAST(c.target AS INTEGER)
+                         AND o.kind = 'diff-coverage') AS covered,
+               c.kind
+        FROM v_change c
+        LEFT JOIN v_agent_turn t ON c.kind = 'request' AND t.request_id = CAST(c.target AS INTEGER)
+        LEFT JOIN v_test_run tr ON tr.turn_id = t.id
+        WHERE c.id = CAST(:change_id AS INTEGER)
+        GROUP BY c.id
+      )
+      SELECT CASE WHEN t.n = 0 THEN 'None changed'
+                  ELSE printf('%d changed · tests %d → %d · assertions %d → %d · skips %d → %d',
+                              t.n, t.tb, t.ta, t.ab, t.aa, t.sb, t.sa) END AS test_files,
+             CASE WHEN t.aa < t.ab OR t.sa > t.sb OR t.ta < t.tb THEN 'warning' END AS test_files_tone,
+             CASE WHEN s.high + s.medium = 0 THEN 'None'
+                  ELSE trim(CASE WHEN s.high > 0 THEN printf('%d high', s.high) ELSE '' END
+                            || CASE WHEN s.high > 0 AND s.medium > 0 THEN ' · ' ELSE '' END
+                            || CASE WHEN s.medium > 0 THEN printf('%d medium', s.medium) ELSE '' END) END AS weakened,
+             CASE WHEN s.high > 0 THEN 'danger' WHEN s.medium > 0 THEN 'warning' END AS weakened_tone,
+             CASE WHEN r.kind <> 'request' THEN 'Only a request has runs'
+                  WHEN r.latest IS NULL THEN 'None seen'
+                  ELSE 'Latest: ' || r.latest || CASE WHEN r.n > 1 THEN printf(' · %d runs', r.n) ELSE '' END END AS runs,
+             CASE WHEN r.kind = 'request' AND r.latest IS NULL THEN 'warning'
+                  WHEN r.failed > 0 THEN 'danger' END AS runs_tone,
+             CASE WHEN r.kind <> 'request' THEN 'Only a request has coverage'
+                  WHEN NOT r.covered THEN 'No coverage report'
+                  WHEN s.uncovered = 0 THEN 'None'
+                  ELSE printf('Changed lines in %d file%s ran in no test', s.uncovered,
+                              CASE s.uncovered WHEN 1 THEN '' ELSE 's' END) END AS uncovered,
+             CASE WHEN s.uncovered > 0 THEN 'warning' END AS uncovered_tone
+      FROM t, s, r
+  code_summary:
+    sql: |
+      -- What the change did to its code, in four facts: enough to tell
+      -- whether to open the Code page.
+      WITH f AS (
+        SELECT count(*) FILTER (WHERE status = 'added') AS added,
+               count(*) FILTER (WHERE status = 'modified') AS changed,
+               count(*) FILTER (WHERE status = 'deleted') AS removed,
+               count(*) FILTER (WHERE complexity_delta > 0) AS grew
+        FROM v_change_function WHERE change_id = CAST(:change_id AS INTEGER) AND is_test = 0
+      ),
+      s AS (
+        SELECT count(*) FILTER (WHERE signal = 'signature-changed') AS signatures,
+               count(*) FILTER (WHERE signal = 'public-removed') AS removed,
+               count(*) FILTER (WHERE source = 'oxplow/review_signal_duplication') AS copies
+        FROM v_oxplow_review_signal_shown WHERE change_id = CAST(:change_id AS INTEGER)
+          AND source IN ('oxplow/review_signal_api', 'oxplow/review_signal_duplication')
+      )
+      SELECT CASE WHEN f.added + f.changed + f.removed = 0 THEN 'None changed'
+                  ELSE trim(CASE WHEN f.added > 0 THEN printf('%d added · ', f.added) ELSE '' END
+                            || CASE WHEN f.changed > 0 THEN printf('%d changed · ', f.changed) ELSE '' END
+                            || CASE WHEN f.removed > 0 THEN printf('%d removed · ', f.removed) ELSE '' END, ' ·') END AS functions,
+             CASE WHEN f.grew = 0 THEN 'No function got more complex'
+                  ELSE printf('%d got more complex; the most is %s', f.grew,
+                         (SELECT printf('`%s` +%d', CASE WHEN x.container <> '' THEN x.container || '::' ELSE '' END || x.name, x.complexity_delta)
+                          FROM v_change_function x
+                          WHERE x.change_id = CAST(:change_id AS INTEGER) AND x.is_test = 0 AND x.complexity_delta > 0
+                          ORDER BY x.complexity_delta DESC, x.path, x.start_line LIMIT 1)) END AS complexity,
+             CASE WHEN f.grew > 0 THEN 'warning' END AS complexity_tone,
+             CASE WHEN s.signatures + s.removed = 0 THEN 'None'
+                  ELSE trim(CASE WHEN s.signatures > 0 THEN printf('%d signature%s changed · ', s.signatures, CASE s.signatures WHEN 1 THEN '' ELSE 's' END) ELSE '' END
+                            || CASE WHEN s.removed > 0 THEN printf('%d removed · ', s.removed) ELSE '' END, ' ·') END AS api,
+             CASE WHEN s.signatures + s.removed > 0 THEN 'warning' END AS api_tone,
+             CASE WHEN s.copies = 0 THEN 'None'
+                  ELSE printf('%d block%s on changed lines repeat%s other code', s.copies,
+                              CASE s.copies WHEN 1 THEN '' ELSE 's' END, CASE s.copies WHEN 1 THEN 's' ELSE '' END) END AS duplicates
+      FROM f, s
 rail:
   title: About
   from: change
@@ -137,19 +222,42 @@ view:
     description: The files with a high or medium signal, worst first, then by how much each changed. Open a row for each signal and its line.
     from: look_here
     viz: table
+    edge: tone
     columns:
     - key: file
       label: File
       link: { kind: diff-at, from: path, base: base_revision, head: head_revision }
       expand: change-review-file
-    - { key: severity, label: Severity, format: badge, tone: tone }
-    - { key: signals_all, label: Why, format: items }
+    - { key: signals_all, label: Signals, format: items }
     empty: No file has a high or medium signal.
+  - id: tests
+    title: Tests
+    description: What the change did to its tests and what checked it. The arrow opens the Tests page.
+    from: tests_summary
+    viz: detail
+    link: change-review-tests
+    columns:
+    - { key: test_files, label: Test files, tone: test_files_tone }
+    - { key: weakened, label: Weakened, tone: weakened_tone }
+    - { key: runs, label: Runs, tone: runs_tone }
+    - { key: uncovered, label: Uncovered, tone: uncovered_tone }
+  - id: code
+    title: Code
+    description: What the change did to its functions, its public API and its copies of other code. The arrow opens the Code page.
+    from: code_summary
+    viz: detail
+    link: change-review-code
+    columns:
+    - { key: functions, label: Functions }
+    - { key: complexity, label: Complexity, tone: complexity_tone, format: markdown }
+    - { key: api, label: Public API, tone: api_tone }
+    - { key: duplicates, label: Duplicates }
   - id: by-area
     title: By Area
-    description: How many signals each area gave. `info` signals are context; they are listed under their file, not in Look Here.
+    description: How many signals each area gave. `info` signals are context; they are listed under their file, not in Look Here. The arrow opens every signal on one page.
     from: by_area
     viz: table
+    link: change-review-signals
     columns:
     - key: area
       label: Area
@@ -157,14 +265,5 @@ view:
     - { key: high, label: High }
     - { key: medium, label: Medium }
     - { key: info, label: Info }
-    - key: more_label
-      label: Details
-      link: { kind: page, from: more }
     empty: No signals.
-  - id: pages
-    title: Go Deeper
-    description: Every signal in one table, and the pages for what the change did to its tests and its code.
-    from: all_signals
-    viz: markdown
-    markdown: { text: text }
   - slot: sections

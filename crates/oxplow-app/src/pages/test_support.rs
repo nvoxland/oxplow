@@ -443,6 +443,22 @@ view: { viz: table, from: borrowed }
 "#,
     ),
     (
+        "linked",
+        r#"
+title: Linked
+params:
+  - { name: n, default: 4 }
+  - { name: pick, role: filter, default: x }
+loaders:
+  one: { sql: "SELECT 1 AS total" }
+view:
+  stack:
+    - { id: to-numbers, title: To numbers, viz: number, from: one, link: numbers }
+    - { id: to-picked, title: To picked, viz: number, from: one, link: picked }
+    - { id: plain, title: Plain, viz: number, from: one }
+"#,
+    ),
+    (
         "related",
         r#"
 title: Related

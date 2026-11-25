@@ -11,7 +11,7 @@ SELECT i.change_id, i.path,
        CASE WHEN i.days >= config('/coChange/dormantDays') THEN 'dormant'
             ELSE 'usual-co-changers-absent' END AS reason,
        CASE WHEN i.days >= config('/coChange/dormantDays') THEN NULL
-            ELSE (SELECT group_concat(t.other, ', ' ORDER BY t.together DESC, t.other)
+            ELSE (SELECT json_group_array(t.other ORDER BY t.together DESC, t.other)
                     FROM (SELECT p.other, p.together FROM ref('co_change_pair') p
                            WHERE p.path = i.path
                            ORDER BY p.together DESC, p.other LIMIT 3) t) END AS expected,

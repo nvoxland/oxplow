@@ -1,6 +1,7 @@
 /// Fake page runs for the page host's tests: a `PageRun` built from a few
 /// nodes and loaders, and a `PageRuns` store over a transport that answers
 /// with it (no daemon).
+import { pageTabRef } from "../../tabs/pageRefs.js";
 import { createPageRuns, type PageKey, type PageRunsTransport, type RunChange } from "../../pageRuns.js";
 import type {
   VizConfig,
@@ -180,6 +181,8 @@ export function runTreeOf(n: Node, pick: Record<string, string> = {}, embeds: Re
     embed: n.kind === "embed" ? (embeds[n.id] ?? null) : null,
     error: null,
     actionPoint: null,
+    // As the run resolves it: the page, with no params in a fake.
+    link: n.link ? pageTabRef(n.link).id : null,
   } as RunNode;
 }
 

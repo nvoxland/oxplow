@@ -21,7 +21,6 @@ import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
 import { actionOptionsOf } from "../viz/vizModel.js";
 import { CollapsibleSections } from "../components/CollapsibleSections.js";
-import { pageTabRef } from "../tabs/pageRefs.js";
 import { actionHelp, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
@@ -195,7 +194,8 @@ function NodeView(props: NodeViewProps) {
           callout={callout}
           icon={def?.icon}
           collapsible={def?.collapsible ?? false}
-          opens={def?.link ? { to: pageTabRef(def.link), name: title } : undefined}
+          // The run resolved the link with the params its page declares.
+          opens={at.link ? { to: at.link, name: title } : undefined}
           fill={fills}
         >
           {body}
