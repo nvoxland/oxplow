@@ -78,6 +78,19 @@ export function rowMenuAction(action: PageAction): boolean {
   return action.row && !action.edit && !action.inForm && !action.drag;
 }
 
+/** The bulk actions (`bulk: true`) the marked rows are offered: an action
+ *  any of them is offered (`when`), run on those. Never a drag action: it
+ *  runs on a drop, not a button. */
+export function bulkOffers(
+  actions: readonly PageAction[],
+  marked: Record<string, SqlCell>[],
+): { action: PageAction; rows: Record<string, SqlCell>[] }[] {
+  return actions
+    .filter((a) => a.bulk && !a.drag)
+    .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
+    .filter((o) => o.rows.length > 0);
+}
+
 /** The actions form action `action`'s `also` names, as buttons in its form:
  *  those of `actions` offered on `row` (`when`), in `also`'s order. */
 export function formAlso(action: PageAction, actions: readonly PageAction[], row: Record<string, SqlCell> | null): PageAction[] {

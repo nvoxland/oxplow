@@ -168,7 +168,8 @@
   field's whole value) — `viz: board` with `group: { by, values }` drags
   cards between columns; `bulk: true` runs once per marked row; `key: f`
   runs on the cursor row. You run the command yourself; these are the
-  person's gestures.
+  person's gestures. A drag action runs only on a drop, so it can't also
+  be `primary`, `form`, `group`, `key` or `bulk`: the loader refuses it.
 - **An action point instead of a command** (`point: oxplow/task.move,
   context: { uri: "{{row.uri}}", stage: "{{option.value}}" }`): whichever
   command a store joined to the point (and accepts that item) runs, so the

@@ -108,7 +108,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { skipSummary, actionAnchor, actionHelp, actionEnabled, actionOffered, formAlso, offeredWholePage, rowMenuAction, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { skipSummary, actionAnchor, actionHelp, actionEnabled, actionOffered, formAlso, offeredWholePage, rowMenuAction, bulkOffers, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
@@ -302,15 +302,6 @@ function actionMenuItem(
   };
 }
 
-/** The bulk actions (`bulk: true`) the marked rows are offered: an action
- *  any of them is offered (`when`), run on those. */
-function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
-  return run.config.actions
-    .filter((a) => a.bulk && !a.drag) // a drag action runs on a drop, not a button
-    .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
-    .filter((o) => o.rows.length > 0);
-}
-
 /** While rows are marked: how many, the bulk actions, and Clear — in place
  *  of the viz's own buttons. */
 function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizActionsState; marks: Marks; options: ActionOptions }) {
@@ -321,7 +312,7 @@ function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizA
       <span data-testid="viz-marks-count" style={{ color: "var(--text-secondary)" }}>
         {marked.length} selected
       </span>
-      {bulkOffers(run, marked).map(({ action, rows }) => (
+      {bulkOffers(run.config.actions, marked).map(({ action, rows }) => (
         <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} options={options[action.id] ?? null} />
       ))}
       <button type="button" data-testid="viz-marks-clear" onClick={() => marks.set([], null)}>

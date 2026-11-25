@@ -5752,6 +5752,8 @@ mod tests {
         for (actions, grouped, says) in [
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, form: true }"], true, "a drag action can't be a form"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, key: f }"], true, "a drag action can't have a `key`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, bulk: true }"], true, "a drag action can't be `bulk`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { o: '{{order.uri}}' } }"], true, "`{{order.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the viz to have a `group`"),

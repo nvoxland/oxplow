@@ -671,7 +671,7 @@ prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm?, options_from?,
 checked at load). A page action with `when` or `{{row.*}}` and no `row`
 reads the page's first loader's one row. A drag action also binds
 `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, and
-`{{order.x}}` (a list of column `x` in the new order).
+`{{order.x}}` (a list of column `x` in the new order). A drag action runs only on a drop: it is never a menu item, a click, a key or a bulk button, and the loader refuses `drag` with `primary`, `form`, `group`, `key` or `bulk`.
 
 An action that fails needs nothing from the page: core records it once
 (Failed operations on the Alerts page) and shows it beside the button

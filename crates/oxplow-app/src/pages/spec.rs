@@ -1885,6 +1885,18 @@ pub(crate) fn parse_actions(
                 f.id
             ));
         }
+        if f.drag && f.key.is_some() {
+            return Err(format!(
+                "actions: `{}`: a drag action can't have a `key` (a key press doesn't drop)",
+                f.id
+            ));
+        }
+        if f.drag && f.bulk {
+            return Err(format!(
+                "actions: `{}`: a drag action can't be `bulk` (a button doesn't drop)",
+                f.id
+            ));
+        }
         if f.primary && !row {
             return Err(format!(
                 "actions: `{}`: `primary` is for a row action (`row: true`)",

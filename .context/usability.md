@@ -1043,7 +1043,8 @@ its right-click menu.
   Dragging a marked row drags every marked row. A drop's place shows as a
   line above or below the row, or the row or group outlined
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
-  the marked rows). Marks are per page and kept in the entry's history
+  the marked rows). A drag action runs only on a drop: it is never a row's menu item, click, key or bulk button.
+  Marks are per page and kept in the entry's history
   state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
   too: focusable, right-click and the Menu key open their row actions,
   `key:`s run them, and they drag where a drag action runs, the place
