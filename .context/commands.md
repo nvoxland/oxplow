@@ -555,7 +555,13 @@ skipping.
    `command_run` detail row linked by `run_id`
    (`command_run_store::insert_tx`). The shared row holds the actor,
    anchors, timing, outcome, error, cost and authority. The detail row
-   holds the command's input, result, inverse, event link and undo marker.
+   holds the command's input, result, inverse, event link and undo marker,
+   and the device a person asked from (`device_id`): a run's context carries
+   the request's caller (`RunContext::with_caller`; its children inherit it),
+   and the RPC commands that run as the person (`run_command`, `undo_command`,
+   `decide_proposal`, page actions and forms, component commands) set it
+   from the request (`.context/remote-daemon.md` "Who is asking"). An agent's,
+   an effect's or a job's run has none.
    For a `Tx` write, the handler, both rows, `command.executed@6` and the
    handler's effects commit together. The event's `command_run_id` names the
    detail row's integer ID. The handler's events take the executed event

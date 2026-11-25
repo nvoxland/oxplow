@@ -52,6 +52,7 @@ pub(super) async fn component_example(
                     on_behalf_of: Actor::Human,
                     confirmed: true,
                     version: version.clone(),
+                    caller: None,
                 },
             )
             .await
@@ -70,6 +71,7 @@ pub(super) async fn component_example(
                     on_behalf_of: Actor::Human,
                     confirmed: true,
                     version: version.clone(),
+                    caller: None,
                 },
             )
             .await
@@ -912,6 +914,7 @@ impl PageAt<'_> {
                 input.unwrap_or_else(|| json!({})),
                 Actor::Human,
                 confirmed,
+                None,
             )
             .await
         } else {
@@ -931,6 +934,7 @@ impl PageAt<'_> {
                         .map(str::to_string),
                     on_behalf_of: Actor::Human,
                     confirmed,
+                    caller: None,
                 },
             )
             .await

@@ -265,7 +265,7 @@ pub async fn page_spec(svc: &Services, page: String) -> Result<PageSpec, IpcErro
 /// is one it holds.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_page_action(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     run_id: String,
     node: Option<String>,
     action: String,
@@ -277,8 +277,8 @@ pub async fn run_page_action(
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     use oxplow_app::pages::actions::{run_page_action, PageActionCall};
     Ok(run_page_action(
-        svc,
-        &svc.page_runs,
+        req,
+        &req.page_runs,
         PageActionCall {
             run_id,
             node,
@@ -289,6 +289,7 @@ pub async fn run_page_action(
             option,
             on_behalf_of: Actor::Human,
             confirmed,
+            caller: req.caller.cloned(),
         },
     )
     .await?)
@@ -306,20 +307,21 @@ pub async fn page_form(
 
 /// A form node of an open run is submitted.
 pub async fn submit_page_form(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     run_id: String,
     node: String,
     input: oxplow_domain::Json,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     Ok(oxplow_app::pages::actions::submit_page_form(
-        svc,
-        &svc.page_runs,
+        req,
+        &req.page_runs,
         &run_id,
         &node,
         input.0,
         Actor::Human,
         confirmed,
+        req.caller,
     )
     .await?)
 }

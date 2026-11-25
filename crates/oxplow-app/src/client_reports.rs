@@ -9,6 +9,8 @@
 //! stops reporting (a closed window) is forgotten after [`FORGET_AFTER`]. A
 //! report older than [`STALE_AFTER`] is still listed, marked stale.
 
+pub mod devices;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 

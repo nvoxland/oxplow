@@ -345,6 +345,7 @@ async fn invoke(ctx: &Ctx, command: &str, input: Value, confirmed: bool) -> Valu
             on_behalf_of: Actor::Human,
             confirmed,
             version: ctx.version.clone(),
+            caller: None,
         },
     )
     .await;
@@ -389,6 +390,7 @@ async fn invoke_point(
             on_behalf_of: Actor::Human,
             confirmed,
             version: ctx.version.clone(),
+            caller: None,
         },
     )
     .await;

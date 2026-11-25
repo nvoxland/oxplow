@@ -341,6 +341,10 @@ app, across its socket's reconnects). The client makes both ids;
   sets them from the device's own token.
 - A request with no caller reads per-device state as its defaults and may
   not write it.
+- A person's command run keeps the device it was asked from
+  (`v_command_run.device_id`): the RPC commands that run as the person pass
+  the caller into the run's context (`.context/commands.md` "Run and
+  record").
 
 The frontend makes the ids. `device.ts` (`getDevice()`, once per page load)
 takes the Mac app's device from the shell's injected `window.__OXPLOW__.device`
@@ -354,7 +358,7 @@ kind, and the connection in the event socket's query (a browser cannot set
 headers on a WebSocket). The daemon checks them as it checks the headers and
 refuses a socket that names them wrongly; one with neither owns no page runs.
 While a socket is open its device is in `Services::client_devices`
-(`crates/oxplow-app/src/client_devices.rs`, memory only), with the newest
+(`crates/oxplow-app/src/client_reports/devices.rs`, memory only), with the newest
 name and kind it gave; it leaves when its last connection closes.
 
 ## Known v1 gaps

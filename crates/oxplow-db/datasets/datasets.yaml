@@ -1728,7 +1728,7 @@ datasets:
     - { not_null: capability }
     - { not_null: provider }
 - name: command_run
-  version: 2
+  version: 3
   key: [id]
   description: "Every command run on the bus, including reads and refusals. Each row names the command, who ran it, how it ended and the contribution run that holds its cost and authority."
   groups: [contribution_run]
@@ -1738,6 +1738,7 @@ datasets:
     - { name: "changed", type: "INT", doc: "1 when the command completed with outcome ok and recorded its input." }
     - { name: "undone", type: "INT", doc: "1 when another command run has undone this run." }
     - { name: "uri", type: "TEXT", doc: "The contribution run's URI (`oxplow:oxplow/contribution_run?id=<run_id>`)." }
+    - { name: "device_id", type: "TEXT", doc: "The device a person asked from (`dev-<uuid>`: the Mac app or a paired browser); NULL for a run no device asked for (an agent, an effect, a job) and for runs before v3. (v3)" }
   tests:
     - { not_null: run_id }
     - { unique: run_id }

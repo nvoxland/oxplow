@@ -1263,6 +1263,7 @@ fn run_action_op(services: ServicesSlot) -> Op {
                         on_behalf_of: invocation.actor().clone(),
                         // An agent never confirms.
                         confirmed: false,
+                        caller: None,
                     },
                 )
                 .await?;

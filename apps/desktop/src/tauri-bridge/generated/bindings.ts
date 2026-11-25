@@ -159,12 +159,14 @@ export const commands = {
 	loadComponent: (id: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("load_component", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	invokeComponentPoint: (id: string, point: string, context: unknown, command: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_point", { id, point, context, command, confirmed, version })),
 	/**
@@ -251,7 +253,8 @@ export const commands = {
 	pageSpec: (page: string) => typedError<PageSpec, IpcError_Serialize>(__TAURI_INVOKE("page_spec", { page })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	runPageAction: (runId: string, node: string | null, action: string, row: { [key in string]: SqlCell } | null, input: unknown | null, drop: {
 	before?: { [key in string]: SqlCell } | null,
@@ -267,7 +270,8 @@ export const commands = {
 	pageForm: (runId: string, node: string) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("page_form", { runId, node })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	submitPageForm: (runId: string, node: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("submit_page_form", { runId, node, input, confirmed })),
 	/**
@@ -503,7 +507,8 @@ export const commands = {
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError_Serialize>(__TAURI_INVOKE("get_workspace_context")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
 	/**
@@ -557,12 +562,14 @@ export const commands = {
 	runCommandForCall: (call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command_for_call", { call, id, input })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	undoCommand: (commandRunId: CommandRunId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { commandRunId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	decideProposal: (proposal: ProposalId, approve: boolean) => typedError<{
 	result: unknown,
