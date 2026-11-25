@@ -727,8 +727,8 @@ function RowsBody({
       text
     );
     const opens = c.expand ? expanded.has(expansionKey(c, row)) : false;
-    // Its `badges`: another column's labels, as pills before the text, where
-    // a cut text can't hide them (as `git log` puts `(main)` first).
+    // Its `badges`: another column's labels, as pills at the cell's end:
+    // every row's text starts in one place, and a cut text can't hide them.
     const pills = c.badgesIndex == null ? [] : (markList(row[c.badgesIndex] ?? null) ?? []);
     if (!tone && !icon && mine.length === 0 && pills.length === 0 && !c.expand) return body;
     // The expand glyph leads the cell and stays on its first line: the
@@ -736,7 +736,9 @@ function RowsBody({
     return (
       <span
         data-tone={tone ? String(toneName) : undefined}
-        style={{ display: "inline-flex", alignItems: "flex-start", gap: 4, maxWidth: "100%", color: tone ?? undefined }}
+        // With pills, the cell's whole width: the text from its start, the
+        // pills at its end.
+        style={{ display: pills.length > 0 ? "flex" : "inline-flex", alignItems: "flex-start", gap: 4, maxWidth: "100%", color: tone ?? undefined }}
       >
         {c.expand ? (
           <button
@@ -750,20 +752,24 @@ function RowsBody({
           </button>
         ) : null}
         {icon ? <VizIcon spec={icon} tone={tone} /> : null}
-        {pills.map((p, i) => (
-          <span
-            key={`b${i}`}
-            data-testid="viz-cell-badge"
-            className="ox-badge ox-cell-badge"
-            title={p.hint}
-            style={{ color: toneColor(p.tone ?? "accent") ?? toneColor("accent")! }}
-          >
-            {p.text}
-          </span>
-        ))}
         <span className="ox-cell-text" style={{ minWidth: 0 }}>
           {body}
         </span>
+        {pills.length > 0 ? (
+          <span className="ox-cell-badges">
+            {pills.map((p, i) => (
+              <span
+                key={`b${i}`}
+                data-testid="viz-cell-badge"
+                className="ox-badge ox-cell-badge"
+                title={p.hint ? `${p.text}: ${p.hint}` : p.text}
+                style={{ color: toneColor(p.tone ?? "accent") ?? toneColor("accent")! }}
+              >
+                {p.text}
+              </span>
+            ))}
+          </span>
+        ) : null}
         {mine.map((b, i) => (
           <RefBadge key={i} label={b.label} tone="label" color={safeColor(b.color) ?? undefined} title={`from ${b.extension}`} />
         ))}

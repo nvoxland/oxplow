@@ -572,9 +572,10 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
 `tone`, `badges`, `width`, `format`, `parents`, `highlight`, `select`, `expand`, `when`.
 
-- `badges: <column>` draws that column's labels as pills before the cell's
-  text (a commit's branches and tags, as `git log` puts `(main)` first), each
-  outlined and tinted in its `tone` (the accent when it names none). The value is a JSON array, as
+- `badges: <column>` draws that column's labels as pills at the right end of
+  the cell (a commit's branches and tags), so every row's text starts in the
+  same place; each is outlined and tinted in its `tone` (the accent when it
+  names none), at most 12em wide with the full label on hover. The value is a JSON array, as
   `marks` reads it: each element a string or `{ "text", "tone"?, "hint"? }`.
   The column must be in the result (`viz_column_problems`). An agent's page
   text reads it as a column of its own, after this one, joined by spaces

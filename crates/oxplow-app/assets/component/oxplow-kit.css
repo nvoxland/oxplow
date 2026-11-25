@@ -206,8 +206,10 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A column's `badges`: pills in their tone (the colour set on the pill),
    outlined and tinted with it, so a branch or tag stands out in its row. */
-.ox-cell-badge { flex-shrink: 0; border-color: currentColor; background: color-mix(in srgb, currentColor 14%, transparent); font-weight: var(--weight-medium); line-height: var(--leading-tight); }
-/* A cut cell of parts (pills, then its text): the text is cut, the pills stay whole. */
+.ox-cell-badge { border-color: currentColor; background: color-mix(in srgb, currentColor 14%, transparent); font-weight: var(--weight-medium); line-height: var(--leading-tight); max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The pills at the cell's end, after its text, on its first line. */
+.ox-cell-badges { margin-left: auto; flex-shrink: 0; display: inline-flex; gap: var(--space-1); align-self: center; }
+/* A cut cell of parts (its text, then pills): the text is cut, the pills stay. */
 .ox-truncate .ox-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Document pages: a title, an intro, then sections. A section is a

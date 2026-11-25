@@ -3,8 +3,8 @@ import { cleanup, render } from "@testing-library/react";
 
 import type { VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
-// A column's `badges` draws another column's labels as pills before its
-// text; `single_line` keeps each of a table's rows to one line, a long cell
+// A column's `badges` draws another column's labels as pills at the end
+// of its cell; `single_line` keeps each of a table's rows to one line, a long cell
 // cut with "…".
 
 const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
@@ -43,13 +43,17 @@ const runOf = (over: Record<string, unknown> = {}): VizRun =>
     result: { columns: ["subject", "refs", "author"], rows, truncated: false, reads: { datasets: [], tables: [], measures: [] } },
   }) as unknown as VizRun;
 
-test("a column's badges are pills before its text, each in its tone, and the badges column isn't a cell", () => {
+test("a column's badges are pills at the end of its cell, each in its tone, and the badges column isn't a cell", () => {
   const view = render(<VizView run={runOf()} />);
   const pills = [...view.getByTestId("viz-row-0").querySelectorAll<HTMLElement>("[data-testid=viz-cell-badge]")];
   expect(pills.map((p) => p.textContent)).toEqual(["main", "v1.0"]);
-  // Before the text, so a cut subject never hides them.
+  // At the cell's right end, after its text: every row's text starts at
+  // the same place, and a cut text never hides them.
   const text = view.getByTestId("viz-row-0").querySelector(".ox-cell-text")!;
-  expect(pills.every((p) => p.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect(pills.every((p) => p.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
+  expect(pills[0]!.closest(".ox-cell-badges")).not.toBeNull();
+  // A long name is cut too, whole on hover.
+  expect(pills[0]!.title).toBe("main");
   // Untoned, the accent; a tone, its own colour.
   expect(pills[0]!.style.color).toBe("var(--accent)");
   expect(pills[1]!.style.color).toBe("var(--status-waiting)");

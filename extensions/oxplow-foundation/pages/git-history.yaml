@@ -26,8 +26,10 @@ params:
   default: ''
 - name: head_sha
   label: Head commit
+# The commit a link brings into view (marked, loaded even past the limit):
+# set by the link, never typed, so not in the rail.
 - name: reveal_sha
-  role: filter
+  role: view
   label: Commit to reveal
   default: ''
 - name: limit
