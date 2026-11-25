@@ -10,9 +10,11 @@ developer-facing mechanics.
 
 ## Pieces
 
-The event socket carries the window's `client` query parameter beside its
-token: one id for the page load, in memory (`uiClientId.ts`), so a reload is
-a new window and a duplicated browser tab is never the one it came from. Its page-run ownership guard drops that window's runs on disconnect;
+The event socket says who it is in its query, beside its token: `device`,
+`connection` (one id for the page load, in memory, `uiClientId.ts`, so a
+reload is a new connection and a duplicated browser tab is never the one it
+came from), and the device's `name` and `kind` (see "Who is asking"). Its
+page-run ownership guard drops that connection's runs on disconnect;
 a replacement socket takes a new generation, so late cleanup from the old socket
 cannot release new runs. An open in flight is fenced against that generation.
 Logs, tab reports, the client host and the socket use the same `uiClientId.ts` identity.
@@ -347,7 +349,13 @@ dir, `oxplow_config::this_device`, named after the Mac; every project window
 gets the same one),
 or, in a browser, keeps a `dev-<uuid>` in `shellStorage` (`oxplow.device`);
 `uiClientId.ts` makes the `con-<uuid>`. `tauri-bridge/transport.ts` adds both
-headers to every HTTP invoke; the event socket still sends only `client=`.
+headers to every HTTP invoke, and `eventsUrl` puts the device, its name and
+kind, and the connection in the event socket's query (a browser cannot set
+headers on a WebSocket). The daemon checks them as it checks the headers and
+refuses a socket that names them wrongly; one with neither owns no page runs.
+While a socket is open its device is in `Services::client_devices`
+(`crates/oxplow-app/src/client_devices.rs`, memory only), with the newest
+name and kind it gave; it leaves when its last connection closes.
 
 ## Known v1 gaps
 

@@ -194,9 +194,62 @@ async fn health() -> &'static str {
 /// the upgrade's callback runs only after the client has its
 /// `101`, so a client that writes once its socket opens could otherwise
 /// cause an event no forwarder was there to see.
+///
+/// The socket says who it is in its query (`.context/remote-daemon.md` "Who
+/// is asking"): `device` and `connection`, both or neither, with the
+/// device's `name` and `kind`. A socket with neither (a test, a script)
+/// owns no page runs; one that names them wrongly is refused.
 #[derive(serde::Deserialize)]
 struct EventClient {
-    client: Option<String>,
+    device: Option<String>,
+    connection: Option<String>,
+    name: Option<String>,
+    kind: Option<String>,
+}
+
+impl EventClient {
+    fn caller(
+        self,
+    ) -> Result<Option<(oxplow_domain::DeviceDescriptor, oxplow_domain::ConnectionId)>, String>
+    {
+        let (device, connection) = match (self.device, self.connection) {
+            (None, None) => return Ok(None),
+            (Some(device), Some(connection)) => (device, connection),
+            _ => return Err("device and connection come together".into()),
+        };
+        let kind = match self.kind.as_deref() {
+            None => oxplow_domain::DeviceKind::Desktop,
+            Some(kind) => serde_json::from_value(serde_json::Value::String(kind.into()))
+                .map_err(|_| format!("kind: expected desktop, tablet or phone, got `{kind}`"))?,
+        };
+        Ok(Some((
+            oxplow_domain::DeviceDescriptor {
+                id: oxplow_domain::DeviceId::parse(&device).map_err(|e| format!("device: {e}"))?,
+                name: self
+                    .name
+                    .filter(|n| !n.trim().is_empty())
+                    .unwrap_or_else(|| "Unnamed device".into()),
+                kind,
+            },
+            oxplow_domain::ConnectionId::parse(&connection)
+                .map_err(|e| format!("connection: {e}"))?,
+        )))
+    }
+}
+
+/// What a named socket holds while it is open: its page runs, and its
+/// device's place among the connected ones.
+struct SocketOwner {
+    _runs: oxplow_app::pages::open_runs::PageClient,
+    devices: std::sync::Arc<oxplow_app::client_devices::ClientDevices>,
+    device: oxplow_domain::DeviceId,
+    connection: oxplow_domain::ConnectionId,
+}
+
+impl Drop for SocketOwner {
+    fn drop(&mut self) {
+        self.devices.disconnected(&self.device, &self.connection);
+    }
 }
 
 async fn events_ws(
@@ -204,11 +257,24 @@ async fn events_ws(
     Query(client): Query<EventClient>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let named = match client.caller() {
+        Ok(named) => named,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
     let forwarders = subscribe(&state);
     let services = state.ctx.services.clone();
-    let owner = client
-        .client
-        .map(|client| services.page_runs.connect_client(&client));
+    let owner = named.map(|(descriptor, connection)| {
+        let device = descriptor.id.clone();
+        services
+            .client_devices
+            .connected(descriptor, connection.clone());
+        SocketOwner {
+            _runs: services.page_runs.connect_client(connection.as_str()),
+            devices: services.client_devices.clone(),
+            device,
+            connection,
+        }
+    });
     ws.on_upgrade(move |socket| events_stream(socket, forwarders, services, owner))
 }
 
@@ -303,7 +369,7 @@ async fn events_stream(
     socket: WebSocket,
     subscriptions: [Forwarder; 3],
     services: std::sync::Arc<oxplow_app::Services>,
-    _owner: Option<oxplow_app::pages::open_runs::PageClient>,
+    _owner: Option<SocketOwner>,
 ) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
@@ -997,20 +1063,65 @@ mod tests {
         }
     }
 
+    /// A page's event socket names its device and its page load, with the
+    /// device's name and kind; the daemon knows the device while it is
+    /// connected, and refuses a socket that names them wrongly.
+    #[tokio::test]
+    async fn an_event_socket_says_which_device_it_is() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let base = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
+        let device = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        let (mut socket, _) = tokio_tungstenite::connect_async(format!(
+            "{base}&device={DEVICE}&connection={CONNECTION}&name=Tab%20S9&kind=tablet"
+        ))
+        .await
+        .unwrap();
+        let seen = svc
+            .client_devices
+            .get(&device)
+            .expect("the device is connected");
+        assert_eq!(seen.name, "Tab S9");
+        assert_eq!(seen.kind, oxplow_domain::DeviceKind::Tablet);
+        socket.close(None).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while svc.client_devices.get(&device).is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a closed socket's device is no longer connected");
+
+        for bad in [
+            format!("{base}&device={DEVICE}"),
+            format!("{base}&device=dev-x&connection={CONNECTION}"),
+            format!("{base}&device={DEVICE}&connection={CONNECTION}&kind=toaster"),
+        ] {
+            assert!(
+                tokio_tungstenite::connect_async(&bad).await.is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn closing_an_event_socket_releases_only_its_windows_page_runs() {
         let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
-        let url = |client| {
+        const ONE: &str = "con-11111111-1111-4111-8111-111111111111";
+        const TWO: &str = "con-22222222-2222-4222-8222-222222222222";
+        let url = |connection| {
             format!(
-                "ws://{}/events?token={UI_TOKEN}&client={client}",
+                "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={connection}&name=Mac&kind=desktop",
                 daemon.bind_addr
             )
         };
-        let (mut one, _) = tokio_tungstenite::connect_async(url("one")).await.unwrap();
-        let (mut two, _) = tokio_tungstenite::connect_async(url("two")).await.unwrap();
+        let (mut one, _) = tokio_tungstenite::connect_async(url(ONE)).await.unwrap();
+        let (mut two, _) = tokio_tungstenite::connect_async(url(TWO)).await.unwrap();
         let yaml =
             "title: Open\nloaders: { a: { sql: SELECT 1 AS n } }\nview: { viz: number, from: a }\n";
         let first = oxplow_rpc::commands::pages::open_page(
@@ -1020,7 +1131,7 @@ mod tests {
             None,
             None,
             None,
-            "one".into(),
+            ONE.into(),
         )
         .await
         .unwrap();
@@ -1031,7 +1142,7 @@ mod tests {
             None,
             None,
             None,
-            "two".into(),
+            TWO.into(),
         )
         .await
         .unwrap();

@@ -165,11 +165,21 @@ const endpoint = readRemoteEndpoint();
 const remoteBase: string | null = endpoint.base;
 const remoteToken: string | null = endpoint.token;
 
-/** The event connection owns this window's open runs until it closes. */
-export function eventsUrl(base: string, token: string | null, client: string): string {
+/** The event socket says which device and page load it is (a browser
+ *  cannot set headers on a WebSocket, so they ride in the query); it owns
+ *  this page load's open runs until it closes. */
+export function eventsUrl(
+  base: string,
+  token: string | null,
+  device: { id: string; name: string; kind: string },
+  connection: string,
+): string {
   const url = new URL(`${base.replace(/^http/, "ws")}/events`);
   if (token) url.searchParams.set("token", token);
-  url.searchParams.set("client", client);
+  url.searchParams.set("device", device.id);
+  url.searchParams.set("connection", connection);
+  url.searchParams.set("name", device.name);
+  url.searchParams.set("kind", device.kind);
   return url.toString();
 }
 
@@ -447,7 +457,7 @@ export function handleSocketOpen(): void {
 function ensureSocket(): void {
   if (remoteBase === null || socket !== null || tokenRefused) return;
   // Browsers can't set headers on a WebSocket; the token rides the query.
-  const wsUrl = eventsUrl(remoteBase, remoteToken, getUiClientId());
+  const wsUrl = eventsUrl(remoteBase, remoteToken, getDevice(), getUiClientId());
   const ws = new WebSocket(wsUrl);
   socket = ws;
   ws.onmessage = (msg) => {

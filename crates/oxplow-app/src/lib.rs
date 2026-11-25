@@ -36,6 +36,7 @@ pub mod change_analysis;
 pub(crate) mod change_diff;
 pub mod change_reactor;
 pub mod churn;
+pub mod client_devices;
 pub mod client_host;
 pub mod client_reports;
 pub mod code_analysis;
@@ -589,6 +590,8 @@ pub struct Services {
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
     pub client_reports: Arc<client_reports::ClientReports>,
+    /// The devices connected now, as they named themselves (`client_devices`).
+    pub client_devices: Arc<client_devices::ClientDevices>,
     /// Durable atomic fact layer — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
     /// here; the read surface aggregates them through `metric_engine`.
@@ -1043,6 +1046,7 @@ impl Services {
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let client_reports = Arc::new(client_reports::ClientReports::new());
+        let client_devices = Arc::new(client_devices::ClientDevices::default());
         let agent_status_store: Arc<dyn AgentStatusStore> = Arc::new(
             oxplow_db::SqliteAgentStatusStore::new(db.clone(), vocabulary.clone()),
         );
@@ -1852,6 +1856,7 @@ impl Services {
             agent_status_store,
             agent_turn_store,
             client_reports,
+            client_devices,
             fact_store,
             metric_engine,
             metric_visibility,

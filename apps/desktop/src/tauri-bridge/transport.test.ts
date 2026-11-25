@@ -29,16 +29,22 @@ const DAEMON = "http://127.0.0.1:60331";
 const SHELL_COMMAND = "set_native_menu";
 const PROJECT_COMMAND = "list_streams";
 
-test("the event socket carries the stable client identity beside its token", () => {
-  const url = new URL(eventsUrl("https://daemon.example", "private & token", "window/one"));
+const TABLET = { id: "dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427", name: "Tab S9", kind: "tablet" as const };
+const LOAD = "con-6fa459ea-ee8a-3ca4-894e-db77e160355e";
+
+test("the event socket says which device and page load it is, beside its token", () => {
+  const url = new URL(eventsUrl("https://daemon.example", "private & token", TABLET, LOAD));
   expect(url.protocol).toBe("wss:");
   expect(url.pathname).toBe("/events");
   expect(url.searchParams.get("token")).toBe("private & token");
-  expect(url.searchParams.get("client")).toBe("window/one");
-  const local = new URL(eventsUrl(DAEMON, null, "window-one"));
+  expect(url.searchParams.get("device")).toBe(TABLET.id);
+  expect(url.searchParams.get("connection")).toBe(LOAD);
+  expect(url.searchParams.get("name")).toBe("Tab S9");
+  expect(url.searchParams.get("kind")).toBe("tablet");
+  expect(url.searchParams.has("client")).toBe(false);
+  const local = new URL(eventsUrl(DAEMON, null, TABLET, LOAD));
   expect(local.protocol).toBe("ws:");
   expect(local.searchParams.has("token")).toBe(false);
-  expect(local.searchParams.get("client")).toBe("window-one");
 });
 
 describe("resolveBase", () => {
