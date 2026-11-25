@@ -13,48 +13,67 @@ export function shown(page: Page, needle?: string): Locator {
   return page.locator(`[data-testid^="center-tab-body-"]${has}:visible`);
 }
 
-/** What a narrow screen needs of a page: nothing reaches past the shown tab's
- *  right edge (cut off, or making the window scroll sideways), except inside
- *  a box that scrolls sideways on purpose. A page scrolls in a box of its own,
- *  so the tab body's own width says nothing: each element is measured. The
- *  boxes that do scroll sideways are returned, for the caller to note. */
+/** Boxes that may scroll sideways on a narrow screen: a table in its scroll
+ *  box, a code block, the terminal. Any other box that does is a failure. */
+const SCROLLS_ON_PURPOSE = "table, pre, code, .xterm, .ox-table, [data-scrolls-sideways]";
+
+/** What a narrow screen needs of a page: nothing reaches past the right edge
+ *  of its nearest clipping ancestor (`overflow-x: hidden|clip`), past the
+ *  shown tab's right edge, or past the window's; and no box scrolls sideways
+ *  but those of `SCROLLS_ON_PURPOSE`. The shown tab's body and the page's nav
+ *  bar are walked; each element is measured, since a page scrolls in boxes of
+ *  its own. Boxes that scroll sideways on purpose are returned, for the
+ *  caller to note. With no shown tab body, it returns at once. */
 export async function expectNoHorizontalOverflow(page: Page): Promise<string[]> {
+  const tab = shown(page);
+  if ((await tab.count()) === 0) return [];
   const root = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
     client: document.documentElement.clientWidth,
   }));
   expect(root.scroll, `the window scrolls sideways (${root.scroll} > ${root.client})`).toBeLessThanOrEqual(root.client);
-  const found = await shown(page)
-    .first()
-    .evaluate((body) => {
-      const edge = body.getBoundingClientRect().right + 1;
-      const name = (el: Element) => {
-        const id = el.getAttribute("data-testid") ?? el.getAttribute("data-node");
-        const cls = typeof el.className === "string" && el.className ? `.${el.className.trim().split(/\s+/).join(".")}` : "";
-        return `${el.tagName.toLowerCase()}${id ? `[${id}]` : ""}${cls}`;
-      };
-      const scrolls = (el: Element) => {
-        const x = getComputedStyle(el).overflowX;
-        return (x === "auto" || x === "scroll") && el.scrollWidth > el.clientWidth + 1;
-      };
-      const past: string[] = [];
-      const boxes: string[] = [];
-      const walk = (el: Element) => {
-        const box = el.getBoundingClientRect();
-        if (box.width === 0 && box.height === 0) return;
-        // The code editor lays out huge layers of its own and clips them.
-        if (el.classList.contains("monaco-editor")) return;
-        if (box.right > edge) past.push(`${name(el)} reaches ${Math.round(box.right)} > ${Math.round(edge - 1)}`);
-        if (scrolls(el)) {
-          boxes.push(`${name(el)} scrolls ${el.scrollWidth} in ${el.clientWidth}`);
-          return; // What is inside scrolls with it.
-        }
-        for (const child of el.children) walk(child);
-      };
-      for (const child of body.children) walk(child);
-      return { past, boxes };
-    });
-  expect(found.past, "content reaches past the shown tab's right edge").toEqual([]);
+  const found = await tab.first().evaluate((body, allowed) => {
+    const tabEdge = body.getBoundingClientRect().right + 1;
+    const windowEdge = document.documentElement.clientWidth + 1;
+    const name = (el: Element) => {
+      const id = el.getAttribute("data-testid") ?? el.getAttribute("data-node");
+      const cls = typeof el.className === "string" && el.className ? `.${el.className.trim().split(/\s+/).join(".")}` : "";
+      return `${el.tagName.toLowerCase()}${id ? `[${id}]` : ""}${cls}`;
+    };
+    const scrolls = (el: Element) => {
+      const x = getComputedStyle(el).overflowX;
+      return (x === "auto" || x === "scroll") && el.scrollWidth > el.clientWidth + 1;
+    };
+    const clips = (el: Element) => ["hidden", "clip"].includes(getComputedStyle(el).overflowX);
+    const past: string[] = [];
+    const boxes: string[] = [];
+    const wrong: string[] = [];
+    const walk = (el: Element, edge: number) => {
+      const box = el.getBoundingClientRect();
+      if (box.width === 0 && box.height === 0) return;
+      if (box.right > edge) past.push(`${name(el)} reaches ${Math.round(box.right)} > ${Math.round(edge - 1)}`);
+      // The code editor lays out huge layers of its own and clips them: its
+      // own box is measured above, what is inside is not.
+      if (el.classList.contains("monaco-editor")) return;
+      if (scrolls(el)) {
+        const note = `${name(el)} scrolls ${el.scrollWidth} in ${el.clientWidth}`;
+        if (el.matches(allowed) || el.closest(allowed) || (el.children.length > 0 && [...el.children].every((c) => c.matches(allowed)))) boxes.push(note);
+        else wrong.push(note);
+        return; // What is inside scrolls with it.
+      }
+      // What an element clips is cut at its own right edge.
+      const inner = clips(el) ? Math.min(edge, box.right + 1) : edge;
+      for (const child of el.children) walk(child, inner);
+    };
+    for (const child of body.children) walk(child, Math.min(tabEdge, windowEdge));
+    for (const bar of document.querySelectorAll('[data-testid="page-nav-bar"]')) {
+      if (bar.getClientRects().length === 0) continue;
+      walk(bar, windowEdge);
+    }
+    return { past, boxes, wrong };
+  }, SCROLLS_ON_PURPOSE);
+  expect(found.past, "content reaches past the right edge of the tab, the window or a clipping box").toEqual([]);
+  expect(found.wrong, "a box scrolls sideways that is not a table, code block or terminal").toEqual([]);
   return found.boxes;
 }
 

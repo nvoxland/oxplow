@@ -134,6 +134,24 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **Projects**: `chromium` runs every spec; `webkit` runs
   `specs/components/` (a custom component's frame, the one place the two
   engines are checked apart — the macOS window is WebKit).
+- **Form factors** (`E2E_FORM_FACTORS=1`, off by default: a measurement):
+  adds `tablet` (1180×820), `tablet-portrait` (800×1180, exactly the width
+  where the rail hides) and `phone` (iPhone 13), all with touch, over
+  `specs/pages/` only. Run them with `E2E_FORM_FACTORS=1 bun run e2e specs/pages
+  --project tablet --project tablet-portrait --project phone`. In these
+  projects every passing spec ends with `expectNoHorizontalOverflow`
+  (`support/ui.ts`), which fails the spec when the window scrolls sideways,
+  when an element of the shown tab or of the page's nav bar reaches past the
+  right edge of the window, the tab or its nearest ancestor with
+  `overflow-x: hidden|clip` (the code editor's own box is measured, not what
+  is inside it), or when a box scrolls sideways that is not a table, a code
+  block or the terminal. The allowed boxes are noted on the test as
+  "scrolls sideways" annotations. With no shown tab it returns at once.
+  `specs/harness/overflow-check.spec.ts` draws boxes the check must refuse.
+- **`client(browser, baseURL, daemon, viewport?)`** (`support/fixtures.ts`)
+  is a second client of the spec's daemon: a browser context of its own, so
+  its own storage, connected to the same daemon. The caller closes the
+  returned `context`. `specs/shell/two-clients.spec.ts` uses it.
 - **CI**: the `e2e` job in `.github/workflows/ci.yml` — Chromium and WebKit,
   three workers, the JUnit report uploaded always and traces and daemon
   logs on failure. `daemon-contract` stays browser-free. A failed test is

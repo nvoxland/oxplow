@@ -18,6 +18,11 @@ const formFactors = process.env.E2E_FORM_FACTORS
         use: { ...devices["Desktop Chrome"], viewport: { width: 1180, height: 820 }, hasTouch: true },
         testMatch: /specs\/pages\//,
       },
+      {
+        name: "tablet-portrait",
+        use: { ...devices["Desktop Chrome"], viewport: { width: 800, height: 1180 }, hasTouch: true },
+        testMatch: /specs\/pages\//,
+      },
       { name: "phone", use: { ...devices["iPhone 13"] }, testMatch: /specs\/pages\// },
     ]
   : [];

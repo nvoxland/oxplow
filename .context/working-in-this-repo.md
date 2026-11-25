@@ -367,6 +367,17 @@ command's UI path, a testid. What every page does (select, expand, switch,
 forms, slots, replacements, embeds, components, panels) is
 `tests-e2e/specs/pages/*`'s, each over a small extension of its own.
 
+**Tablet and phone sizes.** `E2E_FORM_FACTORS=1` adds the `tablet`,
+`tablet-portrait` (800 px wide, where the rail hides) and `phone` projects
+(touch on) over `specs/pages/` only; they are off by default, as a
+measurement: `E2E_FORM_FACTORS=1 bun run e2e specs/pages --project tablet
+--project tablet-portrait --project phone`. A passing spec there must also
+fit its screen (`expectNoHorizontalOverflow`, `tests-e2e/support/ui.ts`):
+nothing in the shown tab or the page's nav bar past the right edge of the
+window, the tab or a clipping ancestor, and no sideways-scrolling box except
+a table, code block or the terminal. `tests-e2e/README.md` "Projects" has the
+detail; `specs/harness/overflow-check.spec.ts` proves the check can fail.
+
 **What belongs here.** e2e is for what only the app can show, not for what a
 page says or a command does:
 

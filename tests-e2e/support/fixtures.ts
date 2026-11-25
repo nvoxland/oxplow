@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 import { expectNoHorizontalOverflow } from "./ui.js";
 import { deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
@@ -156,6 +156,19 @@ class Daemons {
   }
 }
 
+/** Another client of `daemon`: a browser context of its own (its own
+ *  storage, as another device has), at `viewport`, connected to the same
+ *  daemon. The caller closes `context`. */
+export async function client(
+  browser: Browser,
+  baseURL: string,
+  daemon: Daemon,
+  viewport = { width: 1280, height: 800 },
+): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ storageState: connectedTo(baseURL, daemon.base, daemon.token), viewport });
+  return { context, page: await context.newPage() };
+}
+
 export const test = base.extend<{ daemon: Workspace }, { daemons: Daemons }>({
   daemons: [
     async ({}, use) => {
@@ -198,7 +211,7 @@ export const test = base.extend<{ daemon: Workspace }, { daemons: Daemons }>({
     check();
     // Tablet and phone runs: a passing page must also fit the screen.
     const info = test.info();
-    if (["tablet", "phone"].includes(info.project.name) && info.status === info.expectedStatus) {
+    if (["tablet", "tablet-portrait", "phone"].includes(info.project.name) && info.status === info.expectedStatus) {
       for (const box of await expectNoHorizontalOverflow(page)) {
         info.annotations.push({ type: "scrolls sideways", description: box });
       }

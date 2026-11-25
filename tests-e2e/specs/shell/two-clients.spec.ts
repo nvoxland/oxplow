@@ -2,24 +2,11 @@
 // its own, and what they share. Each test here fails on today's code and is
 // marked `test.fail()`: the mark comes off in the change that makes it pass
 // (per-device state, and the shared terminal's size rule).
-import type { Browser, BrowserContext, Page } from "@playwright/test";
-
-import { ipc, run, settle, startDaemon, type Daemon } from "../../support/daemon.js";
-import { connectedTo, expect, test } from "../../support/fixtures.js";
+import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
+import { client, connectedTo, expect, test } from "../../support/fixtures.js";
 import { load, open, reload } from "../../support/ui.js";
 
 const TAB_SESSIONS = "oxplow.layout.v8.sessions";
-
-/** A second client of `daemon`: a browser context of its own, at `viewport`. */
-async function client(
-  browser: Browser,
-  baseURL: string,
-  daemon: Daemon,
-  viewport = { width: 1280, height: 800 },
-): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ storageState: connectedTo(baseURL, daemon.base, daemon.token), viewport });
-  return { context, page: await context.newPage() };
-}
 
 /// The thread a client shows is that client's own: another client picking a
 /// thread doesn't move it, even across a reload.
@@ -40,6 +27,32 @@ test("a thread picked on one client is not the other client's thread", async ({ 
 
     await reload(page);
     await expect(page.getByTestId("title-bar-thread")).toHaveText(first!);
+  } finally {
+    await b.context.close();
+  }
+});
+
+/// The stream a client shows is that client's own: another client switching
+/// stream doesn't move it, even across a reload.
+test("the stream a client shows is that client's own", async ({ page, browser, baseURL, daemon }) => {
+  test.fail(true, "the selected stream is one row shared by every client");
+  const made = await run<{ result: { id: string } }>(daemon, "oxplow.stream.create", {
+    title: "Second client's stream",
+    source: "new",
+    new_branch: "second-client",
+    start_point: "HEAD",
+  });
+  await load(page);
+  const first = await page.getByTestId("title-bar-stream").textContent();
+
+  const b = await client(browser, baseURL!, daemon);
+  try {
+    await load(b.page);
+    await b.page.getByTestId(`navigator-strip-stream-${made.result.id}`).click();
+    await expect(b.page.getByTestId("title-bar-stream")).toContainText("Second client's stream");
+
+    await reload(page);
+    await expect(page.getByTestId("title-bar-stream")).toHaveText(first!);
   } finally {
     await b.context.close();
   }
@@ -92,7 +105,7 @@ test("a project's window never shows another project's tabs", async ({ page, bro
     const [thread] = await ipc<{ id: string }[]>(second, "list_threads", { streamId: stream!.id });
     // The two projects' ids meet only when they are the same, as two fresh
     // projects' are.
-    test.skip(thread!.id !== daemon.thread, `the projects' threads differ (${thread!.id}, ${daemon.thread})`);
+    expect(thread!.id, "the two fresh projects' threads have the same id").toBe(daemon.thread);
 
     await open(page, daemon, "oxplow:oxplow/page?page=settings");
     await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=settings")).toBeVisible();
