@@ -3,6 +3,7 @@ import type {
   BackgroundTask,
   TabReport,
   TabReportAnswer,
+  TabSession,
   HookEnvelope,
   OpOutcome,
   PointOffer,
@@ -489,6 +490,23 @@ export async function listServices(): Promise<ServiceListing[]> {
 /// agent's `list_tabs` / `get_open_page`.
 export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
   return unwrap(await commands.reportTabs(report));
+}
+
+/// This device's stored tabs of every thread it opened (`tab_session`).
+export async function listTabSessions(): Promise<TabSession[]> {
+  return unwrap(await commands.listTabSessions());
+}
+
+/// Keep this device's tabs of `threadId`, if still at `revision` (the one
+/// last read; null for a thread it has no tabs of yet). The new revision;
+/// null when they moved on since (nothing was written).
+export async function saveTabSession(threadId: string, sessionJson: string, revision: number | null): Promise<number | null> {
+  return unwrap(await commands.saveTabSession(threadId, sessionJson, revision));
+}
+
+/// Forget this device's tabs of `threadId`.
+export async function forgetTabSession(threadId: string): Promise<void> {
+  unwrap(await commands.forgetTabSession(threadId));
 }
 
 /// Analyze a change (a commit, a request, or a stream's working tree) if

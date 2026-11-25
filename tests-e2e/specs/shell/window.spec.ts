@@ -3,7 +3,7 @@
 // socket, and who a tab open reaches. Each test asserts current behavior.
 import { ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { load, open, shown } from "../../support/ui.js";
+import { load, open, reload, shown } from "../../support/ui.js";
 import type { Page } from "@playwright/test";
 
 const tab = (page: Page, uri: string) => page.getByTestId(`center-tab-${uri}`);
@@ -207,4 +207,22 @@ test("the tab report lists the strip's labels and its open page is the shown tab
   // Each title is the label the strip draws on that tab.
   for (const t of tabs) await expect(tab(page, t.tab)).toContainText(t.title);
   expect(await openPage()).toMatchObject({ pageId: home, kind: "e2e/home" });
+});
+
+// A device's tabs are the daemon's (`tab_session`), not the browser's: a
+// reload brings them back, active tab and all.
+test("a reload brings the device's tabs back from the daemon", async ({ page, daemon }) => {
+  await load(page);
+  await open(page, daemon, home);
+  // The save that keeps the second tab: a reload before it would find the
+  // daemon without it.
+  const saved = page.waitForRequest(
+    (r) => r.url().includes("/ipc/save_tab_session") && (r.postData() ?? "").includes("e2e/second"),
+  );
+  await open(page, daemon, second, { new_tab: true });
+  await expect(tab(page, second)).toBeVisible();
+  await (await saved).response();
+  await reload(page);
+  await expect(tab(page, home)).toBeVisible();
+  await expect(tab(page, second)).toBeVisible();
 });

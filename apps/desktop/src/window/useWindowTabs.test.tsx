@@ -12,9 +12,16 @@ mock.module("../newThreadSession.js", () => ({
     return opening;
   },
 }));
+const realApiForTabs = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
+mock.module("../api.js", () => ({
+  ...realApiForTabs,
+  // This device has no stored tabs yet; saves are kept nowhere.
+  listTabSessions: async () => [],
+  saveTabSession: async () => 1,
+  forgetTabSession: async () => {},
+}));
 const { HOME_TAB, useWindowTabs } = await import("./useWindowTabs.js");
 const { MAX_PAGE_TABS } = await import("../tabs/session.js");
-const { SESSIONS_STORAGE_KEY } = await import("../tabs/useTabSessions.js");
 
 const page = (n: number) => ({ id: `oxplow:oxplow/page?page=e2e/item&uri=${n}` });
 type Sessions = Parameters<typeof useWindowTabs>[0]["selectedThreadSessions"];
@@ -27,8 +34,6 @@ function setup(selectedThreadSessions: Sessions) {
 
 beforeEach(() => {
   openings = 0;
-  window.localStorage.removeItem(SESSIONS_STORAGE_KEY);
-  window.sessionStorage.removeItem(SESSIONS_STORAGE_KEY);
 });
 afterEach(() => cleanup());
 

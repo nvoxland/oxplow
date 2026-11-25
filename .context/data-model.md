@@ -433,6 +433,14 @@ device's own (migration V82; the device is the request's caller,
   PK(device_id, stream_id))`: the thread the device shows in a stream.
   `get_thread_state` reads the caller's; `select_thread` writes it.
 
+- `tab_session(device_id, thread_id, session_json, revision, updated_at,
+  PK(device_id, thread_id))` (V83): the device's tabs of a thread, as the
+  window's session (`apps/desktop/src/tabs/session.ts`) writes them, at most
+  256 KB. A save gives the revision it read (`TabSessionStore::save`) and is
+  refused when the row moved on; a thread that goes takes its tabs. A thread
+  this device has no row for, with no agent session, opens the session
+  picker on it (the new-thread signal, per device).
+
 A reader with no device (an agent, a job, an effect, a script with the
 token) gets the defaults: the primary stream, a stream's first open thread
 (`ThreadService::selected_or_first(None, …)`), never one device's choice. A

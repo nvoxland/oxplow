@@ -3466,6 +3466,7 @@ mod tests {
             "device_view_state",
             "threads",
             "thread_selection",
+            "tab_session",
             "agent_turn",
             "page_visit",
             "usage_event",

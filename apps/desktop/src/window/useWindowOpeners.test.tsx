@@ -16,9 +16,16 @@ mock.module("../editor/openFiles.js", () => ({
   },
 }));
 mock.module("../workspaceFiles.js", () => ({ isWorkspaceDir: async () => false }));
+const realApiForTabs = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
+mock.module("../api.js", () => ({
+  ...realApiForTabs,
+  // This device has no stored tabs yet; saves are kept nowhere.
+  listTabSessions: async () => [],
+  saveTabSession: async () => 1,
+  forgetTabSession: async () => {},
+}));
 const { useWindowTabs } = await import("./useWindowTabs.js");
 const { useWindowOpeners } = await import("./useWindowOpeners.js");
-const { SESSIONS_STORAGE_KEY } = await import("../tabs/useTabSessions.js");
 
 const stream = { id: "str1", title: "s", branch: "main", created_at: "1", worktree_path: "/w" } as never;
 const thread = { id: "thr1", title: "t" } as never;
@@ -48,8 +55,6 @@ function setup() {
 
 beforeEach(() => {
   missing.clear();
-  window.localStorage.removeItem(SESSIONS_STORAGE_KEY);
-  window.sessionStorage.removeItem(SESSIONS_STORAGE_KEY);
 });
 afterEach(() => cleanup());
 

@@ -273,6 +273,10 @@ macro_rules! oxplow_command_table {
                 invoke_component_point => $crate::commands::extensions::invoke_component_point { id: String, point: String, context: ::oxplow_domain::Json, command: Option<String>, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
                 // what a page load shows, for agents
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> oxplow_app::client_reports::TabReportAnswer,
+                // each device's tabs of each thread (`.context/data-model.md` "tab_session")
+                list_tab_sessions => $crate::commands::tabs::list_tab_sessions {} -> Vec<::oxplow_db::tab_session_store::TabSession>,
+                save_tab_session => $crate::commands::tabs::save_tab_session { thread_id: ::oxplow_domain::ThreadId, session_json: String, revision: Option<::oxplow_db::tab_session_store::TabRevision> } -> Option<::oxplow_db::tab_session_store::TabRevision>,
+                forget_tab_session => $crate::commands::tabs::forget_tab_session { thread_id: ::oxplow_domain::ThreadId } -> (),
             }
             svc {
             }

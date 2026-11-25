@@ -175,6 +175,7 @@ export function App() {
   // active tab and the operations on its tabs.
   const {
     sessions,
+    sessionsLoaded,
     updateSession,
     pageTitles,
     setPageTitle,
@@ -456,7 +457,7 @@ export function App() {
     selectedThreadId,
     selectedThreadSessions,
     extensions,
-    tabs: { sessions, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread },
+    tabs: { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread },
     openers: { handleOpenPageRef, handleNavigateInTab },
     switchStream: handleSwitch,
     selectThread: handleSelectThread,

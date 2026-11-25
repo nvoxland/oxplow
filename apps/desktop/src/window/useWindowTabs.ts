@@ -59,7 +59,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
   // (`tabs/session.ts`), restored on start and stored on every change.
   // The strip, the bodies, history, origins and the active tab all come
   // from it (`.context/pages-and-tabs.md` "Navigation model").
-  const { sessions, update: updateSession, forget: forgetSession } = useTabSessions();
+  const { sessions, loaded: sessionsLoaded, update: updateSession, forget: forgetSession } = useTabSessions();
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -196,7 +196,8 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
   // The threads whose stored tabs were checked against their open sessions.
   const checkedStored = useRef(new Set<string>());
   useEffect(() => {
-    if (!selectedThreadId || selectedThreadSessions === null) return;
+    // Until this device's stored tabs are read, no thread is known to be new.
+    if (!sessionsLoaded || !selectedThreadId || selectedThreadSessions === null) return;
     // Tabs the browser kept from before a project reset can name sessions the
     // thread never had (a new thread gets an old one's id): forget them once,
     // when the thread is first seen, and open it as a new thread.
@@ -216,7 +217,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
       return;
     }
     updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
-  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession, forgetSession]);
+  }, [sessionsLoaded, selectedThreadId, selectedThreadSessions, sessions, updateSession, forgetSession]);
 
   async function openNewThread(threadId: string) {
     try {
@@ -307,6 +308,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
 
   return {
     sessions,
+    sessionsLoaded,
     updateSession,
     pageTitles,
     setPageTitle,

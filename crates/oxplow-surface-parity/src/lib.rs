@@ -287,6 +287,12 @@ pub const MANIFEST: &[Capability] = &[
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
     ),
     ui(
+        "list_tab_sessions",
+        "a device's stored tabs of each thread, which its window restores",
+    ),
+    ui("save_tab_session", "a window keeping its device's tabs of a thread"),
+    ui("forget_tab_session", "a window forgetting its device's tabs of a thread"),
+    ui(
         "listen_for_oauth_redirect",
         "the desktop shell's loopback listener for a person's sign-in (P10)",
     ),

@@ -36,6 +36,7 @@ export interface WindowHostOptions {
   tabs: Pick<
     ReturnType<typeof useWindowTabs>,
     | "sessions"
+    | "sessionsLoaded"
     | "updateSession"
     | "closePageTab"
     | "centerActive"
@@ -78,7 +79,7 @@ export function useWindowHost({
   view,
   openQuickOpen,
 }: WindowHostOptions) {
-  const { sessions, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread } = tabs;
+  const { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread } = tabs;
   const { handleOpenPageRef, handleNavigateInTab } = openers;
   const { effectiveCenterActive, visitContextRef, tabLabelByIdRef } = view;
   // Read when a call comes, so the handlers needn't be made again for it.
@@ -320,6 +321,7 @@ export function useWindowHost({
     stream !== null &&
     selectedThreadId !== null &&
     selectedThreadSessions !== null &&
+    sessionsLoaded &&
     sessions[selectedThreadId] !== undefined &&
     openingThread !== selectedThreadId &&
     extensions !== null;

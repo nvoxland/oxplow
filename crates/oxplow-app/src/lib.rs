@@ -617,6 +617,8 @@ pub struct Services {
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
     /// The person's page memory and app preferences (`ui_preference`).
     pub ui_preference_store: oxplow_db::SqliteUiPreferenceStore,
+    /// Each device's tabs of each thread.
+    pub tab_session_store: Arc<oxplow_db::tab_session_store::TabSessionStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Git history and branches (`v_commit`, `v_branch`, …).
@@ -1657,6 +1659,9 @@ impl Services {
         sql.on_demand().bind(services_slot.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
         let ui_preference_store = oxplow_db::SqliteUiPreferenceStore::new(db.clone());
+        let tab_session_store = Arc::new(oxplow_db::tab_session_store::TabSessionStore::new(
+            db.clone(),
+        ));
         for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
             .chain(commands::agent_settings::ops(
@@ -1866,6 +1871,7 @@ impl Services {
             collector_runner,
             panel_layout_store,
             ui_preference_store,
+            tab_session_store,
             tool_call_store,
             git_store,
             diagnostic_store,

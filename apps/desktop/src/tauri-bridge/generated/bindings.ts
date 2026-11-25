@@ -294,6 +294,24 @@ export const commands = {
 	 */
 	reportTabs: (report: TabReport) => typedError<TabReportAnswer, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	listTabSessions: () => typedError<TabSession[], IpcError_Serialize>(__TAURI_INVOKE("list_tab_sessions")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	saveTabSession: (threadId: ThreadId, sessionJson: string, revision: number | null) => typedError<number | null, IpcError_Serialize>(__TAURI_INVOKE("save_tab_session", { threadId, sessionJson, revision })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	forgetTabSession: (threadId: ThreadId) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_tab_session", { threadId })),
+	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
 	 */
@@ -6419,6 +6437,21 @@ export type TabReport = {
 export type TabReportAnswer = {
 	/**  The runs it reported that the daemon no longer holds for it. */
 	missingRuns: string[],
+};
+
+/**
+ *  A thread's tabs' revision: bumped by every save, and given back by the
+ *  next.
+ */
+export type TabRevision = number;
+
+/**  One thread's stored tabs. */
+export type TabSession = {
+	threadId: ThreadId,
+	/**  The session, as the window writes it (JSON text). */
+	sessionJson: string,
+	/**  Bumped by every save: the next save gives it back. */
+	revision: TabRevision,
 };
 
 /**  One `test_conventions:` entry as the extension declares it. */

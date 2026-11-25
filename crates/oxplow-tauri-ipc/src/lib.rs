@@ -152,6 +152,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::submit_page_form,
             commands::generated::page_action_form,
             commands::generated::report_tabs,
+            commands::generated::list_tab_sessions,
+            commands::generated::save_tab_session,
+            commands::generated::forget_tab_session,
             // The sign-in redirect, caught by the shell (P10).
             commands::oauth_redirect::listen_for_oauth_redirect,
             commands::oauth_redirect::await_oauth_redirect,

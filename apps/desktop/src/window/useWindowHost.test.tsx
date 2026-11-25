@@ -18,6 +18,9 @@ const realApi = { ...(await import("../api.js")) };
 const reports: Array<{ shown_thread: string | null }> = [];
 mock.module("../api.js", () => ({
   ...realApi,
+  listTabSessions: async () => [],
+  saveTabSession: async () => 1,
+  forgetTabSession: async () => {},
   reportTabs: async (report: { shown_thread: string | null }) => {
     reports.push(report);
     return { missingRuns: [] };
@@ -25,7 +28,6 @@ mock.module("../api.js", () => ({
 }));
 const { useWindowTabs } = await import("./useWindowTabs.js");
 const { useWindowHost } = await import("./useWindowHost.js");
-const { SESSIONS_STORAGE_KEY } = await import("../tabs/useTabSessions.js");
 
 const stream = { id: "str1", title: "s", branch: "main", created_at: "1", worktree_path: "/w" } as never;
 const page = (n: number) => ({ id: `oxplow:oxplow/page?page=e2e/item&uri=${n}` });
@@ -61,8 +63,6 @@ function setup(ready: { extensions: unknown[] | null }) {
 beforeEach(() => {
   started = 0;
   reports.length = 0;
-  window.localStorage.removeItem(SESSIONS_STORAGE_KEY);
-  window.sessionStorage.removeItem(SESSIONS_STORAGE_KEY);
 });
 afterEach(() => cleanup());
 

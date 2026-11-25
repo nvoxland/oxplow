@@ -58,6 +58,7 @@ mod sql_functions;
 pub mod sql_tokens;
 pub mod stream_store;
 pub mod symbol_store;
+pub mod tab_session_store;
 pub mod table_generations;
 pub mod terminal_store;
 pub mod thread_store;

@@ -6,7 +6,8 @@ import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
 import { client, connectedTo, expect, test } from "../../support/fixtures.js";
 import { load, open, reload } from "../../support/ui.js";
 
-const TAB_SESSIONS = "oxplow.layout.v8.sessions";
+/** Where a browser keeps its device id (`device.ts`). */
+const DEVICE_KEY = "oxplow.device";
 
 /// The thread a client shows is that client's own: another client picking a
 /// thread doesn't move it, even across a reload.
@@ -95,7 +96,6 @@ test("a terminal another client opens keeps the size of the client typing", asyn
 /// window shows its own tabs, never another project's.
 test("a project's window never shows another project's tabs", async ({ page, browser, baseURL, daemon }) => {
   test.setTimeout(180_000);
-  test.fail(true, "the tab sessions are one browser key, by thread id only");
   const second = await startDaemon();
   try {
     await settle(second);
@@ -107,12 +107,12 @@ test("a project's window never shows another project's tabs", async ({ page, bro
 
     await open(page, daemon, "oxplow:oxplow/page?page=settings");
     await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=settings")).toBeVisible();
-    // What the first project's window left in the origin's storage.
-    const sessions = await page.evaluate((key) => localStorage.getItem(key), TAB_SESSIONS);
-    expect(sessions).toContain("page=settings");
+    // The second project's window is the same device (the same browser).
+    const device = await page.evaluate((key) => localStorage.getItem(key), DEVICE_KEY);
+    expect(device).toMatch(/^dev-/);
 
     const state = connectedTo(baseURL!, second.base, second.token);
-    state.origins[0]!.localStorage.push({ name: TAB_SESSIONS, value: sessions! });
+    state.origins[0]!.localStorage.push({ name: DEVICE_KEY, value: device! });
     const context = await browser.newContext({ storageState: state });
     try {
       const other = await context.newPage();

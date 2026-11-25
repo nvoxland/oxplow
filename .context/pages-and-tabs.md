@@ -212,9 +212,9 @@ shown as itself, the default for one anywhere; the Text view stands
 aside for it), `tsv` (a TSV file as a table), `wiki-page`, `task`,
 `diff-view` for `oxplow/snapshot`, `oxplow/request` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
-session's tab follows its row (`reconcileSessionTabs`). The tabs the browser
-stores per thread (`oxplow.layout.v8.sessions`) outlive a reset of the project,
-and a new thread can get an old one's id: when the window first sees a thread's
+session's tab follows its row (`reconcileSessionTabs`). The tabs a device keeps
+per thread (`tab_session`) go with their thread, but a stored entry can still
+name sessions the thread never had: when the window first sees a thread's
 open sessions, a stored entry whose agent-session tabs name none of them is
 forgotten and the thread opens as a new one (`storedSessionIsStale`), so it
 never sits on tabs that can't load. There is no `change-analysis` page.
@@ -1606,10 +1606,16 @@ at other values") whose popover offers **update that bookmark**
 (`bookmarkedElsewhere`, `moveBookmark`: one `oxplow.command.sequence` of remove +
 set at the same scope, so one undo).
 
-**Persistence.** One key, `oxplow.layout.v8.sessions` (`{ [thread]:
-Session }`, written on every change, read on start; corrupt text reads
-as none). It holds every tab's history and the active tab, so a restart
-comes back to the same pages at the same params. A diff's spec rides in
+**Persistence.** The daemon keeps each device's tabs of each thread
+(`tab_session`, `.context/data-model.md`): `useTabSessions` reads them at
+start (`list_tab_sessions`; until they load no thread is known to be new, and
+a change made before they arrive stays), and saves each thread's session as it
+changes (`save_tab_session`), one save at a time per thread, each giving the
+revision the last one answered. A save refused as stale takes the daemon's copy
+of that thread. A thread's text that isn't a session reads as none. The browser
+keeps nothing of the tabs, so two projects never mix theirs, and another device
+of the same person has its own. A session holds every tab's history and the
+active tab, so a restart comes back to the same pages at the same params. A diff's spec rides in
 its ref (`diffRef`), so diffs survive too. An open file's buffer is
 read again when its tab's page mounts; unsaved edits don't outlive the
 window (`editor/buffers.ts`).
