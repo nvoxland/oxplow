@@ -356,17 +356,27 @@ impl StreamService {
         Ok(self.streams.list().await?)
     }
 
-    /// Get the runtime-state-pinned current stream (None if nothing
-    /// has been selected yet — caller typically falls back to primary).
-    pub async fn current(&self) -> Result<Option<Stream>, SessionError> {
-        match self.streams.current_id().await? {
+    /// The stream `device` shows (None if it chose none, or for a reader
+    /// with no device — the caller falls back to the primary stream).
+    pub async fn current(
+        &self,
+        device: Option<&oxplow_domain::DeviceId>,
+    ) -> Result<Option<Stream>, SessionError> {
+        let Some(device) = device else {
+            return Ok(None);
+        };
+        match self.streams.current_id(device).await? {
             None => Ok(None),
             Some(id) => Ok(self.streams.get(&id).await?),
         }
     }
 
-    /// Set the current stream pointer. `None` clears the pointer.
-    pub async fn set_current(&self, id: Option<&StreamId>) -> Result<(), SessionError> {
+    /// Set the stream `device` shows. `None` clears it.
+    pub async fn set_current(
+        &self,
+        device: &oxplow_domain::DeviceId,
+        id: Option<&StreamId>,
+    ) -> Result<(), SessionError> {
         if let Some(id) = id {
             // Validate the target exists before writing the pointer.
             self.streams
@@ -374,7 +384,7 @@ impl StreamService {
                 .await?
                 .ok_or(SessionError::Storage(DomainError::NotFound))?;
         }
-        self.streams.set_current(id).await?;
+        self.streams.set_current(device, id).await?;
         Ok(())
     }
 

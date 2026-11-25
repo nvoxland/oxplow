@@ -8,7 +8,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, StreamId, Thread, ThreadId};
+use oxplow_domain::{DeviceId, DomainError, StreamId, Thread, ThreadId};
 
 #[derive(Debug, Error)]
 pub enum ThreadError {
@@ -43,19 +43,30 @@ impl ThreadService {
         Ok(all)
     }
 
-    pub async fn selected(&self, stream: &StreamId) -> Result<Option<ThreadId>, ThreadError> {
-        Ok(self.threads.selected_for_stream(stream).await?)
-    }
-
-    /// The thread the person is on in `stream`: their explicit selection
-    /// (`selected_for_stream`), else the stream's first open thread in its
-    /// order. `None` only when the stream has no open thread, which should
-    /// not happen for a stream that seeded its first one.
-    pub async fn selected_or_first(
+    /// The thread `device` chose in `stream`; a reader with no device
+    /// (an agent, a job, a script) has chosen none.
+    pub async fn selected(
         &self,
+        device: Option<&DeviceId>,
         stream: &StreamId,
     ) -> Result<Option<ThreadId>, ThreadError> {
-        if let Some(id) = self.threads.selected_for_stream(stream).await? {
+        match device {
+            Some(device) => Ok(self.threads.selected_for_stream(device, stream).await?),
+            None => Ok(None),
+        }
+    }
+
+    /// The thread `device` is on in `stream`: its explicit selection
+    /// (`selected_for_stream`), else the stream's first open thread in its
+    /// order — what a reader with no device gets, never one device's
+    /// selection. `None` only when the stream has no open thread, which
+    /// should not happen for a stream that seeded its first one.
+    pub async fn selected_or_first(
+        &self,
+        device: Option<&DeviceId>,
+        stream: &StreamId,
+    ) -> Result<Option<ThreadId>, ThreadError> {
+        if let Some(id) = self.selected(device, stream).await? {
             return Ok(Some(id));
         }
         // `list_for_stream` returns them in their order.
@@ -68,12 +79,16 @@ impl ThreadService {
             .map(|t| t.id))
     }
 
+    /// `device` shows `thread` in `stream`.
     pub async fn select(
         &self,
+        device: &DeviceId,
         stream: &StreamId,
         thread: Option<&ThreadId>,
     ) -> Result<(), ThreadError> {
-        self.threads.set_selected_for_stream(stream, thread).await?;
+        self.threads
+            .set_selected_for_stream(device, stream, thread)
+            .await?;
         Ok(())
     }
 }
@@ -149,9 +164,13 @@ mod tests {
         add(&f, "closed", false, 0).await;
         let a = add(&f, "a", true, 1).await;
         add(&f, "b", true, 2).await;
-        assert_eq!(f.svc.selected(&f.stream).await.unwrap(), None);
+        let mac = DeviceId::generate();
+        assert_eq!(f.svc.selected(Some(&mac), &f.stream).await.unwrap(), None);
         assert_eq!(
-            f.svc.selected_or_first(&f.stream).await.unwrap(),
+            f.svc
+                .selected_or_first(Some(&mac), &f.stream)
+                .await
+                .unwrap(),
             Some(a.id)
         );
     }
@@ -160,18 +179,38 @@ mod tests {
     async fn selected_or_first_prefers_explicit_selection() {
         let f = fixture().await;
         add(&f, "a", true, 0).await;
+        let a_id = f.store.list_for_stream(&f.stream).await.unwrap()[0].id;
         let b = add(&f, "b", true, 1).await;
-        f.svc.select(&f.stream, Some(&b.id)).await.unwrap();
+        let (mac, tablet) = (DeviceId::generate(), DeviceId::generate());
+        f.svc.select(&mac, &f.stream, Some(&b.id)).await.unwrap();
         assert_eq!(
-            f.svc.selected_or_first(&f.stream).await.unwrap(),
+            f.svc
+                .selected_or_first(Some(&mac), &f.stream)
+                .await
+                .unwrap(),
             Some(b.id)
+        );
+        // Another device, or a reader with none, has the first open thread.
+        assert_eq!(
+            f.svc
+                .selected_or_first(Some(&tablet), &f.stream)
+                .await
+                .unwrap(),
+            Some(a_id)
+        );
+        assert_eq!(
+            f.svc.selected_or_first(None, &f.stream).await.unwrap(),
+            Some(a_id)
         );
     }
 
     #[tokio::test]
     async fn selected_or_first_returns_none_when_stream_has_no_threads() {
         let f = fixture().await;
-        assert_eq!(f.svc.selected_or_first(&f.stream).await.unwrap(), None);
+        assert_eq!(
+            f.svc.selected_or_first(None, &f.stream).await.unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
@@ -195,8 +234,13 @@ mod tests {
     async fn select_round_trips() {
         let f = fixture().await;
         let t = add(&f, "x", true, 0).await;
-        assert_eq!(f.svc.selected(&f.stream).await.unwrap(), None);
-        f.svc.select(&f.stream, Some(&t.id)).await.unwrap();
-        assert_eq!(f.svc.selected(&f.stream).await.unwrap(), Some(t.id));
+        let mac = DeviceId::generate();
+        assert_eq!(f.svc.selected(Some(&mac), &f.stream).await.unwrap(), None);
+        f.svc.select(&mac, &f.stream, Some(&t.id)).await.unwrap();
+        assert_eq!(
+            f.svc.selected(Some(&mac), &f.stream).await.unwrap(),
+            Some(t.id)
+        );
+        assert_eq!(f.svc.selected(None, &f.stream).await.unwrap(), None);
     }
 }

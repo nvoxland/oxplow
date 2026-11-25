@@ -2537,10 +2537,12 @@ impl ViewContext {
 }
 
 /// The context a viz is viewed from: `stream` (else `thread`'s stream,
-/// else the primary) and `thread` (else that stream's selected or active
-/// thread). Lookups that fail leave the value unset.
+/// else the primary) and `thread` (else the thread `device` shows in that
+/// stream, else its first open thread — what a viewer with no device
+/// gets). Lookups that fail leave the value unset.
 pub async fn view_context(
     svc: &crate::Services,
+    device: Option<&oxplow_domain::DeviceId>,
     stream: Option<oxplow_domain::StreamId>,
     thread: Option<oxplow_domain::ThreadId>,
 ) -> ViewContext {
@@ -2566,7 +2568,12 @@ pub async fn view_context(
     }
     let thread = match (thread, stream) {
         (Some(t), _) => Some(t),
-        (None, Some(s)) => svc.threads.selected_or_first(&s).await.ok().flatten(),
+        (None, Some(s)) => svc
+            .threads
+            .selected_or_first(device, &s)
+            .await
+            .ok()
+            .flatten(),
         (None, None) => None,
     };
     ViewContext {

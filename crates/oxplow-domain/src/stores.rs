@@ -36,11 +36,15 @@ pub trait StreamStore: Send + Sync {
     /// is a no-op.
     async fn archive(&self, id: &StreamId) -> Result<(), DomainError>;
     async fn primary(&self) -> Result<Option<Stream>, DomainError>;
-    /// Returns the runtime-state pointer to the currently-selected
-    /// stream id, if any. Survives restarts; null until set.
-    async fn current_id(&self) -> Result<Option<StreamId>, DomainError>;
-    /// Sets (or clears) the current-stream pointer.
-    async fn set_current(&self, id: Option<&StreamId>) -> Result<(), DomainError>;
+    /// The stream `device` shows, if it chose one. Survives restarts;
+    /// null until set.
+    async fn current_id(&self, device: &crate::DeviceId) -> Result<Option<StreamId>, DomainError>;
+    /// Sets (or clears) the stream `device` shows.
+    async fn set_current(
+        &self,
+        device: &crate::DeviceId,
+        id: Option<&StreamId>,
+    ) -> Result<(), DomainError>;
 }
 
 #[async_trait]
@@ -56,11 +60,15 @@ pub trait ThreadStore: Send + Sync {
     /// Soft-delete: stamp `archived_at`. Excluded from
     /// `list_for_stream` after this fires.
     async fn archive(&self, id: &ThreadId) -> Result<(), DomainError>;
-    /// Per-stream selected-thread pointer. None means nothing selected.
-    async fn selected_for_stream(&self, stream: &StreamId)
-        -> Result<Option<ThreadId>, DomainError>;
+    /// The thread `device` shows in `stream`. None means nothing selected.
+    async fn selected_for_stream(
+        &self,
+        device: &crate::DeviceId,
+        stream: &StreamId,
+    ) -> Result<Option<ThreadId>, DomainError>;
     async fn set_selected_for_stream(
         &self,
+        device: &crate::DeviceId,
         stream: &StreamId,
         thread: Option<&ThreadId>,
     ) -> Result<(), DomainError>;

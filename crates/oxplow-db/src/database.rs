@@ -3453,18 +3453,6 @@ mod tests {
         assert_eq!(row, "streams");
     }
 
-    #[test]
-    fn runtime_state_seeded() {
-        let db = Database::in_memory();
-        let conn = db.conn().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM runtime_state WHERE id = 1", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
     /// Schema regression: every table that should exist after all
     /// migrations apply should be present. agent_status + hook_event
     /// were dropped in V2 (now in-memory) — assert they're GONE so a
@@ -3475,7 +3463,7 @@ mod tests {
         let conn = db.conn().unwrap();
         let expected_present = [
             "streams",
-            "runtime_state",
+            "device_view_state",
             "threads",
             "thread_selection",
             "agent_turn",
@@ -3530,6 +3518,8 @@ mod tests {
         // `effort_observation` was dropped in V39; the V38
         // `metric_*` cluster was dropped in V49 (T-E3) — assert gone.
         let expected_absent = [
+            // V82: each device shows its own stream (`device_view_state`).
+            "runtime_state",
             // V47: the context items moved to `context_item`.
             "thread_context_item",
             // V45: comments are gone (the context basket's notes do their job).

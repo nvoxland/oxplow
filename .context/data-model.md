@@ -409,7 +409,8 @@ Each stream owns:
 - two agent pane targets (`working` and `talking`)
 - per-pane / per-thread agent resume session ids (so reconnecting picks up
   history for the assigned agent)
-- a `runtime_state.current_stream_id` pointer (singleton row, id=1)
+- no shared "current stream": each device shows its own stream and its own
+  thread in each stream (see "device_view_state" below)
 - a `custom_prompt` column (migration V6, nullable TEXT; read as `v_stream.prompt`, v3) — per-stream
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via the `oxplow.stream.set_prompt`
@@ -418,6 +419,28 @@ Each stream owns:
   V6 also dropped a legacy `summary` column that was carried over from
   the TS schema and never displayed; the prompt feature briefly
   piggybacked on that slot before getting its own column.
+
+### device_view_state and thread_selection — each device's place
+
+The stream a device shows and the thread it shows in each stream are that
+device's own (migration V82; the device is the request's caller,
+`.context/remote-daemon.md` "Who is asking"):
+
+- `device_view_state(device_id PK, current_stream_id)`: the stream the
+  device shows. `get_current_stream` reads the caller's; `switch_stream`
+  writes it.
+- `thread_selection(device_id, stream_id, selected_thread_id,
+  PK(device_id, stream_id))`: the thread the device shows in a stream.
+  `get_thread_state` reads the caller's; `select_thread` writes it.
+
+A reader with no device (an agent, a job, an effect, a script with the
+token) gets the defaults: the primary stream, a stream's first open thread
+(`ThreadService::selected_or_first(None, …)`), never one device's choice. A
+write with no device is `INVALID` ("this needs a device"). A page viewed
+with no thread named takes the thread the caller's device shows
+(`pages::spec::view_context`); an agent's page is about its own thread. The
+old shared rows were dropped, not carried over: each device starts from the
+defaults.
 
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."

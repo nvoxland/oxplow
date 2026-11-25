@@ -148,11 +148,8 @@ export function useWindowStreams({ setError, setDaemonUnavailable }: WindowStrea
     setError(null);
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
-    // Make the new stream current on the backend BEFORE we let the
-    // terminal view mount and call open_terminal_session — that command
-    // builds its session_key from `state.streams.current()`, so without
-    // this hop the new thread's terminal would dedup onto the previous
-    // stream/thread's PTY and show the wrong agent's transcript.
+    // The new stream becomes the one this device shows, so a reload comes
+    // back to it.
     try {
       await switchStream(next.id);
     } catch (e) {

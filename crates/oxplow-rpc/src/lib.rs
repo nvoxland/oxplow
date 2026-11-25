@@ -250,6 +250,15 @@ macro_rules! oxplow_command_table {
                 // pages: a page load's open runs
                 open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String> } -> $crate::commands::pages::OpenedRun,
                 open_panel_part => $crate::commands::pages::open_panel_part { panel: String, part: ::oxplow_app::pages::panels::PanelPart, choices: Option<::std::collections::BTreeMap<String, String>>, stream_id: Option<String>, thread_id: Option<String> } -> $crate::commands::pages::OpenedRun,
+                // each device's own stream and thread (`.context/data-model.md` "device_view_state")
+                get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
+                select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
+                get_current_stream => $crate::commands::streams::get_current_stream {} -> Option<::oxplow_domain::Stream>,
+                switch_stream => $crate::commands::streams::switch_stream { id: Option<::oxplow_domain::StreamId> } -> (),
+                // pages viewed with the thread the caller's device shows
+                run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
+                page_options => $crate::commands::pages::page_options { page: String, param: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_db::SqlQueryResult,
+                renderers_for => $crate::commands::pages::renderers_for { uri: String, stream_id: Option<String> } -> Vec<::oxplow_app::pages::renderers::Renderer>,
                 // the person's runs: each keeps the device it was asked from
                 run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 undo_command => $crate::commands::bus::undo_command { command_run_id: ::oxplow_domain::CommandRunId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
@@ -277,8 +286,6 @@ macro_rules! oxplow_command_table {
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 list_agent_harnesses => $crate::commands::threads::list_agent_harnesses {} -> Vec<::oxplow_app::harnesses::HarnessListing>,
-                get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
-                select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog
                 // tasks
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
@@ -314,11 +321,8 @@ macro_rules! oxplow_command_table {
                 rerun_page => $crate::commands::pages::rerun_page { run_id: String } -> ::oxplow_app::pages::runner::PageRun,
                 set_page_visible => $crate::commands::pages::set_page_visible { run_id: String, visible: bool } -> bool,
                 fetch_page_runs => $crate::commands::pages::fetch_page_runs { run_ids: Vec<String> } -> ::std::collections::BTreeMap<String, ::oxplow_app::pages::open_runs::RunSnapshot>,
-                run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
                 page_text => $crate::commands::pages::page_text { run_id: String } -> String,
-                page_options => $crate::commands::pages::page_options { page: String, param: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_db::SqlQueryResult,
                 get_page => $crate::commands::pages::get_page { id: String } -> ::oxplow_app::pages::schema::Page,
-                renderers_for => $crate::commands::pages::renderers_for { uri: String, stream_id: Option<String> } -> Vec<::oxplow_app::pages::renderers::Renderer>,
                 page_spec => $crate::commands::pages::page_spec { page: String } -> $crate::commands::pages::PageSpec,
                 page_form => $crate::commands::pages::page_form { run_id: String, node: String } -> ::oxplow_app::viz_actions::FormStart,
                 page_action_form => $crate::commands::pages::page_action_form { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>> } -> ::oxplow_app::viz_actions::FormStart,
@@ -376,8 +380,6 @@ macro_rules! oxplow_command_table {
                 // streams
                 list_streams => $crate::commands::streams::list_streams {} -> ::std::vec::Vec<::oxplow_domain::Stream>,
                 get_primary_stream => $crate::commands::streams::get_primary_stream {} -> Option<::oxplow_domain::Stream>,
-                get_current_stream => $crate::commands::streams::get_current_stream {} -> Option<::oxplow_domain::Stream>,
-                switch_stream => $crate::commands::streams::switch_stream { id: Option<::oxplow_domain::StreamId> } -> (),
             }
         }
     };

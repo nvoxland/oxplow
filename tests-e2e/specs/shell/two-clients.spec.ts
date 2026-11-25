@@ -1,7 +1,7 @@
 // One person on two clients of the same projects: what each client keeps of
-// its own, and what they share. Each test here fails on today's code and is
-// marked `test.fail()`: the mark comes off in the change that makes it pass
-// (per-device state, and the shared terminal's size rule).
+// its own, and what they share. A test that fails on today's code is marked
+// `test.fail()`: the mark comes off in the change that makes it pass
+// (per-device tabs, and the shared terminal's size rule).
 import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
 import { client, connectedTo, expect, test } from "../../support/fixtures.js";
 import { load, open, reload } from "../../support/ui.js";
@@ -11,7 +11,6 @@ const TAB_SESSIONS = "oxplow.layout.v8.sessions";
 /// The thread a client shows is that client's own: another client picking a
 /// thread doesn't move it, even across a reload.
 test("a thread picked on one client is not the other client's thread", async ({ page, browser, baseURL, daemon }) => {
-  test.fail(true, "the selected thread is one row shared by every client");
   const other = await run<{ result: { id: string } }>(daemon, "oxplow.thread.create", {
     stream: daemon.stream,
     title: "Second client's thread",
@@ -35,7 +34,6 @@ test("a thread picked on one client is not the other client's thread", async ({ 
 /// The stream a client shows is that client's own: another client switching
 /// stream doesn't move it, even across a reload.
 test("the stream a client shows is that client's own", async ({ page, browser, baseURL, daemon }) => {
-  test.fail(true, "the selected stream is one row shared by every client");
   const made = await run<{ result: { id: string } }>(daemon, "oxplow.stream.create", {
     title: "Second client's stream",
     source: "new",

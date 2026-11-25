@@ -103,7 +103,7 @@ pub(super) async fn panel_example(
         })
         .unwrap_or_default();
     host.current().await;
-    let ctx = oxplow_app::pages::spec::view_context(&host.svc, stream, thread).await;
+    let ctx = oxplow_app::pages::spec::view_context(&host.svc, None, stream, thread).await;
     let run = match oxplow_app::pages::panels::run_panel(&host.svc, &id, ctx.clone(), &picks).await
     {
         Ok(run) => run,

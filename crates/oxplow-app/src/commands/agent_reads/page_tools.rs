@@ -399,7 +399,9 @@ async fn context(
         // one the person has selected; a person keeps the selected one.
         None => own_thread_in(svc, invocation.actor(), stream).await?,
     };
-    Ok(crate::pages::spec::view_context(svc, stream, thread).await)
+    // A person's run names the device they asked from: its thread, then.
+    let device = invocation.run.caller().map(|c| &c.device);
+    Ok(crate::pages::spec::view_context(svc, device, stream, thread).await)
 }
 
 /// The acting agent's own thread, when it is in `stream` (or no stream is

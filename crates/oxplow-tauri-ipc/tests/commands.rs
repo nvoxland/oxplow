@@ -207,12 +207,19 @@ async fn stream_reads() {
         .await
         .unwrap()
         .is_some());
-    let _ = commands::generated::get_current_stream(app.state())
+    // A request with no device reads the default and may not choose.
+    let current = rpc(&app, "get_current_stream", serde_json::json!({}))
         .await
         .unwrap();
-    commands::generated::switch_stream(app.state(), Some(stream.id))
-        .await
-        .unwrap();
+    assert_eq!(current, serde_json::Value::Null);
+    let refused = rpc(
+        &app,
+        "switch_stream",
+        serde_json::json!({ "id": stream.id.to_string() }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(refused.code, "INVALID");
 }
 
 // ---- config commands ----
@@ -233,9 +240,17 @@ async fn thread_reads_over_default_thread() {
         .await
         .unwrap()
         .is_empty());
-    let _ = commands::generated::get_thread_state(app.state(), stream.id)
-        .await
-        .unwrap();
+    let state = rpc(
+        &app,
+        "get_thread_state",
+        serde_json::json!({ "streamId": stream.id.to_string() }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        state["selectedThreadId"].is_string(),
+        "the first open thread: {state}"
+    );
 }
 
 // ---- page-ref + search reads ----

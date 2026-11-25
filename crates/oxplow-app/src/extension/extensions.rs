@@ -6584,10 +6584,13 @@ view:
                     .snapshot(&crate::config_service::read_config(&f.svc.config)),
             ),
         };
-        assert_eq!(view_context(&f.svc, None, None).await, expect);
-        assert_eq!(view_context(&f.svc, None, Some(f.thread)).await, expect);
+        assert_eq!(view_context(&f.svc, None, None, None).await, expect);
         assert_eq!(
-            view_context(&f.svc, Some(thread.stream_id), None).await,
+            view_context(&f.svc, None, None, Some(f.thread)).await,
+            expect
+        );
+        assert_eq!(
+            view_context(&f.svc, None, Some(thread.stream_id), None).await,
             expect
         );
     }

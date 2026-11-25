@@ -239,7 +239,7 @@ mod tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads
-            .selected_or_first(&stream.id)
+            .selected_or_first(None, &stream.id)
             .await
             .unwrap()
             .unwrap();
@@ -401,7 +401,7 @@ mod tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads
-            .selected_or_first(&stream.id)
+            .selected_or_first(None, &stream.id)
             .await
             .unwrap()
             .expect("the primary stream has a thread");

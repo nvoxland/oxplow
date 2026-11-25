@@ -60,7 +60,8 @@ export const commands = {
 } | null, IpcError_Serialize>(__TAURI_INVOKE("get_primary_stream")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getCurrentStream: () => typedError<{
 	id: StreamId,
@@ -94,7 +95,8 @@ export const commands = {
 } | null, IpcError_Serialize>(__TAURI_INVOKE("get_current_stream")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	switchStream: (id: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("switch_stream", { id })),
 	/**
@@ -109,12 +111,14 @@ export const commands = {
 	listAgentHarnesses: () => typedError<HarnessListing[], IpcError_Serialize>(__TAURI_INVOKE("list_agent_harnesses")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("select_thread", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError_Serialize>(__TAURI_INVOKE("get_thread_state", { streamId })),
 	/**
@@ -224,7 +228,8 @@ export const commands = {
 	fetchPageRuns: (runIds: string[]) => typedError<{ [key in string]: RunSnapshot_Serialize }, IpcError_Serialize>(__TAURI_INVOKE("fetch_page_runs", { runIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	runPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<PageRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_page", { page, specYaml, params, streamId })),
 	/**
@@ -234,7 +239,8 @@ export const commands = {
 	pageText: (runId: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("page_text", { runId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	pageOptions: (page: string, param: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("page_options", { page, param, params, streamId })),
 	/**
@@ -244,7 +250,8 @@ export const commands = {
 	getPage: (id: string) => typedError<Page_Serialize, IpcError_Serialize>(__TAURI_INVOKE("get_page", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	renderersFor: (uri: string, streamId: string | null) => typedError<Renderer[], IpcError_Serialize>(__TAURI_INVOKE("renderers_for", { uri, streamId })),
 	/**

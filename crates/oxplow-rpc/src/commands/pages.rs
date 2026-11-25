@@ -43,9 +43,16 @@ fn target(page: Option<String>, spec_yaml: Option<String>) -> Result<RunTarget, 
     }
 }
 
-async fn context(svc: &Services, stream_id: Option<&str>, thread_id: Option<&str>) -> ViewContext {
+/// The context a page is viewed from: the stream and thread asked for,
+/// else the thread the caller's device shows in that stream.
+async fn context(
+    request: &RpcRequest<'_>,
+    stream_id: Option<&str>,
+    thread_id: Option<&str>,
+) -> ViewContext {
     oxplow_app::pages::spec::view_context(
-        svc,
+        request,
+        request.caller.map(|c| &c.device),
         stream_id.and_then(oxplow_domain::StreamId::try_from_str),
         thread_id.and_then(oxplow_domain::ThreadId::try_from_str),
     )
@@ -66,7 +73,7 @@ pub async fn open_page(
     let req = RunRequest {
         target: target(page, spec_yaml)?,
         params: params.unwrap_or_default(),
-        ctx: context(svc, stream_id.as_deref(), thread_id.as_deref()).await,
+        ctx: context(request, stream_id.as_deref(), thread_id.as_deref()).await,
         viewer: Actor::Human,
     };
     let (run_id, run) = svc.page_runs.open(svc, req, client).await?;
@@ -95,7 +102,7 @@ pub async fn open_panel_part(
     let client = request.connection()?.as_str();
     let svc: &Services = request;
     let found = panels::find_panel(svc, &panel).await?;
-    let ctx = context(svc, stream_id.as_deref(), thread_id.as_deref()).await;
+    let ctx = context(request, stream_id.as_deref(), thread_id.as_deref()).await;
     let req = panels::part_request(svc, &found, part, ctx, &choices.unwrap_or_default())
         .await?
         .ok_or_else(|| DomainError::Invalid(format!("panel `{panel}` has no {part:?} part")))?;
@@ -156,17 +163,18 @@ pub async fn fetch_page_runs(
 /// Run a page once, keeping nothing open (a launcher count, a picker's
 /// options).
 pub async fn run_page(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     page: Option<String>,
     spec_yaml: Option<String>,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<PageRun, IpcError> {
+    let svc: &Services = request;
     Ok(PageRunner::of(svc)
         .run(RunRequest {
             target: target(page, spec_yaml)?,
             params: params.unwrap_or_default(),
-            ctx: context(svc, stream_id.as_deref(), None).await,
+            ctx: context(request, stream_id.as_deref(), None).await,
             viewer: Actor::Human,
         })
         .await?)
@@ -176,18 +184,19 @@ pub async fn run_page(
 /// current values, run once — only that loader's chain
 /// (`pages::options::param_options`).
 pub async fn page_options(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     page: String,
     param: String,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<oxplow_db::SqlQueryResult, IpcError> {
+    let svc: &Services = request;
     Ok(oxplow_app::pages::options::param_options(
         svc,
         &page,
         &param,
         &params.unwrap_or_default(),
-        &context(svc, stream_id.as_deref(), None).await,
+        &context(request, stream_id.as_deref(), None).await,
         &Actor::Human,
     )
     .await?)
@@ -213,11 +222,12 @@ pub async fn get_page(svc: &Services, id: String) -> Result<Page, IpcError> {
 /// (`oxplow_app::pages::renderers`): the window's one way to choose what
 /// draws a tab and what View as lists.
 pub async fn renderers_for(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     uri: String,
     stream_id: Option<String>,
 ) -> Result<Vec<oxplow_app::pages::renderers::Renderer>, IpcError> {
-    let ctx = context(svc, stream_id.as_deref(), None).await;
+    let svc: &Services = request;
+    let ctx = context(request, stream_id.as_deref(), None).await;
     Ok(oxplow_app::pages::renderers::renderers_for(svc, &uri, &ctx, &Actor::Human).await)
 }
 
@@ -459,7 +469,11 @@ mod tests {
         let source = page_spec(&ctx, "my_pages/example".into()).await.unwrap();
         assert!(source.writable);
         assert_eq!(source.yaml, edited);
-        let deployed = run_page(&ctx, Some("my_pages/example".into()), None, None, None)
+        let request = crate::RpcRequest {
+            ctx: &ctx,
+            caller: None,
+        };
+        let deployed = run_page(&request, Some("my_pages/example".into()), None, None, None)
             .await
             .unwrap();
         assert_eq!(
