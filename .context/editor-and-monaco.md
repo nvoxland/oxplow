@@ -36,7 +36,7 @@ draft: typing, and an LSP edit to a file no editor shows, are edits to
 it, and the store follows them. Every editor of the file shares the
 model and its undo history; an `EditorPane` only `setModel`s it.
 
-- **Buffers follow the tabs.** `App.tsx` calls `buffers.retainOnly` with
+- **Buffers follow the tabs.** `window/useWindowTabs.ts` calls `buffers.retainOnly` with
   every file a tab of any thread shows (any step of its history): the
   rest close and their models are disposed. A closed tab with unsaved
   edits is `stash`ed first, and the toast's Undo `restore`s it.
@@ -76,7 +76,7 @@ before deleting either binding.
 
 ## Closing a dirty tab offers Undo
 
-`handleCloseOpenFile` in `apps/desktop/src/App.tsx` stashes a dirty
+`handleCloseOpenFile` in `apps/desktop/src/window/useWindowOpeners.ts` stashes a dirty
 buffer (`buffers.stash`), closes the tab at once, and shows a toast
 whose Undo restores the buffer and reopens the tab with the draft. The
 tab cap (`evictions`) never closes a tab whose page is dirty.

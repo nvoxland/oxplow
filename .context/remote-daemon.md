@@ -148,7 +148,7 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
   next bullet.
 - **Auto-resync on reconnect.** Recovery re-hydrates the client stores
   in place — *no* manual full-page reload. The top-level loader
-  (`loadInitialAppState` in `App.tsx`: streams, current stream + its
+  (`loadInitialAppState` in `window/useWindowStreams.ts`: streams, current stream + its
   threads, workspace context), the core-store
   subscriptions (`useBackendSubscriptions`: config, agent
   statuses) all register

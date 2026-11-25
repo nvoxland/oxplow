@@ -1237,7 +1237,7 @@ its right-click menu.
   the `agent` tab); it stays at the front and is never a drag source or
   drop target, so nothing lands before it. Reorders persist in the
   thread's tab session (`reorder`, `tabs/session.ts`);
-  `App.tsx`'s `handleReorderCenterTabs` reorders the whole strip, not a
+  `window/useWindowTabs.ts`'s `handleReorderCenterTabs` reorders the whole strip, not a
   per-kind subset. Clicking a tab in the
   overflow `▾` panel (or any activation of an overflowed tab) promotes it
   to **right after `agent`** via `promoteHiddenIntoStrip` (inserts after

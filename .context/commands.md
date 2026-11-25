@@ -396,7 +396,7 @@ in `CommandSpec::op`.
   `.context/remote-daemon.md` "Who is asking"), and a request with none is
   refused. It says it's open — and what it hosts — with
   `register_client_host { scopes }` once it is ready to do a
-  call as asked (App.tsx `windowReady`: its stream and thread loaded,
+  call as asked (`window/useWindowHost.ts` `windowReady`: its stream and thread loaded,
   the thread's first tabs opened, the extensions loaded; before that a
   navigate was refused, pushed aside by those first tabs, or drawn by
   nothing). Once ready it stays the host, and `<html data-oxplow-ready>`

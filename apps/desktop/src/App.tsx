@@ -3,16 +3,13 @@ import { useResourcesLoader } from "./resources.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
-  getThreadState,
   type AgentStatus,
   type AgentStatusEntry,
-  getCurrentStream,
   type GitOpKickoff,
   desktopBridge,
   probeDaemon,
   runCommand,
   runCommandInBackground,
-  openInSystemBrowser,
   commandOpenAfter,
   type SqlCell,
 } from "./api.js";
@@ -47,6 +44,7 @@ import { useNarrowWindow } from "./windowWidth.js";
 import { useWindowStreams } from "./window/useWindowStreams.js";
 import { HOME_TAB, useWindowTabs } from "./window/useWindowTabs.js";
 import { useWindowOpeners } from "./window/useWindowOpeners.js";
+import { useWindowHost } from "./window/useWindowHost.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation } from "./tabs/PageNavigationContext.js";
@@ -57,8 +55,6 @@ import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
-import { insertIntoAgent } from "./agent-input-bus.js";
-import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { MissingPage } from "./pages/MissingPage.js";
 import { PartNotAPage } from "./pages/PartNotAPage.js";
 import { kindForTabId } from "./pageKinds.js";
@@ -75,40 +71,29 @@ import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
-import { buildTabReport, createTabReporter } from "./tabs/tabReport.js";
-import { useTabReportRepeats } from "./tabs/useTabReportRepeats.js";
-import { windowPageRuns } from "./pageRuns.js";
 import {
-  activeRef,
   bodies,
-  close as sessionClose,
   current as currentEntry,
   navigate as sessionNavigate,
-  open as sessionOpen,
   setTitle as sessionSetTitle,
   patchHistoryState as sessionPatchHistoryState,
-  slotShowing,
   identityOf as pageIdentityOf,
   type Entry,
   type Origin,
   type Session,
   type Tab,
 } from "./tabs/session.js";
-import { installCli, openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
+import { installCli, listRecentProjects, shellAvailable } from "./api.js";
 import { triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
-import { pickFolder } from "./tauri-bridge/nativeDialog.js";
-import { buffers } from "./editor/openFiles.js";
-import { finishPageVisit, recordPageVisit, reportTabs } from "./api.js";
+import { finishPageVisit, recordPageVisit } from "./api.js";
 import { PageVisitTimer } from "./pageVisitTimer.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
 import { setRefOfferHost } from "./components/refCommands.js";
 import type { WhenContext } from "./when.js";
-import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
-import { streamOfThread } from "./tabs/threadTabOps.js";
-import { planNavigation } from "./tabs/navigation.js";
+import { runLocally } from "./clientHost.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { logUi, setUiLogContext } from "./logger.js";
@@ -120,45 +105,6 @@ import { GitDialogs } from "./components/Git/GitDialogs.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { useLiveTerminals } from "./terminal/useTerminalSession.js";
 import { copyText } from "./clipboard.js";
-
-/// Prompt for a folder and open it as an **existing** project.
-/// `newWindow=false` replaces the current window (this process exits
-/// once the new one spawns); `true` opens an additional independent
-/// window. A folder that isn't a project yet is refused by
-/// `open_project` — File ▸ New Project… is the door for that.
-async function pickAndOpenProject(newWindow: boolean) {
-  const selected = await pickFolder(newWindow ? "Open Project in New Window" : "Open Project");
-  if (selected === null) return;
-  try {
-    await openProject(selected, newWindow);
-  } catch (e) {
-    recordOpError({
-      label: "Open project",
-      message: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
-
-/// Prompt for a folder and create a new project in it. Always opens in
-/// a new window, so creating never closes the window the command ran
-/// from; a folder that already is a project is refused by
-/// `create_project`.
-async function pickAndCreateProject() {
-  const selected = await pickFolder("New Project");
-  if (selected === null) return;
-  try {
-    await createProject(selected);
-  } catch (e) {
-    recordOpError({
-      label: "New project",
-      message: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
-
-/** How often an unchanged window repeats its tab report (the backend forgets
- *  one that falls silent for five minutes). */
-const TAB_REPORT_HEARTBEAT_MS = 60_000;
 
 /** The tab a thread falls back to: its first agent session's, else the
  *  session picker, else its first tab. */
@@ -721,58 +667,6 @@ export function App() {
     return () => clearTimeout(deferred);
   }, [effectiveCenterActive, selectedThreadId]);
 
-  // Report what this window shows — every thread's tabs and the one
-  // selected in each, the thread it shows, its focus and visibility, and
-  // the shown page's published detail (a page's params) — so an agent's
-  // `list_tabs` / `get_open_page` see what the person sees. Best-effort
-  // and debounced; see tabs/tabReport.ts and tabs/openPageDetail.ts.
-  const [pageDetailTick, setPageDetailTick] = useState(0);
-  useEffect(() => getPageDetailStore().subscribe(() => setPageDetailTick((t) => t + 1)), []);
-  const [pageRunsTick, setPageRunsTick] = useState(0);
-  useEffect(() => windowPageRuns().subscribeRunIds(() => setPageRunsTick((t) => t + 1)), []);
-  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
-  const [windowVisible, setWindowVisible] = useState(() => document.visibilityState === "visible");
-  useEffect(() => visitTimerRef.current?.setVisible(windowVisible), [windowVisible]);
-  useEffect(() => {
-    const focus = () => setWindowFocused(true);
-    const blur = () => setWindowFocused(false);
-    const visibility = () => setWindowVisible(document.visibilityState === "visible");
-    window.addEventListener("focus", focus);
-    window.addEventListener("blur", blur);
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      window.removeEventListener("focus", focus);
-      window.removeEventListener("blur", blur);
-      document.removeEventListener("visibilitychange", visibility);
-    };
-  }, []);
-  // The last thing told, repeated while nothing changes: the backend forgets
-  // a window that stops reporting (`client_reports::FORGET_AFTER_MS`), and an
-  // idle window with tabs open is still there.
-  const lastTabReportRef = useRef<ReturnType<typeof buildTabReport> | null>(null);
-  const tabReporter = useMemo(
-    () => createTabReporter((report) => reportTabs(report).then((answer) => windowPageRuns().reopen(answer.missingRuns))),
-    [],
-  );
-  useTabReportRepeats(lastTabReportRef, tabReporter, () => windowPageRuns().runIds(), TAB_REPORT_HEARTBEAT_MS);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const ctx = visitContextRef.current;
-      const shown = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
-      const report = buildTabReport({
-        runs: windowPageRuns().runIds(),
-        focused: windowFocused,
-        visible: windowVisible,
-        shownThread: selectedThreadId ?? null,
-        sessions,
-        titleOf: (tab) => tabLabelByIdRef.current[tab.id] ?? pageTitles[tab.id],
-        detail: shown ? getPageDetailStore().get(shown.id) : null,
-      });
-      lastTabReportRef.current = report;
-      tabReporter.send(report);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, pageRunsTick, windowFocused, windowVisible, tabReporter]);
 
 
 
@@ -867,179 +761,6 @@ export function App() {
     };
   })();
 
-  // The window as a command host (`clientHost.ts`): what only it can do,
-  // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
-  // the agent's own thread (never switching the thread or stream shown).
-  const windowHandlers = useMemo<ClientHandlers>(() => {
-    const threadOf = (ctx: ClientCallContext) => {
-      const thread = ctx.threadId ?? selectedThreadId;
-      if (!thread) throw new Error("no thread is shown");
-      return thread;
-    };
-    const refOf = (input: unknown) => {
-      const id = (input as { uri?: unknown } | null)?.uri;
-      if (typeof id !== "string") throw new Error("`uri` is a page's URI");
-      const ref = refFromTabId(id);
-      if (!ref) throw new Error(`\`${id}\` isn't a page's ref`);
-      return ref;
-    };
-    const open = async (input: unknown, ctx: ClientCallContext, focus: boolean) => {
-      const thread = threadOf(ctx);
-      const ref = refOf(input);
-      if (thread === selectedThreadId && focus) {
-        handleOpenPageRef.current?.(ref);
-        return { uri: ref.id, focused: true };
-      }
-      // A working-tree file is read first: a path that isn't a file
-      // opens nothing.
-      const path = diskFilePath(ref.id);
-      const fileStream = streams.find((candidate) => candidate.id === streamOfThread(threadStates, thread));
-      if (path !== null && fileStream) {
-        const buffer = await buffers.open(fileStream, path);
-        if (buffer.state === "missing") throw new Error(`\`${path}\` isn't a file in the working tree`);
-        if (buffer.state === "error") throw new Error(buffer.error ?? `couldn't read \`${path}\``);
-      }
-      updateSession(thread, (session) => {
-        const opened = sessionOpen(session, { ref });
-        // Opened without focus, it waits behind what the thread shows.
-        return focus ? opened : { ...opened, active: session.active, mru: [...session.mru, ...opened.mru.filter((m) => !session.mru.includes(m))] };
-      });
-      return { uri: ref.id, focused: focus };
-    };
-    return {
-      "editor.write": {
-        // The file `uri` names, else the one the thread shows.
-        save: async (input, ctx) => {
-          const thread = threadOf(ctx);
-          const id = (input as { uri?: unknown } | null)?.uri;
-          const shown = thread === selectedThreadId ? centerActive : activeRef(sessions[thread])?.id;
-          const tab = typeof id === "string" ? id : shown;
-          const path = tab ? diskFilePath(tab) : null;
-          // The page shown that isn't a file saves through its own Save
-          // (`useTabEditing`): a knowledge page's draft, say.
-          const ownSave = typeof id !== "string" && thread === selectedThreadId && tab ? tabSavesRef.current[tab] : undefined;
-          if (path === null && ownSave) {
-            ownSave();
-            return { saved: tab };
-          }
-          if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "nothing to save on the page shown");
-          const streamId = streamOfThread(threadStates, thread);
-          if (!streamId) throw new Error(`no stream has thread \`${thread}\``);
-          await buffers.save(streamId, path, ctx.call);
-          return { saved: path };
-        },
-      },
-      "window.show": {
-        find: () => {
-          // The page shown finds in what it edits (`useTabEditing`).
-          const find = tabFindsRef.current[centerActive];
-          if (!find) throw new Error("nothing to find in on the page shown");
-          find();
-          return null;
-        },
-        // Past the window (the daemon refuses an agent): the person's
-        // browser, their clipboard.
-        open_url: async (input) => {
-          const url = (input as { url?: unknown } | null)?.url;
-          if (typeof url !== "string") throw new Error("`url` is a web address");
-          await openInSystemBrowser(url);
-          return null;
-        },
-        copy_text: async (input) => {
-          const text = (input as { text?: unknown } | null)?.text;
-          if (typeof text !== "string") throw new Error("`text` is the text to copy");
-          if (!(await copyText(text))) throw new Error("The browser refused to copy");
-          return { copied: text.length };
-        },
-        quick_open: (input) => {
-          if (!stream) throw new Error("no stream is shown");
-          const query = (input as { query?: unknown } | null)?.query;
-          setQuickOpenQuery(typeof query === "string" ? query : "");
-          setQuickOpenVisible(true);
-          return null;
-        },
-        // Takes the person to a ref (`tabs/navigation.ts`): the page opens
-        // and is focused in the thread it belongs to, then the window
-        // switches to that stream and thread.
-        navigate: async (input) => {
-          const plan = await planNavigation(input, threadStates, stream?.id ?? null, undefined, {
-            current: async () => (await getCurrentStream()).id,
-            threads: async (id) => getThreadState(id),
-          });
-          const { replace, new_tab: newTab } = (input ?? {}) as { replace?: unknown; new_tab?: unknown };
-          if (plan.page) {
-            if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);
-            // As a browser follows a link: the shown tab goes there (Back
-            // returns, or not with `replace`); `new_tab` gives it a tab of
-            // its own.
-            const shownTab = activeRef(sessions[plan.threadId])?.id;
-            if (newTab !== true && shownTab && plan.threadId === selectedThreadId) {
-              handleNavigateInTab(shownTab, plan.page, undefined, replace === true);
-            } else {
-              await open({ uri: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
-            }
-          }
-          if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
-          if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
-          return { opened: plan.page?.id ?? null, stream: plan.streamId };
-        },
-      },
-      "agent_terminal.write": {
-        restart: async (input, ctx) => {
-          if (ctx.actor !== "human") throw new Error("Only a person can restart an agent terminal.");
-          const requested = (input as { uri?: string } | null)?.uri;
-          const uri = requested ?? effectiveCenterActive;
-          if (typeOf(uri) !== "oxplow/agent_session") throw new Error("No agent terminal is selected.");
-          await desktopBridge().restartAgentTerminal(uri);
-          return null;
-        },
-      },
-      // It fills the shown thread's agent input, unsent.
-      "agent_input.write": {
-        draft: (input) => {
-          const text = (input as { text?: unknown } | null)?.text;
-          if (typeof text !== "string") throw new Error("`text` is the draft");
-          insertIntoAgent(text);
-          return null;
-        },
-      },
-      // The app shell's: projects and windows.
-      "projects.write": {
-        create: async () => {
-          await pickAndCreateProject();
-          return null;
-        },
-        open: async (input) => {
-          const { path, new_window } = (input ?? {}) as { path?: unknown; new_window?: unknown };
-          if (typeof path === "string") await openProject(path, new_window === true);
-          else await pickAndOpenProject(new_window === true);
-          return null;
-        },
-      },
-      "tabs.write": {
-        open: (input, ctx) => open(input, ctx, false),
-        focus: (input, ctx) => open(input, ctx, true),
-        close: (input, ctx) => {
-          const thread = threadOf(ctx);
-          const ref = refOf(input);
-          if (thread === selectedThreadId) {
-            closePageTab(ref.id);
-          } else {
-            updateSession(thread, (session) => {
-              const slot = slotShowing(session, ref.id);
-              return slot ? sessionClose(session, slot) : session;
-            });
-          }
-          return { uri: ref.id, closed: true };
-        },
-      },
-    };
-    // getFileSession / mutateFileSession are plain functions over the
-    // session state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, effectiveCenterActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
-  const windowHandlersRef = useRef(windowHandlers);
-  windowHandlersRef.current = windowHandlers;
 
 
 
@@ -1064,30 +785,25 @@ export function App() {
 
   const extensions = useExtensions();
   extensionsRef.current = extensions;
-  // The window takes the daemon's calls (an agent's or a link's navigate,
-  // `clientHost.ts`) once it can do them as asked: its stream and thread
-  // loaded, the thread's first tabs opened, and the extensions that say what
-  // draws a page loaded. Before that a call is refused "no window is open",
-  // never half done. Once ready it stays the host: a later stream switch
-  // or extensions reload doesn't take it away. The page says so on `<html>`
-  // (`data-oxplow-ready`), for whoever waits for the window.
-  const windowReady =
-    stream !== null &&
-    selectedThreadId !== null &&
-    selectedThreadSessions !== null &&
-    sessions[selectedThreadId] !== undefined &&
-    openingThread !== selectedThreadId &&
-    extensions !== null;
-  const [hosting, setHosting] = useState(false);
-  useEffect(() => {
-    if (windowReady) setHosting(true);
-  }, [windowReady]);
-  useEffect(() => {
-    if (!hosting) return;
-    return startClientHost(() => windowHandlersRef.current, undefined, undefined, () => {
-      document.documentElement.dataset.oxplowReady = "true";
-    });
-  }, [hosting]);
+  // The window as the daemon's host, and its tab report for agents.
+  const { windowHandlersRef, windowVisible } = useWindowHost({
+    stream,
+    streams,
+    threadStates,
+    selectedThreadId,
+    selectedThreadSessions,
+    extensions,
+    tabs: { sessions, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread },
+    openers: { handleOpenPageRef, handleNavigateInTab },
+    switchStream: handleSwitch,
+    selectThread: handleSelectThread,
+    view: { effectiveCenterActive, visitContextRef, tabLabelByIdRef },
+    openQuickOpen: (query) => {
+      setQuickOpenQuery(query);
+      setQuickOpenVisible(true);
+    },
+  });
+  useEffect(() => visitTimerRef.current?.setVisible(windowVisible), [windowVisible]);
   const foundationErrors = foundationDown(extensions);
   // Which pages can draw each tab of the thread: the daemon's list
   // (`pages/useRenderers.ts`), fetched as tabs appear and remembered.

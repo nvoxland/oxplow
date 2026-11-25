@@ -629,18 +629,14 @@ runtime exposes one writer over IPC; the rows are read through `v_usage_event`:
 
 The bus event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
 
-Active write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
-`streamId` and the active `threadId` so per-stream and per-thread
+Active write hookpoints (both in `apps/desktop/src/window/useWindowOpeners.ts`,
+both pass `streamId` and the active `threadId` so per-stream and per-thread
 queries both work):
 
-- `wiki-note` → `handleOpenNote`
 - `editor-file` → `handleOpenFile`
-- `task` → `handleRequestEditTask`
+- `knowledge` → `handleOpenKnowledge`
 
-The wiki-note rows currently feed `NotesPane`'s "Recently visited"
-section; editor-file and task rows are recorded but not yet
-surfaced in any UI — the architecture is ready, the consumer is the
-follow-up.
+No UI reads these rows yet.
 
 When wiring a new kind, record the visit at the moment the user
 *opens* the target — not on hover or focus — because the 30s coalesce
