@@ -1,3 +1,4 @@
+import { newId } from "./newId.js";
 import { windowStorage } from "./shellStorage.js";
 
 export const CLIENT_ID_KEY = "oxplow-ui-client-id";
@@ -7,7 +8,7 @@ export const CLIENT_ID_KEY = "oxplow-ui-client-id";
  *  has no API/transport dependency: the socket can use it during startup. */
 export function createUiClientId(
   storage: Pick<typeof windowStorage, "getItem" | "setItem"> = windowStorage,
-  generate: () => string = () => globalThis.crypto?.randomUUID?.() ?? `client-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  generate: () => string = newId,
 ): () => string {
   let id: string | null = null;
   return () => {

@@ -28,6 +28,7 @@ import { BarButton, DockToolbar } from "../Dock/DockToolbar.js";
 import { formatFullDateTime } from "../format.js";
 import { alertCounts, alertRows, alertsSummary, clearable, shortAge, type AlertItems, type AlertKind, type AlertRow } from "./alertsModel.js";
 import { useAlerts } from "./useAlerts.js";
+import { copyText } from "../../clipboard.js";
 
 export function useAlertsBadge(): DockBadge | null {
   const { items } = useAlerts();
@@ -278,7 +279,7 @@ function AlertRowView({
                 </button>
               ) : null}
               {whole ? (
-                <button type="button" data-testid="alerts-item-copy" onClick={() => void navigator.clipboard?.writeText([row.title, whole].join("\n\n")).catch(() => {})} style={linkButton}>
+                <button type="button" data-testid="alerts-item-copy" onClick={() => void copyText([row.title, whole].join("\n\n"))} style={linkButton}>
                   Copy
                 </button>
               ) : null}

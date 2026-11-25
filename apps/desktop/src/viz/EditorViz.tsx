@@ -18,6 +18,8 @@ import { useOptionalPageNavigation, useTabEditing } from "../tabs/PageNavigation
 import { diffRef, fileRefAt, gitCommitRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { useVizStream } from "./VizStream.js";
+import { PASTE_WITH_KEYBOARD, readText } from "../clipboard.js";
+import { showToast } from "../components/toastStore.js";
 
 export function EditorViz({
   row,
@@ -87,8 +89,9 @@ export function EditorViz({
         onNavigateToLocation={(target) => open(fileRefAt(target.path, target.line))}
         onRevealCommit={(sha) => open(gitCommitRef(sha))}
         onCompareWithClipboard={(selection, file) => {
-          void navigator.clipboard.readText().then(
+          void readText().then(
             (clipboard) => {
+              if (clipboard === null) { showToast({ message: PASTE_WITH_KEYBOARD }); return; }
               // The two texts are no address: they ride as the new entry's
               // history state (`DiffViz` reads them); WORKING on both sides
               // is the sentinel they replace. Each compare is its own tab.

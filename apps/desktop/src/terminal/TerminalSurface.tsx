@@ -24,6 +24,7 @@ import type { MenuItem } from "../menu.js";
 import { followRuleLink, linkRefOf, openInBrowser, openInForPath, openInForRef, withLinkOffers } from "../openIn.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import { isMacPlatform } from "../keybindings.js";
+import { copyText, readText } from "../clipboard.js";
 
 /** The terminal's font size, px: its cells are measured in it. */
 const TERMINAL_FONT_SIZE = 13;
@@ -105,7 +106,7 @@ async function readClipboard(): Promise<string> {
     }
   }
   try {
-    return await navigator.clipboard.readText();
+    return (await readText()) ?? "";
   } catch {
     return "";
   }
@@ -165,7 +166,7 @@ export function TerminalSurface({
       id,
       label,
       enabled: true,
-      run: () => void navigator.clipboard.writeText(text).catch(() => {}),
+      run: () => void copyText(text),
     });
     if (link.kind === "url") {
       const elsewhere = openInForRef(link.url);
@@ -191,7 +192,7 @@ export function TerminalSurface({
         mac: isMacPlatform(),
         ...(what?.around ? { around: what.around } : {}),
         uri,
-        copy: (text) => void navigator.clipboard.writeText(text).catch(() => {}),
+        copy: (text) => void copyText(text),
         paste: () =>
           void readClipboard()
             .then((text) => {

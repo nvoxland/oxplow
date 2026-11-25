@@ -151,6 +151,7 @@ import { openCompareWith, openRollback } from "./components/Git/gitDialogStore.j
 import { GitDialogs } from "./components/Git/GitDialogs.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { useLiveTerminals } from "./terminal/useTerminalSession.js";
+import { copyText } from "./clipboard.js";
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -1588,7 +1589,7 @@ export function App() {
         copy_text: async (input) => {
           const text = (input as { text?: unknown } | null)?.text;
           if (typeof text !== "string") throw new Error("`text` is the text to copy");
-          await navigator.clipboard.writeText(text);
+          if (!(await copyText(text))) throw new Error("The browser refused to copy");
           return { copied: text.length };
         },
         quick_open: (input) => {
@@ -2346,7 +2347,7 @@ function FoundationDownDialog({ errors }: { errors: string[] }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
-            onClick={() => void navigator.clipboard.writeText(lines.join("\n")).catch(() => {})}
+            onClick={() => void copyText(lines.join("\n"))}
             style={{ ...button, background: "var(--accent)", color: "#fff", border: "none" }}
           >
             Copy

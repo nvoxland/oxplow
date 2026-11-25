@@ -24,6 +24,8 @@ import { editorContextEntry } from "../agent-context-ref.js";
 import { addToContext } from "../contextBasket.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { fileRef } from "../tabs/pageRefs.js";
+import { copyText, PASTE_WITH_KEYBOARD, readText } from "../clipboard.js";
+import { showToast } from "./toastStore.js";
 
 interface Props {
   stream: Stream;
@@ -455,7 +457,7 @@ export function EditorPane({
         const model = ed?.getModel();
         const sel = ed?.getSelection?.();
         if (!ed || !model || !sel || sel.isEmpty()) return;
-        void navigator.clipboard.writeText(model.getValueInRange(sel));
+        void copyText(model.getValueInRange(sel));
         ed.executeEdits("cut", [{ range: sel, text: "" }]);
         ed.focus();
       },
@@ -469,7 +471,7 @@ export function EditorPane({
         const model = ed?.getModel();
         const sel = ed?.getSelection?.();
         if (!ed || !model || !sel || sel.isEmpty()) return;
-        void navigator.clipboard.writeText(model.getValueInRange(sel));
+        void copyText(model.getValueInRange(sel));
       },
     },
     {
@@ -480,7 +482,8 @@ export function EditorPane({
         const ed = editorRef.current;
         const sel = ed?.getSelection?.();
         if (!ed || !sel) return;
-        const t = await navigator.clipboard.readText();
+        const t = await readText();
+        if (t === null) { showToast({ message: PASTE_WITH_KEYBOARD }); return; }
         if (t) {
           ed.executeEdits("paste", [{ range: sel, text: t }]);
           ed.focus();
@@ -525,7 +528,7 @@ export function EditorPane({
       id: "editor.copy-path",
       label: "Copy Path",
       enabled: !!filePath,
-      run: () => (filePath ? navigator.clipboard.writeText(filePath) : undefined),
+      run: () => { if (filePath) void copyText(filePath); },
     },
     // The file outside oxplow: the file manager, its default app, a
     // terminal in its folder (`openIn.ts`).
@@ -623,7 +626,7 @@ export function EditorPane({
                 id: "blame.copy-sha",
                 label: "Copy commit SHA",
                 enabled: true,
-                run: () => { void navigator.clipboard?.writeText(blameMenu.sha); },
+                run: () => { void copyText(blameMenu.sha); },
               },
               {
                 id: "blame.reveal",
@@ -635,7 +638,7 @@ export function EditorPane({
                 id: "blame.copy-author-email",
                 label: "Copy author email",
                 enabled: !!blameMenu.authorMail,
-                run: () => { void navigator.clipboard?.writeText(blameMenu.authorMail); },
+                run: () => { void copyText(blameMenu.authorMail); },
               },
             ]}
             position={{ x: blameMenu.x, y: blameMenu.y }}

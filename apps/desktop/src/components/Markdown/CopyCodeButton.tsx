@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { copyText } from "../../clipboard.js";
 
 /**
  * The Copy on a markdown code block, the same in the viewer and the
@@ -22,13 +23,11 @@ export function CopyCodeButton({ read }: { read(button: HTMLButtonElement): stri
         e.preventDefault();
         e.stopPropagation();
         const text = read(e.currentTarget);
-        void navigator.clipboard
-          .writeText(text)
-          .then(() => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1200);
-          })
-          .catch(() => {});
+        void copyText(text).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        });
       }}
     >
       {copied ? <Check size={12} /> : <Copy size={12} />}
