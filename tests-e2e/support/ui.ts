@@ -13,6 +13,51 @@ export function shown(page: Page, needle?: string): Locator {
   return page.locator(`[data-testid^="center-tab-body-"]${has}:visible`);
 }
 
+/** What a narrow screen needs of a page: nothing reaches past the shown tab's
+ *  right edge (cut off, or making the window scroll sideways), except inside
+ *  a box that scrolls sideways on purpose. A page scrolls in a box of its own,
+ *  so the tab body's own width says nothing: each element is measured. The
+ *  boxes that do scroll sideways are returned, for the caller to note. */
+export async function expectNoHorizontalOverflow(page: Page): Promise<string[]> {
+  const root = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }));
+  expect(root.scroll, `the window scrolls sideways (${root.scroll} > ${root.client})`).toBeLessThanOrEqual(root.client);
+  const found = await shown(page)
+    .first()
+    .evaluate((body) => {
+      const edge = body.getBoundingClientRect().right + 1;
+      const name = (el: Element) => {
+        const id = el.getAttribute("data-testid") ?? el.getAttribute("data-node");
+        const cls = typeof el.className === "string" && el.className ? `.${el.className.trim().split(/\s+/).join(".")}` : "";
+        return `${el.tagName.toLowerCase()}${id ? `[${id}]` : ""}${cls}`;
+      };
+      const scrolls = (el: Element) => {
+        const x = getComputedStyle(el).overflowX;
+        return (x === "auto" || x === "scroll") && el.scrollWidth > el.clientWidth + 1;
+      };
+      const past: string[] = [];
+      const boxes: string[] = [];
+      const walk = (el: Element) => {
+        const box = el.getBoundingClientRect();
+        if (box.width === 0 && box.height === 0) return;
+        // The code editor lays out huge layers of its own and clips them.
+        if (el.classList.contains("monaco-editor")) return;
+        if (box.right > edge) past.push(`${name(el)} reaches ${Math.round(box.right)} > ${Math.round(edge - 1)}`);
+        if (scrolls(el)) {
+          boxes.push(`${name(el)} scrolls ${el.scrollWidth} in ${el.clientWidth}`);
+          return; // What is inside scrolls with it.
+        }
+        for (const child of el.children) walk(child);
+      };
+      for (const child of body.children) walk(child);
+      return { past, boxes };
+    });
+  expect(found.past, "content reaches past the shown tab's right edge").toEqual([]);
+  return found.boxes;
+}
+
 /** Wait until the window takes the daemon's calls: it has loaded its stream
  *  and thread, opened the thread's first tabs and loaded the extensions,
  *  and registered (`data-oxplow-ready` on `<html>`, App.tsx). A navigate

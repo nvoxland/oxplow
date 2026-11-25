@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { test as base, expect, type Page } from "@playwright/test";
 
+import { expectNoHorizontalOverflow } from "./ui.js";
 import { deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
@@ -195,6 +196,13 @@ export const test = base.extend<{ daemon: Workspace }, { daemons: Daemons }>({
     const check = guard(page);
     await use(page);
     check();
+    // Tablet and phone runs: a passing page must also fit the screen.
+    const info = test.info();
+    if (["tablet", "phone"].includes(info.project.name) && info.status === info.expectedStatus) {
+      for (const box of await expectNoHorizontalOverflow(page)) {
+        info.annotations.push({ type: "scrolls sideways", description: box });
+      }
+    }
   },
 });
 

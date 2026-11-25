@@ -9,6 +9,19 @@ import { previewPort } from "./tests-e2e/support/port.js";
 const PORT = previewPort(process.cwd(), process.env);
 const PREVIEW = `http://127.0.0.1:${PORT}`;
 
+// Tablet and phone sizes with touch, over the generic page specs only: a
+// measurement, so they exist only when asked for (`E2E_FORM_FACTORS=1`).
+const formFactors = process.env.E2E_FORM_FACTORS
+  ? [
+      {
+        name: "tablet",
+        use: { ...devices["Desktop Chrome"], viewport: { width: 1180, height: 820 }, hasTouch: true },
+        testMatch: /specs\/pages\//,
+      },
+      { name: "phone", use: { ...devices["iPhone 13"] }, testMatch: /specs\/pages\// },
+    ]
+  : [];
+
 export default defineConfig({
   testDir: "tests-e2e/specs",
   outputDir: "tests-e2e/.output/results",
@@ -42,6 +55,7 @@ export default defineConfig({
     // A custom component's frame is the one place the two engines are
     // checked apart (macOS's window is WebKit): its sandbox and frame bound.
     { name: "webkit", use: { ...devices["Desktop Safari"] }, testMatch: /specs\/(components\/|shell\/rail-groups)/ },
+    ...formFactors,
   ],
   webServer: {
     // Built once per run, so a spec never meets a stale `dist/`. Locally, a

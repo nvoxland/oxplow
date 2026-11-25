@@ -2,6 +2,9 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <!-- A phone or tablet browser draws the page at its own width, not a
+         980px desktop page shrunk to fit. The Mac window ignores it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- A custom component's frame may navigate itself: bound it to this
          machine whatever serves this page (Tauri's CSP says the same;
          lens/frameBound.test.ts keeps the two one value). -->
