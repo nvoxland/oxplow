@@ -60,3 +60,12 @@ test("a thread first seen with no agent session opens a new thread's first tabs"
   expect(openings).toBe(1);
   expect(hook.result.current.openingThread).toBeNull();
 });
+
+test("with no tab chosen the thread's home tab shows: its first agent session's, else its first tab", () => {
+  const hook = setup(null);
+  act(() => hook.result.current.openTab(page(1)));
+  act(() => hook.result.current.openTab({ id: "oxplow:oxplow/agent_session?id=ses1", pinned: true }));
+  act(() => hook.result.current.setCenterActive(HOME_TAB));
+  expect(hook.result.current.centerActive).toBe(HOME_TAB);
+  expect(hook.result.current.effectiveCenterActive).toBe("oxplow:oxplow/agent_session?id=ses1");
+});

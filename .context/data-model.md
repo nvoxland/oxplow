@@ -1563,17 +1563,14 @@ The store coalesces rapid repeats: if the most recent matching
 a new row. This keeps history clean when a user re-selects the same
 target several times in quick succession.
 
-Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
-`streamId` and `threadId`):
+Current write hookpoints (both in `apps/desktop/src/window/useWindowOpeners.ts`,
+both pass `streamId` and `threadId`):
 
-- `wiki-note` — `handleOpenNote` records a visit when a note becomes
-  the active center tab. Nothing reads it any more: the Knowledge page's
-  "Recently visited" is the `wiki-visited` page over `v_page_visit`.
-- `editor-file` — `handleOpenFile` records a visit when a file
-  becomes the active center tab. Not yet surfaced in UI; collected
-  for future "recent files" / "files this thread cares about" views.
-- `task` — `handleRequestEditTask` records a visit when the
-  user opens the edit modal. Not yet surfaced.
+- `editor-file` — `handleOpenFile` records a use when a file opens.
+  Not yet surfaced in UI; collected for future "recent files" /
+  "files this thread cares about" views.
+- `knowledge` — `handleOpenKnowledge` records a use when a knowledge
+  page opens. Not yet surfaced.
 
 UI surfaces consume via `subscribeUsageEvents(listener, { kind })` to
 refresh on cross-window visits without polling.
@@ -2108,8 +2105,8 @@ inside the bus's transactions; read as `v_command_proposal` (ref
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit
-recorded by `handleOpenPage` (`window/useWindowOpeners.ts`) (skipping `agent`, `new-stream`,
-`new-task`).
+recorded by the window's visit effect (`App.tsx`) as its active page changes
+(skipping `agent`, `new-stream`, `new-task`).
 
 Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
 pre-canonical ones, and V102 emptied the table again when a visit became the page's identity (the id without its `#`), so no row holds a view. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),

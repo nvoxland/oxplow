@@ -577,7 +577,7 @@ markdown itself, nor edits it in a `<textarea>`.
   through its own Save, and the tab cap never closes such a tab.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
   immediately and a toast offers Undo (which restores both the saved
-  buffer and the unsaved draft). See `App.tsx` →
+  buffer and the unsaved draft). See `window/useWindowOpeners.ts` →
   `handleCloseOpenFile`.
 
 ## Actions that reach outside oxplow

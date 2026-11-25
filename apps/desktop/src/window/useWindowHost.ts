@@ -81,6 +81,9 @@ export function useWindowHost({
   const { sessions, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread } = tabs;
   const { handleOpenPageRef, handleNavigateInTab } = openers;
   const { effectiveCenterActive, visitContextRef, tabLabelByIdRef } = view;
+  // Read when a call comes, so the handlers needn't be made again for it.
+  const openQuickOpenRef = useRef(openQuickOpen);
+  openQuickOpenRef.current = openQuickOpen;
   // Report what this window shows — every thread's tabs and the one
   // selected in each, the thread it shows, its focus and visibility, and
   // the shown page's published detail (a page's params) — so an agent's
@@ -220,7 +223,7 @@ export function useWindowHost({
         quick_open: (input) => {
           if (!stream) throw new Error("no stream is shown");
           const query = (input as { query?: unknown } | null)?.query;
-          openQuickOpen(typeof query === "string" ? query : "");
+          openQuickOpenRef.current(typeof query === "string" ? query : "");
           return null;
         },
         // Takes the person to a ref (`tabs/navigation.ts`): the page opens
@@ -299,8 +302,8 @@ export function useWindowHost({
         },
       },
     };
-    // getFileSession / mutateFileSession are plain functions over the
-    // session state.
+    // Remade as the window's state changes; Quick Open is read through
+    // its ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, effectiveCenterActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);

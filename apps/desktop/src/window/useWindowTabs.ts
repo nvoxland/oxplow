@@ -8,6 +8,7 @@ import { logUi } from "../logger.js";
 import { newThreadOpening } from "../newThreadSession.js";
 import { liveItemsOf } from "../tabs/liveOrigin.js";
 import { agentSessionRef, diskFilePath, isPage, newSessionRef } from "../tabs/pageRefs.js";
+import { typeOf } from "../uri/uri.js";
 import type { TabEditing } from "../tabs/PageNavigationContext.js";
 import {
   activate,
@@ -127,6 +128,13 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
   // The shown thread's active tab's page id; `HOME_TAB` when none is
   // chosen (the thread's home tab shows — `effectiveCenterActive`).
   const centerActive = (selectedThreadId ? activeRef(sessions[selectedThreadId])?.id : null) ?? HOME_TAB;
+  // The shown thread's tabs, and the tab it shows: the chosen one, else its
+  // home tab.
+  const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+  const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
+  const effectiveCenterActive = availableCenterIds.has(centerActive)
+    ? centerActive
+    : homeTabOf(pageTabsForActiveThread);
   // The working-tree file the shown tab edits, if it does.
   const shownFilePath = diskFilePath(centerActive);
   /** Make the tab showing `id` active in the shown thread (`HOME_TAB`:
@@ -310,6 +318,8 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
     actionsSetterFor,
     threadPageTabs,
     centerActive,
+    pageTabsForActiveThread,
+    effectiveCenterActive,
     shownFilePath,
     setCenterActive,
     openTab,
@@ -324,4 +334,15 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
     handleGoBack,
     handleGoForward,
   };
+}
+
+/** The tab a thread falls back to: its first agent session's, else the
+ *  session picker, else its first tab. */
+function homeTabOf(tabs: TabRef[]): string {
+  return (
+    tabs.find((t) => typeOf(t.id) === "oxplow/agent_session")?.id ??
+    tabs.find((t) => isPage(t, "new-session"))?.id ??
+    tabs[0]?.id ??
+    HOME_TAB
+  );
 }

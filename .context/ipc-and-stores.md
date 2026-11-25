@@ -646,13 +646,13 @@ signal.
 ## `PageVisitStore` — page navigation event log
 
 Distinct from `UsageStore` (which is a generic kind/key tracker with
-coalescing). `PageVisitStore` records every `handleOpenPage` call (`window/useWindowOpeners.ts`)
-as a fresh event with the full `TabRef` (kind + id + payload + label).
+coalescing). `PageVisitStore` records a visit each time the window's active page
+changes (the visit effect in `App.tsx`) as a fresh event with the full `TabRef` (kind + id + payload + label).
 Append-only, no coalescing — analytics queries collapse as needed.
 
 IPC:
 
-- `recordPageVisit(input)` — called from `handleOpenPage` for every
+- `recordPageVisit(input)` — called from the window's visit effect for every
   ref except `agent`/`new-stream`/`new-task`. The label is
   resolved from richer context first (task title) and falls back
   to `deriveDefaultLabel(ref)` from

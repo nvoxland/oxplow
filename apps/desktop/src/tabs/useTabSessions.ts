@@ -39,7 +39,7 @@ export function writePersistedSessions(sessions: Record<string, Session>): void 
 /**
  * The window's tab sessions, one per thread, restored on start and
  * stored on every change. `update` applies a model operation to one
- * thread's session; App draws everything tab-shaped from the result.
+ * thread's session; the window (`window/useWindowTabs.ts`) draws everything tab-shaped from the result.
  */
 export function useTabSessions() {
   const [sessions, setSessions] = useState<Record<string, Session>>(() => readPersistedSessions());

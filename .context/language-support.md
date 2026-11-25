@@ -292,7 +292,7 @@ symbol } -> Option<SymbolLocation { path, line, col, revision, versionGone }>`:
 - A pin whose version is gone, or no longer holds the symbol, falls back to
   the current symbol with `versionGone`.
 
-The desktop's `openSymbol` (`App.tsx`) opens a current symbol in the editor at
+The desktop's `openSymbol` (`window/useWindowOpeners.ts`) opens a current symbol in the editor at
 its line, a pinned one in the file viewer at that revision (no line jump
 there), and on `versionGone` shows an error notice and then the current one.
 `ref_resolver` titles a pinned ref from its current row.

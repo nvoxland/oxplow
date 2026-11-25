@@ -30,13 +30,14 @@ import { RailHud } from "./components/RailHud/RailHud.js";
 import { NarrowRail } from "./components/RailHud/NarrowRail.js";
 import { useNarrowWindow } from "./windowWidth.js";
 import { useWindowStreams } from "./window/useWindowStreams.js";
-import { HOME_TAB, useWindowTabs } from "./window/useWindowTabs.js";
+import { WindowProviders } from "./window/WindowProviders.js";
+import { useWindowTabs } from "./window/useWindowTabs.js";
 import { useWindowOpeners } from "./window/useWindowOpeners.js";
 import { useWindowHost } from "./window/useWindowHost.js";
 import { useWindowCommands } from "./window/useWindowCommands.js";
 import { changeView, TabLoading, useWindowPages } from "./window/useWindowPages.js";
 import type { TabRef } from "./tabs/tabState.js";
-import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
+import { liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { useBookmarks } from "./tabs/bookmarks.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
@@ -44,11 +45,7 @@ import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
-import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
-import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
-import { useAlerts } from "./components/Alerts/useAlerts.js";
-import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
-import { diskFilePath,  refFromTabId, recordedPageKind, isPage,  newStreamRef, alertsRef,  streamSettingsRef, threadSettingsRef, viewParamsOf,  pageTabRef, terminalRef } from "./tabs/pageRefs.js";
+import { diskFilePath,  refFromTabId, recordedPageKind,  newStreamRef, alertsRef,  streamSettingsRef, threadSettingsRef, viewParamsOf,  pageTabRef, terminalRef } from "./tabs/pageRefs.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
@@ -74,17 +71,6 @@ import { GitDialogs } from "./components/Git/GitDialogs.js";
 import { startRecordStores } from "./recordStoresLoader.js";
 import { copyText } from "./clipboard.js";
 
-/** The tab a thread falls back to: its first agent session's, else the
- *  session picker, else its first tab. */
-function homeTabOf(tabs: TabRef[]): string {
-  return (
-    tabs.find((t) => typeOf(t.id) === "oxplow/agent_session")?.id ??
-    tabs.find((t) => isPage(t, "new-session"))?.id ??
-    tabs[0]?.id ??
-    HOME_TAB
-  );
-}
-
 export function App() {
   // A window under 800 px wide gives the rail up so the page keeps the room.
   const narrowWindow = useNarrowWindow();
@@ -94,8 +80,6 @@ export function App() {
   // sessions' roll-up, and its question (the rail dot's tooltip) the one
   // the awaiting session asks.
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
-  // The agent session whose tab's Rename… strip is open.
-  // The conversation picker open over a session's terminal, and for what.
   const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
     () => threadStatuses(Object.values(sessionStatuses)),
     [sessionStatuses],
@@ -200,8 +184,9 @@ export function App() {
     editingSetterFor,
     tabActions,
     actionsSetterFor,
-    threadPageTabs,
     centerActive,
+    pageTabsForActiveThread,
+    effectiveCenterActive,
     shownFilePath,
     setCenterActive,
     openTab,
@@ -268,19 +253,7 @@ export function App() {
     setSessionStatuses,
   });
 
-  // Imperative shortcut for opening the New-Task modal. When PlanPane is
-  // mounted it registers its openCreateModal here; the menu handler can
-  // call this ref directly instead of going through setState + useEffect.
-  // Needed because menu clicks arrive as IPC messages (not "discrete user
-  // input events"), so React doesn't auto-flush effects for them — the
-  // useEffect chain can stall for 10+ seconds before committing. Direct
-  // ref call inside flushSync sidesteps the scheduler entirely.
 
-  const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-  const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
-  const effectiveCenterActive = availableCenterIds.has(centerActive)
-    ? centerActive
-    : homeTabOf(pageTabsForActiveThread);
 
   // Feed the stall watchdog (logger.ts) the coarse "what's on screen"
   // context so a `main thread stalled` WARN names the active page + the
@@ -624,25 +597,15 @@ export function App() {
   });
 
   return (
-    // One owner of every extension panel's runs, read by the rail, the
-    // status bar's bell and the Alerts page.
-    <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
-    {/* The viewer's left-nav layout, read by the rail and View ▸ Sidebar Panels. */}
-    <PanelLayoutProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    <WindowProviders
+      streamId={stream?.id ?? null}
+      threadId={selectedThreadId}
+      session={sessions[selectedThreadId ?? ""]}
+      onLiveItems={(slot, key, items) => setLiveItems((prev) => ({ ...prev, [slot]: { key, items } }))}
+      onReviewAlerts={(open) => handleOpenPage((open ? refFromTabId(open) : null) ?? alertsRef())}
+    >
     <GoMenuFeed onRows={setGoRows} />
     <RailMenuFeed onChange={setRailMenu} />
-    {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
-      const live = currentEntry(t).from?.live;
-      return live ? (
-        <LiveOriginResolver
-          key={`${t.slot}/${JSON.stringify(live)}`}
-          live={live}
-          streamId={stream?.id ?? null}
-          onItems={(items) => setLiveItems((prev) => ({ ...prev, [t.slot]: { key: JSON.stringify(live), items } }))}
-        />
-      ) : null;
-    })}
-    <AlertToasts onReview={(open) => handleOpenPage((open ? refFromTabId(open) : null) ?? alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
           webview reaches the top edge: the title bar is the window's top,
@@ -806,16 +769,8 @@ export function App() {
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
-    </PanelLayoutProvider>
-    </PanelRunsProvider>
+    </WindowProviders>
   );
-}
-
-/** A toast as each new thing needs the person; Review opens Alerts (a badge's, its page). */
-function AlertToasts({ onReview }: { onReview(open?: string): void }) {
-  const { items } = useAlerts();
-  useAlertToasts(items, onReview);
-  return null;
 }
 
 /**

@@ -1,6 +1,6 @@
 /// Where `window.show/navigate` takes the person: the stream and thread to
 /// show and the page to open there. Pure over the window's thread lists;
-/// `App.tsx` does it (`clientHost.ts`).
+/// `window/useWindowHost.ts` does it (`clientHost.ts`).
 import { idOf } from "../uri/uri.js";
 import { refTarget, type RefTarget } from "./refOpener.js";
 import type { TabRef } from "./tabState.js";

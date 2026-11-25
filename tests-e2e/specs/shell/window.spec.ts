@@ -1,7 +1,7 @@
 // What the window does today, pinned before App.tsx is split into hooks:
 // stream and thread switching, the tab cap, resync after a dropped event
 // socket, and who a tab open reaches. Each test asserts current behavior.
-import { ipc, run, type Daemon } from "../../support/daemon.js";
+import { ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { load, open, shown } from "../../support/ui.js";
 import type { Page } from "@playwright/test";
@@ -138,4 +138,73 @@ test("a person's tab open lands in the shown thread, not in another thread", asy
   await page.getByTestId(`navigator-strip-thread-${daemon.thread}`).click();
   await expect(page.getByTestId("title-bar-thread")).toHaveText(title);
   await expect(tab(page, second)).toBeVisible();
+});
+
+const visits = async (daemon: Daemon) =>
+  (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+    sql: "SELECT page_kind, page_id, label FROM v_page_visit ORDER BY visited_at, id",
+  })).rows;
+
+// The recorder skips the window's first commit (the restored startup tab),
+// waits 250 ms before reading the strip's label, and drops a visit that is
+// replaced inside that wait: each page is waited for in turn here, as a
+// person's reading of it would.
+test("a page's visit is recorded once, with the strip's label, and a view change is the same visit", async ({ page, daemon }) => {
+  const rows = (...pages: [string, string][]) => pages.map(([kind, label]) => [kind, `oxplow:oxplow/page?page=${kind}`, label]);
+  const recorded = async (count: number) => {
+    await until(`${count} visits`, 15_000, async () => (await visits(daemon)).length >= count);
+    return visits(daemon);
+  };
+  await load(page);
+  await open(page, daemon, second);
+  await expect(tab(page, second)).toContainText("Suite Second");
+  expect(await recorded(1)).toEqual(rows(["e2e/second", "Suite Second"]));
+
+  await open(page, daemon, home, { new_tab: true });
+  await expect(tab(page, home)).toContainText("Suite Home");
+  expect(await recorded(2)).toEqual(rows(["e2e/second", "Suite Second"], ["e2e/home", "Suite Home"]));
+
+  // A view param pushes into the shown tab: the same page, so no new visit.
+  await open(page, daemon, `${home}#mode=other`);
+  await expect(shown(page, home)).toContainText("Suite home in other mode");
+
+  await tab(page, second).click();
+  await expect(shown(page, second)).toHaveCount(1);
+  const all = await recorded(3);
+  expect(all).toEqual(rows(["e2e/second", "Suite Second"], ["e2e/home", "Suite Home"], ["e2e/second", "Suite Second"]));
+});
+
+// The window reports its tabs to the daemon after a short debounce, so each
+// read waits for the report to say what the window now shows. A person can
+// read it with the agent's commands by naming the thread.
+test("the tab report lists the strip's labels and its open page is the shown tab, none while no tab is chosen", async ({ page, daemon }) => {
+  type Tab = { tab: string; kind: string; title: string; selected: boolean };
+  const listed = async () =>
+    (await run<{ result: { tabs: Tab[] } }>(daemon, "oxplow.page.list_tabs", { thread: daemon.thread })).result.tabs;
+  const openPage = async () =>
+    (await run<{ result: { open: { pageId: string; kind: string } | null } }>(daemon, "oxplow.page.open", { thread_id: daemon.thread })).result.open;
+  const selectedIs = (uri: string) => async () => (await listed()).find((t) => t.selected)?.tab === uri;
+  const newSession = "oxplow:oxplow/page?page=new-session";
+
+  await load(page);
+  // Nothing chosen: the thread's own New Session tab is the open page.
+  await until("report of the first tab", 15_000, async () => (await listed()).length > 0);
+  // The thread's own New Session tab is reported, but no tab is selected
+  // yet, so no page is open (today's behavior, not a promise).
+  expect((await listed()).map((t) => [t.tab, t.selected])).toEqual([[newSession, false]]);
+  expect(await openPage()).toBeNull();
+
+  await open(page, daemon, second, { new_tab: true });
+  await open(page, daemon, home, { new_tab: true });
+  await until("report of the home tab", 15_000, selectedIs(home));
+
+  const tabs = await listed();
+  expect(tabs.map((t) => [t.tab, t.title, t.selected])).toEqual([
+    [newSession, "New Session", false],
+    [second, "Suite Second", false],
+    [home, "Suite Home", true],
+  ]);
+  // Each title is the label the strip draws on that tab.
+  for (const t of tabs) await expect(tab(page, t.tab)).toContainText(t.title);
+  expect(await openPage()).toMatchObject({ pageId: home, kind: "e2e/home" });
 });
