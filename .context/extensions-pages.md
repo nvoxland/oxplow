@@ -116,6 +116,9 @@ Where it lives, and what is loaded:
   `{{…}}` is refused (`label_refs`).
   A label that shortens a path with `{{param.x|basename}}` (Editor, Directory, Diff) is
   also the tab's hover: the whole path (`tabHint`, `CenterTab.hint`).
+  A label whose every `{{…}}` is empty is the page's title, not its other
+  words alone: Git History's `'{{param.path|basename}} history'` is
+  "Git History" with no path (`tabLabel`).
   Check warns (`page.label_column`) when a `{{row.col}}` names a column the
   first loader's dry run doesn't return: a loader reads only the ones declared
   before it, so that loader can't move; it returns the column instead.
@@ -211,6 +214,14 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   component draws its own controls declares them so (the Work board) (`ParamRole::rides_view`
   is the one test for "rides the `#`"). A `filter`, `selection` or `view`
   param found in a `?` is refused.
+  **A param a link sets to name what the page shows is a `resource`**, never
+  a filter: a file's history (Git History's `path`), a knowledge page's
+  freshness (`store`, `id`), an extension's problems (`extension`). A tab
+  is reused for a URI with the same `?` (`identityOf`, pages-and-tabs.md
+  "page ids"), so a filter set by a link turns the person's open tab into
+  other content. A filter is what the person narrows in the rail. A
+  renderer (`for:`) is the exception: it runs with its resource's URI
+  params, so its own settings ride the `#` (Changes' `start`/`end`).
 - **`options_from`** makes a choice whose options rows list: `value`,
   `label`, optional `group`. It names a **query** (`<slug>` of the
   extension or `<namespace>/<slug>`, its last loader; `…#<loader>` for

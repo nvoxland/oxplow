@@ -208,7 +208,9 @@ split by hand (`oxplow:oxplow/task?id=tsk42&provider=oxtask`). A web
 page's id is its URL. A tab's view (`#lines=…`, a filter, a pick) rides in
 the id after `#` but is not its identity: the `?` names what the page
 shows, the `#` how it shows it, and the identity is the id without its
-`#` (`identityOf`). A `[[…]]` link, a `page_ref` row, a backlink and a tab
+`#` (`identityOf`); a param a link sets to name the content is therefore
+a `resource` param, in the `?`, so it opens its own tab
+(extensions-pages.md "role"). A `[[…]]` link, a `page_ref` row, a backlink and a tab
 all agree on one string. **Tabs match on more than identity: a tab shows
 an identity in a display mode** (`modeOf`: the `#oxplow.renderer` value,
 `""` when the view names none — the default). The Text view of a file and

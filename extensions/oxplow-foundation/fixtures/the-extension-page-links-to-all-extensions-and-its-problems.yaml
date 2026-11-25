@@ -8,4 +8,4 @@ when:
 expect:
   see_also:
     - { title: Extensions, uri: "oxplow:oxplow/page?page=extensions" }
-    - { title: Extension problems, uri: "oxplow:oxplow/page?page=extension-problems#extension=oxplow-foundation" }
+    - { title: Extension problems, uri: "oxplow:oxplow/page?extension=oxplow-foundation&page=extension-problems" }

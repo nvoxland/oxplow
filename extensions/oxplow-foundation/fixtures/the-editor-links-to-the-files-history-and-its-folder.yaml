@@ -5,10 +5,10 @@ when:
   params: { path: "src/sub/c.rs" }
 expect:
   see_also:
-    - { title: File history, uri: "oxplow:oxplow/page?page=file-history&path=src/sub/c.rs" }
+    - { title: Git History, uri: "oxplow:oxplow/page?page=git-history&path=src/sub/c.rs" }
     - { title: src/sub, uri: "oxplow:oxplow/dir?path=src/sub" }
 steps:
   - params: { path: "top.txt" }
     expect:
       see_also:
-        - { title: File history, uri: "oxplow:oxplow/page?page=file-history&path=top.txt" }
+        - { title: Git History, uri: "oxplow:oxplow/page?page=git-history&path=top.txt" }

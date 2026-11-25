@@ -688,7 +688,7 @@ branches, commit) stay on the Git page and the menu bar.
 | Item | Shown when |
 |---|---|
 | Annotate with Git Blame (a file: opens the editor with `#blame=1`; in the editor it toggles) | tracked |
-| Show History (`file-history`; a folder's: the commits under it) | tracked |
+| Show History (`git-history` narrowed by `path`; a folder's: the commits under it) | tracked |
 | Show Diff (a file: `git:HEAD` → working; a folder: Uncommitted Changes) | it, or something under the folder, is changed |
 | Compare with… (a file) | tracked |
 | Rollback… | it, or something under the folder, is changed |

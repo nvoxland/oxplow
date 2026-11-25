@@ -51,6 +51,11 @@ test("a page's tab label is its label filled from its params, else its title", (
   expect(tabLabel(dir, {})).toBe("Directory");
   expect(tabLabel(page("pr", { title: "PR", label: "PR #{{ param.id }}" }), { id: "12" })).toBe("PR #12");
   expect(tabLabel(page("tasks", { title: "Tasks" }), { id: "12" })).toBe("Tasks");
+  // Every field empty: the page's own title, not the label's other words.
+  const history = page("git-history", { title: "Git History", label: "{{param.path|basename}} history" });
+  expect(tabLabel(history, { path: "src/a.rs" })).toBe("a.rs history");
+  expect(tabLabel(history, {})).toBe("Git History");
+  expect(tabLabel(history, { path: "" })).toBe("Git History");
 });
 
 // A label may also name a column of its page's row, and filter what it

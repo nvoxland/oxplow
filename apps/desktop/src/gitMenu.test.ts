@@ -33,7 +33,7 @@ test("an unchanged file: blame, history, compare", () => {
   pick(menu, "Compare with…").run!();
   expect(did).toEqual([
     "open:oxplow:oxplow/file?path=src/a.ts#oxplow.blame=1",
-    "open:oxplow:oxplow/page?page=file-history&path=src/a.ts",
+    "open:oxplow:oxplow/page?page=git-history&path=src/a.ts",
     "compare:src/a.ts",
   ]);
 });

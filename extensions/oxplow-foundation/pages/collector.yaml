@@ -41,7 +41,7 @@ loaders:
   problems:
     sql: |
       SELECT 'Extension problems' AS title,
-             uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || a.extension AS uri,
+             uri('oxplow/page', 'page', 'extension-problems', 'extension', a.extension) AS uri,
              'What is wrong in ' || a.extension AS description
       FROM v_contribution_health h JOIN about a WHERE h.uri = :uri AND h.state <> 'ok'
 view:

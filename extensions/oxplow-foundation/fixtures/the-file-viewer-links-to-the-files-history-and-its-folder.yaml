@@ -5,7 +5,7 @@ when:
   params: { path: "src/sub/c.rs", rev: "git:HEAD" }
 expect:
   see_also:
-    - { title: File history, uri: "oxplow:oxplow/page?page=file-history&path=src/sub/c.rs" }
+    - { title: Git History, uri: "oxplow:oxplow/page?page=git-history&path=src/sub/c.rs" }
     - { title: src/sub, uri: "oxplow:oxplow/dir?path=src/sub&rev=git:HEAD" }
 steps:
   - params: { path: "oxplow-foundation/pages/commit.yaml", filesystem: "oxplow:extensions", rev: "" }

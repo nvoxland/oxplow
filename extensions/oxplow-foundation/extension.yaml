@@ -109,9 +109,9 @@ intent:
     - name: recent-commits-lists-the-latest-first
       input: { page: recent-commits }
       expect: the latest commits, newest first, cut to the limit
-    - name: file-history-lists-the-commits-that-touched-a-file
-      input: { page: file-history }
-      expect: the commits that touched a file, newest first
+    - name: git-history-narrowed-to-a-file-lists-the-commits-that-touched-it
+      input: { page: git-history, params: { path: src/lib.rs } }
+      expect: the commits that touched a file, newest first, with its lines added and removed in each
     - name: the-command-page-says-what-a-command-needs-and-whether-it-asks-first
       input: { page: command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
       expect: a command's permission, whether it asks first and can be undone, and where it is declared

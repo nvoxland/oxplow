@@ -63,7 +63,7 @@ export function gitMenu(target: GitTarget, status: GitStatusEntry[], env: GitMen
     if (target.kind === "file") {
       items.push(item("blame", "Annotate with Git Blame", () => env.openRef(withViewParams(fileRef(path), { [BLAME_VIEW]: "1" }).id)));
     }
-    items.push(item("history", "Show History", () => env.openRef(pageTabRef("file-history", { path }).id)));
+    items.push(item("history", "Show History", () => env.openRef(pageTabRef("git-history", { path }).id)));
     if (changed) {
       items.push(
         item("diff", "Show Diff", () =>

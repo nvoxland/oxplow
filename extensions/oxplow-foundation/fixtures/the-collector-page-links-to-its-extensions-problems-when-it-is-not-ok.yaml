@@ -13,4 +13,4 @@ steps:
     expect:
       see_also:
         contains:
-          - { title: Extension problems, uri: "oxplow:oxplow/page?page=extension-problems#extension=oxplow-foundation" }
+          - { title: Extension problems, uri: "oxplow:oxplow/page?extension=oxplow-foundation&page=extension-problems" }

@@ -39,5 +39,5 @@ view:
     lines: lines
     blame: blame
 see_also:
-  - { page: oxplow/file-history, params: { path: { param: path } } }
+  - { page: oxplow/git-history, params: { path: { param: path } } }
   - { from: folder }
