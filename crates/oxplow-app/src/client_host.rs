@@ -35,8 +35,8 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
 type Answer = tokio::sync::oneshot::Sender<Result<Value, String>>;
 
-/// An open window: its id (minted by the window when it starts) and the
-/// scopes it hosts.
+/// An open window: its id (the window's id for one page load, the one its
+/// event socket and tab reports carry) and the scopes it hosts.
 struct Window {
     client: String,
     hosted: BTreeSet<String>,

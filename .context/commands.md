@@ -389,8 +389,9 @@ in `CommandSpec::op`.
   addressed to one window — the last registered that hosts the
   scope — which does it and answers `answer_client_call { client,
   id, result | error }` (another window's answer is ignored); the run
-  waits (15 s), its answer the run's result. A window mints an id when it
-  starts and says it's open — and what it hosts — with
+  waits (15 s), its answer the run's result. A window uses its own id for
+  one page load (`uiClientId.ts`, the id its socket, tab reports and logs
+  carry; a reload is a new window) and says it's open — and what it hosts — with
   `register_client_host { client, scopes }` once it is ready to do a
   call as asked (App.tsx `windowReady`: its stream and thread loaded,
   the thread's first tabs opened, the extensions loaded; before that a

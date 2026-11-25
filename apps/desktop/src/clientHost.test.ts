@@ -5,8 +5,8 @@ import type { OxplowEvent } from "./tauri-bridge/generated/bindings.js";
 
 // The window as a command host: it says which scopes it hosts, does
 // what the daemon calls it for, and answers — in the caller's thread. It
-// has an id of its own: calls are addressed to one window, and it says
-// when it closes.
+// hosts under its window id (its socket's and tab reports'): calls are
+// addressed to one window, and it says when it closes.
 
 // The window hosts commands as the window it is everywhere else (its event
 // socket, its tab reports, its logs), so a call can be addressed to the

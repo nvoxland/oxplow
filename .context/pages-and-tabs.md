@@ -563,8 +563,8 @@ while one is in flight, only the newest pending snapshot is retained, so
 an older HTTP report cannot arrive after a newer roster and close its runs.
 Runs belong to their window's `client`; reports prune only that client's
 previously acknowledged runs which are now absent. The event socket's
-`client` query param names the same stable id used by logs and reports
-(`uiClientId.ts`, independent of the API/transport import graph), and its
+`client` query param names the same id used by logs, reports and the
+client host (`uiClientId.ts`: one per page load, in memory; independent of the API/transport import graph), and its
 disconnect and client expiry reclaim owned runs. A reconnect clears the
 old roster and reopens its held runs; stale open replies are fenced out and
 closed instead of resurrecting old ids. A dataset change keeps the loaders it didn't reach:
@@ -1579,7 +1579,7 @@ at other values") whose popover offers **update that bookmark**
 (`bookmarkedElsewhere`, `moveBookmark`: one `oxplow.command.sequence` of remove +
 set at the same scope, so one undo).
 
-**Persistence.** One key, `oxplow.layout.v7.sessions` (`{ [thread]:
+**Persistence.** One key, `oxplow.layout.v8.sessions` (`{ [thread]:
 Session }`, written on every change, read on start; corrupt text reads
 as none). It holds every tab's history and the active tab, so a restart
 comes back to the same pages at the same params. A diff's spec rides in
