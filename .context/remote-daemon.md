@@ -20,8 +20,8 @@ cannot release new runs. An open in flight is fenced against that generation.
 Logs, tab reports, the client host and the socket use the same `uiClientId.ts` identity.
 
 - **`crates/oxplow-rpc`** — transport-neutral command cores +
-  `rpc_dispatch!` registry (`dispatch(name, camelCase JSON args,
-  &Services) -> JSON`). Single source of truth for the command set;
+  `rpc_dispatch!` registry (`dispatch_as(name, camelCase JSON args,
+  ctx, caller) -> JSON`). Single source of truth for the command set;
   both hosts call it. No `tauri` deps, ever — the daemon builds
   headless.
 - **`crates/oxplow-daemon`** — headless binary. `--project <dir>`

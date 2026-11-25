@@ -100,6 +100,27 @@ pub enum DeviceKind {
     Phone,
 }
 
+/// The longest name a device keeps, in characters.
+pub const DEVICE_NAME_MAX: usize = 64;
+
+/// The name a device gave, as shown to people and agents: control
+/// characters dropped, trimmed, cut to [`DEVICE_NAME_MAX`], and
+/// "Unnamed device" when nothing is left.
+pub fn device_name(given: Option<&str>) -> String {
+    let clean: String = given
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let name: String = clean.trim().chars().take(DEVICE_NAME_MAX).collect();
+    let name = name.trim_end();
+    if name.is_empty() {
+        "Unnamed device".into()
+    } else {
+        name.into()
+    }
+}
+
 /// A device as it names itself (until the host's registry holds this).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct DeviceDescriptor {
@@ -119,6 +140,19 @@ pub struct Caller {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_device_name_is_trimmed_cut_and_never_empty() {
+        assert_eq!(device_name(Some("  Tab S9 \n")), "Tab S9");
+        assert_eq!(device_name(Some("Tab\u{7}S9\r\n2")), "TabS92");
+        assert_eq!(
+            device_name(Some(&"x".repeat(500))).chars().count(),
+            DEVICE_NAME_MAX
+        );
+        assert_eq!(device_name(Some(" \t ")), "Unnamed device");
+        assert_eq!(device_name(None), "Unnamed device");
+    }
+
     use super::*;
 
     #[test]

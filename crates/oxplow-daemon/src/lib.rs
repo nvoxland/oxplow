@@ -219,39 +219,22 @@ impl EventClient {
         };
         let kind = match self.kind.as_deref() {
             None => oxplow_domain::DeviceKind::Desktop,
-            Some(kind) => serde_json::from_value(serde_json::Value::String(kind.into()))
-                .map_err(|_| format!("kind: expected desktop, tablet or phone, got `{kind}`"))?,
+            Some(kind) => {
+                serde_json::from_value(serde_json::Value::String(kind.into())).map_err(|_| {
+                    let got: String = kind.chars().take(80).collect();
+                    format!("kind: expected desktop, tablet or phone, got `{got}`")
+                })?
+            }
         };
         Ok(Some((
             oxplow_domain::DeviceDescriptor {
                 id: oxplow_domain::DeviceId::parse(&device).map_err(|e| format!("device: {e}"))?,
-                name: self
-                    .name
-                    .filter(|n| !n.trim().is_empty())
-                    .unwrap_or_else(|| "Unnamed device".into()),
+                name: oxplow_domain::client::device_name(self.name.as_deref()),
                 kind,
             },
             oxplow_domain::ConnectionId::parse(&connection)
                 .map_err(|e| format!("connection: {e}"))?,
         )))
-    }
-}
-
-/// What a named socket holds while it is open: its page runs, its device's
-/// place among the connected ones, and what its window reports showing.
-struct SocketOwner {
-    _runs: oxplow_app::pages::open_runs::PageClient,
-    services: std::sync::Arc<oxplow_app::Services>,
-    device: oxplow_domain::DeviceId,
-    connection: oxplow_domain::ConnectionId,
-}
-
-impl Drop for SocketOwner {
-    fn drop(&mut self) {
-        self.services
-            .client_devices
-            .disconnected(&self.device, &self.connection);
-        self.services.client_reports.forget(&self.connection);
     }
 }
 
@@ -267,16 +250,7 @@ async fn events_ws(
     let forwarders = subscribe(&state);
     let services = state.ctx.services.clone();
     let owner = named.map(|(descriptor, connection)| {
-        let device = descriptor.id.clone();
-        services
-            .client_devices
-            .connected(descriptor, connection.clone());
-        SocketOwner {
-            _runs: services.page_runs.connect_client(connection.as_str()),
-            services: services.clone(),
-            device,
-            connection,
-        }
+        oxplow_app::client_reports::SocketLease::open(&services, descriptor, connection)
     });
     ws.on_upgrade(move |socket| events_stream(socket, forwarders, services, owner))
 }
@@ -372,7 +346,7 @@ async fn events_stream(
     socket: WebSocket,
     subscriptions: [Forwarder; 3],
     services: std::sync::Arc<oxplow_app::Services>,
-    _owner: Option<SocketOwner>,
+    _owner: Option<oxplow_app::client_reports::SocketLease>,
 ) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
@@ -1202,6 +1176,73 @@ mod tests {
         .expect("the disconnected window's runs are released");
         assert!(svc.page_runs.get(&second.run_id).is_some());
         two.close(None).await.unwrap();
+    }
+
+    /// A page load keeps its connection across reconnects, so its new socket
+    /// can open before the daemon sees the old one close (a tablet that
+    /// slept). The old socket's close must leave the live window as it is.
+    #[tokio::test]
+    async fn a_stale_socket_closing_leaves_the_reconnected_window_connected() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const ONE: &str = "con-11111111-1111-4111-8111-111111111111";
+        let url = format!(
+            "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={ONE}&name=Mac&kind=desktop",
+            daemon.bind_addr
+        );
+        let device = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        let caller = oxplow_domain::Caller {
+            device: device.clone(),
+            connection: oxplow_domain::ConnectionId::parse(ONE).unwrap(),
+        };
+        let (mut old, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let (mut new, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let now = oxplow_domain::Timestamp::now();
+        svc.client_reports.report(
+            &caller,
+            oxplow_app::client_reports::TabReport {
+                focused: true,
+                visible: true,
+                shown_thread: None,
+                threads: vec![],
+                detail_json: None,
+                runs: vec![],
+            },
+            now,
+        );
+        let gone = |svc: &std::sync::Arc<oxplow_app::Services>| {
+            svc.client_devices.get(&device).is_none()
+                && svc
+                    .client_reports
+                    .live_ids(oxplow_domain::Timestamp::now())
+                    .is_empty()
+        };
+        old.close(None).await.unwrap();
+        // The old socket's close has run once its read loop ends; give it the
+        // time a close takes, then the window must still be there.
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            svc.client_devices.get(&device).is_some(),
+            "the device stays connected"
+        );
+        assert_eq!(
+            svc.client_reports.live_ids(oxplow_domain::Timestamp::now()),
+            vec![ONE.to_string()],
+            "the window's report stays"
+        );
+        new.close(None).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !gone(&svc) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the current socket's close releases the window");
     }
 
     #[tokio::test]

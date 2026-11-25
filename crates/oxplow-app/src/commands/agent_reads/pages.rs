@@ -188,6 +188,7 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
             "forward": this.map(|p| p.forward.clone()).unwrap_or_default(),
             "origin": this.and_then(|p| p.origin.clone()),
             "client": this.map(|p| p.client.clone()),
+            "device": this.map(|p| p.device.clone()),
             "visible": this.is_some_and(|p| p.visible),
             "reportedAt": this.map(|p| p.reported_at),
             "stale": this.is_some_and(|p| p.stale),
@@ -250,6 +251,7 @@ async fn list_tabs(
                 "selected": t.selected,
                 "visible": t.visible,
                 "client": t.client,
+                "device": t.device,
                 "reportedAt": t.reported_at,
                 "stale": t.stale,
             })
@@ -463,6 +465,7 @@ mod tests {
         let open = run(json!({ "thread_id": tid })).await.unwrap().result;
         assert_eq!(open["open"]["pageId"], "oxplow:oxplow/file?path=src/a.rs");
         assert_eq!(open["open"]["client"], con("a"));
+        assert_eq!(open["open"]["device"], caller("a").device.to_string());
         assert_eq!(open["open"]["detail"]["line"], 3);
         assert_eq!(
             open["others"][0]["pageId"],
@@ -543,6 +546,8 @@ mod tests {
             "oxplow:oxplow/knowledge?id=home&store=oxwiki title"
         );
         assert_eq!(rows[0]["thread"], fx.thread.to_string());
+        assert_eq!(rows[0]["client"], con("a"));
+        assert_eq!(rows[0]["device"], caller("a").device.to_string());
         assert_eq!(
             (rows[0]["selected"].clone(), rows[0]["visible"].clone()),
             (json!(true), json!(true))

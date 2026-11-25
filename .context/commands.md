@@ -409,7 +409,7 @@ in `CommandSpec::op`.
   is refused at once rather than waiting out another timeout.
 - **What the window runs to answer a call runs as the caller.** A
   window handler that writes through the daemon — Save writing
-  `oxplow.file.save` — calls `run_command_for_call { client, call, id,
+  `oxplow.file.save` — calls `run_command_for_call { call, id,
   input }`, which runs as the waiting call's actor (`ClientHost::caller`;
   only the window the call went to, only while it waits), never as the
   person at the window: an agent's Save is the agent's write, under its

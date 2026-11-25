@@ -178,8 +178,12 @@ pub fn insert_rolled_back_children_tx(
         });
         crate::contribution_run_store::record_tx(conn, &child, outcome, error)?;
         conn.execute(
-            "INSERT INTO command_run (command, run_id) VALUES (?1, ?2)",
-            params![contribution.id.local, child.run().as_str()],
+            "INSERT INTO command_run (command, run_id, device_id) VALUES (?1, ?2, ?3)",
+            params![
+                contribution.id.local,
+                child.run().as_str(),
+                child.caller().map(|c| c.device.as_str())
+            ],
         )
         .map_err(map_sql_err)?;
     }
@@ -375,6 +379,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(devices, (Some(device.to_string()), None));
+    }
+
+    /// A child that ran inside a rolled-back run keeps the device too: the
+    /// person asked for it as they asked for its parent.
+    #[tokio::test]
+    async fn a_rolled_back_child_keeps_the_device_that_asked() {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        use oxplow_domain::run::{ContributionRef, Mode};
+        let db = Database::in_memory();
+        let device = oxplow_domain::DeviceId::generate();
+        let parent = test_command_run("oxplow.thread.rename", oxplow_domain::Actor::Human)
+            .with_caller(Some(oxplow_domain::Caller {
+                device: device.clone(),
+                connection: oxplow_domain::ConnectionId::generate(),
+            }));
+        let child = parent.child(
+            Some(ContributionRef {
+                id: ContributionId::new("oxplow", ContributionKind::Command, "oxplow.thread.mark"),
+                extension: "core".into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            }),
+            Mode::External,
+        );
+        parent.track_child(&child);
+        child.observe_rollback_outcome(oxplow_domain::run::Outcome::Failed, Some("no".into()));
+        let recorded: Option<String> = db
+            .transaction(move |tx| {
+                insert_rolled_back_children_tx(tx, &parent)?;
+                Ok(tx
+                    .query_row(
+                        "SELECT device_id FROM command_run WHERE command = 'oxplow.thread.mark'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        assert_eq!(recorded, Some(device.to_string()));
     }
 
     #[tokio::test]

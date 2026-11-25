@@ -4,56 +4,88 @@
 //! database stores only device ids, and once a host stands in front of the
 //! daemon its registry holds the names.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use oxplow_domain::{ConnectionId, DeviceDescriptor, DeviceId};
 
 #[derive(Default)]
 pub struct ClientDevices {
-    inner: Mutex<HashMap<DeviceId, Entry>>,
+    inner: Mutex<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
+    devices: HashMap<DeviceId, Entry>,
+    /// The last socket handed out; each socket gets the next.
+    sockets: u64,
 }
 
 struct Entry {
     descriptor: DeviceDescriptor,
-    connections: BTreeSet<ConnectionId>,
+    /// Each live connection's current socket. A page load keeps its
+    /// connection across reconnects, so its new socket can open before the
+    /// old one is seen to close: the newest socket is the connection's.
+    connections: HashMap<ConnectionId, Socket>,
 }
 
+/// One event socket of a connection, as [`ClientDevices::connected`] hands
+/// it out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Socket(u64);
+
 impl ClientDevices {
-    /// `connection` of `descriptor`'s device opened its socket; its name and
-    /// kind are the newest it gave.
-    pub fn connected(&self, descriptor: DeviceDescriptor, connection: ConnectionId) {
+    /// `connection` of `descriptor`'s device opened a socket, which is now
+    /// the connection's current one; the device's name and kind are the
+    /// newest it gave.
+    pub fn connected(&self, descriptor: DeviceDescriptor, connection: ConnectionId) -> Socket {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let entry = inner.entry(descriptor.id.clone()).or_insert_with(|| Entry {
-            descriptor: descriptor.clone(),
-            connections: BTreeSet::new(),
-        });
+        inner.sockets += 1;
+        let socket = Socket(inner.sockets);
+        let entry = inner
+            .devices
+            .entry(descriptor.id.clone())
+            .or_insert_with(|| Entry {
+                descriptor: descriptor.clone(),
+                connections: HashMap::new(),
+            });
         entry.descriptor = descriptor;
-        entry.connections.insert(connection);
+        entry.connections.insert(connection, socket);
+        socket
     }
 
-    /// `connection` of `device` closed its socket. A device with no
-    /// connection left is no longer connected.
-    pub fn disconnected(&self, device: &DeviceId, connection: &ConnectionId) {
+    /// `socket` of `connection` closed. Only the connection's current socket
+    /// ends it (true): a replaced socket's late close changes nothing
+    /// (false). A device with no connection left is no longer connected.
+    pub fn closed(&self, device: &DeviceId, connection: &ConnectionId, socket: Socket) -> bool {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(entry) = inner.get_mut(device) {
-            entry.connections.remove(connection);
-            if entry.connections.is_empty() {
-                inner.remove(device);
-            }
+        let Some(entry) = inner.devices.get_mut(device) else {
+            return false;
+        };
+        if entry.connections.get(connection) != Some(&socket) {
+            return false;
         }
+        entry.connections.remove(connection);
+        if entry.connections.is_empty() {
+            inner.devices.remove(device);
+        }
+        true
     }
 
     /// A connected device, as it named itself.
     pub fn get(&self, device: &DeviceId) -> Option<DeviceDescriptor> {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        inner.get(device).map(|e| e.descriptor.clone())
+        inner.devices.get(device).map(|e| e.descriptor.clone())
     }
 
     /// The connected devices, by id.
     pub fn list(&self) -> Vec<DeviceDescriptor> {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let mut out: Vec<_> = inner.values().map(|e| e.descriptor.clone()).collect();
+        let mut out: Vec<_> = inner
+            .devices
+            .values()
+            .map(|e| e.descriptor.clone())
+            .collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
     }
@@ -77,13 +109,29 @@ mod tests {
         let devices = ClientDevices::default();
         let tab = device("Tab S9");
         let (first, second) = (ConnectionId::generate(), ConnectionId::generate());
-        devices.connected(tab.clone(), first.clone());
-        devices.connected(tab.clone(), second.clone());
-        devices.disconnected(&tab.id, &first);
+        let one = devices.connected(tab.clone(), first.clone());
+        let two = devices.connected(tab.clone(), second.clone());
+        assert!(devices.closed(&tab.id, &first, one));
         assert_eq!(devices.get(&tab.id), Some(tab.clone()));
-        devices.disconnected(&tab.id, &second);
+        assert!(devices.closed(&tab.id, &second, two));
         assert_eq!(devices.get(&tab.id), None);
         assert!(devices.list().is_empty());
+    }
+
+    #[test]
+    fn a_replaced_sockets_close_leaves_its_connection_connected() {
+        let devices = ClientDevices::default();
+        let tab = device("Tab S9");
+        let connection = ConnectionId::generate();
+        let old = devices.connected(tab.clone(), connection.clone());
+        let new = devices.connected(tab.clone(), connection.clone());
+        assert!(
+            !devices.closed(&tab.id, &connection, old),
+            "a late close is not the connection's"
+        );
+        assert_eq!(devices.get(&tab.id), Some(tab.clone()));
+        assert!(devices.closed(&tab.id, &connection, new));
+        assert_eq!(devices.get(&tab.id), None);
     }
 
     #[test]

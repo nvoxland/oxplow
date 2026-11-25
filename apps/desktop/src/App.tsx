@@ -84,6 +84,7 @@ import { installContextMenuSuppressor } from "./context-menu.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { buildTabReport, createTabReporter } from "./tabs/tabReport.js";
+import { useTabReportRepeats } from "./tabs/useTabReportRepeats.js";
 import { windowPageRuns } from "./pageRuns.js";
 import { useTabSessions } from "./tabs/useTabSessions.js";
 import {
@@ -928,16 +929,7 @@ export function App() {
     () => createTabReporter((report) => reportTabs(report).then((answer) => windowPageRuns().reopen(answer.missingRuns))),
     [],
   );
-  useEffect(() => {
-    const beat = setInterval(() => {
-      if (lastTabReportRef.current) {
-        const report = { ...lastTabReportRef.current, runs: windowPageRuns().runIds() };
-        lastTabReportRef.current = report;
-        tabReporter.send(report);
-      }
-    }, TAB_REPORT_HEARTBEAT_MS);
-    return () => clearInterval(beat);
-  }, [tabReporter]);
+  useTabReportRepeats(lastTabReportRef, tabReporter, () => windowPageRuns().runIds(), TAB_REPORT_HEARTBEAT_MS);
   useEffect(() => {
     const timer = setTimeout(() => {
       const ctx = visitContextRef.current;

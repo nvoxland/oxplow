@@ -11,6 +11,52 @@
 
 pub mod devices;
 
+/// What a named event socket holds while it is open: its page runs, its
+/// device's place among the connected ones, and its window's tab report.
+/// Only the connection's current socket lets them go when it closes: a page
+/// load keeps its connection across reconnects, so a replaced socket's late
+/// close must leave the window that took its place alone.
+pub struct SocketLease {
+    _runs: crate::pages::open_runs::PageClient,
+    services: std::sync::Arc<crate::Services>,
+    device: oxplow_domain::DeviceId,
+    connection: oxplow_domain::ConnectionId,
+    socket: devices::Socket,
+}
+
+impl SocketLease {
+    /// `connection` of `descriptor`'s device opened a socket.
+    pub fn open(
+        services: &std::sync::Arc<crate::Services>,
+        descriptor: oxplow_domain::DeviceDescriptor,
+        connection: oxplow_domain::ConnectionId,
+    ) -> Self {
+        let device = descriptor.id.clone();
+        let socket = services
+            .client_devices
+            .connected(descriptor, connection.clone());
+        Self {
+            _runs: services.page_runs.connect_client(connection.as_str()),
+            services: services.clone(),
+            device,
+            connection,
+            socket,
+        }
+    }
+}
+
+impl Drop for SocketLease {
+    fn drop(&mut self) {
+        if self
+            .services
+            .client_devices
+            .closed(&self.device, &self.connection, self.socket)
+        {
+            self.services.client_reports.forget(&self.connection);
+        }
+    }
+}
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 

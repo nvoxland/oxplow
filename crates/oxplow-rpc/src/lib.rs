@@ -254,6 +254,9 @@ macro_rules! oxplow_command_table {
                 run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 undo_command => $crate::commands::bus::undo_command { command_run_id: ::oxplow_domain::CommandRunId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 decide_proposal => $crate::commands::bus::decide_proposal { proposal: ::oxplow_domain::ProposalId, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
+                // a person's typed reads through the bus: each keeps the device
+                search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
+                vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
                 // presses on a page or a component: each keeps the device
                 submit_page_form => $crate::commands::pages::submit_page_form { run_id: String, node: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::viz_actions::Drop>, option: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
@@ -295,7 +298,6 @@ macro_rules! oxplow_command_table {
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 // search
-                search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
@@ -340,7 +342,6 @@ macro_rules! oxplow_command_table {
                 // workspace
                 resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
-                vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
                 // code_quality (duplication only — the metrics scan was retired in)
                 // config

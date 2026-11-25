@@ -119,7 +119,8 @@ export const commands = {
 	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError_Serialize>(__TAURI_INVOKE("get_thread_state", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	search: (query: string, streamId: string | null, resources: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search", { query, streamId, resources, limit })),
 	/**
@@ -595,7 +596,8 @@ export const commands = {
 	filesAt: (streamId: string | null, revision: string) => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("files_at", { streamId, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError_Serialize>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
 	/**

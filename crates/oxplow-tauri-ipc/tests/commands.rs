@@ -176,11 +176,11 @@ async fn git_reads_over_primary_worktree() {
         Some("git:HEAD".into()),
     )
     .await;
-    let _ = commands::generated::vcs_blame(
-        s.clone(),
-        None,
-        "nope.txt".into(),
-        oxplow_domain::vcs::Revision::Working,
+    // A person's read through the bus (a `req` row: Tauri adds no caller).
+    let _ = rpc(
+        &app,
+        "vcs_blame",
+        serde_json::json!({ "path": "nope.txt", "revision": "working" }),
     )
     .await;
 }
@@ -264,22 +264,36 @@ async fn page_ref_reads_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn search_returns_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    assert!(
-        commands::generated::search(app.state(), "anything".into(), None, None, Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(commands::generated::search(
-        app.state(),
-        "anything".into(),
-        None,
-        Some(vec!["oxplow/knowledge".into()]),
-        None
+    let hits = rpc(
+        &app,
+        "search",
+        serde_json::json!({ "query": "anything", "limit": 10 }),
     )
     .await
-    .unwrap()
-    .is_empty());
+    .unwrap();
+    assert_eq!(hits, serde_json::json!([]));
+    let hits = rpc(
+        &app,
+        "search",
+        serde_json::json!({ "query": "anything", "resources": ["oxplow/knowledge"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(hits, serde_json::json!([]));
+}
+
+/// A `req` row as its Tauri adapter runs it: no caller. (Its adapter also
+/// takes the plugin runtime, which this harness doesn't build.)
+async fn rpc(
+    app: &TestApp,
+    name: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, oxplow_rpc::IpcError> {
+    let ctx = oxplow_rpc::RpcContext {
+        services: app.state().inner().clone(),
+        plugin_runtime: None,
+    };
+    oxplow_rpc::dispatch(name, args, &ctx).await
 }
 
 // ---- snapshot reads ----

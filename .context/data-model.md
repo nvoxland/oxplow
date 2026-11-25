@@ -330,6 +330,9 @@ installed one — see [DEV.md](../DEV.md):
   dedups by canonical path, bumps recency, caps at 20. The IPC layer
   resolves the path via the Tauri path resolver and manages it as
   `RecentProjectsState` on the shell.
+- **`device.json`** — this install's device id and name, made once, in the
+  same app-config dir (`oxplow_config::this_device`,
+  `crates/oxplow-config/src/device.rs`). The shell gives it to each window.
 - **`session.json`** — the set of project dirs open last, in the same
   app-config dir. Managed by `oxplow_config::SessionProjects`
   (`crates/oxplow-config/src/session.rs`); drives session restore on a
@@ -1518,7 +1521,8 @@ layer (V94). Nothing is skipped silently.
 `command_run` is the command detail table named by V68. Its unique,
 required `run_id` names a `contribution_run`. It keeps the integer
 `id`, the command's name, `input_json`, `result_json`, `event_id`,
-`inverse_json` and `undone_by`. Reads and no-ops leave the payload and
+`inverse_json`, `undone_by` and `device_id` (the device a person asked
+from; NULL for agents, effects, jobs and requests with no caller). Reads and no-ops leave the payload and
 inverse columns NULL. The bus writes the run and its details through
 `command_run_store::insert_tx`, then links an event or undo when there
 is one. A nested write's details land with its transaction. A rolled-back

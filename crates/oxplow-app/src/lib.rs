@@ -589,7 +589,7 @@ pub struct Services {
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
     pub client_reports: Arc<client_reports::ClientReports>,
-    /// The devices connected now, as they named themselves (`client_devices`).
+    /// The devices connected now, as they named themselves (`client_reports::devices`).
     pub client_devices: Arc<client_reports::devices::ClientDevices>,
     /// Durable atomic fact layer — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts

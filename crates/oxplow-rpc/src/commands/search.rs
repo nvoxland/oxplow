@@ -1,6 +1,5 @@
 //! Cores for the `search` command module — site-wide BM25 search.
 
-use oxplow_app::Services;
 use oxplow_db::SearchHit;
 
 use crate::error::IpcError;
@@ -12,14 +11,14 @@ use crate::error::IpcError;
 /// searches everything. `resources` optionally restricts to some of those
 /// (`oxplow/knowledge`, or `oxplow/file`). Results are ranked best-first.
 pub async fn search(
-    svc: &Services,
+    req: &crate::RpcRequest<'_>,
     query: String,
     stream_id: Option<String>,
     resources: Option<Vec<String>>,
     limit: Option<u32>,
 ) -> Result<Vec<SearchHit>, IpcError> {
     crate::commands::bus::read_as_person(
-        svc,
+        req,
         "oxplow.search.find",
         serde_json::json!({
             "query": query,

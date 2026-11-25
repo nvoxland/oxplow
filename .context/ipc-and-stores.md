@@ -218,7 +218,9 @@ touches roughly seven files. They sit in this order:
    whose only job is to give `tauri-specta` something to derive the TS
    binding from. The standard generator takes `&Services`. Terminal
    launch and restart also need the plugin endpoints, so their dispatch
-   rows use `ctx` and their adapters supply `RpcContext`.
+   rows go in the `req` section and their adapters supply `RpcContext`.
+   A command that needs the caller (who asked: the device and the page
+   load) goes in `req` too; its core takes `&RpcRequest { ctx, caller }`.
 
    `cargo test -p oxplow-tauri-ipc` (`export_ts_bindings`) regenerates
    `apps/desktop/src/tauri-bridge/generated/bindings.ts`; CI fails on a

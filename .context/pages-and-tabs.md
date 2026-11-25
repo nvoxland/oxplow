@@ -527,9 +527,9 @@ reach the run's actual reads retry its initial execution; catalog-wide changes a
 retry. Unrelated writes (including records from its own command loaders) do not
 starve opening. A later change finds the published run. This closes the query/registration gap without a timed missed-event cache.
 A window opens
-a run (`open_page { page | specYaml, params, streamId, threadId, client }`
+a run (`open_page { page | specYaml, params, streamId, threadId }`
 → `{ runId, run }`; a left-nav panel's part is `open_panel_part { panel,
-part, choices?, streamId, threadId, client }`, the daemon saying which page
+part, choices?, streamId, threadId }`, the daemon saying which page
 and with what, and its reply and snapshots carrying the part's `panel`
 view: the header's count and the toggles) and closes it (`close_page`); a pick, filter or
 switch is `set_page_params`, Refresh `rerun_page`. The change loop
@@ -561,11 +561,11 @@ its loading screen. The window's run store publishes its whole live roster with
 instead of repeating a cached list. Reports use a single-flight writer:
 while one is in flight, only the newest pending snapshot is retained, so
 an older HTTP report cannot arrive after a newer roster and close its runs.
-Runs belong to their window's `client`; reports prune only that client's
+Runs belong to their window's connection (the request's caller); reports prune only that connection's
 previously acknowledged runs which are now absent. The event socket's
-`client` query param names the same id used by logs, reports and the
+`connection` query param (with `device`, `name` and `kind`) names the same id used by logs, reports and the
 client host (`uiClientId.ts`: `con-<uuid>`, one per page load, in memory; independent of the API/transport import graph), and its
-disconnect and client expiry reclaim owned runs. A reconnect clears the
+disconnect and connection expiry reclaim owned runs. The socket releases them only when it is the connection's current socket (`SocketLease`). A reconnect clears the
 old roster and reopens its held runs; stale open replies are fenced out and
 closed instead of resurrecting old ids. A dataset change keeps the loaders it didn't reach:
 the re-run is seeded (`PageRunner::run_seeded`) with every loader run —
@@ -1608,10 +1608,12 @@ forgotten, a report older than a minute is listed as stale.
   window: id (a ref), kind, title, thread, stream, agent session for a
   session tab, `selected` (in its thread, in that window), `visible`
   (selected, in the thread its window shows, in a visible window),
-  window (`client`, its page load) and its `device`, and staleness;
+  window (`client`: its connection, the page load) and its `device`, and staleness;
   `unreported` names the threads no window reported. A window's report is
   keyed by its page load, comes from the request's caller (the report itself
-  names no window), and is dropped when the window's event socket closes.
+  names no window), and is dropped when the window's event socket closes;
+  the window sends it again as soon as its socket is back
+  (`tabs/useTabReportRepeats.ts`), as well as on its minute heartbeat.
 - `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
   thread in the window the person was in last (most recently focused),
   with `others` (each other window's), or the listed `tab`: its

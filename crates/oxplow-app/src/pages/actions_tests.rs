@@ -249,6 +249,10 @@ async fn a_form_node_starts_from_its_defaults_and_submits() {
         .map(|c| c.value.as_str())
         .collect();
     assert_eq!(states, ["todo", "done"]);
+    let caller = oxplow_domain::Caller {
+        device: oxplow_domain::DeviceId::generate(),
+        connection: oxplow_domain::ConnectionId::generate(),
+    };
     submit_page_form(
         &svc,
         &runs,
@@ -257,9 +261,21 @@ async fn a_form_node_starts_from_its_defaults_and_submits() {
         serde_json::json!({ "title": "submitted" }),
         Actor::Human,
         false,
-        None,
+        Some(&caller),
     )
     .await
     .unwrap();
     assert_eq!(titles(&svc).await, ["submitted"]);
+    // The press keeps the device it came from.
+    let devices = svc
+        .sql
+        .run(oxplow_db::SqlQuery::new(
+            "SELECT device_id FROM v_command_run WHERE command = 'oxplow.thread.create'",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        devices.rows,
+        vec![vec![SqlCell::Text(caller.device.to_string())]]
+    );
 }

@@ -3,7 +3,6 @@
 //! `oxplow.vcs.log` / `oxplow.vcs.branches` and the `v_commit` / `v_branch`
 //! datasets.
 
-use oxplow_app::Services;
 use oxplow_domain::vcs::{BlameLine, Revision};
 
 use crate::error::IpcError;
@@ -11,13 +10,13 @@ use crate::error::IpcError;
 /// The blame of `path` at `revision`: the agent's `oxplow.vcs.blame`, run
 /// as the person.
 pub async fn vcs_blame(
-    svc: &Services,
+    req: &crate::RpcRequest<'_>,
     stream_id: Option<String>,
     path: String,
     revision: Revision,
 ) -> Result<Vec<BlameLine>, IpcError> {
     crate::commands::bus::read_as_person(
-        svc,
+        req,
         "oxplow.vcs.blame",
         serde_json::json!({
             "stream_id": stream_id,

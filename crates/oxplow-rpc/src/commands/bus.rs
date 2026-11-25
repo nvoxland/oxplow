@@ -37,13 +37,17 @@ fn persons_run(req: &RpcRequest<'_>) -> oxplow_domain::run::RunContext {
 
 /// A read the person makes through the bus: command `id` run as the
 /// person, its result decoded. A typed IPC read the agent has too is
-/// this, so both front doors validate and answer alike.
+/// this, so both front doors validate and answer alike. Its record keeps
+/// the device the person asked from.
 pub(crate) async fn read_as_person<T: serde::de::DeserializeOwned>(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     id: &str,
     input: serde_json::Value,
 ) -> Result<T, IpcError> {
-    let outcome = svc.commands.run(&Actor::Human, id, input, false).await?;
+    let outcome = req
+        .commands
+        .run_in(&persons_run(req), id, input, false)
+        .await?;
     serde_json::from_value(outcome.result)
         .map_err(|e| IpcError::internal(format!("`{id}` answered an unexpected shape: {e}")))
 }
@@ -277,6 +281,30 @@ mod tests {
         assert_eq!(rows[1][1], json!(device), "its undo");
         assert_eq!(rows[2][0], anonymous["command_run_id"]);
         assert_eq!(rows[2][1], serde_json::Value::Null, "no caller, no device");
+    }
+
+    /// A person's typed read (search) is recorded with the device it came
+    /// from, as their writes are.
+    #[tokio::test]
+    async fn a_persons_read_keeps_the_device_that_asked() {
+        let (svc, _dir) = services().await;
+        let caller = crate::test_support::caller();
+        crate::dispatch_as(
+            "search",
+            json!({ "query": "anything" }),
+            &svc,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        let rows = crate::dispatch(
+            "query_sql",
+            json!({ "sql": "SELECT device_id FROM v_command_run WHERE command = 'oxplow.search.find'" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows["rows"], json!([[caller.device.to_string()]]));
     }
 
     /// A person's run that fails says which command run record recorded it, so the
