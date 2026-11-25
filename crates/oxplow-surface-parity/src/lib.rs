@@ -223,7 +223,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
-    dataset("get_ui_preferences", &["v_ui_preference"]),
+    dataset("get_ui_preferences", &["v_ui_preference", "v_component_memory"]),
     ui("set_ui_preference", "the person's page memory and app preferences, a UI pointer like the panel layout"),
     dataset("list_extensions", &["v_extension", "v_contribution"]),
     // A window's open page runs: it opens one, hears which loaders

@@ -10,26 +10,31 @@
  * - a panel's memory (`usePanelMemory`): its choice params.
  *
  * A tab's own view is its **view params** and its own memory its **history
- * state**; neither is here. Values are JSON. One store loads everything
- * once and writes a change after a pause, per key; a value equal to what's
- * there writes nothing.
+ * state**; neither is here. Values are JSON. One store loads everything,
+ * reads it again when the daemon reconnects or the rows change (another
+ * device wrote a component's memory), and writes a change after a pause, per
+ * key; a value equal to what's there writes nothing. A value waiting to be
+ * saved wins over a reloaded one.
  */
 
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 
-import { getUiPreferences, setUiPreference } from "../api.js";
+import { getUiPreferences, onRemoteReconnect, setUiPreference, subscribeOxplowEvents } from "../api.js";
 import { logUi } from "../logger.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { panelUri } from "../uri/uri.js";
 import { keyIdentityOf, typeOf } from "../uri/uri.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { UiPreference } from "../tauri-bridge/generated/bindings.js";
+import { readsChanged, readsOf } from "../viz/rerun.js";
 
 /** Where remembered values are read from and written to. */
 export interface RememberedBackend {
   load(): Promise<UiPreference[]>;
   /** Keep `valueJson` under `scope` and `key`; null forgets it. */
   save(scope: string, key: string, valueJson: string | null): Promise<void>;
+  /** Calls `reload` when what is kept may have changed elsewhere; returns the stop. */
+  watch?(reload: () => void): () => void;
 }
 
 export interface RememberedStore {
@@ -72,21 +77,44 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
     version += 1;
     for (const listener of Array.from(listeners)) listener();
   };
-  const ready = backend
-    .load()
-    .then((rows) => {
-      for (const row of rows) {
-        // A value kept before this load finished wins: it is newer.
-        if (values.has(at(row.scope, row.key))) continue;
-        try {
-          values.set(at(row.scope, row.key), JSON.parse(row.valueJson));
-        } catch {
-          // Not JSON: as if never kept.
+  // Ids with a save in flight, and ids written since the read in flight began:
+  // a read that started before them would bring back an older value.
+  const saving = new Set<string>();
+  const written = new Set<string>();
+  let reading = 0;
+  const read = (): Promise<void> => {
+    const turn = ++reading;
+    written.clear();
+    return backend
+      .load()
+      .then((rows) => {
+        if (turn !== reading) return;
+        const incoming = new Map<string, unknown>();
+        for (const row of rows) {
+          try {
+            incoming.set(at(row.scope, row.key), JSON.parse(row.valueJson));
+          } catch {
+            // Not JSON: as if never kept.
+          }
         }
-      }
-      changed();
-    })
-    .catch((e: unknown) => logUi("warn", "couldn't read what was remembered", { error: String(e) }));
+        const mine = (id: string) => pending.has(id) || saving.has(id) || written.has(id);
+        let differs = false;
+        for (const [id, value] of incoming) {
+          if (mine(id) || JSON.stringify(values.get(id)) === JSON.stringify(value)) continue;
+          values.set(id, value);
+          differs = true;
+        }
+        for (const id of Array.from(values.keys())) {
+          if (incoming.has(id) || mine(id)) continue;
+          values.delete(id);
+          differs = true;
+        }
+        if (differs || turn === 1) changed();
+      })
+      .catch((e: unknown) => logUi("warn", "couldn't read what was remembered", { error: String(e) }));
+  };
+  const ready = read();
+  backend.watch?.(() => void read());
   return {
     ready,
     get: (scope, key) => values.get(at(scope, key)),
@@ -95,6 +123,7 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
       if (JSON.stringify(values.get(id)) === JSON.stringify(value)) return;
       if (value === undefined) values.delete(id);
       else values.set(id, value);
+      written.add(id);
       changed();
       clearTimeout(pending.get(id));
       pending.set(
@@ -102,9 +131,11 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
         setTimeout(() => {
           pending.delete(id);
           const now = values.get(id);
+          saving.add(id);
           void backend
             .save(scope, key, now === undefined ? null : JSON.stringify(now))
-            .catch((e: unknown) => logUi("warn", "couldn't remember a value", { scope, key, error: String(e) }));
+            .catch((e: unknown) => logUi("warn", "couldn't remember a value", { scope, key, error: String(e) }))
+            .finally(() => saving.delete(id));
         }, debounceMs),
       );
     },
@@ -129,7 +160,21 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
 let shared: RememberedStore | null = null;
 /** The app's store, made on first use. */
 function appStore(): RememberedStore {
-  shared ??= createRememberedStore({ load: getUiPreferences, save: setUiPreference });
+  shared ??= createRememberedStore({
+    load: getUiPreferences,
+    save: setUiPreference,
+    watch: (reload) => {
+      const reads = readsOf("v_ui_preference", "v_component_memory");
+      const stopEvents = subscribeOxplowEvents((event) => {
+        if (readsChanged(event as Record<string, unknown>, reads)) reload();
+      });
+      const stopReconnect = onRemoteReconnect(reload);
+      return () => {
+        stopEvents();
+        stopReconnect();
+      };
+    },
+  });
   return shared;
 }
 

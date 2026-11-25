@@ -2639,6 +2639,44 @@ mod tests {
         assert_eq!(queued, ("acme-models".into(), "1.0".into(), None));
     }
 
+    /// V84 keeps a component's memory (copied to `component_memory`) and drops
+    /// the other preferences: each device starts from the defaults.
+    #[test]
+    fn v84_keeps_component_memory_and_drops_the_other_preferences() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(83))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO ui_preference (scope, key, value_json, updated_at)
+             VALUES ('component:acme/board', 'k', '1', 't'), ('app', 'railWidth', '320', 't');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let memory: Vec<(String, String, String)> = conn
+            .prepare("SELECT scope, key, value_json FROM component_memory")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            memory,
+            vec![("component:acme/board".into(), "k".into(), "1".into())]
+        );
+        let kept: i64 = conn
+            .query_row("SELECT count(*) FROM ui_preference", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 0);
+        conn.execute(
+            "INSERT INTO ui_preference (device_id, scope, key, value_json, updated_at)
+             VALUES ('d', 'app', 'k', '1', 't')",
+            [],
+        )
+        .unwrap();
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {
@@ -3467,6 +3505,7 @@ mod tests {
             "threads",
             "thread_selection",
             "tab_session",
+            "component_memory",
             "agent_turn",
             "page_visit",
             "usage_event",

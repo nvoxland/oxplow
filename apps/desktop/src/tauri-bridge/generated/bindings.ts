@@ -144,12 +144,14 @@ export const commands = {
 	setPanelLayout: (streamId: string | null, threadId: string | null, layout: ScopedPanelLayout) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { streamId, threadId, layout })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getUiPreferences: () => typedError<UiPreference[], IpcError_Serialize>(__TAURI_INVOKE("get_ui_preferences")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	setUiPreference: (scope: string, key: string, valueJson: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_ui_preference", { scope, key, valueJson })),
 	/**

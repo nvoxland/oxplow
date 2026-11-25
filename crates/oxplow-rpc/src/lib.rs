@@ -277,6 +277,9 @@ macro_rules! oxplow_command_table {
                 list_tab_sessions => $crate::commands::tabs::list_tab_sessions {} -> Vec<::oxplow_db::tab_session_store::TabSession>,
                 save_tab_session => $crate::commands::tabs::save_tab_session { thread_id: ::oxplow_domain::ThreadId, session_json: String, revision: Option<::oxplow_db::tab_session_store::TabRevision> } -> Option<::oxplow_db::tab_session_store::TabRevision>,
                 forget_tab_session => $crate::commands::tabs::forget_tab_session { thread_id: ::oxplow_domain::ThreadId } -> (),
+                // what a device remembers (`.context/data-model.md` "ui_preference")
+                get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
+                set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
             }
             svc {
             }
@@ -312,8 +315,6 @@ macro_rules! oxplow_command_table {
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
-                get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
-                set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
                 run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,

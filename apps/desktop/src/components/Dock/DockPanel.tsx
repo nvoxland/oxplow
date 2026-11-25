@@ -17,7 +17,7 @@ import type { KeyboardEvent, PointerEvent } from "react";
 import { ICONS, iconFor } from "../../icons.js";
 import { OpenPageLink } from "../../kit/OpenPageLink.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { dockStore, DOCK_MAX_HEIGHT_MARGIN, DOCK_MIN_HEIGHT, useDockState } from "./dockStore.js";
+import { dockStore, DOCK_MAX_HEIGHT_MARGIN, DOCK_MIN_HEIGHT, useDockHeight, useDockState } from "./dockStore.js";
 import { useDockPanels } from "./dockPanels.js";
 
 /** The height the panel draws at: the remembered one within the column. */
@@ -28,7 +28,8 @@ export function clampDockHeight(height: number, columnHeight: number): number {
 
 export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; onOpenPage(ref: TabRef): void }) {
   const panels = useDockPanels();
-  const { open, height } = useDockState();
+  const { open } = useDockState();
+  const [height, setHeight] = useDockHeight();
   const panel = panels.find((p) => p.id === open) ?? null;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ startY: number; base: number } | null>(null);
@@ -72,7 +73,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
   };
   const onHandleMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current || e.buttons === 0) return;
-    dockStore.setHeight(clampDockHeight(drag.current.base + (drag.current.startY - e.clientY), columnHeight));
+    setHeight(clampDockHeight(drag.current.base + (drag.current.startY - e.clientY), columnHeight));
   };
   const onHandleUp = (e: PointerEvent<HTMLDivElement>) => {
     drag.current = null;

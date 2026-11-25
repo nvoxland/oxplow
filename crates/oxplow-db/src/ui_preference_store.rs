@@ -4,10 +4,12 @@
 //! `oxplow:oxplow/page?page=acme/board` — or `kind:<kind>` for every page of an entity kind),
 //! a panel's (its `panel:` ref), a custom component's own
 //! (`component:<ext>/<id>`), and the app's **app preferences** (`app`).
+//! Each device has its own, except a component's memory (`component_memory`),
+//! which is extension data every device shares.
 //! A tab's own view and history state live in its tab session, not here.
 //! Local to this project's database, never the repo, like `panel_layout`.
 
-use oxplow_domain::{DomainError, Timestamp};
+use oxplow_domain::{DeviceId, DomainError, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::database::map_sql_err;
@@ -61,15 +63,22 @@ impl SqliteUiPreferenceStore {
         Self { db }
     }
 
-    /// Every remembered value, by scope then key.
-    pub async fn all(&self) -> Result<Vec<UiPreference>, DomainError> {
+    /// `device`'s remembered values and every component's memory, by scope
+    /// then key. With no device: the components' memory alone.
+    pub async fn all(&self, device: Option<&DeviceId>) -> Result<Vec<UiPreference>, DomainError> {
+        let device = device.map(|d| d.as_str().to_string());
         self.db
-            .read(|c| {
+            .read(move |c| {
                 let mut stmt = c
-                    .prepare("SELECT scope, key, value_json FROM ui_preference ORDER BY scope, key")
+                    .prepare(
+                        "SELECT scope, key, value_json FROM ui_preference WHERE device_id = ?1
+                         UNION ALL SELECT scope, key, value_json FROM component_memory
+                         ORDER BY 1, 2",
+                    )
                     .map_err(map_sql_err)?;
+                // No device matches no row.
                 let rows = stmt
-                    .query_map([], |r| {
+                    .query_map([device.unwrap_or_default()], |r| {
                         Ok(UiPreference {
                             scope: r.get(0)?,
                             key: r.get(1)?,
@@ -84,14 +93,16 @@ impl SqliteUiPreferenceStore {
             .await
     }
 
-    /// Remember `value_json` under `scope` and `key`; `None` forgets it.
+    /// Remember `value_json` under `scope` and `key`; `None` forgets it. A
+    /// component's memory is shared; every other scope is `device`'s own.
     ///
     /// # Errors
     /// `Invalid` for an unknown scope, an empty key, text that isn't JSON,
-    /// a value over [`MAX_VALUE_BYTES`], or a component's memory that would
-    /// pass [`MAX_COMPONENT_BYTES`].
+    /// a value over [`MAX_VALUE_BYTES`], a component's memory that would
+    /// pass [`MAX_COMPONENT_BYTES`], or no device for a scope that needs one.
     pub async fn set(
         &self,
+        device: Option<&DeviceId>,
         scope: String,
         key: String,
         value_json: Option<String>,
@@ -112,21 +123,34 @@ impl SqliteUiPreferenceStore {
                 )));
             }
         }
+        let shared = scope.starts_with("component:");
+        let device = match (shared, device) {
+            (true, _) => String::new(),
+            (false, Some(d)) => d.as_str().to_string(),
+            (false, None) => return Err(DomainError::Invalid("this needs a device".into())),
+        };
         let now = Timestamp::now().to_string();
         self.db
             .transaction(move |tx| {
                 let Some(value) = value_json.as_deref() else {
-                    tx.execute(
-                        "DELETE FROM ui_preference WHERE scope = ?1 AND key = ?2",
-                        rusqlite::params![scope, key],
-                    )
+                    if shared {
+                        tx.execute(
+                            "DELETE FROM component_memory WHERE scope = ?1 AND key = ?2",
+                            rusqlite::params![scope, key],
+                        )
+                    } else {
+                        tx.execute(
+                            "DELETE FROM ui_preference WHERE device_id = ?1 AND scope = ?2 AND key = ?3",
+                            rusqlite::params![device, scope, key],
+                        )
+                    }
                     .map_err(map_sql_err)?;
                     return Ok(());
                 };
-                if scope.starts_with("component:") {
+                if shared {
                     let others: i64 = tx
                         .query_row(
-                            "SELECT COALESCE(SUM(length(value_json)), 0) FROM ui_preference WHERE scope = ?1 AND key <> ?2",
+                            "SELECT COALESCE(SUM(length(value_json)), 0) FROM component_memory WHERE scope = ?1 AND key <> ?2",
                             rusqlite::params![scope, key],
                             |r| r.get(0),
                         )
@@ -137,12 +161,18 @@ impl SqliteUiPreferenceStore {
                             "`{scope}` would keep {total} bytes; a component keeps {MAX_COMPONENT_BYTES} at most"
                         )));
                     }
+                    tx.execute(
+                        "INSERT INTO component_memory (scope, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT (scope, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+                        rusqlite::params![scope, key, value, now],
+                    )
+                } else {
+                    tx.execute(
+                        "INSERT INTO ui_preference (device_id, scope, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT (device_id, scope, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+                        rusqlite::params![device, scope, key, value, now],
+                    )
                 }
-                tx.execute(
-                    "INSERT INTO ui_preference (scope, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT (scope, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
-                    rusqlite::params![scope, key, value, now],
-                )
                 .map_err(map_sql_err)?;
                 Ok(())
             })
@@ -162,18 +192,90 @@ mod tests {
         }
     }
 
+    /// Each device keeps its own value; every device sees a component's memory;
+    /// with no device only the components' memory is read and only it is written.
+    #[tokio::test]
+    async fn a_device_keeps_its_own_but_components_are_shared() {
+        let store = SqliteUiPreferenceStore::new(Database::in_memory());
+        let mac = DeviceId::generate();
+        let tablet = DeviceId::generate();
+        store
+            .set(
+                Some(&mac),
+                "app".into(),
+                "railWidth".into(),
+                Some("320".into()),
+            )
+            .await
+            .unwrap();
+        store
+            .set(
+                Some(&tablet),
+                "app".into(),
+                "railWidth".into(),
+                Some("500".into()),
+            )
+            .await
+            .unwrap();
+        store
+            .set(
+                None,
+                "component:acme/board".into(),
+                "k".into(),
+                Some("1".into()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.all(Some(&mac)).await.unwrap(),
+            vec![
+                pref("app", "railWidth", "320"),
+                pref("component:acme/board", "k", "1")
+            ]
+        );
+        assert_eq!(
+            store.all(Some(&tablet)).await.unwrap(),
+            vec![
+                pref("app", "railWidth", "500"),
+                pref("component:acme/board", "k", "1")
+            ]
+        );
+        assert_eq!(
+            store.all(None).await.unwrap(),
+            vec![pref("component:acme/board", "k", "1")]
+        );
+        // One device forgetting its value leaves the other's.
+        store
+            .set(Some(&mac), "app".into(), "railWidth".into(), None)
+            .await
+            .unwrap();
+        assert_eq!(store.all(Some(&tablet)).await.unwrap().len(), 2);
+        // A device's own scope needs a device.
+        let refused = store
+            .set(None, "app".into(), "railWidth".into(), Some("1".into()))
+            .await;
+        assert!(matches!(refused, Err(DomainError::Invalid(m)) if m == "this needs a device"));
+    }
+
     /// A value is remembered per scope and key, replaced by a new one, and
     /// forgotten by none.
     #[tokio::test]
     async fn a_value_is_kept_replaced_and_forgotten() {
         let store = SqliteUiPreferenceStore::new(Database::in_memory());
-        assert!(store.all().await.unwrap().is_empty());
+        let mac = DeviceId::generate();
+        assert!(store.all(Some(&mac)).await.unwrap().is_empty());
         store
-            .set("app".into(), "railWidth".into(), Some("320".into()))
+            .set(
+                Some(&mac),
+                "app".into(),
+                "railWidth".into(),
+                Some("320".into()),
+            )
             .await
             .unwrap();
         store
             .set(
+                Some(&mac),
                 "oxplow:oxplow/page?page=git-dashboard".into(),
                 "mergeMode".into(),
                 Some("\"rebase\"".into()),
@@ -181,11 +283,16 @@ mod tests {
             .await
             .unwrap();
         store
-            .set("app".into(), "railWidth".into(), Some("400".into()))
+            .set(
+                Some(&mac),
+                "app".into(),
+                "railWidth".into(),
+                Some("400".into()),
+            )
             .await
             .unwrap();
         assert_eq!(
-            store.all().await.unwrap(),
+            store.all(Some(&mac)).await.unwrap(),
             vec![
                 pref("app", "railWidth", "400"),
                 pref(
@@ -196,11 +303,11 @@ mod tests {
             ]
         );
         store
-            .set("app".into(), "railWidth".into(), None)
+            .set(Some(&mac), "app".into(), "railWidth".into(), None)
             .await
             .unwrap();
         assert_eq!(
-            store.all().await.unwrap(),
+            store.all(Some(&mac)).await.unwrap(),
             vec![pref(
                 "oxplow:oxplow/page?page=git-dashboard",
                 "mergeMode",
@@ -213,13 +320,16 @@ mod tests {
     #[tokio::test]
     async fn what_isnt_a_preference_is_refused() {
         let store = SqliteUiPreferenceStore::new(Database::in_memory());
+        let mac = DeviceId::generate();
         let refused = |r: Result<(), DomainError>| matches!(r, Err(DomainError::Invalid(_)));
         assert!(refused(
-            store.set("tab".into(), "k".into(), Some("1".into())).await
+            store
+                .set(Some(&mac), "tab".into(), "k".into(), Some("1".into()))
+                .await
         ));
         assert!(refused(
             store
-                .set("page:".into(), "k".into(), Some("1".into()))
+                .set(Some(&mac), "page:".into(), "k".into(), Some("1".into()))
                 .await
         ));
         for scope in [
@@ -228,27 +338,37 @@ mod tests {
             "oxplow:oxplow/panel?panel=core:work",
         ] {
             store
-                .set(scope.into(), "k".into(), Some("1".into()))
+                .set(Some(&mac), scope.into(), "k".into(), Some("1".into()))
                 .await
                 .unwrap();
         }
         assert!(refused(
-            store.set("app".into(), "".into(), Some("1".into())).await
+            store
+                .set(Some(&mac), "app".into(), "".into(), Some("1".into()))
+                .await
         ));
         assert!(refused(
             store
-                .set("app".into(), "k".into(), Some("not json".into()))
+                .set(
+                    Some(&mac),
+                    "app".into(),
+                    "k".into(),
+                    Some("not json".into())
+                )
                 .await
         ));
         let big = format!("\"{}\"", "x".repeat(MAX_VALUE_BYTES));
         assert!(refused(
-            store.set("app".into(), "k".into(), Some(big)).await
+            store
+                .set(Some(&mac), "app".into(), "k".into(), Some(big))
+                .await
         ));
         // A component's keys together stay under its cap.
         let chunk = format!("\"{}\"", "x".repeat(MAX_VALUE_BYTES - 10));
         for i in 0..(MAX_COMPONENT_BYTES / MAX_VALUE_BYTES) {
             store
                 .set(
+                    Some(&mac),
                     "component:acme/board".into(),
                     format!("k{i}"),
                     Some(chunk.clone()),
@@ -259,6 +379,7 @@ mod tests {
         assert!(refused(
             store
                 .set(
+                    Some(&mac),
                     "component:acme/board".into(),
                     "more".into(),
                     Some(chunk.clone())
@@ -267,7 +388,12 @@ mod tests {
         ));
         // Replacing a key counts its new size, not both.
         store
-            .set("component:acme/board".into(), "k0".into(), Some(chunk))
+            .set(
+                Some(&mac),
+                "component:acme/board".into(),
+                "k0".into(),
+                Some(chunk),
+            )
             .await
             .unwrap();
     }

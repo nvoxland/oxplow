@@ -32705,6 +32705,36 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "device_id",
+          "type": "TEXT",
+          "doc": "The device that remembers it: each device's preferences are its own. (v5)"
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=…`) or `kind:<kind>`; or a panel's URI."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)."
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "doc": "Its value, as JSON text."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of the last change."
+        }
+      ],
+      "key": []
     }
   },
   "agent_harness": {
@@ -39805,6 +39835,33 @@
         "thread_id",
         "item_id"
       ]
+    }
+  },
+  "component_memory": {
+    "1": {
+      "columns": [
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`component:<extension>/<id>`."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What is remembered, within the component."
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "doc": "Its value, as JSON text."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of the last change."
+        }
+      ],
+      "key": []
     }
   }
 }

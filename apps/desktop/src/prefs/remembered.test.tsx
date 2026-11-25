@@ -117,3 +117,48 @@ test("outside a tab, page memory is the component's own", () => {
   expect(view.getByTestId("mode").textContent).toBe("rebase");
   expect(store.get("oxplow:oxplow/page?page=tasks", "mergeMode")).toBeUndefined();
 });
+
+// A value another device (or a forgetting) changed arrives when the store is told to read again.
+test("the store reads again when told to, keeping what is waiting to be saved over what comes back", async () => {
+  let stored: UiPreference[] = [{ scope: "app", key: "railWidth", valueJson: "320" }];
+  let reload = () => {};
+  const saves: [string, string, string | null][] = [];
+  const store = createRememberedStore(
+    {
+      load: async () => stored,
+      save: async (scope, key, valueJson) => void saves.push([scope, key, valueJson]),
+      watch: (run) => {
+        reload = run;
+        return () => {};
+      },
+    },
+    10,
+  );
+  await store.ready;
+  let heard = 0;
+  store.subscribe(() => (heard += 1));
+  stored = [
+    { scope: "app", key: "railWidth", valueJson: "500" },
+    { scope: "app", key: "dockHeight", valueJson: "200" },
+  ];
+  reload();
+  await waitFor(() => expect(store.get("app", "railWidth")).toBe(500));
+  expect(store.get("app", "dockHeight")).toBe(200);
+  // What the other side forgot is forgotten here.
+  stored = [{ scope: "app", key: "railWidth", valueJson: "500" }];
+  reload();
+  await waitFor(() => expect(store.get("app", "dockHeight")).toBeUndefined());
+  // A change waiting to be saved wins over the reloaded value.
+  store.set("app", "railWidth", 700);
+  stored = [{ scope: "app", key: "railWidth", valueJson: "100" }];
+  reload();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(store.get("app", "railWidth")).toBe(700);
+  await waitFor(() => expect(saves).toEqual([["app", "railWidth", "700"]]));
+  // Nothing changed: nobody is told.
+  stored = [{ scope: "app", key: "railWidth", valueJson: "700" }];
+  const before = heard;
+  reload();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(heard).toBe(before);
+});

@@ -1347,10 +1347,10 @@ is the Alerts panel's icon.
   row plus the panel. `DockBar.tsx` draws the icons. `DockPanel.tsx` draws
   the open panel. `dockStore.ts` holds the state. `dockPanels.tsx` holds
   the registry.
-- **Store:** `{ open: id | null, height }`. At most one panel is open.
-  `toggle`, `open`, `close` and `setHeight` change it. The height is
-  clamped to 160px or more and kept in `shellStorage` under
-  `oxplow.dock.height`. The panel also keeps it within the column height
+- **Store:** `{ open: id | null }`. At most one panel is open.
+  `toggle`, `open` and `close` change it. The height is an app preference
+  (`useDockHeight`, key `dockHeight`), so each device has its own. It is
+  clamped to 160px or more. The panel also keeps it within the column height
   minus 80px.
 - **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, page? }`.
   `icon` is a name from `ICONS`. `useBadge` is a hook that returns a count
@@ -1778,19 +1778,22 @@ the docs and the skill:
 |---|---|---|---|
 | **view params** | this tab's view: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the `#` of the entry's ref | `nav.viewParams`, `nav.setViewParams(view, { push })`, `nav.patchViewParams(patch, { push })` |
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
-| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
-| **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
+| **page memory** | this page, for the person on this device, every tab of it, across restarts | `ui_preference` (by device), scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
+| **app preference** | the whole app, for the person on this device | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
 | (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |
 
 `prefs/remembered.ts` holds page memory and app preferences: one store
-loads everything once (`get_ui_preferences`), a change shows at once and
-is written after a pause per key (`set_ui_preference`), a value equal to
-what's there writes nothing; tests give it a backend
+loads everything (`get_ui_preferences`: the device's own rows and every
+component's memory) and reads it again on a reconnect and when
+`v_ui_preference` or `v_component_memory` changes, a change shows at once and
+is written after a pause per key (`set_ui_preference`), a value waiting to be
+written wins over a reloaded one, a value equal to what's there writes
+nothing; tests give it a backend
 (`RememberedContext`). **Nothing touches the browser's storage but
 `shellStorage.ts`**, which holds only the shell's own keys (the tab
 sessions, the open files' paths, the remote daemon and its token, the
-recent remotes, the window's log id); `no-direct-storage.test.ts` holds
+recent remotes, this browser's device id); `no-direct-storage.test.ts` holds
 every other file to it.
 
 **One hook per kind, as easy as `useState`** (`tabs/useViewParam.ts`);

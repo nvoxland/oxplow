@@ -1870,19 +1870,31 @@ project's, and a named panel that no longer exists is dropped
 the repo. UI-only RPCs `get_panel_layout` / `set_panel_layout { stream_id?,
 thread_id? }` (a thread's stream is its own, `viewer_tx`).
 
-### `ui_preference` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
+### `ui_preference` and `component_memory` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
 
-V96. What the person's oxplow remembers for them outside any one tab
-(`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
-(JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
-without its params (`oxplow:oxplow/page?page=work`, `…?page=acme/pulls`) or
-`resource:<namespace>/<name>` (page memory, shared by every tab of the page); a panel's
-URI; `component:<namespace>/<id>` (a custom component's own memory). Anything
-else is refused, as is text that isn't JSON or a value over 64 KB, and a
-component's keys together stay under 1 MB. Local state, never the repo,
-like `panel_layout`. UI-only RPCs `get_ui_preferences` (all, read once at
-start by `prefs/remembered.ts`) / `set_ui_preference { scope, key,
-value_json | null }`; agents read `v_ui_preference`.
+V84. What a device's oxplow remembers for it outside any one tab
+(`.context/pages-and-tabs.md` "Page state"): `ui_preference(device_id,
+scope, key, value_json, updated_at)`, keyed by device, scope and key. Each
+device's values are its own: a phone and a Mac keep their own rail widths.
+Scopes: `app` (app preferences); a page's URI without its params
+(`oxplow:oxplow/page?page=work`, `…?page=acme/pulls`) or
+`resource:<namespace>/<name>` (page memory, shared by every tab of the page on
+that device); a panel's URI. V84 dropped the shared rows: each device starts
+from the defaults.
+
+A custom component's memory is extension data, so it is shared by every
+device: `component_memory(scope, key, value_json, updated_at)`, scope
+`component:<namespace>/<id>` (V84 copied the old rows into it). A set of a
+`component:` scope writes it and needs no device; any other scope with no
+device is refused (`Invalid`, "this needs a device"). Anything else is refused,
+as is text that isn't JSON or a value over 64 KB, and a component's keys
+together stay under 1 MB. Local state, never the repo, like `panel_layout`.
+
+UI-only RPCs `get_ui_preferences` (the caller device's rows and every
+component's; with no device, the components' alone; read by
+`prefs/remembered.ts` at start, on reconnect and when the rows change) /
+`set_ui_preference { scope, key, value_json | null }`. Agents read
+`v_ui_preference` and `v_component_memory`.
 
 ### `bookmark` — `bookmark_store` (`crates/oxplow-db/src/bookmark_store.rs`)
 

@@ -5,6 +5,7 @@ use oxplow_app::Services;
 use oxplow_db::{SqlCell, SqlQueryResult};
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 /// Run one read-only `SELECT`/`WITH` over the semantic layer, with
 /// positional `params` (`?1`, `?2`, …) and a row cap. `raw` is the
@@ -58,25 +59,36 @@ pub async fn get_panel_layout(
     Ok(svc.panel_layout_store.get(viewer).await?)
 }
 
-/// Everything the person's oxplow remembers outside any one tab: page
-/// memory and app preferences (`ui_preference`). UI-only; an agent reads
-/// `v_ui_preference`.
-pub async fn get_ui_preferences(svc: &Services) -> Result<Vec<oxplow_db::UiPreference>, IpcError> {
-    Ok(svc.ui_preference_store.all().await?)
+/// Everything the caller's device remembers outside any one tab (page
+/// memory and app preferences, `ui_preference`) and every component's
+/// memory (`component_memory`). A request with no device gets the
+/// components' alone. UI-only; an agent reads `v_ui_preference` and
+/// `v_component_memory`.
+pub async fn get_ui_preferences(
+    req: &RpcRequest<'_>,
+) -> Result<Vec<oxplow_db::UiPreference>, IpcError> {
+    Ok(req
+        .ui_preference_store
+        .all(req.caller.map(|c| &c.device))
+        .await?)
 }
 
-/// Remember one value (JSON text), or forget it with none.
+/// Remember one value (JSON text), or forget it with none: the caller
+/// device's own, or a component's, which every device shares.
 #[expect(
     clippy::disallowed_methods,
     reason = "off the bus: page memory and app preferences"
 )]
 pub async fn set_ui_preference(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     scope: String,
     key: String,
     value_json: Option<String>,
 ) -> Result<(), IpcError> {
-    Ok(svc.ui_preference_store.set(scope, key, value_json).await?)
+    Ok(req
+        .ui_preference_store
+        .set(req.caller.map(|c| &c.device), scope, key, value_json)
+        .await?)
 }
 
 /// Replace the lists the viewer sees (each in its order).
@@ -97,6 +109,59 @@ pub async fn set_panel_layout(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    /// Two devices keep their own app preference and both read one
+    /// component's memory; with no device a component's memory is written and
+    /// read, an app preference is refused.
+    #[tokio::test]
+    async fn preferences_are_each_devices_but_components_are_shared() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let mac = crate::test_support::caller();
+        let tablet = oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::generate(),
+            connection: oxplow_domain::ConnectionId::generate(),
+        };
+        let set = |caller: Option<&oxplow_domain::Caller>, scope: &str, value: &str| {
+            let args = json!({ "scope": scope, "key": "k", "valueJson": value });
+            let caller = caller.cloned();
+            let svc = svc.clone();
+            async move { crate::dispatch_as("set_ui_preference", args, &svc, caller.as_ref()).await }
+        };
+        let get = |caller: Option<&oxplow_domain::Caller>| {
+            let caller = caller.cloned();
+            let svc = svc.clone();
+            async move {
+                crate::dispatch_as("get_ui_preferences", json!({}), &svc, caller.as_ref())
+                    .await
+                    .unwrap()
+            }
+        };
+        set(Some(&mac), "app", "1").await.unwrap();
+        set(Some(&tablet), "app", "2").await.unwrap();
+        set(Some(&tablet), "component:acme/board", "3")
+            .await
+            .unwrap();
+        assert_eq!(
+            get(Some(&mac)).await,
+            json!([
+                { "scope": "app", "key": "k", "valueJson": "1" },
+                { "scope": "component:acme/board", "key": "k", "valueJson": "3" }
+            ])
+        );
+        assert_eq!(
+            get(Some(&tablet)).await,
+            json!([
+                { "scope": "app", "key": "k", "valueJson": "2" },
+                { "scope": "component:acme/board", "key": "k", "valueJson": "3" }
+            ])
+        );
+        assert_eq!(set(None, "app", "4").await.unwrap_err().code, "INVALID");
+        set(None, "component:acme/board", "5").await.unwrap();
+        assert_eq!(
+            get(None).await,
+            json!([{ "scope": "component:acme/board", "key": "k", "valueJson": "5" }])
+        );
+    }
 
     #[tokio::test]
     async fn query_sql_dispatches_and_reads_views() {
