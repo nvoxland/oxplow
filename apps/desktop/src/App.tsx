@@ -1,5 +1,5 @@
 import { useResourcesLoader } from "./resources.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   type AgentStatus,
@@ -18,22 +18,14 @@ import { Dock } from "./components/Dock/Dock.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { identityOf,    paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
-import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
-import { drawnByRenderer,  useRenderers } from "./pages/useRenderers.js";
-import { PageFileView } from "./pages/PageFileView.js";
-import { TempPage } from "./pages/TempPage.js";
-import { TEMP_EXTENSION } from "./pages/viewActions.js";
+import { paramOf, typeOf } from "./uri/uri.js";
+import { nextMode, openWithOf } from "./pages/renderers.js";
+import { drawnByRenderer } from "./pages/useRenderers.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs } from "./components/CenterTabs/CenterTabs.js";
-import type { WindowTab } from "./window/windowTab.js";
-import type { DiffSpec } from "./components/Diff/DiffPane.js";
-import { builtInPages } from "./pages/builtInPages.js";
-import type { SlotNav } from "./pages/slotNav.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import { NarrowRail } from "./components/RailHud/NarrowRail.js";
 import { useNarrowWindow } from "./windowWidth.js";
@@ -42,51 +34,40 @@ import { HOME_TAB, useWindowTabs } from "./window/useWindowTabs.js";
 import { useWindowOpeners } from "./window/useWindowOpeners.js";
 import { useWindowHost } from "./window/useWindowHost.js";
 import { useWindowCommands } from "./window/useWindowCommands.js";
+import { changeView, TabLoading, useWindowPages } from "./window/useWindowPages.js";
 import type { TabRef } from "./tabs/tabState.js";
-import { PageNavigationContext, type PageNavigation } from "./tabs/PageNavigationContext.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
-import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
-import type { VisibilityScope } from "./visibilityScope.js";
+import { useBookmarks } from "./tabs/bookmarks.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
-import { MissingPage } from "./pages/MissingPage.js";
-import { PartNotAPage } from "./pages/PartNotAPage.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
-import { diskFilePath,  refFromTabId,   fileRef,  pagePayload, recordedPageKind, isPage,  newStreamRef, alertsRef,  streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams,  pageTabRef, terminalRef } from "./tabs/pageRefs.js";
+import { diskFilePath,  refFromTabId, recordedPageKind, isPage,  newStreamRef, alertsRef,  streamSettingsRef, threadSettingsRef, viewParamsOf,  pageTabRef, terminalRef } from "./tabs/pageRefs.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import {
-  bodies,
   current as currentEntry,
-  navigate as sessionNavigate,
-  setTitle as sessionSetTitle,
-  patchHistoryState as sessionPatchHistoryState,
   identityOf as pageIdentityOf,
-  type Entry,
-  type Origin,
-  type Session,
-  type Tab,
 } from "./tabs/session.js";
 import { installCli, listRecentProjects, shellAvailable } from "./api.js";
 import { triggerRemoteResync } from "./api.js";
-import type { Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { finishPageVisit, recordPageVisit } from "./api.js";
 import { PageVisitTimer } from "./pageVisitTimer.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { personCommands } from "./personCommands.js";
 import { logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
-import { openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
+import { setOpenInHost } from "./openIn.js";
 import { setGitMenuHost, type GitStatusEntry } from "./gitMenu.js";
 import { openCompareWith, openRollback } from "./components/Git/gitDialogStore.js";
 import { GitDialogs } from "./components/Git/GitDialogs.js";
@@ -102,32 +83,6 @@ function homeTabOf(tabs: TabRef[]): string {
     tabs[0]?.id ??
     HOME_TAB
   );
-}
-
-/** What a tab shows while the daemon says which page draws it. */
-function TabLoading() {
-  return <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Loading…</div>;
-}
-
-/** The params a tab's label and renderer are given: an oxplow URI's, and for
- *  a web page (no oxplow URI) the page itself as `uri`. */
-function renderedParams(id: string): Record<string, string> {
-  return parseUri(id)?.params ?? { uri: id };
-}
-
-/** `slot`'s page in the view `view` makes of its current one (its id's
- *  `#`): the same page, so a filter replaces the entry and a pick
- *  (`push`) adds one Back returns from. */
-function changeView(
-  session: Session,
-  slot: string,
-  view: (now: Record<string, SqlCell>) => Record<string, SqlCell>,
-  opts?: { push?: boolean },
-): Session {
-  const tab = session.tabs.find((t) => t.slot === slot);
-  if (!tab) return session;
-  const ref = currentEntry(tab).ref;
-  return sessionNavigate(session, slot, { ref: withViewParams(ref, view(viewParamsOf(ref))) }, { replace: !opts?.push });
 }
 
 export function App() {
@@ -267,12 +222,9 @@ export function App() {
     extensionsRef,
     handleCloseOpenFile,
     handleNavigateInTab,
-    handleNavigateToLocation,
-    handleOpenCommit,
     handleOpenDiffInTab,
     handleOpenExternalUrl,
     handleOpenFile,
-    handleOpenKnowledge,
     handleOpenPage,
     handleOpenPageRef,
     openRefRef,
@@ -476,7 +428,6 @@ export function App() {
 
 
 
-  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
 
 
@@ -521,24 +472,6 @@ export function App() {
 
 
 
-  // The terminal link provider hands us absolute paths (resolved against
-  // stream.worktree_path); the open-file path takes a workspace-relative
-  // one, so trim the worktree prefix when present.
-  const openTerminalPath = useCallback(
-    (absPath: string, line?: number, column?: number) => {
-      if (!stream) return;
-      const wt = stream.worktree_path.endsWith("/") ? stream.worktree_path.slice(0, -1) : stream.worktree_path;
-      const rel = absPath.startsWith(wt + "/") ? absPath.slice(wt.length + 1) : absPath;
-      if (typeof line === "number" && line > 0) {
-        void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
-      } else {
-        void handleOpenFile(rel);
-      }
-    },
-    // handleNavigateToLocation / handleOpenFile are plain functions over state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [stream],
-  );
 
   const extensions = useExtensions();
   extensionsRef.current = extensions;
@@ -659,316 +592,36 @@ export function App() {
     });
   }, [menuGroups]);
   const foundationErrors = foundationDown(extensions);
-  // Which pages can draw each tab of the thread: the daemon's list
-  // (`pages/useRenderers.ts`), fetched as tabs appear and remembered.
-  const rendererUris = useMemo(
-    () =>
-      (selectedThreadId ? (sessions[selectedThreadId]?.tabs ?? []) : []).flatMap((t) =>
-        bodies(t).map((b) => b.entry.ref.id).filter(drawnByRenderer),
-      ),
-    [sessions, selectedThreadId],
-  );
-  const renderersOf = useRenderers(extensions, rendererUris, stream?.id ?? null);
-  const centerTabs: WindowTab[] = useMemo(() => {
-    const tabs: WindowTab[] = [];
-    // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
-    // sessions and pages alike. A tab keeps a body mounted per page in its
-    // history (`bodies`) so Back shows a page as it was; only the current
-    // one is in the strip. A file's content and unsaved edits are its
-    // buffer's (`editor/openFiles.ts`), its place the session's.
-    const pageTabStartIdx = tabs.length;
-    const threadSession = selectedThreadId ? sessions[selectedThreadId] : undefined;
-    // Tab ids must be unique across the rendered list — the active-tab
-    // lookup and the close button key on them — so a page shows once.
-    const renderedTabIds = new Set<string>();
-    // For each rendered tab: its session tab, its entry's ref, and whether
-    // it is that tab's current entry.
-    const placed: { tab: Tab; ref: TabRef; entry: Entry; current: boolean }[] = [];
-    // A route (`oxplow:oxplow/page?page=…`): its page file; none, a page
-    // no enabled extension has.
-    const routeTab = (ref: TabRef, nav: SlotNav): WindowTab | null => {
-      const page = pagePayload(ref)!;
-      // Until the extensions load, nothing says what draws it.
-      if (extensions === null) return { id: ref.id, label: page.page, closable: true, render: () => null };
-      // A shown view is a page file on `oxplow:temp`: the daemon has it, not the extensions.
-      if (page.namespace === TEMP_EXTENSION) {
-        return {
-          id: ref.id,
-          label: "View",
-          closable: true,
-          render: () => <TempPage id={page.page} resource={page.params} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />,
-        };
-      }
-      const file = chooseRoute(extensions, page);
-      // A part or a query has no tab of its own: the tab says what it is
-      // and, for a part, where it is drawn.
-      if (file && file.kind !== "page") return { id: ref.id, label: file.title, closable: true, render: () => <PartNotAPage page={file} extensions={extensions} /> };
-      if (file) return pageFileTab(file, ref, nav, page.params, null);
-      return { id: ref.id, label: page.page, closable: true, render: () => <MissingPage page={page} /> };
-    };
-    // What draws a tab: a route's declaration, else the page that renders
-    // its URI (`pages/renderers.ts`: its resource's, as the URI's view and
-    // the declarations pick), else foundation's fallback, `resource`.
-    const renderTab = (ref: TabRef, nav: SlotNav): WindowTab | null => {
-      if (typeOf(ref.id) === "oxplow/page") return routeTab(ref, nav);
-      // A symbol opens its file at its line (openSymbol); it's never a tab.
-      if (typeOf(ref.id) === "oxplow/symbol") return null;
-      // Until the extensions load, nothing says what renders it.
-      if (extensions === null) return { id: ref.id, label: "", closable: true, render: () => null };
-      // The first ask for this URI hasn't answered: a moment of nothing.
-      const renderers = renderersOf(ref.id);
-      if (renderers === undefined) return { id: ref.id, label: "", closable: true, render: () => <TabLoading /> };
-      const file = chooseRenderer(extensions, renderers, viewParamsOf(ref));
-      // A renderer's page file runs with the URI it shows and the
-      // resource's own params; nothing renders it: foundation's fallback.
-      if (file) return pageFileTab(file, ref, nav, { ...renderedParams(ref.id), uri: identityOf(ref.id) ?? ref.id }, ref.id);
-      return builtInPages.resource({ ref, params: renderedParams(ref.id), nav });
-    };
-    // A page file, drawn by the page host: its run's params are the
-    // entry's URI (`PageFileView`).
-    const pageFileTab = (file: PageFile, ref: TabRef, nav: SlotNav, resource: Record<string, SqlCell>, renders: string | null): WindowTab => ({
-      id: ref.id,
-      label: tabLabel(file, resource),
-      hint: tabHint(file, resource),
-      closable: true,
-      ...(file.pinned ? { pinned: true } : {}),
-      render: () => (
-        <PageFileView
-          page={file}
-          resource={resource}
-          renders={renders}
-          stream={stream}
-          threadId={selectedThread?.id ?? null}
-          onOpenPage={nav.navOpen}
-        />
-      ),
-    });
-    // A currently shown page owns its navigation context. The same page
-    // in an earlier tab's Back history must not claim its body first:
-    // links would otherwise navigate that earlier slot instead.
-    const currentBodies = new Set((threadSession?.tabs ?? []).map((t) => pageIdentityOf(currentEntry(t).ref.id)));
-    for (const sessionTab of threadSession?.tabs ?? []) {
-      // Navigation from any of the tab's bodies (a hidden back page too)
-      // moves the tab.
-      const currentId = currentEntry(sessionTab).ref.id;
-      const navOpen = (newRef: TabRef, opts?: import("./tabs/PageNavigationContext.js").NavigateOptions) => {
-        if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
-      };
-      const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
-        if (opts?.newTab) handleOpenPage(fileRef(path));
-        else handleNavigateInTab(currentId, fileRef(path));
-      };
-      // A diff in this tab: Back returns to the page it came from.
-      const navOpenDiff = (spec: DiffSpec, origin?: Origin) => handleOpenDiffInTab(currentId, spec, origin);
-      const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff };
-      for (const body of bodies(sessionTab)) {
-        const ref = body.entry.ref;
-        if (!body.current && currentBodies.has(pageIdentityOf(ref.id))) continue;
-        if (renderedTabIds.has(ref.id)) continue;
-        renderedTabIds.add(ref.id);
-        const tab = renderTab(ref, slotNav);
-        if (!tab) continue;
-        tabs.push({ ...tab, key: body.key, ...(body.current ? {} : { hidden: true }) });
-        placed.push({ tab: sessionTab, ref, entry: body.entry, current: body.current });
-      }
-    }
-    // Wrap each page-tab render with PageNavigationContext so descendants
-    // (BacklinksList, RouteLink, in-page cross-references) can navigate
-    // in-tab and the Page chrome mounts its nav bar.
-    for (let i = pageTabStartIdx; i < tabs.length; i++) {
-      const tab = tabs[i]!;
-      const { tab: sessionTab, ref, entry, current: isCurrent } = placed[i - pageTabStartIdx]!;
-      const slot = sessionTab.slot;
-      const tabId = tab.id;
-      const currentId = currentEntry(sessionTab).ref.id;
-      const stored = isCurrent ? currentEntry(sessionTab).from : undefined;
-      const origin: Origin | null = stored ? resolvedOrigin(stored, liveItemsOf(liveItems, slot, stored), ref) : null;
-      const innerRender = tab.render;
-      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.visibilityScope ?? null;
-      const elsewhere = bookmarkScope === null ? bookmarkedElsewhere(bookmarks, ref) : null;
-      const registeredTitle = pageTitles[tabId] ?? (isCurrent ? currentEntry(sessionTab).title : undefined);
-      const navValue: PageNavigation = {
-        navigate: (newRef, opts) => {
-          // A new tab with history state (a compare's two texts) is its
-          // own tab; without, the tab already showing the page, or a new one.
-          if (opts?.newTab && opts.state) openTab(newRef, { historyState: opts.state });
-          else if (opts?.newTab) handleOpenPage(newRef);
-          else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
-        },
-        openRef: (target, how) =>
-          openRefRef.current(
-            target,
-            how ?? {},
-            (opened, h) => {
-              if (h.newTab) handleOpenPage(opened);
-              else handleNavigateInTab(currentId, opened, h.origin, h.replace);
-            },
-            () => closePageTab(currentId),
-          ),
-        goBack: () => handleGoBack(slot),
-        goForward: () => handleGoForward(slot),
-        close: () => closePageTab(currentId),
-        canGoBack: sessionTab.at > 0,
-        canGoForward: sessionTab.at < sessionTab.entries.length - 1,
-        pinned: !!tab.pinned,
-        origin,
-        stepOrigin: origin ? (index: number) => handleStepOrigin(slot, index) : undefined,
-        setTitle: (t: string) => {
-          setPageTitle(tabId, t);
-          // Kept with the entry, for the strip before this page mounts again.
-          if (isCurrent && selectedThreadId) updateSession(selectedThreadId, (session) => sessionSetTitle(session, slot, t));
-        },
-        title: registeredTitle,
-        setEditing: isCurrent ? editingSetterFor(tabId) : undefined,
-        setTabActions: isCurrent ? actionsSetterFor(tabId) : undefined,
-        ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
-        bookmark: {
-          visibilityScope: bookmarkScope,
-          other: elsewhere ? { visibilityScope: elsewhere.visibilityScope } : null,
-          updateOther: elsewhere
-            ? () => {
-                moveBookmark({ threadId: selectedThreadId, streamId: stream?.id ?? null }, elsewhere, ref, registeredTitle ?? tab.label).catch((e: unknown) =>
-                  recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
-              }
-            : undefined,
-          toggle: (scope: VisibilityScope) => {
-            const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
-            const write = bookmarkScope === scope
-              ? removeBookmark(viewer, ref.id)
-              : setBookmark(viewer, ref, registeredTitle ?? tab.label, scope);
-            write.catch((e: unknown) =>
-              recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
-          },
-        },
-        ref,
-        renderers: drawnByRenderer(ref.id) ? renderersOf(ref.id) : undefined,
-        viewParams: viewParamsOf(ref),
-        // Only the page the tab shows changes the tab; a hidden back page
-        // drawing an older entry can't.
-        setViewParams: isCurrent && selectedThreadId
-          ? (params: Record<string, SqlCell>, opts?: { push?: boolean }) => {
-              const thread = selectedThreadId;
-              // A page writes its own view; the shell's keys (the renderer
-              // pick) stay.
-              updateSession(thread, (session) => changeView(session, slot, (now) => ({ ...shellView(now), ...params }), opts));
-            }
-          : undefined,
-        patchViewParams: isCurrent && selectedThreadId
-          ? (patch: Record<string, SqlCell | undefined>, opts?: { push?: boolean }) => {
-              const thread = selectedThreadId;
-              updateSession(thread, (session) =>
-                changeView(session, slot, (now) => {
-                  const next: Record<string, SqlCell> = { ...now };
-                  for (const [k, v] of Object.entries(patch)) {
-                    if (v === undefined) delete next[k];
-                    else next[k] = v;
-                  }
-                  return next;
-                }, opts),
-              );
-            }
-          : undefined,
-        historyState: entry.historyState && typeof entry.historyState === "object" && !Array.isArray(entry.historyState) ? (entry.historyState as Record<string, unknown>) : undefined,
-        setHistoryState: isCurrent && selectedThreadId
-          ? (patch: Record<string, unknown>) => {
-              const thread = selectedThreadId;
-              updateSession(thread, (session) => sessionPatchHistoryState(session, slot, patch));
-            }
-          : undefined,
-      };
-      if (registeredTitle && registeredTitle !== tab.label) {
-        tab.label = registeredTitle;
-      }
-      if (isCurrent && dirtyTabs[tabId]) tab.dirty = true;
-      // The page's actions are its tab's menu (ahead of the strip's own).
-      const pageActions = isCurrent ? tabActions[tabId] : undefined;
-      if (pageActions) {
-        tab.contextMenu = [
-          ...(tab.contextMenu ?? []),
-          ...pageActions.map((a) => ({ id: a.id, label: a.label, enabled: !a.disabled, run: () => void a.run() })),
-        ];
-      }
-      // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`)
-      // and a file's or folder's Git ▸ (`gitMenu.ts`).
-      tab.menuAtOpen = () => {
-        const elsewhere = openInForRef(ref.id);
-        return withLinkOffers(elsewhere ? [elsewhere] : [], ref.id).then((items) =>
-          // The tab's page menu has the ref's other commands; the tab adds
-          // only its Open In ▸ and Git ▸.
-          items.filter((i) => i.id === "open-in" || i.id === "git"),
-        );
-      };
-      // An agent session's tab: its harness's logo and its status dot.
-      if (typeOf(ref.id) === "oxplow/agent_session") {
-        const sessionId = paramOf(ref.id, "id") ?? "";
-        const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
-        const status = sessionStatuses[sessionId];
-        tab.pinned = true;
-        tab.agentStatus = status?.status ?? "waiting";
-        tab.question = status?.question;
-        tab.icon = session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined;
-        tab.contextMenu = [
-          ...(tab.contextMenu ?? []),
-          {
-            id: "agent_terminal.restart",
-            label: "Restart Terminal",
-            enabled: liveTerminals.has(ref.id),
-            run: () => void offerDeps.run("Restart Terminal", "oxplow.agent_terminal.restart", { uri: ref.id }),
-          },
-        ];
-        if (session && !registeredTitle) tab.label = session.displayName || sessionLabel(harnesses, session);
-      }
-      tab.render = () => (
-        <PageNavigationContext.Provider value={navValue}>
-          {innerRender()}
-        </PageNavigationContext.Provider>
-      );
-    }
-    // Snapshot the resolved labels for the history recorder so RailHud
-    // History shows the same text the tab strip shows.
-    const labelMap: Record<string, string> = {};
-    for (const t of tabs) labelMap[t.id] = t.label;
-    tabLabelByIdRef.current = labelMap;
-    return tabs;
-  }, [
-    selectedThread,
-    agentThreadStatus,
-    selectedThreadSessions,
-    sessionStatuses,
-    liveTerminals,
-    harnesses,
-    openTerminalPath,
-    effectiveCenterActive,
+  // The shown thread's tabs, as every shell draws them.
+  const { windowTabs: centerTabs, renderersOf } = useWindowPages({
     stream,
-    handleOpenKnowledge,
-    handleOpenCommit,
-    handleOpenExternalUrl,
-    selectedThreadId,
-    sessions,
-    updateSession,
-    handleOpenPage,
-    handleNavigateInTab,
-    handleOpenDiffInTab,
-    handleGoBack,
-    handleGoForward,
-    handleStepOrigin,
-    closePageTab,
-    pageTitles,
-    setPageTitle,
-    dirtyTabs,
-    editingSetterFor,
-    tabActions,
-    offerDeps,
-    actionsSetterFor,
-    openTab,
-    bookmarks,
-    workspaceContext.vcsEnabled,
-    shownFilePath,
-    centerActive,
+    selectedThread,
+    selectedThreadSessions,
     extensions,
-    renderersOf,
-  ]);
+    sessionStatuses,
+    harnesses,
+    liveTerminals,
+    offerDeps,
+    bookmarks,
+    tabs: {
+      sessions,
+      updateSession,
+      openTab,
+      closePageTab,
+      handleGoBack,
+      handleGoForward,
+      handleStepOrigin,
+      liveItems,
+      pageTitles,
+      setPageTitle,
+      dirtyTabs,
+      tabActions,
+      editingSetterFor,
+      actionsSetterFor,
+    },
+    openers: { handleOpenPage, handleNavigateInTab, handleOpenDiffInTab, openRefRef },
+    tabLabelByIdRef,
+  });
 
   return (
     // One owner of every extension panel's runs, read by the rail, the

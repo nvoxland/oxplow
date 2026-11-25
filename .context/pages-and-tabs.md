@@ -1814,7 +1814,7 @@ following its link back to that existing page.
 
 Every tab is a session tab, whatever it shows (a knowledge page, a file, a
 diff, a task, a page file, a commit, an agent session, a web page, …). The
-builder in `App.tsx` (`centerTabs`) takes each tab's `bodies`, draws
+builder in `window/useWindowPages.tsx` (`windowTabs`) takes each tab's `bodies`, draws
 each with `renderTab` — a route through `routeTab`, anything else
 through its renderer ("Renderers"), so there is no per-kind table to
 extend — and wraps it in a `PageNavigationContext`. `nav` is the
