@@ -665,7 +665,7 @@ surface calls it and adds nothing of its own.
 - **Terminal** runs `oxplow.terminal.open { stream, dir }` and shows the
   new terminal.
 - A failure goes to the error toast (`recordOpError`).
-- A tab builds its Open In as its menu opens (`CenterTab.menuAtOpen`), so
+- A tab builds its Open In as its menu opens (`WindowTab.menuAtOpen`), so
   it reads the window as it is then.
 - **Extensions add links.** `links:` (a pattern and a URI) make text a
   link in the terminal and markdown, with the same menu
@@ -1248,7 +1248,7 @@ its right-click menu.
   Pure reorder math lives in `centerTabsReorder.ts` (unit-tested).
 - **A tab area with no tab ready yet says "Loading…"** (`center-tabs-loading`), quiet and muted; the app shows the same line before the first stream loads. A blank pane is never the loading state.
 - **Right-clicking a center tab** opens its action menu: any kind-specific
-  entries (the `CenterTab.contextMenu` slot) followed by a **"Close"** (closable, unpinned tabs only) and the universal **"Close Other Tabs"** /
+  entries (the `WindowTab.contextMenu` slot) followed by a **"Close"** (closable, unpinned tabs only) and the universal **"Close Other Tabs"** /
   **"Close Tabs to the Right"** pair that `CenterTabs` appends for every
   tab. Each close item is disabled when it has no targets; targets are
   computed over the real open tabs in strip order (overflowed-but-open tabs
@@ -1263,7 +1263,7 @@ its right-click menu.
 ## Capitalization
 
 - **Title-case for every UI title.** Page titles (`<Page title=…>`),
-  tab labels (`label:` in CenterTab arrays), section / card headers
+  tab labels (`label:` in WindowTab arrays), section / card headers
   (`<Section title=…>`, `<Card title=…>`), modal headers, and menu
   items that name a destination (e.g. `New Stream…`) all use
   title case: capitalize the first and last words plus all major

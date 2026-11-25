@@ -29,7 +29,8 @@ import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { Menubar } from "./components/Menubar.js";
-import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
+import { CenterTabs } from "./components/CenterTabs/CenterTabs.js";
+import type { WindowTab } from "./window/windowTab.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { builtInPages } from "./pages/builtInPages.js";
 import type { SlotNav } from "./pages/slotNav.js";
@@ -668,8 +669,8 @@ export function App() {
     [sessions, selectedThreadId],
   );
   const renderersOf = useRenderers(extensions, rendererUris, stream?.id ?? null);
-  const centerTabs: CenterTab[] = useMemo(() => {
-    const tabs: CenterTab[] = [];
+  const centerTabs: WindowTab[] = useMemo(() => {
+    const tabs: WindowTab[] = [];
     // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
     // sessions and pages alike. A tab keeps a body mounted per page in its
     // history (`bodies`) so Back shows a page as it was; only the current
@@ -685,7 +686,7 @@ export function App() {
     const placed: { tab: Tab; ref: TabRef; entry: Entry; current: boolean }[] = [];
     // A route (`oxplow:oxplow/page?page=…`): its page file; none, a page
     // no enabled extension has.
-    const routeTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
+    const routeTab = (ref: TabRef, nav: SlotNav): WindowTab | null => {
       const page = pagePayload(ref)!;
       // Until the extensions load, nothing says what draws it.
       if (extensions === null) return { id: ref.id, label: page.page, closable: true, render: () => null };
@@ -708,7 +709,7 @@ export function App() {
     // What draws a tab: a route's declaration, else the page that renders
     // its URI (`pages/renderers.ts`: its resource's, as the URI's view and
     // the declarations pick), else foundation's fallback, `resource`.
-    const renderTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
+    const renderTab = (ref: TabRef, nav: SlotNav): WindowTab | null => {
       if (typeOf(ref.id) === "oxplow/page") return routeTab(ref, nav);
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       if (typeOf(ref.id) === "oxplow/symbol") return null;
@@ -725,7 +726,7 @@ export function App() {
     };
     // A page file, drawn by the page host: its run's params are the
     // entry's URI (`PageFileView`).
-    const pageFileTab = (file: PageFile, ref: TabRef, nav: SlotNav, resource: Record<string, SqlCell>, renders: string | null): CenterTab => ({
+    const pageFileTab = (file: PageFile, ref: TabRef, nav: SlotNav, resource: Record<string, SqlCell>, renders: string | null): WindowTab => ({
       id: ref.id,
       label: tabLabel(file, resource),
       hint: tabHint(file, resource),
