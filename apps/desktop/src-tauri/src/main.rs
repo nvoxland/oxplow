@@ -49,9 +49,11 @@ fn harness_arg(mut args: impl Iterator<Item = String>) -> Option<tauri::Url> {
 /// capability names its label. The engine is the app's own, so a component
 /// tested is drawn as it will be. A test runs while the person works, so
 /// the window is never seen: on macOS it is shown — WebKit draws no frames
-/// for a hidden window, or one off every display — but fully transparent,
+/// for a hidden window, one off every display, or one other windows cover
+/// (occluded) — so it floats above the person's windows, fully transparent,
 /// borderless and click-through, with no Dock icon and never focused. It
-/// quits when the page goes to `/harness/done`.
+/// says on stderr whether macOS shows it (`say_how_shown`). It quits when
+/// the page goes to `/harness/done`.
 fn run_harness(ctx: tauri::Context, url: tauri::Url) {
     tauri::Builder::default()
         .setup(move |app| {
@@ -76,10 +78,58 @@ fn run_harness(ctx: tauri::Context, url: tauri::Url) {
                     .build()?;
             unseen(&window)?;
             window.show()?;
+            say_how_shown(window);
             Ok(())
         })
         .run(ctx)
         .expect("the component harness's window opens");
+}
+
+/// While the harness's page waits for its first frame (up to 10 s), the
+/// window says on stderr, a few times, whether macOS shows it —
+/// `harness-window: occlusion=… active_space=… visible=… screen=…` — which
+/// the test run reports when the page drew nothing (`component_harness.rs`
+/// `WINDOW_SAYS`).
+fn say_how_shown(window: tauri::WebviewWindow) {
+    std::thread::spawn(move || {
+        for wait in [1, 4, 4] {
+            std::thread::sleep(std::time::Duration::from_secs(wait));
+            let w = window.clone();
+            let _ =
+                window.run_on_main_thread(move || eprintln!("harness-window: {}", how_shown(&w)));
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn how_shown(window: &tauri::WebviewWindow) -> String {
+    use objc2_app_kit::NSWindowOcclusionState;
+    let yes = |b: bool| if b { "yes" } else { "no" };
+    let Ok(ns) = window.ns_window() else {
+        return "no window".to_string();
+    };
+    // SAFETY: Tauri's NSWindow for this window, alive while `window` is,
+    // read on the main thread (`run_on_main_thread`).
+    let ns = unsafe { &*ns.cast::<objc2_app_kit::NSWindow>() };
+    format!(
+        "occlusion={} active_space={} visible={} screen={}",
+        if ns
+            .occlusionState()
+            .contains(NSWindowOcclusionState::Visible)
+        {
+            "visible"
+        } else {
+            "hidden"
+        },
+        yes(ns.isOnActiveSpace()),
+        yes(ns.isVisible()),
+        yes(ns.screen().is_some()),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn how_shown(window: &tauri::WebviewWindow) -> String {
+    format!("visible={}", window.is_visible().unwrap_or(false))
 }
 
 /// Make `window` invisible and let clicks pass through it, before it is
@@ -92,6 +142,9 @@ fn unseen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     unsafe {
         (*ns).setAlphaValue(0.0);
         (*ns).setIgnoresMouseEvents(true);
+        // Above the person's windows: one under an opaque window is
+        // occluded, and WebKit draws an occluded window no frames.
+        (*ns).setLevel(objc2_app_kit::NSFloatingWindowLevel);
     }
     Ok(())
 }

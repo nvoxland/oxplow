@@ -324,18 +324,24 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   never seen: on macOS it is shown (WebKit draws no frames for a hidden
   window, or for one off every display, and macOS moves a titled window
   placed off-screen onto a display left of or above the main one) but
-  borderless, fully transparent and click-through (`unseen` in the
-  shell's `main.rs`); elsewhere it goes to -20000, -20000. Found as `OXPLOW_SHELL`, else an
+  borderless, fully transparent and click-through, floating above the
+  person's windows so none covers it (`unseen` in the shell's `main.rs`);
+  elsewhere it goes to -20000, -20000. Found as `OXPLOW_SHELL`, else an
   `oxplow` beside the running program or up to two folders above it. With
   none, the `ui` steps aren't run, nor the steps after them (they read
   what the `ui` steps did): the report lists it under `skipped` and its
   case is **skipped** (`CaseOutcome::Skipped`, a `<skipped>` in the JUnit
   form) — never a pass.
   Likewise when the window draws no frames: WebKit draws none while the
-  display is locked or asleep, so a component that lays itself out never
-  draws. The page asks first (`drawsFrames`: a frame within 2 s) and
-  records `drawing`; `false` leaves the steps, and those after them, not
-  run and the case skipped, never failed (`Harness::drawing`). CI builds the app and runs the tests
+  display is locked or asleep, or for a window macOS marks occluded (one
+  other windows cover: so on macOS the window floats above them), so a
+  component that lays itself out never draws. The page asks first
+  (`drawsFrames`: a frame within 10 s) and records `drawing`; `false`
+  leaves the steps, and those after them, not run and the case skipped,
+  never failed (`Harness::drawing`). The skip says why, as far as it is
+  known: what the page saw (`drawingSeen`: visibility, focus, size, the
+  wait) and what the window said of itself on stderr (`harness-window:
+  occlusion=… active_space=… visible=… screen=…`, `Harness::not_drawn`). CI builds the app and runs the tests
   under `xvfb-run`.
 - **Steps**: `click: <sel>`, `fill: { <sel>: text }`, `key: { on, key }`
   (`Mod+Enter`; a plain `Enter` in a form's `<input>` that nothing stopped

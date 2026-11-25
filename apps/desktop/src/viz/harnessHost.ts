@@ -59,15 +59,35 @@ export function fedBy(run: PageRun, node: string): HostedData {
   return pageData(run, def?.kind === "component" ? def.props : null);
 }
 
-/** Whether this window draws: a frame within `wait` ms. WebKit draws none
- *  while the display is locked or asleep, and a component that lays
- *  itself out in a frame then never draws, so its test can't run. */
-export function drawsFrames(wait = 2000): Promise<boolean> {
-  return new Promise((drew) => {
-    const timer = setTimeout(() => drew(false), wait);
+/** What the harness's page saw while it waited for a frame: how long it
+ *  waited, whether it was visible (WebKit hides an occluded window's page)
+ *  and focused, and how big the window was. */
+export interface DrawingSeen {
+  waitedMs: number;
+  visibility: string;
+  focused: boolean;
+  width: number;
+  height: number;
+}
+
+/** Whether this window draws: a frame within `wait` ms, and what the page
+ *  saw. WebKit draws none while the display is locked or asleep, or for a
+ *  window macOS doesn't show, and a component that lays itself out in a
+ *  frame then never draws, so its test can't run. */
+export function drawsFrames(wait = 10_000): Promise<{ drew: boolean; seen: DrawingSeen }> {
+  const from = performance.now();
+  const seen = (): DrawingSeen => ({
+    waitedMs: Math.round(performance.now() - from),
+    visibility: document.visibilityState,
+    focused: document.hasFocus(),
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+  return new Promise((done) => {
+    const timer = setTimeout(() => done({ drew: false, seen: seen() }), wait);
     requestAnimationFrame(() => {
       clearTimeout(timer);
-      drew(true);
+      done({ drew: true, seen: seen() });
     });
   });
 }
@@ -75,17 +95,19 @@ export function drawsFrames(wait = 2000): Promise<boolean> {
 /** Mount `start` in `frame` and run the server's ops until it says done:
  *  `dom` ops go to the agent in the frame (`toAgent`, whose answer comes
  *  back through `fromAgent`), the rest to the bridge. First the server is
- *  told whether the window draws (`frames`); one that doesn't mounts
- *  nothing and waits to be told it's done. */
+ *  told whether the window draws (`frames`); one that doesn't says what its
+ *  page saw (`drawingSeen`), mounts nothing and waits to be told it's done. */
 export async function runHarness(
   server: Server,
   frame: HTMLIFrameElement,
   agent: { send(id: number, action: unknown): void; answers(cb: (id: number, result: unknown) => void): void },
-  frames: () => Promise<boolean> = drawsFrames,
+  frames: () => Promise<{ drew: boolean; seen: DrawingSeen }> = drawsFrames,
 ): Promise<void> {
-  const drawing = await frames();
-  server.record("drawing", drawing);
-  if (!drawing) {
+  const { drew, seen } = await frames();
+  // What the page saw, before whether it drew: a run that can't draw says why.
+  if (!drew) server.record("drawingSeen", seen);
+  server.record("drawing", drew);
+  if (!drew) {
     while ((await server.next(null)).op !== "done");
     return;
   }

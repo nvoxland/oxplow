@@ -155,13 +155,16 @@ impl PageAt<'_> {
         match harness.drawing().await {
             Ok(true) => {}
             Ok(false) => {
+                let why = harness.not_drawn();
                 harness.close().await;
                 return unrun(
                     report,
                     shown,
-                    "its `ui` steps, and the steps after them, aren't run: the oxplow app's \
-                     window draws nothing while the display is locked or asleep"
-                        .into(),
+                    format!(
+                        "its `ui` steps, and the steps after them, aren't run: the oxplow app's \
+                         window drew {why} — a locked or sleeping display, or a window macOS \
+                         doesn't show"
+                    ),
                     "run it again with the display awake",
                 );
             }
