@@ -8,9 +8,9 @@ params:
   label: Start from
   default: new
   options:
-  - { value: new, label: New branch }
-  - { value: worktree, label: Worktree }
-  - { value: branch, label: Branch }
+  - { value: new, label: New Branch }
+  - { value: worktree, label: From Worktree }
+  - { value: branch, label: From Branch }
 answers:
 - {"question":"Which branches could a new stream start on?","params":{},"skill":"oxplow-codebase"}
 - {"question":"Which worktrees of this repository could a new stream adopt?","params":{"tab":"worktree"},"skill":"oxplow-codebase"}
@@ -77,7 +77,7 @@ view:
       param: tab
       children:
       - id: new
-        title: New branch
+        title: New Branch
         from: new_form
         viz: form
         form:
@@ -87,23 +87,23 @@ view:
           defaults: { source: new }
           fixed: [source]
           fields:
-          - { name: new_branch, label: Branch name, help: "The stream and its worktree's folder are named for it." }
+          - { name: new_branch, label: Branch name, help: "A new worktree is made on it; the stream and the worktree's folder are named for it." }
           - { name: start_point, label: Start from, help: "A branch, a remote branch, a tag or a commit." }
           choices:
             start_point: { from: oxplow/new-stream#start_points, open: true }
       - id: worktree
-        title: Worktree
+        title: From Worktree
         description: This repository's worktrees that no stream uses, whoever made them. Click one to start a stream in it.
         from: worktrees
         viz: table
         single_line: true
         empty: Every worktree of this repository already has a stream.
         columns:
-        - { key: folder, label: Worktree, width: 260 }
-        - { key: branch, label: Branch, width: 200 }
+        - { key: folder, label: Worktree, width: 200 }
+        - { key: branch, label: Branch, width: 180 }
         - { key: subject, label: Last commit }
-        - { key: committed_at, label: When, format: relative, width: 110 }
-        - { key: changes, label: Changed, format: integer, width: 90 }
+        - { key: committed_at, label: When, format: relative, width: 100 }
+        - { key: changes, label: Changed, format: integer, width: 80 }
         actions:
         - id: create
           label: Create Stream…
@@ -119,19 +119,19 @@ view:
           fields:
           - { name: title, label: Stream name }
       - id: branch
-        title: Branch
+        title: From Branch
         description: Local branches no stream works on, and remote branches with no local copy. Click one to start a stream on it.
         from: branches
         viz: table
         single_line: true
         empty: Every branch already has a stream. Start a new branch instead.
         columns:
-        - { key: branch, label: Branch, width: 260 }
-        - { key: place, label: Where, width: 80 }
+        - { key: branch, label: Branch, width: 220 }
+        - { key: place, label: Where, width: 72 }
         - { key: subject, label: Last commit }
-        - { key: committed_at, label: When, format: relative, width: 110 }
-        - { key: sync, label: Upstream, width: 90 }
-        - { key: note, label: Note, width: 220 }
+        - { key: committed_at, label: When, format: relative, width: 100 }
+        - { key: sync, label: Upstream, width: 80 }
+        - { key: note, label: Note, width: 170 }
         actions:
         - id: create
           label: Create Stream…

@@ -52,8 +52,8 @@ test("New Stream forks a branch into a stream and gives way to it", async ({ pag
   const host = shown(page).getByTestId("page-host");
   const tabs = host.getByRole("tablist", { name: "Start from" });
   // New branch is first: a branch name and where it starts, no stream name.
-  await expect(tabs.getByRole("tab", { name: "New branch", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(tabs.getByRole("tab")).toHaveText(["New branch", "Worktree", "Branch"]);
+  await expect(tabs.getByRole("tab", { name: "New Branch", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.getByRole("tab")).toHaveText(["New Branch", "From Worktree", "From Branch"]);
   const form = host.getByTestId("node-new").getByTestId("viz-form");
   await expect(form.getByTestId("viz-form-fields-title")).toHaveCount(0);
   // Nothing beside the page: no Details rail.

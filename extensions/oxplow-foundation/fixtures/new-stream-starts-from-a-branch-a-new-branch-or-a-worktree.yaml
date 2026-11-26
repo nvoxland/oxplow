@@ -1,5 +1,5 @@
-# New Stream is three tabs, one per way to start: New branch (first), then
-# Worktree, then Branch. New branch asks only for the branch and where it
+# New Stream is three tabs, one per way to start: New Branch (first), then
+# From Worktree, then From Branch. New Branch asks only for the branch and where it
 # starts: the stream is named for the branch. Branch lists the branches a
 # new stream can be on (local ones no stream has out, remote ones with no
 # local copy as `origin/<name>`), one line each with its last commit; a
@@ -24,7 +24,7 @@ expect:
   loaders:
     new_form: { rows: [{ source: new, start_point: main, new_branch: null }] }
   text:
-    contains: "Tabs, picked by `tab`: **New branch** (`new`, shown), Worktree (`worktree`), Branch (`branch`)"
+    contains: "Tabs, picked by `tab`: **New Branch** (`new`, shown), From Worktree (`worktree`), From Branch (`branch`)"
 steps:
   # What a new branch can start from: branches, remote branches and tags.
   - when: { query: "oxplow/new-stream#start_points" }

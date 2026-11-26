@@ -560,7 +560,7 @@ modal masks and never drafts.
 
 - **Providers:** name, kind, base URL, key status and **Used by** (the roles
   whose model comes from it, own or fallen back to). Add a Provider…
-  (prominent; the kinds not set up yet). A row's pencil, or a click on it, is **Edit…** (URL
+  (prominent; the kinds not set up yet). A click on a row (or its ☰) is **Edit…** (URL
   and key; an empty key keeps the saved one; its button is Save, `submit`;
   its form holds **Remove**, `also`, offered while no role is bound to it;
   Remove deletes the key). **Test…** makes one small call with a model you
@@ -579,7 +579,7 @@ modal masks and never drafts.
   a binding for a profile nothing declares) follows the model, the cell in
   the warning tone. Default is the first row: every other role falls back
   to it (a profile through the built-in it names), so one model set on
-  Default serves them all. A row's pencil, or a click, is **Choose Model…** (provider and model;
+  Default serves them all. A click on a row (or its ☰) is **Choose Model…** (provider and model;
   Save; the binding's `restrict` kept as it is; the Model suggests every
   provider's models, labelled with theirs, for every role — open choices,
   any id may be typed). **Use the Fallback Model** unbinds the role, offered only

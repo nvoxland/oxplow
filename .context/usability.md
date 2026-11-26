@@ -783,8 +783,8 @@ not a pick and isn't in the address.
 > tablet client: a touch screen has no right-click, and a button shows
 > where a row's actions are. (The IA redesign's `⋯` kebab was removed
 > for the row space it took; the ☰ came back for touch.) The keyboard
-> keeps Menu / Shift+F10 on the focused row. A primary form action still
-> has its own icon before the ☰ (`rowButton`). Surfaces that are not page
+> keeps Menu / Shift+F10 on the focused row. A primary form action has no
+> icon of its own: the row's click opens it and the ☰ holds it. Surfaces that are not page
 > rows (the Navigator, tab strips, the terminal, dashboard tiles,
 > selected text) keep their right-click menus below; a page's body has
 > none (its ☰ in the nav bar holds it all).
@@ -1430,14 +1430,13 @@ key (`1d`…`90d`), `all`, or `a..b` (dates or date-times, either end open) —
 a page `date_range`, the metric pages' range and a chart's brushed window. A row shows the value it applied
 at once; it never waits for the run.
 
-**A row whose click opens a form shows it.** A table row whose `primary`
-action is a form (an Edit…, a Choose Model…) ends in an icon button that
-opens the same form: a pencil unless the action names its `icon`, its
-label (without the `…`) the hover and accessible name, quiet until the row
-is hovered (`ox-icon-button`, `viz-row-button-<i>`). The click on the row
-stays as the shortcut. A row whose click opens a page, or runs at once,
-gets none: a link already reads as clickable, and an action that runs
-belongs in the row's menu or a named button, not a hidden click.
+**A row whose click opens a form has no button for it.** A table row
+whose `primary` action is a form (an Edit…, a Choose Model…) reads as
+clickable (the pointer, the hover wash) and its ☰ holds the same action,
+so it draws no icon of its own: one button per row, the ☰. (An icon
+before the ☰ was tried and removed: it was the same action twice.) An
+action that runs at once belongs in the row's menu or a named button,
+never a row's click.
 
 A param a column `select`s is the page's **selection**, never an input.
 A page row whose column `select`s a param is a pick: it reads as

@@ -177,6 +177,9 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
    pushing the others. */
 .ox-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .ox-table.ox-fixed { table-layout: fixed; }
+/* A fixed table's heading is cut like its cells: a narrow column's label
+   never runs into the next one's. */
+.ox-table.ox-fixed th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ox-table th,
 .ox-table td { padding: var(--space-2); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }
 /* How a column wraps is the renderer's call (`columnWrap`), by its format
