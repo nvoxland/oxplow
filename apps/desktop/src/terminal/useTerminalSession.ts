@@ -17,6 +17,7 @@ import { logUi } from "../logger.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import {
   type ExitOutcome,
+  type Grid,
   failedLaunch,
   mayStartNow,
   readSessionMessage,
@@ -48,6 +49,12 @@ export interface TerminalSession {
   input(data: string): void;
   binary(data: string): void;
   resize(cols: number, rows: number): void;
+  /** Take the terminal's size for this pane (Fit to this device): its grid
+   *  becomes `cols` × `rows` though another client typed into it last. */
+  fit(cols: number, rows: number): void;
+  /** The terminal's grid, as the client typing into it set it; null until
+   *  the session opens. A pane draws this grid, scaled down to fit. */
+  grid: Grid | null;
   /** Open it again (Start Again, Retry). */
   reopen(): void;
   /** The session's live working directory, for relative links. */
@@ -95,6 +102,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
   const endedRef = useRef(false);
   const launchFailedRef = useRef(false);
   const [ended, setEndedState] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
+  const [grid, setGrid] = useState<Grid | null>(null);
   // Ended or not is what the pane shows; live is the same fact, for the
   // tab menu and `when`.
   const setEnded = useCallback(
@@ -146,6 +154,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
       const applyEvent = (event: TerminalEvent) => {
         const msg = readSessionMessage(event.message);
         if (msg?.kind === "data") term.write(msg.bytes);
+        if (msg?.kind === "size") setGrid({ cols: msg.cols, rows: msg.rows });
         if (msg?.kind === "restart") {
           endedRef.current = true;
           sessionIdRef.current = null;
@@ -181,7 +190,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
         const asked = performance.now();
         void desktopBridge()
           .openTerminalSession(uri, term.cols, term.rows)
-          .then(({ sessionId, replayB64 }) => {
+          .then(({ sessionId, replayB64, cols, rows }) => {
             if (disposed) {
               void desktopBridge().closeTerminalSession(sessionId);
               return;
@@ -192,6 +201,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
               term.write(RESTARTED_NOTICE);
             }
             sessionIdRef.current = sessionId;
+            setGrid({ cols, rows });
             endedRef.current = false;
             launchFailedRef.current = false;
             setEnded(null);
@@ -290,6 +300,8 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
     input: (data) => send({ type: "input", data }),
     binary: (data) => send({ type: "input-binary", data }),
     resize: (cols, rows) => send({ type: "resize", cols, rows }),
+    fit: (cols, rows) => send({ type: "resize", cols, rows, take: true }),
+    grid,
     reopen: () => reopenRef.current?.(),
     cwd,
     ended,
@@ -301,7 +313,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
 type TerminalMessage =
   | { type: "input"; data: string }
   | { type: "input-binary"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number; take?: true };
 
 /** `message` as the PTY's protocol reads it (`oxplow_app::terminal_sessions`). */
 function encode(message: TerminalMessage): string {

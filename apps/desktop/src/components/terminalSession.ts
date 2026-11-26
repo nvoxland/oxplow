@@ -14,7 +14,21 @@ export type ExitOutcome =
 export type SessionMessage =
   | { kind: "data"; bytes: Uint8Array }
   | { kind: "restart" }
-  | { kind: "exit"; exitCode: number | null; outcome: ExitOutcome };
+  | { kind: "exit"; exitCode: number | null; outcome: ExitOutcome }
+  /** The terminal's grid, as the client typing into it set it. */
+  | { kind: "size"; cols: number; rows: number };
+
+/** A terminal's grid, in cells. */
+export interface Grid {
+  cols: number;
+  rows: number;
+}
+
+/** How much a pane of `pane` cells scales a grid of `grid` cells to show it
+ *  whole: down to fit, never up. */
+export function gridScale(pane: Grid, grid: Grid): number {
+  return Math.min(1, pane.cols / grid.cols, pane.rows / grid.rows);
+}
 
 function readOutcome(value: unknown): ExitOutcome {
   const o = value as { kind?: unknown; reason?: unknown; exitCode?: unknown; message?: unknown } | null;
@@ -56,6 +70,11 @@ export function readSessionMessage(message: string): SessionMessage | null {
     };
   }
   if (m.type === "restart") return { kind: "restart" };
+  if (m.type === "size") {
+    const { cols, rows } = m as { cols?: unknown; rows?: unknown };
+    if (typeof cols === "number" && typeof rows === "number") return { kind: "size", cols, rows };
+    return null;
+  }
   return null;
 }
 

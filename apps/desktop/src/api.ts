@@ -1,6 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
+  AttachResult,
   TabReport,
   TabReportAnswer,
   TabSave,
@@ -157,10 +158,7 @@ function buildBridge() {
       uri: string,
       cols: number,
       rows: number,
-    ): Promise<{ sessionId: string; replayB64: string }> => {
-      const result = unwrap(await commands.openTerminalSession(uri, cols, rows));
-      return { sessionId: result.sessionId, replayB64: result.replayB64 };
-    },
+    ): Promise<AttachResult> => unwrap(await commands.openTerminalSession(uri, cols, rows)),
     /// The live process of `uri` (a terminal or an agent session), without
     /// starting one: `null` when none runs.
     lookupTerminalSession: async (uri: string): Promise<string | null> =>

@@ -49,13 +49,20 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
   const ctrlOn = useRef(false);
   ctrlOn.current = ctrl;
   const banner = session.ended ? exitBanner(session.ended) : null;
+  // The cells this pane has room for: when the terminal's grid differs
+  // (another client typed into it last), Fit to this device takes it.
+  const [pane, setPane] = useState<{ cols: number; rows: number } | null>(null);
+  const grid = session.grid;
+  const elsewhere = !!grid && !!pane && (grid.cols !== pane.cols || grid.rows !== pane.rows);
   return (
     <div ref={boxRef} data-testid="terminal-view" data-uri={uri} style={boxStyle}>
       <TerminalSurface
         shown={shown}
         uri={uri}
+        grid={grid}
         onOpened={(opened) => {
           term.current = opened;
+          setPane({ cols: opened.cols, rows: opened.rows });
           detach.current?.();
           detach.current = session.attach(opened);
         }}
@@ -69,13 +76,26 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
           session.input(data);
         }}
         onBinary={session.binary}
-        onResize={session.resize}
+        onResize={(cols, rows) => {
+          setPane({ cols, rows });
+          session.resize(cols, rows);
+        }}
         onInterrupt={agent?.onInterrupt}
         worktreePath={worktreePath}
         cwd={session.cwd}
         onOpenFile={onOpenFile}
         isLinkablePath={isLinkablePath}
       />
+      {elsewhere ? (
+        <div data-testid="terminal-sized-elsewhere" style={bannerStyle}>
+          <span>
+            Sized for another device ({grid!.cols}×{grid!.rows}).
+          </span>
+          <button type="button" data-testid="terminal-fit" onClick={() => session.fit(pane!.cols, pane!.rows)}>
+            Fit to this device
+          </button>
+        </div>
+      ) : null}
       {touch ? (
         <TerminalTouchBar
           send={session.input}

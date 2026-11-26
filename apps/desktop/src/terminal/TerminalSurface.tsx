@@ -5,7 +5,8 @@
 /// and nothing about a session. What the person types comes out through
 /// `onData` / `onBinary`, a fit through `onResize`; `onOpened` hands the
 /// opened terminal to whoever writes to it (`useTerminalSession`).
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent } from "react";
+import { gridScale, type Grid } from "../components/terminalSession.js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
@@ -123,8 +124,11 @@ export interface TerminalSurfaceProps {
   /** What the person typed (`input`), or binary input. */
   onData(data: string): void;
   onBinary(data: string): void;
-  /** It fit to a new size. */
+  /** The pane measured a new size (the cells it has room for). */
   onResize(cols: number, rows: number): void;
+  /** The terminal's grid, as the client typing into it set it: the pane
+   *  draws it, scaled down when it has less room; null follows the pane. */
+  grid?: Grid | null;
   /** Plain Escape: Claude Code cancels its turn on it without a Stop
    *  hook, so the host records the interrupt. The byte still goes. */
   onInterrupt?(): void;
@@ -142,6 +146,7 @@ export interface TerminalSurfaceProps {
 export function TerminalSurface({
   shown,
   uri,
+  grid = null,
   onOpened,
   onData,
   onBinary,
@@ -154,6 +159,24 @@ export function TerminalSurface({
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  // The cells the pane has room for, and the grid it draws: the terminal's
+  // own (another client may own its size), scaled down to fit.
+  const paneRef = useRef<Grid | null>(null);
+  const gridRef = useRef<Grid | null>(grid);
+  gridRef.current = grid;
+  const applyGrid = useCallback(() => {
+    const term = termRef.current;
+    const pane = paneRef.current;
+    const target = gridRef.current ?? pane;
+    if (!term || !pane || !target) return;
+    if (term.cols !== target.cols || term.rows !== target.rows) term.resize(target.cols, target.rows);
+    const scale = gridScale(pane, target);
+    if (term.element) {
+      term.element.style.transformOrigin = "top left";
+      term.element.style.transform = scale < 1 ? `scale(${scale})` : "";
+    }
+  }, []);
+  useEffect(applyGrid, [grid?.cols, grid?.rows, applyGrid]);
   const menu = useContextMenu();
   // The link under the pointer (the link providers' hover / leave): the
   // right-click menu's Open In ▸ is for it.
@@ -370,6 +393,7 @@ export function TerminalSurface({
         host.removeEventListener("mousedown", handleMouseDown);
         host.removeEventListener("paste", handlePaste);
       });
+      paneRef.current = { cols: term.cols, rows: term.rows };
       props.current.onOpened(term);
       // Debounced refits; none while hidden (`display: none` has no size,
       // and a fit would shrink the program's screen for real).
@@ -379,9 +403,11 @@ export function TerminalSurface({
         resizeTimer = window.setTimeout(() => {
           if (host.clientWidth < 2 || host.clientHeight < 2) return;
           try {
-            fit.fit();
-            if (term.cols < 2 || term.rows < 2) return;
-            props.current.onResize(term.cols, term.rows);
+            const pane = fit.proposeDimensions();
+            if (!pane || pane.cols < 2 || pane.rows < 2) return;
+            paneRef.current = { cols: pane.cols, rows: pane.rows };
+            props.current.onResize(pane.cols, pane.rows);
+            applyGrid();
           } catch {}
         }, 80);
       });

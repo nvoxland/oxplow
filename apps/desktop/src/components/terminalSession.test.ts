@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { exitBanner, failedLaunch, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
+import { exitBanner, failedLaunch, gridScale, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
 
 // after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
@@ -99,4 +99,19 @@ test("a failed launch reads as an ended pane whose banner gives the reason and a
     kind: "launch_failed",
     message: "refused",
   });
+});
+
+// The terminal's size, as the client typing into it set it: a watching
+// pane draws that grid.
+test("a size message reads as the terminal's grid", () => {
+  expect(readSessionMessage(JSON.stringify({ type: "size", cols: 120, rows: 40 }))).toEqual({ kind: "size", cols: 120, rows: 40 });
+  expect(readSessionMessage(JSON.stringify({ type: "size", cols: "x" }))).toBeNull();
+});
+
+// A pane smaller than the grid scales it down to fit; a larger one draws it
+// as it is.
+test("the grid is scaled down to the pane, never up", () => {
+  expect(gridScale({ cols: 60, rows: 20 }, { cols: 120, rows: 40 })).toBe(0.5);
+  expect(gridScale({ cols: 100, rows: 20 }, { cols: 120, rows: 40 })).toBe(0.5);
+  expect(gridScale({ cols: 200, rows: 80 }, { cols: 120, rows: 40 })).toBe(1);
 });

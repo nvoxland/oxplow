@@ -92,6 +92,41 @@ test("a terminal another client opens keeps the size of the client typing", asyn
   }
 });
 
+/// A client watching a terminal another client sized draws that grid, scaled
+/// to its pane, and Fit to this device takes the size for it.
+test("a watching client draws the owner's grid, and Fit takes it", async ({ page, browser, baseURL, daemon }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  await page.keyboard.type("echo owner");
+  await page.keyboard.press("Enter");
+
+  const b = await client(browser, baseURL!, daemon, { width: 700, height: 600 });
+  try {
+    // The command opens a page on the window used last: this one, now.
+    await load(b.page);
+    await b.page.mouse.click(5, 5);
+    await open(b.page, daemon, "oxplow:oxplow/page?page=terminal");
+    const sized = b.page.getByTestId("terminal-sized-elsewhere");
+    await expect(sized).toBeVisible();
+    // The owner's grid, shrunk to the narrow pane.
+    await expect(b.page.locator(".xterm")).toHaveCSS("transform", /matrix\(0\./);
+
+    await b.page.getByTestId("terminal-fit").click();
+    await expect(sized).toBeHidden();
+    // The shell now has the narrow client's size, and the wide one draws it.
+    await expect(page.getByTestId("terminal-sized-elsewhere")).toBeVisible();
+    await b.page.locator(".xterm").click();
+    await b.page.keyboard.type("echo fit-$((6*7))=$(stty size | tr ' ' x)");
+    await b.page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText(/fit-42=\d+x\d+/);
+  } finally {
+    await b.context.close();
+  }
+});
+
 /// Two projects' windows share a browser origin (every Mac window is
 /// `tauri://localhost`), and their threads' ids can be the same. A project's
 /// window shows its own tabs, never another project's.

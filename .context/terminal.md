@@ -148,6 +148,16 @@ event, and `AttachResult` carries the PTY's `cols` and `rows`, so a pane
 that is not the owner can draw the owner's grid. Locked by the
 `TerminalSessionRegistry` ownership tests and the `two-clients` e2e spec.
 
+**A pane draws the terminal's grid.** `useTerminalSession` keeps the PTY's
+`grid` (from the open's `cols`/`rows` and each `size` message), and
+`TerminalSurface` keeps its xterm at that grid: it measures the pane
+(`FitAddon.proposeDimensions`) and reports that size as the pane's asked
+size, but never resizes xterm to it unless no other client owns the size. A
+pane with less room scales the grid down (`gridScale`, a CSS transform on the
+xterm element); one with more room draws it as it is. While the grid differs
+from the pane, the view says "Sized for another device" with **Fit to this
+device** (`terminal-fit`), which sends a `resize` with `take`.
+
 **A reattach replays a tail, not the whole ring.** The daemon keeps up to
 4 MB of a pane's output, but `open_terminal_session` answers with the last
 `REPLAY_LINES` (6000) lines of it (`RingBuffer::replay`): the pane's xterm

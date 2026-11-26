@@ -23,7 +23,7 @@ mock.module("../api.js", () => ({
     openTerminalSession: async (uri: string, cols: number, rows: number) => {
       calls.push(`open ${uri} ${cols}x${rows}`);
       await answer;
-      return { sessionId: `term-${next++}`, replayB64: btoa("hello") };
+      return { sessionId: `term-${next++}`, replayB64: btoa("hello"), cols: 120, rows: 40 };
     },
     lookupTerminalSession: async (uri: string) => {
       calls.push(`lookup ${uri}`);
@@ -199,4 +199,18 @@ test("an ended session takes no keys; unmounting detaches", async () => {
   expect(calls.length).toBe(before);
   unmount();
   expect(calls).toContain("detach term-1");
+});
+
+// The terminal's grid is the one the client typing into it set: the open
+// answers it, a size message changes it, and Fit to this device takes it.
+test("a pane follows the terminal's grid, and Fit takes it", async () => {
+  const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+  const { term } = fakeTerm();
+  act(() => void result.current.attach(term));
+  await waitFor(() => expect(result.current.grid).toEqual({ cols: 120, rows: 40 }));
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "size", cols: 90, rows: 30 }) }));
+  expect(result.current.grid).toEqual({ cols: 90, rows: 30 });
+  act(() => result.current.fit(80, 24));
+  const sent = calls.filter((c) => c.startsWith("input "));
+  expect(JSON.parse(sent.at(-1)!.slice(`input ${SHELL} `.length))).toEqual({ type: "resize", cols: 80, rows: 24, take: true });
 });
