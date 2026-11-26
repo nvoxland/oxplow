@@ -87,6 +87,6 @@ test("search and the tray are drawn", () => {
 // named gap. The gaps shrink to none as the tablet shell is built.
 test("the tablet shell's gaps are the known ones", () => {
   const gaps = SHELL_CONTRIBUTIONS.filter((c) => SHELL_PLACES.tablet[c] === null);
-  expect(gaps).toEqual(["streams and threads", "panels", "menu commands"]);
+  expect(gaps).toEqual(["panels", "menu commands"]);
   expect(SHELL_CONTRIBUTIONS.filter((c) => SHELL_PLACES.desktop[c] === null)).toEqual([]);
 });

@@ -14,3 +14,16 @@ test("with ?shell=tablet the window is the tablet shell, and a page opens in its
   await expect(page.getByTestId(`tablet-tab-${home}`)).toHaveAttribute("aria-selected", "true");
   await expect(shown(page, home)).toHaveCount(1);
 });
+
+test("the context line opens the switcher; a new thread made there is listed, and a tap shows it", async ({ page, daemon }) => {
+  await load(page, "/?shell=tablet");
+  await page.getByTestId("tablet-context").click();
+  await expect(page.getByTestId(`switcher-thread-${daemon.thread}`)).toHaveAttribute("aria-current", "true");
+  await page.getByTestId(`switcher-add-thread-${daemon.stream}`).click();
+  await page.getByTestId(`switcher-new-thread-input-${daemon.stream}`).fill("Tablet thread");
+  await page.getByTestId(`switcher-new-thread-input-${daemon.stream}`).press("Enter");
+  const made = page.getByTestId("tablet-switcher").getByRole("button", { name: /Tablet thread/ });
+  await made.click();
+  await expect(page.getByTestId("tablet-switcher")).toBeHidden();
+  await expect(page.getByTestId("tablet-context")).toContainText("Tablet thread");
+});

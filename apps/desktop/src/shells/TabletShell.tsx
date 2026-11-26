@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useState } from "react";
 import { Search, X } from "lucide-react";
 
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
@@ -7,6 +8,28 @@ import { TabBodies } from "../components/CenterTabs/TabBodies.js";
 import { useRowContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { WindowTab } from "../window/windowTab.js";
 import type { ShellWindow } from "./shellWindow.js";
+import { RemoveStreamDialog } from "../components/RemoveStreamDialog.js";
+import { listProjects, setHold } from "../host/hostApi.js";
+import { hostOrigin, hostToken } from "../tauri-bridge/transport.js";
+import { useStreamThreadMenus } from "../window/useStreamThreadMenus.js";
+import { readWindowContext } from "../windowContext.js";
+import { TabletSwitcher, type SwitcherHost } from "./TabletSwitcher.js";
+
+/** The host that served this page, for the switcher's projects; none in the
+ *  Mac app or without a device token. */
+function pageHost(): SwitcherHost | null {
+  const origin = hostOrigin();
+  const token = hostToken();
+  if (!origin || !token) return null;
+  return {
+    origin,
+    token,
+    current: readWindowContext()?.project ?? null,
+    listProjects: (h, t) => listProjects(h, t),
+    setHold: async (h, t, id, held) => void (await setHold(h, t, id, held)),
+    go: (path) => window.location.assign(path),
+  };
+}
 
 /**
  * The tablet's shell: one line at the top (the context: stream and thread,
@@ -15,14 +38,30 @@ import type { ShellWindow } from "./shellWindow.js";
  * surfaces only. It draws the window's model (`ShellWindow`) as the desktop
  * layout does; what it does not draw yet is listed in `shellContract.ts`.
  */
-export function TabletShell({ win }: { win: ShellWindow }) {
+export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host?: SwitcherHost | null }) {
+  const [switching, setSwitching] = useState(false);
+  // The stream and thread menus and their flows: this shell has no
+  // Navigator, so they are drawn in the switcher, which a flow opens.
+  const menus = useStreamThreadMenus({
+    streams: win.streams,
+    threadStates: win.threadStates,
+    streamStatuses: win.streamStatuses,
+    currentStreamId: win.stream?.id ?? null,
+    onRenameStream: win.renameStream,
+    onRenameThread: win.renameThread,
+    onMarkThread: win.markThread,
+    onCloseThread: win.closeThread,
+    onOpenStreamSettings: win.openStreamSettings,
+    onOpenThreadSettings: win.openThreadSettings,
+    reveal: () => setSwitching(true),
+  });
   const shown = win.tabs.filter((t) => !t.hidden);
   const active = win.tabs.find((t) => t.id === win.activeTabId) ?? shown[0] ?? null;
   const bulkClosable = shown.map((t) => ({ id: t.id, closable: t.closable && !t.pinned }));
   return (
     <div data-testid="tablet-shell" style={frame}>
       <div style={topLine}>
-        <button type="button" data-testid="tablet-context" style={contextButton} title="Streams and threads">
+        <button type="button" data-testid="tablet-context" style={contextButton} title="Projects, streams and threads" aria-haspopup="dialog" onClick={() => setSwitching(true)}>
           <span style={{ fontWeight: 600 }}>{win.stream?.title ?? "…"}</span>
           {win.selectedThread ? <span style={{ color: "var(--text-secondary)" }}>› {win.selectedThread.title}</span> : null}
         </button>
@@ -48,6 +87,19 @@ export function TabletShell({ win }: { win: ShellWindow }) {
       <div data-testid="tablet-tray" style={trayLine}>
         {win.tray}
       </div>
+      <TabletSwitcher
+        open={switching}
+        onClose={() => {
+          setSwitching(false);
+          menus.setRenaming(null);
+          menus.setPendingNewThreadFor(null);
+        }}
+        win={win}
+        menus={menus}
+        host={host}
+      />
+      <RemoveStreamDialog removal={menus.removal} />
+      {menus.requestedMenu}
     </div>
   );
 }

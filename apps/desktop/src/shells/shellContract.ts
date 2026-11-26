@@ -44,8 +44,7 @@ export const SHELL_PLACES: Record<ShellKind, Record<ShellContribution, string | 
   tablet: {
     tabs: "tablet-tabs",
     "tab menus": "tablet-tabs (long press)",
-    // The switcher on the context line is next.
-    "streams and threads": null,
+    "streams and threads": "tablet-context → TabletSwitcher",
     // The tray and sheet are after the switcher; the dock stands in.
     panels: null,
     "dock panels": "tablet-tray (the dock)",

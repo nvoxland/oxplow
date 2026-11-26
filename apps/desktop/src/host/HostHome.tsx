@@ -21,7 +21,7 @@ import {
 /** How often the list is read again while a project starts or stops. */
 const WHILE_CHANGING_MS = 1_500;
 
-const STATE_WORDS: Record<HostProject["state"], string> = {
+export const STATE_WORDS: Record<HostProject["state"], string> = {
   starting: "starting…",
   running: "running",
   stopping: "stopping…",

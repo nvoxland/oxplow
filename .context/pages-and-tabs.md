@@ -124,6 +124,15 @@ that hides a feature.
   and thread, then the thread's tabs, then search), the page at full width,
   the panels' tray at the bottom (the dock, until the tray is built). A tab's
   long press opens the window's tab menu (`buildTabMenu`).
+  A tap on the context opens the **switcher** (`TabletSwitcher`, a
+  `Slideover`): on a host's page the host's projects first (`/host/projects`;
+  a tap on another holds it and goes to `/p/<id>/`), then the streams, each
+  with its threads (a tap switches or selects; the current ones are
+  `aria-current`). A row's long press or ☰ opens the window's menu for it
+  (`useStreamThreadMenus`, which this shell calls itself: it has no
+  Navigator), and its flows are inline there: Rename, + New thread (made, it
+  is listed; a tap selects it, as in the Navigator), Remove… (the shared
+  `RemoveStreamDialog`). New Thread… from anywhere opens it on the field.
 
 App builds one `ShellWindow` (`shells/shellWindow.ts`): the streams and
 threads and their operations, the shown thread's tabs, `closeTab` (a file's

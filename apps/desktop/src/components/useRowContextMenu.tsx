@@ -104,9 +104,11 @@ export function useContextMenu(): {
 export function useRowContextMenu(items: MenuItem[] | (() => MenuItems), header?: string): {
   onContextMenu(event: MouseEvent): void;
   onKeyDown(event: KeyboardEvent): void;
+  /** Open the same menu at a point: a ☰ beside the row (`MoreButton`). */
+  openAt(pos: { x: number; y: number }): void;
   menu: ReactNode;
 } {
-  const { open, openForKey, menu } = useContextMenu();
+  const { open, openForKey, openAt: openAtPoint, menu } = useContextMenu();
   const onContextMenu = useCallback(
     (event: MouseEvent) => open(event, typeof items === "function" ? items() : items, header),
     [open, items, header],
@@ -118,5 +120,9 @@ export function useRowContextMenu(items: MenuItem[] | (() => MenuItems), header?
     },
     [openForKey, items, header],
   );
-  return { onContextMenu, onKeyDown, menu };
+  const openAt = useCallback(
+    (pos: { x: number; y: number }) => openAtPoint(pos, typeof items === "function" ? items() : items, header),
+    [openAtPoint, items, header],
+  );
+  return { onContextMenu, onKeyDown, openAt, menu };
 }

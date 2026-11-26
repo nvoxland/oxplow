@@ -74,7 +74,10 @@ export function Slideover({
     if (!open) return;
     const node = panelRef.current;
     if (!node) return;
-    // Move focus inside the panel so Escape/Tab feel natural.
+    // Move focus inside the panel so Escape/Tab feel natural, unless its
+    // content took it already (a field a flow opened: moving focus away
+    // would blur it, and an empty field ends its flow on blur).
+    if (node.contains(document.activeElement)) return;
     const first = node.querySelector<HTMLElement>(
       "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
     );
