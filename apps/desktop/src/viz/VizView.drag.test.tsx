@@ -233,3 +233,37 @@ test("a board card's ☰ opens the card's menu, not its page", async () => {
 afterAll(() => {
   mock.module("../api.js", () => realApi);
 });
+
+// A touch screen has no Cmd or Shift: Select in a row's menu marks it, and
+// while rows are marked a tap marks or unmarks a row; Clear ends it. With a
+// mouse the menu has no Select.
+test("on a touch screen Select marks a row, then a tap marks or unmarks one", async () => {
+  const real = globalThis.matchMedia;
+  const fingers = (query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList;
+  globalThis.matchMedia = fingers;
+  try {
+    const view = render(<VizView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.click(await view.findByTestId("menu-item-viz.select"));
+    expect(view.getByTestId("viz-row-0").getAttribute("data-marked")).toBe("true");
+    fireEvent.click(view.getByTestId("viz-row-2"));
+    expect(view.getByTestId("viz-marks-count").textContent).toBe("2 selected");
+    fireEvent.click(view.getByTestId("viz-row-0"));
+    expect(view.getByTestId("viz-row-0").getAttribute("data-marked")).toBeNull();
+    expect(view.getByTestId("viz-marks-count").textContent).toBe("1 selected");
+    fireEvent.click(view.getByTestId("viz-bulk-finish"));
+    await waitFor(() => expect(ran.map((r) => r.row)).toEqual([record(2)]));
+    fireEvent.click(view.getByTestId("viz-marks-clear"));
+    expect(view.queryByTestId("viz-marks")).toBeNull();
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});
+
+test("with a mouse a row's menu has no Select", async () => {
+  const view = render(<VizView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
+  await view.findByTestId("menu-item-add-row-to-context");
+  expect(view.queryByTestId("menu-item-viz.select")).toBeNull();
+});

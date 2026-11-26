@@ -1078,6 +1078,9 @@ its right-click menu.
   line above or below the row, or the row or group outlined
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
   the marked rows). A drag action runs only on a drop: it is never a row's menu item, click, key or bulk button.
+  On a touch screen (no Cmd or Shift), where the page has a bulk action,
+  a row's menu has **Select** (Unselect when marked), and while rows are
+  marked a tap marks or unmarks a row instead of opening it; Clear ends it.
   Marks are per page and kept in the entry's history
   state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
   too: focusable, right-click and the Menu key open their row actions,

@@ -104,6 +104,7 @@ import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
 import { MarksCell } from "./MarksCell.js";
+import { useCoarsePointer } from "../coarsePointer.js";
 import { SourceChip } from "../kit/SourceChip.js";
 import { DisclosureGlyph } from "../kit/Disclosure.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
@@ -563,6 +564,11 @@ function RowsBody({
   actionOptions = NO_OPTIONS,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
+  // A finger has no Cmd or Shift: Select in a row's menu marks it, and
+  // while rows are marked a tap marks or unmarks one (only where a bulk
+  // action can use the marks).
+  const coarse = useCoarsePointer();
+  const touchMarks = coarse && marks !== undefined && viz.actions.some((a) => a.bulk && !a.drag);
   // A list may cap each group instead (`group.compact` in a panel,
   // `group.grown` in a panel grown to the rail; a page caps nothing): its
   // groups end in "+N more", and the list itself isn't cut.
@@ -789,6 +795,19 @@ function RowsBody({
     return refOffersFor(ref).then((entries) => [...base, ...refCommandMenuItems(entries)]);
   };
   const rowBase = (row: SqlCell[]): MenuItem[] => [
+    ...(marks && touchMarks
+      ? [
+          {
+            id: "viz.select",
+            label: marks.keys.includes(rowKey(row)) ? "Unselect" : "Select",
+            enabled: true,
+            run: () => {
+              const next = marksAfterClick(marks.keys, drawnKeys, drawnKeys.indexOf(rowKey(row)), null, { toggle: true, range: false });
+              marks.set(next.marks, next.anchor);
+            },
+          },
+        ]
+      : []),
     {
       id: "add-row-to-context",
       label: "Add to Context",
@@ -831,6 +850,12 @@ function RowsBody({
     // click clears the marks, then picks or runs the primary action.
     onClick: (e: React.MouseEvent) => {
       const index = drawnKeys.indexOf(rowKey(row));
+      const onControl = (e.target as Element).closest("a, button, input, select, textarea") !== null;
+      if (marks && touchMarks && marks.keys.length > 0 && !onControl) {
+        const next = marksAfterClick(marks.keys, drawnKeys, index, null, { toggle: true, range: false });
+        marks.set(next.marks, next.anchor);
+        return;
+      }
       if (marks && (e.metaKey || e.ctrlKey || e.shiftKey)) {
         e.preventDefault();
         const anchor = marks.anchor ?? clickedRef.current;
