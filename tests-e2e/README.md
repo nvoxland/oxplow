@@ -117,7 +117,7 @@ any script, in the top frame only, and CORS is permissive for exactly this
     click opens nothing: a spec that clicked the dock's Alerts as soon as its
     badge showed (the badge comes from the daemon, before the stream) opened
     no page, once in a CI run.
-  - `expandRailSection`, `searchLauncher`, `newSessionPage`, `taskIdOf`.
+  - `openPanel`, `searchLauncher`, `newSessionPage`, `taskIdOf`.
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
   `waitForModels` or `until`, never a sleep. Global setup refuses a spec that
   names `waitForTimeout` or `setTimeout` (`test.setTimeout`, a spec's time
@@ -181,6 +181,57 @@ any script, in the top frame only, and CORS is permissive for exactly this
   of your own: one spec then takes about 3 s.
 - `bun run e2e:flake <spec> [times=10]` runs one spec many times at once,
   the way a race fix is confirmed before it is pushed.
+
+## Shell-neutral helpers
+
+A second shell (a tablet shell) draws the same pages with another tab strip,
+rail and dock, so a spec must not name the desktop shell's chrome. It goes
+through `support/ui.ts`, which is the one place that knows which element does
+what. A new shell changes those helpers, not the specs.
+
+**The ids the page layer needs from any shell (the shell contract).** A new
+shell must draw these, as they are:
+
+- `center-tab-body-<tab id>` — the body of each tab; the hidden ones stay in
+  the DOM, the shown one is visible. `shown()` finds the shown tab by it.
+- `data-oxplow-ready` on `<html>` — set when the window has registered as the
+  daemon's command host. `windowReady`, `load`, `reload` and `open` wait for it.
+- `title-bar-search` — the launcher's anchor (`searchLauncher`).
+
+**Desktop chrome ids, only in `support/ui.ts` and in the desktop-only specs:**
+
+- Tab strip: `center-tab-<id>` (`tabOf`, `tabsWith`, `tabUri`, `activeTab`),
+  `center-tab-close-<id>` (`closeTab`), `center-tab-dirty-<id>` (`tabDirty`).
+- Rail: `rail-hud` (`panelsReady`), `rail-section-<id>` (`panel`),
+  `rail-section-toggle-<id>` (`openPanel`, `panelHeader`), `rail-panel-body`
+  (`panelBody`), `rail-section-ext:*` (`extensionPanels`), plus the group
+  dividers, drag handles and remove zone (`rail-group-divider-*`,
+  `rail-section-drag-*`, `rail-section-shown-in-*`, `rail-remove-zone`,
+  `rail-panels`), which only `shell/rail-groups` uses.
+- Dock: `dock-alerts` and `dock-panel-open-page` (`openAlerts`),
+  `dock-alerts-badge` (`alertsBadge`), `dock-context-badge` (`contextBadge`).
+- Title bar: `title-bar-stream` (`streamName`), `title-bar-thread`
+  (`threadName`), `title-bar`.
+- Navigator: `navigator-strip`, `navigator-strip-stream-*` (`streamEntries`),
+  `navigator-strip-thread-*`, `navigator-stream-row-*`,
+  `navigator-thread-row-*`, `navigator-overlay`, `navigator-new-thread-input`.
+
+Not chrome, so not part of this: `page-rail-*` and `viz-rail-*` are a page's
+own rails, drawn inside the tab body by the page layer.
+
+**The helpers:** `openPanel(page, id)` (expand a panel), `panel`, `panelBody`,
+`panelHeader`, `panelsReady`, `extensionPanels`, `tabOf(page, uri)`,
+`tabsWith(page, prefix, { contains, without })`, `tabUri(locator)`,
+`activeTab(page)`, `closeTab(page, uri)`, `tabDirty(page, uri)`,
+`openAlerts(page)`, `alertsBadge`, `contextBadge`, `streamName`,
+`threadName`, `streamEntries`.
+
+**Desktop-only specs.** A spec that really tests the rail, dock, navigator,
+title bar or tab strip carries `// @desktop-only: <what>` as its first line,
+and may use raw chrome ids. Any other spec uses the helpers only. These are
+desktop-only now: `shell/agent-session`, `shell/window`, `shell/two-clients`,
+`shell/rail-groups`, `shell/boot`, `shell/navigation`, `shell/one-tab`,
+`shell/context-basket` and `host/serve`.
 
 ## What the specs cover
 

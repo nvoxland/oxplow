@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown, load } from "../../support/ui.js";
+import { open, shown, load, extensionPanels } from "../../support/ui.js";
 
 // Oxplow's own pages are complete with every enhancement off: with only
 // oxplow-foundation on, a page shows its own content, and nothing another
@@ -41,10 +41,7 @@ async function nothingAdded(page: Page) {
   await expect(shown(page).locator('[data-testid^="replacement-"]')).toHaveCount(0);
   for (const name of OTHERS) await expect(shown(page).locator(`[data-node^="${name}."]`)).toHaveCount(0);
   await expect(shown(page).locator('[title^="from "]')).toHaveCount(0);
-  const rail = page.getByTestId("rail-hud");
-  await expect(
-    rail.locator('[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:oxplow/"])'),
-  ).toHaveCount(0);
+  await expect(extensionPanels(page, "oxplow")).toHaveCount(0);
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-page-add-to-context")).toBeVisible();
   await expect(page.locator('[data-testid^="menu-item-ref-command-"]')).not.toBeVisible();

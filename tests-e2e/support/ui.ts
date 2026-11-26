@@ -136,14 +136,109 @@ export async function inFrame(from: Page | Locator, label?: string) {
   return from.frameLocator(selector);
 }
 
-/** Expand the rail section `id` (`ext:<extension>/<panel>`) unless it already is — once
- *  the rail shows the person's stored layout (it's `aria-busy` until then),
- *  so the state read is the one the click acts on. */
-export async function expandRailSection(page: Page, id: string): Promise<void> {
-  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+/** Expand the panel `id` (`ext:<extension>/<panel>`) unless it already is.
+ *  The desktop shell draws it as a rail section; once the rail shows the
+ *  person's stored layout (it's `aria-busy` until then), so the state read is
+ *  the one the click acts on. */
+export async function openPanel(page: Page, id: string): Promise<void> {
+  await panelsReady(page);
   const toggle = page.getByTestId(`rail-section-toggle-${id}`);
   if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
+/** A panel's own box, once it is drawn (a rail section on the desktop). */
+export function panel(page: Page, id: string): Locator {
+  return page.getByTestId(`rail-section-${id}`);
+}
+
+/** What a panel draws as its body. */
+export function panelBody(page: Page, id: string): Locator {
+  return panel(page, id).getByTestId("rail-panel-body");
+}
+
+/** A panel's header, which carries its title and badge count. */
+export function panelHeader(page: Page, id: string): Locator {
+  return panel(page, id).getByTestId(`rail-section-toggle-${id}`);
+}
+
+/** The panels extensions other than `except` (an extension name) put in the shell. */
+export function extensionPanels(page: Page, except: string): Locator {
+  return page
+    .getByTestId("rail-hud")
+    .locator(`[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:${except}/"])`);
+}
+
+/** The streams the window lists. */
+export function streamEntries(page: Page): Locator {
+  return page.locator('[data-testid^="navigator-strip-stream-"]');
+}
+
+/** Wait until the shell has loaded the person's panel layout: before that a
+ *  click on a panel acts on a default. */
+export async function panelsReady(page: Page): Promise<void> {
+  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+}
+
+/** A tab of the window by its page URI (the desktop's tab strip item). */
+export function tabOf(page: Page, uri: string): Locator {
+  return page.getByTestId(`center-tab-${uri}`);
+}
+
+/** The tabs whose URI starts with `prefix` (`""`: every tab), narrowed to
+ *  those whose URI holds `contains` and not `without`. */
+export function tabsWith(page: Page, prefix: string, { contains, without }: { contains?: string; without?: string } = {}): Locator {
+  let sel = `[data-testid^=${JSON.stringify(`center-tab-${prefix}`)}]`;
+  if (contains !== undefined) sel += `[data-testid*=${JSON.stringify(contains)}]`;
+  if (without !== undefined) sel += `:not([data-testid*=${JSON.stringify(without)}])`;
+  return page.locator(sel);
+}
+
+/** The URI a tab (as `tab` or `tabsWith` found it) holds. */
+export async function tabUri(found: Locator): Promise<string> {
+  return ((await found.first().getAttribute("data-testid")) ?? "").slice("center-tab-".length);
+}
+
+/** The shown tab, as the strip draws it. */
+export async function activeTab(page: Page): Promise<Locator> {
+  const body = (await shown(page).first().getAttribute("data-testid")) ?? "";
+  return tabOf(page, body.slice("center-tab-body-".length));
+}
+
+/** Close the tab `uri` the way a person does, by its close control. */
+export async function closeTab(page: Page, uri: string): Promise<void> {
+  await page.getByTestId(`center-tab-close-${uri}`).click();
+}
+
+/** The mark that says the tab `uri` holds unsaved changes. */
+export function tabDirty(page: Page, uri: string): Locator {
+  return page.getByTestId(`center-tab-dirty-${uri}`);
+}
+
+/** The count on the Alerts icon. */
+export function alertsBadge(page: Page): Locator {
+  return page.getByTestId("dock-alerts-badge");
+}
+
+/** Open the Alerts page from the Alerts icon and its panel's link. */
+export async function openAlerts(page: Page): Promise<void> {
+  await page.getByTestId("dock-alerts").click();
+  await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
+}
+
+/** The count on the context basket's icon. */
+export function contextBadge(page: Page): Locator {
+  return page.getByTestId("dock-context-badge");
+}
+
+/** The name of the stream the window shows. */
+export function streamName(page: Page): Locator {
+  return page.getByTestId("title-bar-stream");
+}
+
+/** The name of the thread the window shows. */
+export function threadName(page: Page): Locator {
+  return page.getByTestId("title-bar-thread");
 }
 
 /** Open the launcher and type `query` into it — once it has the focus: it

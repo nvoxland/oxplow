@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { expectNoHorizontalOverflow, open, shown, load } from "../../support/ui.js";
+import { expectNoHorizontalOverflow, open, shown, load, tabsWith } from "../../support/ui.js";
 
 // Definition is a display mode of a page's YAML file: Definition in About this page opens
 // the page's running copy drawn as Definition, and the Text view (the raw
@@ -69,7 +69,7 @@ test("Definition drawn again after another tab was shown still names its file an
   // Another tab is shown while the extension is deployed again (its running
   // copy is another deployment); coming back, the tab still names its file
   // and its sections read it.
-  const tab = page.locator('[data-testid^="center-tab-"]').filter({ hasText: "Definition: numbat.yaml" }).first();
+  const tab = tabsWith(page, "").filter({ hasText: "Definition: numbat.yaml" }).first();
   await open(page, daemon, "oxplow:oxplow/page?page=e2e_defn/other", { new_tab: true });
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Other Numbat");
   await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat.replace("What the numbats are.", "What they were."), "pages/other.yaml": other } });
@@ -95,7 +95,7 @@ test("Definition of a page whose file is open in the Text view is another tab: b
   await page.getByTestId("menu-item-page-open-with-oxplow/file-viewer").click();
   await expect(shown(page).getByTestId("viz-code")).toContainText("title: Defined Numbat");
   // The page file's tabs, by id: the file's own (the display mode is the tab's state, not part of its id).
-  const fileTabs = page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="numbat.yaml"]');
+  const fileTabs = tabsWith(page, "oxplow:", { contains: "numbat.yaml" });
   await expect(fileTabs).toHaveCount(1);
   await expect(fileTabs.first()).toHaveAttribute("data-testid", /center-tab-oxplow:oxplow\/file\?/);
 
@@ -103,8 +103,8 @@ test("Definition of a page whose file is open in the Text view is another tab: b
   await openDefinition();
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
   await expect(fileTabs).toHaveCount(2);
-  await expect(page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="definition"]')).toHaveCount(1);
-  await page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="numbat.yaml"]:not([data-testid*="definition"])').click();
+  await expect(tabsWith(page, "oxplow:", { contains: "definition" })).toHaveCount(1);
+  await tabsWith(page, "oxplow:", { contains: "numbat.yaml", without: "definition" }).click();
   await expect(shown(page).getByTestId("viz-code")).toContainText("title: Defined Numbat");
 });
 

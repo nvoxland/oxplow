@@ -1,7 +1,7 @@
 import { fileTask } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { expandRailSection, load } from "../../support/ui.js";
+import { openPanel, load, panel, panelBody, panelHeader } from "../../support/ui.js";
 
 const body = `title: Glider body
 loaders:
@@ -30,14 +30,14 @@ test("a left-nav panel draws its body page, and its badge page's number", async 
   });
   await load(page);
   const id = "ext:e2e_panel/gliders";
-  await expandRailSection(page, id);
-  const section = page.getByTestId(`rail-section-${id}`);
+  await openPanel(page, id);
+  const section = panel(page, id);
   await expect(section).toContainText("Gliders");
-  await expect(section.getByTestId("rail-panel-body")).toContainText("No gliders yet.");
-  await expect(section.getByTestId(`rail-section-toggle-${id}`)).not.toContainText("1");
+  await expect(panelBody(page, id)).toContainText("No gliders yet.");
+  await expect(panelHeader(page, id)).not.toContainText("1");
 
   // A write the body reads shows in it, and the badge counts it.
   await fileTask(daemon, "Glider sugar");
-  await expect(section.getByTestId("rail-panel-body")).toContainText("Glider sugar");
-  await expect(section.getByTestId(`rail-section-toggle-${id}`)).toContainText("1");
+  await expect(panelBody(page, id)).toContainText("Glider sugar");
+  await expect(panelHeader(page, id)).toContainText("1");
 });

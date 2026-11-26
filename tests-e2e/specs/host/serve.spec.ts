@@ -1,3 +1,4 @@
+// @desktop-only: the host serves the desktop shell (rail and title bar)
 // The host serves the built UI and forwards a project's calls: a browser
 // that only knows the host's address pairs once and gets a working window.
 // No token is in a page, and nothing it loads comes from another origin.

@@ -1,3 +1,4 @@
+// @desktop-only: the title bar of a taken-over window
 // A browser keeps one window per project: a second tab of the same browser
 // takes the project over, the first says so, and Use it here takes it back.
 import { expect, test } from "../../support/fixtures.js";

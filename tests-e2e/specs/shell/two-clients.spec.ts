@@ -1,9 +1,10 @@
+// @desktop-only: title bar names, navigator and tab strip across clients
 // One person on two clients of the same projects: what each client keeps of
 // its own, and what they share. A test that fails on today's code is marked
 // `test.fail()`: the mark comes off in the change that makes it pass.
 import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
 import { client, connectContext, expect, test } from "../../support/fixtures.js";
-import { load, open, reload } from "../../support/ui.js";
+import { load, open, reload, streamName, tabOf, threadName } from "../../support/ui.js";
 
 /** Where a browser keeps its device id (`device.ts`). */
 const DEVICE_KEY = "oxplow.device";
@@ -16,16 +17,16 @@ test("a thread picked on one client is not the other client's thread", async ({ 
     title: "Second client's thread",
   });
   await load(page);
-  const first = await page.getByTestId("title-bar-thread").textContent();
+  const first = await threadName(page).textContent();
 
   const b = await client(browser, baseURL!, daemon);
   try {
     await load(b.page);
     await b.page.getByTestId(`navigator-strip-thread-${other.result.id}`).click();
-    await expect(b.page.getByTestId("title-bar-thread")).toHaveText("Second client's thread");
+    await expect(threadName(b.page)).toHaveText("Second client's thread");
 
     await reload(page);
-    await expect(page.getByTestId("title-bar-thread")).toHaveText(first!);
+    await expect(threadName(page)).toHaveText(first!);
   } finally {
     await b.context.close();
   }
@@ -41,16 +42,16 @@ test("the stream a client shows is that client's own", async ({ page, browser, b
     start_point: "HEAD",
   });
   await load(page);
-  const first = await page.getByTestId("title-bar-stream").textContent();
+  const first = await streamName(page).textContent();
 
   const b = await client(browser, baseURL!, daemon);
   try {
     await load(b.page);
     await b.page.getByTestId(`navigator-strip-stream-${made.result.id}`).click();
-    await expect(b.page.getByTestId("title-bar-stream")).toContainText("Second client's stream");
+    await expect(streamName(b.page)).toContainText("Second client's stream");
 
     await reload(page);
-    await expect(page.getByTestId("title-bar-stream")).toHaveText(first!);
+    await expect(streamName(page)).toHaveText(first!);
   } finally {
     await b.context.close();
   }
@@ -194,7 +195,7 @@ test("a project's window never shows another project's tabs", async ({ page, bro
     expect(thread!.id, "the two fresh projects' threads have the same id").toBe(daemon.thread);
 
     await open(page, daemon, "oxplow:oxplow/page?page=settings");
-    await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=settings")).toBeVisible();
+    await expect(tabOf(page, "oxplow:oxplow/page?page=settings")).toBeVisible();
     // The second project's window is the same device (the same browser).
     const device = await page.evaluate((key) => localStorage.getItem(key), DEVICE_KEY);
     expect(device).toMatch(/^dev-/);
@@ -211,7 +212,7 @@ test("a project's window never shows another project's tabs", async ({ page, bro
       const other = await context.newPage();
       await load(other);
       await expect(other.getByTestId("title-bar")).toBeVisible();
-      await expect(other.getByTestId("center-tab-oxplow:oxplow/page?page=settings")).toHaveCount(0);
+      await expect(tabOf(other, "oxplow:oxplow/page?page=settings")).toHaveCount(0);
     } finally {
       await context.close();
     }
@@ -243,8 +244,8 @@ test("a page shown on a named device opens on that device only", async ({ page, 
       client: device,
     });
     expect(shown.result.opened, shown.result.why).toBe(true);
-    await expect(b.page.getByTestId(`center-tab-${shown.result.uri}`)).toBeVisible();
-    await expect(page.getByTestId(`center-tab-${shown.result.uri}`)).toBeHidden();
+    await expect(tabOf(b.page, shown.result.uri)).toBeVisible();
+    await expect(tabOf(page, shown.result.uri)).toBeHidden();
   } finally {
     await b.context.close();
   }

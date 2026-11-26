@@ -1,6 +1,6 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, contextBadge } from "../../support/ui.js";
 
 // The Terminal page is a plain shell in the stream's worktree.
 test("a terminal opens a shell in the project", async ({ page, daemon }) => {
@@ -156,7 +156,7 @@ test("a terminal selection goes in the basket with the lines around it", async (
   await page.mouse.click(box.x + 10, box.y + box.height / 2, { button: "right" });
   await page.getByTestId("menu-item-add-to-context").click();
   await page.getByTestId("context-note-add").click();
-  await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
+  await expect(contextBadge(page)).toHaveText("1");
   const item = async () =>
     (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text, around FROM v_context_item" })).rows;
   await until("the item", 15_000, async () => (await item()).length === 1);

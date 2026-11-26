@@ -1,10 +1,11 @@
+// @desktop-only: the tab strip (order, reuse, labels after a reload)
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fileTask, run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { navigate, open, shown, load, reload, taskIdOf } from "../../support/ui.js";
+import { navigate, open, shown, load, reload, taskIdOf, panelsReady, tabOf, tabsWith } from "../../support/ui.js";
 
 const overviewTitle = (page: import("@playwright/test").Page) => page.getByTestId("page-nav-title").filter({ visible: true });
 
@@ -76,11 +77,11 @@ test("Alt+Down steps to the next file of the list it was opened from", async ({ 
   // The file has opened once its editor is up; focus then rests on the tab,
   // not in the editor (which keeps the keys for typing).
   await expect(page.locator(".monaco-editor").first()).toBeVisible();
-  await page.getByTestId("center-tab-oxplow:oxplow/file?path=aa.txt").click();
+  await tabOf(page, "oxplow:oxplow/file?path=aa.txt").click();
 
   await page.keyboard.press("Alt+ArrowDown");
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=bb.txt")).toBeVisible();
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=aa.txt")).toBeHidden();
+  await expect(tabOf(page, "oxplow:oxplow/file?path=bb.txt")).toBeVisible();
+  await expect(tabOf(page, "oxplow:oxplow/file?path=aa.txt")).toBeHidden();
 });
 
 // A list's link column is live: Up and Down step through the page as it is now,
@@ -116,7 +117,7 @@ const backButton = (page: import("@playwright/test").Page) => page.getByTestId("
 // new filter focuses the tab that has it, and never opens a second.
 test("opening a page again with another filter focuses its tab", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
-  const tabs = page.locator('[data-testid^="center-tab-oxplow:oxplow/page?page=e2e/home"]');
+  const tabs = tabsWith(page, "oxplow:oxplow/page?page=e2e/home");
   await expect(tabs).toHaveCount(1);
   await navigate(page, daemon, "oxplow:oxplow/page?page=e2e/home#mode=other", { new_tab: true });
   await expect(shown(page, "page=e2e/home#mode=other")).toHaveCount(1);
@@ -152,24 +153,24 @@ test("a file opened at a line lands at its #lines view, and Back returns to the 
   await load(page);
   // The window answers a navigate once its stream is shown: a page open is the sign.
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
-  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+  await panelsReady(page);
   await navigate(page, daemon, "oxplow:oxplow/file?path=lines.txt#lines=3-3");
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=lines.txt#lines=3-3")).toBeVisible();
+  await expect(tabOf(page, "oxplow:oxplow/file?path=lines.txt#lines=3-3")).toBeVisible();
   await expect(page.locator(".monaco-editor").first()).toBeVisible();
 
   await navigate(page, daemon, "oxplow:oxplow/file?path=lines.txt#lines=8-8");
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=lines.txt#lines=8-8")).toBeVisible();
-  await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/file?path=lines.txt"]')).toHaveCount(1);
+  await expect(tabOf(page, "oxplow:oxplow/file?path=lines.txt#lines=8-8")).toBeVisible();
+  await expect(tabsWith(page, "oxplow:oxplow/file?path=lines.txt")).toHaveCount(1);
 
   await backButton(page).click();
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=lines.txt#lines=3-3")).toBeVisible();
+  await expect(tabOf(page, "oxplow:oxplow/file?path=lines.txt#lines=3-3")).toBeVisible();
 });
 
 // A tab mounts when it is first shown, so after a reload the tabs not shown
 // yet are named by the title their entry kept, not by their page's slug.
 test("after a reload, tabs not yet shown keep their titles and mount only when shown", async ({ page, daemon }) => {
   for (const id of ["home", "second", "overview"]) await open(page, daemon, `oxplow:oxplow/page?page=e2e/${id}`, { new_tab: true });
-  const strip = page.locator('[data-testid^="center-tab-oxplow"]');
+  const strip = tabsWith(page, "oxplow");
   const labels = () => strip.evaluateAll((els) => els.map((e) => (e.textContent ?? "").replace("×", "").trim()));
   await expect.poll(labels).toContain("Suite Second");
   const before = await labels();

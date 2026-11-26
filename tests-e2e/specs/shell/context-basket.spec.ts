@@ -1,5 +1,6 @@
+// @desktop-only: the dock's context badge
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, contextBadge } from "../../support/ui.js";
 
 // A page's ☰ → Add to Context opens the Context panel's add card, then puts
 // the page in the selected thread's basket: the dock's Context icon counts
@@ -13,7 +14,7 @@ test("a page added from its ☰ is counted in the dock and removed from its pane
   await page.getByTestId("context-note-add").click();
   await expect(page.getByTestId("context-add-card")).not.toBeVisible();
 
-  const badge = page.getByTestId("dock-context-badge");
+  const badge = contextBadge(page);
   await expect(badge).toHaveText("1");
   await expect(page.getByTestId("context-panel-item")).toHaveCount(1);
   await expect(page.getByTestId("context-panel-note-mark")).toHaveAttribute("aria-label", "Note: Check the greeting.");
@@ -34,7 +35,7 @@ test("text selected on a page goes in the basket from its right-click menu", asy
   await page.getByTestId("menu-item-add-to-context").click();
   await page.getByTestId("context-note-add").click();
   await expect(page.getByTestId("context-add-card")).not.toBeVisible();
-  await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
+  await expect(contextBadge(page)).toHaveText("1");
   await expect(page.getByTestId("context-panel-item")).toContainText("Suite home in plain mode");
 });
 
@@ -58,5 +59,5 @@ test("an add to a new basket is counted once it is sent next", async ({ page, da
 
   await page.getByTestId("context-send-next").click();
   await expect(tab.getByTestId("context-tab-sending")).toBeVisible();
-  await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
+  await expect(contextBadge(page)).toHaveText("1");
 });

@@ -1,3 +1,4 @@
+// @desktop-only: the desktop shell boots: rail and title bar
 import { expect, test } from "../../support/fixtures.js";
 import { newSessionPage, load } from "../../support/ui.js";
 

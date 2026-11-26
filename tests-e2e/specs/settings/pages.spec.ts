@@ -1,5 +1,5 @@
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, streamEntries } from "../../support/ui.js";
 
 test("Settings links to category forms and operational tools", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings");
@@ -60,7 +60,7 @@ test("New Stream forks a branch into a stream and gives way to it", async ({ pag
   await expect(shown(page).getByTestId("page-rail-selection")).toHaveCount(0);
   await form.getByTestId("viz-form-fields-new_branch").fill("side-work");
   await form.getByRole("button", { name: "Create Stream" }).click();
-  await expect(page.locator('[data-testid^="navigator-strip-stream-"]')).toHaveCount(2);
+  await expect(streamEntries(page)).toHaveCount(2);
   // The new stream's own first page is a form too (New Session), so only this
   // page's own tabs say it gave way.
   await expect(shown(page).getByRole("tablist", { name: "Start from" })).toHaveCount(0);
