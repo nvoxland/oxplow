@@ -1,12 +1,13 @@
 title: Signals
-description: Every review signal of one change in one table, worst first. Narrow it by area, severity or source to work through one kind at a time.
-label: Signals
+description: The review signals of one change, or of one of its areas, under their files, the worst file first. Narrow them by severity or source to work through one kind at a time.
+label: '{{row.tab}}'
 params:
 - name: change_id
   label: Change
+# The area is what the page shows (its URI's `?`): each area's signals are a
+# tab of their own. Empty is every area.
 - name: area
   label: Area
-  role: filter
   default: ''
 - name: severity
   label: Severity
@@ -17,31 +18,51 @@ params:
   role: filter
   default: ''
 loaders:
+  name:
+    sql: |
+      -- The tab's name ({{row.tab}} in the label): this loader comes first.
+      SELECT CASE WHEN coalesce(:area, '') = '' THEN 'Signals' ELSE upper(substr(:area, 1, 1)) || substr(:area, 2) || ' signals' END || ' · ' || name AS tab FROM v_oxplow_review_change_name WHERE change_id = CAST(:change_id AS INTEGER)
   signals:
     sql: |
-      -- An empty filter means all.
-      SELECT s.path, s.line, s.severity,
-             CASE s.severity WHEN 'high' THEN 'danger' WHEN 'medium' THEN 'warning' ELSE 'muted' END AS tone,
+      -- An empty filter means all. One heading per file (`file`), the worst
+      -- file first: it counts the file's high and medium signals, so a file
+      -- of only `info` context reads as such before it is opened.
+      WITH s AS (
+        SELECT s.*, CASE s.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END AS rank
+        FROM v_oxplow_review_signal_shown s
+        WHERE s.change_id = CAST(:change_id AS INTEGER)
+          AND (coalesce(:area, '') = '' OR s.area = :area)
+          AND (coalesce(:severity, '') = '' OR s.severity = :severity)
+          AND (coalesce(:source, '') = '' OR s.source = :source)
+      ),
+      f AS (
+        SELECT path, min(rank) AS rank,
+               trim(CASE WHEN sum(rank = 1) > 0 THEN printf('%d high', sum(rank = 1)) ELSE '' END
+                    || CASE WHEN sum(rank = 1) > 0 AND sum(rank = 2) > 0 THEN ', ' ELSE '' END
+                    || CASE WHEN sum(rank = 2) > 0 THEN printf('%d medium', sum(rank = 2)) ELSE '' END) AS counts
+        FROM s GROUP BY path
+      )
+      SELECT coalesce(s.path, 'The whole change') || CASE WHEN f.counts <> '' THEN ' · ' || f.counts ELSE '' END AS file,
+             s.path, s.line, s.severity,
+             CASE s.severity WHEN 'high' THEN 'danger' WHEN 'medium' THEN 'warning' END AS tone,
+             s.lines, s.related_shown AS related,
              s.signal, s.title, s.why, s.source, s.area,
              c.base_revision, c.head_revision
-      FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
-      WHERE s.change_id = CAST(:change_id AS INTEGER)
-        AND (coalesce(:area, '') = '' OR s.area = :area)
-        AND (coalesce(:severity, '') = '' OR s.severity = :severity)
-        AND (coalesce(:source, '') = '' OR s.source = :source)
-      ORDER BY CASE s.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-               s.path, s.line, s.title
+      FROM s JOIN f ON f.path IS s.path
+      JOIN v_change c ON c.id = s.change_id
+      ORDER BY f.rank, s.path IS NULL DESC, s.path, s.rank, s.line, s.title
 view:
   from: signals
   viz: table
+  group:
+    by: file
+    link: { kind: diff-at, from: path, base: base_revision, head: head_revision }
+  edge: tone
   columns:
-  - key: path
-    label: File
+  - key: title
+    label: Signal
     link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
-  - { key: line, label: Line }
-  - { key: severity, label: Severity, format: badge, tone: tone }
-  - { key: signal, label: Signal }
-  - { key: title, label: Title }
+  - { key: lines, label: Lines }
   - { key: why, label: Why }
-  - { key: source, label: Source }
+  - { key: related, label: Related, format: items }
   empty: No signal matches. Clear a filter, or the change has none.

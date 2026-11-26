@@ -133,12 +133,22 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   a "The whole change" row), worst first, then by
   `v_oxplow_change_interest`, at most five signals a row; each row expands
   to `change-review-file` (all its signals: the whole file's first, then by
-  line). **By Area** counts signals per `area`, and a `sections` slot
-  (`oxplow/change-review.sections`) takes other extensions' sections.
+  line). **Tests** and **Code** sum up, in four facts each (a `detail`),
+  what the change did to its tests (test files' counts before and after,
+  weakened tests, the latest run, uncovered lines; a commit's runs and
+  coverage say "Only a request has …") and to its code (functions added,
+  changed and removed, the one that grew most in complexity, public API
+  changes, duplicated blocks): enough to tell whether to open the page.
+  Each heading's arrow (`link:`) opens the Tests or Code page. **By Area**
+  counts signals per `area`; its arrow opens every signal on one page. A
+  `sections` slot (`oxplow/change-review.sections`) takes other
+  extensions' sections.
   - The signals are the open dataset `review_signal`
     (`v_oxplow_review_signal`: `change_id, source, area, signal, severity,
-    path, line, end_line, title, why, uri`). Any extension adds rows with a
-    dataset that says `adds_to: oxplow/review_signal` (semantic-layer.md
+    path, line, end_line, title, why, uri, related`; `related` is a JSON
+    array of `{ text, uri? }`, the other places a signal is about, so a
+    source gives one row per place, not one per pair). Any extension adds
+    rows with a dataset that says `adds_to: oxplow/review_signal` (semantic-layer.md
     "Open datasets"). bundled's own sources: `review_signal_tests` (test
     file deleted; test deleted where the file now has fewer; fewer
     assertions; skip added; all `high`, and read only in test files, since
@@ -154,16 +164,24 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `medium`, area `code`.
     - `review_signal_scope`: files a request changed outside its task's area
       (`v_oxplow_deviation`), on the request's change (`target` is the
-      request id as text); `info`, area `scope`.
+      request id as text); `info`, area `scope`. It starts at the change and
+      looks the request's deviations up: a join from `deviation` worked out
+      every request's before narrowing to one change.
     - `review_signal_shape`: files with a reason in
       `v_oxplow_change_interest` (large, complex, long new functions);
       `info`, `why` is the reasons text.
     - `review_signal_history`: `v_oxplow_change_co_change` rows, as
-      `partners-unchanged` and `dormant-file`; a file the change adds is
-      never a signal (no history, so it always read as dormant); `info`.
-    - `review_signal_duplication`: `v_change_duplicate` blocks of the
-      change's files, with the copy in `why`; `info`. The scan runs after the
-      rest of the analysis, so these rows come late.
+      `partners-unchanged` (the partners, `expected`'s JSON array, in
+      `related` as file links, read from the row itself) and `dormant-file`;
+      a file the change adds is never a signal (no history, so it always
+      read as dormant); `info`.
+    - `review_signal_duplication`: `v_change_duplicate` blocks that overlap
+      a line the change touched (`v_change_hunk`), one row per block with
+      every place it repeats in `related` (the scan gives a row per pair: a
+      big file once gave 25 rows for one 7-line block); `info`. A changed
+      file's copies the change didn't touch were there before, so they are no
+      signal of it. The Code page's Duplicates table lists these rows.
+      The scan runs after the rest of the analysis, so these rows come late.
     - `review_signal_verification`: for a request, from the runs oxplow read
       (never the agent's word): its latest test run failed (`high`), it ran no
       test though it changed code (`medium`), and per file the changed lines
@@ -175,7 +193,9 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       facts as of its head snapshot (`working` is the stream's latest), so a
       change headed at an older snapshot has the findings it had then. A change
       headed at a commit (`git:<sha>`) has no snapshot to read them at and gets
-      analyzer findings only.
+      analyzer findings only. The analyzer findings are the request's latest
+      `static-analysis` observation, looked up by the request (a window over
+      every change's observations ranked them all first).
     - `review_signal_unused`: a **check**, not a SQL source over stored
       rows: the collector `oxplow.review.unused` (`collectors/review/unused.star`,
       `on: [change.analyzed]`, `where: { phase: files }`, `sync: upsert`,
@@ -224,6 +244,13 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     (`v_oxplow_review_check`: "Done", "1 running", "1 failed", "1 off", "1 did
     not run", or "None ran") and which language packs are off for the files it changed (from
     `v_language`, with a link to turn each on).
+  - **The tabs name the change** (`review_change_name`,
+    `v_oxplow_review_change_name`): "Review · a1b2c3d Fix the parser", "Tests
+    · …", "Code · …", "Tests signals · …". A commit is its short sha and
+    subject, a request or a turn the first line of its prompt cut at a word
+    near 40 characters, the worktree's "uncommitted changes". Each page's
+    first loader, `name`, gives the `tab` its label reads, so two reviews
+    never share a tab name.
   - **The pages read `review_signal_shown`** (`v_oxplow_review_signal_shown`),
     never the union itself: every row with the project's severity for its
     kind from the setting `review.signals` (`[{ signal, severity: high |
@@ -234,7 +261,11 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     (`examples/extensions/schema-review` is a third party's source that
     relies on it). The union's column types follow its contributors,
     so `shown` casts every column but `change_id` (left as is so a filter on
-    it reaches each source) to a fixed type.
+    it reaches each source) to a fixed type. It also gives the row as the
+    pages show it: `lines` ("12", "12–20", or empty) and `related_shown`
+    (five places at most, then one "N more" item naming the rest on hover),
+    so the Signals page, the Code page and a file's expansion cap the list
+    by one rule.
   - `severity`: `high` and `medium` put a file in Look Here; `info` is
     counted in By Area and listed in the file's expansion.
   - The brief (`parts/change-review-brief.yaml`) is one line under the first
@@ -243,22 +274,28 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     files to look at · Open Review".
   - Page SQL binds `CAST(:change_id AS INTEGER)`: the union's columns are
     untyped, and an MCP caller may pass the id as text.
-  - Three pages go deeper, each with param `change_id`, all reached from
-    By Area (the area cell links to Signals narrowed to that area, a
-    Details cell links to Tests or Code) and from the Go Deeper line:
-    - `change-review-signals` ("Signals"): every signal in one table,
-      worst first, then path and line. Filter params `area`, `severity`
-      and `source` (role `filter`, default `''` = all; a link sets one with
-      `#area=tests`).
+  - Three pages go deeper, each with param `change_id`: Signals from By
+    Area (an area cell opens that area's, the heading's arrow every area's),
+    Tests and Code from their sections' arrows:
+    - `change-review-signals` ("Signals"): every signal under a heading
+      per file (`group: { by: file }`, the heading linking to the file's
+      diff and naming its high and medium counts, "src/a.rs · 2 high"), the
+      worst file first, each file's worst signal first, then by line. A row
+      is the title (linking to its line), its lines, the why and the
+      `related_shown` places (`format: items`), with the severity as the row's
+      `edge`; the signal kind and source stay in the rows for agents and
+      the filters. `area` is a resource param (the URI's `?`, so each area's
+      signals are a tab of their own, labelled "code signals"; `''` is every
+      area, the "Signals" tab); `severity` and `source` are filters (role
+      `filter`, default `''` = all).
     - `change-review-tests` ("Tests"): the `tests` signals, each test file's
       tests/assertions/skips before and after (`v_change_test_file`), a
       request's test runs (`v_test_run` through `v_agent_turn.request_id`)
-      and its `uncovered-lines` signals. Linked from the `tests` and
-      `verification` rows.
+      and its `uncovered-lines` signals.
     - `change-review-code` ("Code"): the non-test functions the change
       touched with their deltas (`v_change_function`), the
-      `review_signal_api` signals and `v_change_duplicate` blocks. Linked
-      from the `code` row.
+      `review_signal_api` signals and the `review_signal_duplication`
+      signals (one row per block on changed lines, its copies in Repeats).
   - Co-change surprises are review signals only (area `history`,
     `review_signal_history`): the review and Signals pages show them. A
     file's diff does not: a line above every diff repeated, one file at a

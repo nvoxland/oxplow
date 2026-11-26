@@ -1,10 +1,14 @@
 title: Code
 description: What a change did to the code's shape. Read it to see which functions grew, which public API moved and which blocks were copied.
-label: Code
+label: '{{row.tab}}'
 params:
 - name: change_id
   label: Change
 loaders:
+  name:
+    sql: |
+      -- The tab's name ({{row.tab}} in the label): this loader comes first.
+      SELECT 'Code · ' || name AS tab FROM v_oxplow_review_change_name WHERE change_id = CAST(:change_id AS INTEGER)
   functions:
     sql: |
       SELECT f.path, f.start_line AS line,
@@ -26,12 +30,13 @@ loaders:
       ORDER BY s.path, s.line
   duplicates:
     sql: |
-      SELECT d.path, d.start_line AS line, d.lines,
-             d.peer_path, printf('%s:%d-%d', d.peer_path, d.peer_start_line, d.peer_end_line) AS peer,
+      -- The duplication signals: one row per block on the lines the change
+      -- touched, the places it repeats in `related`.
+      SELECT s.path, s.line, s.lines, s.why, s.related_shown AS related,
              c.base_revision, c.head_revision
-      FROM v_change_duplicate d JOIN v_change c ON c.id = d.change_id
-      WHERE d.change_id = CAST(:change_id AS INTEGER)
-      ORDER BY d.lines DESC, d.path, d.start_line
+      FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
+      WHERE s.change_id = CAST(:change_id AS INTEGER) AND s.source = 'oxplow/review_signal_duplication'
+      ORDER BY s.end_line - s.line DESC, s.path, s.line
 view:
   stack:
   - id: functions
@@ -62,14 +67,14 @@ view:
     empty: No public function changed its signature or was removed.
   - id: duplicates
     title: Duplicates
-    description: Blocks in the changed files that copy code elsewhere in the tree. Decide whether to share the code.
+    description: Blocks on the lines the change touched that repeat code in other places. Decide whether to share the code.
     from: duplicates
     viz: table
     columns:
     - key: path
       label: File
       link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
-    - { key: line, label: From Line }
     - { key: lines, label: Lines }
-    - { key: peer, label: Copy Of }
-    empty: No duplicated block was found. The scan finishes after the rest of the analysis.
+    - { key: why, label: Why }
+    - { key: related, label: Repeats, format: items }
+    empty: No block on the changed lines repeats other code. The scan finishes after the rest of the analysis.

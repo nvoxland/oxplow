@@ -6,18 +6,21 @@ params:
 loaders:
   signals:
     sql: |
-      SELECT s.title, s.why, s.severity, s.line, s.source, s.uri, s.path, c.base_revision, c.head_revision
+      SELECT s.title, s.why, s.related_shown AS related, s.severity, s.line, s.lines, s.source, s.uri, s.path,
+             CASE s.severity WHEN 'high' THEN 'danger' WHEN 'medium' THEN 'warning' END AS tone,
+             c.base_revision, c.head_revision
       FROM v_oxplow_review_signal_shown s JOIN v_change c ON c.id = s.change_id
       WHERE s.change_id = CAST(:change_id AS INTEGER) AND s.path IS :path
       ORDER BY CASE s.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, s.line, s.title
 view:
   from: signals
   viz: table
+  edge: tone
   columns:
   - key: title
     label: Signal
     link: { kind: diff-at, from: path, line: line, base: base_revision, head: head_revision }
+  - { key: lines, label: Lines }
   - { key: why, label: Why }
-  - { key: severity, label: Severity }
-  - { key: source, label: From }
+  - { key: related, label: Related, format: items }
   empty: No signals for this file.

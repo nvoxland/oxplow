@@ -577,7 +577,12 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   no row; agents' text reads `title`). `collapsible: true` folds at the heading,
   remembered in the tab's history state (`PageTree` is the outermost
   `CollapsibleSections`). `link: <page id>` is the arrow beside the heading
-  (`RefSite::SectionLink`: it must name a page).
+  (`RefSite::SectionLink`: it must name a page). It opens that page with
+  this page's params of the names it declares (the run resolves it:
+  `RunNode.link`, `section_link`), so a Review section's arrow opens the
+  Tests page of the same `change_id`. A loader's column is never one, as
+  it is for an embed: the rows under a heading are not what its page is
+  about.
 - **A `rail:` tree** draws first in the page's rail, under its root's
   `title` as a group (bare without one): what the page is about, such as
   the branch a history is of. A row it picks sets the page's view param.

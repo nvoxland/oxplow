@@ -131,6 +131,9 @@ pub struct RunNode {
     pub replaced_by: Option<String>,
     /// An action point node's point and its context, bound.
     pub action_point: Option<ActionPointRun>,
+    /// What the arrow beside its heading opens: the `link:` page with the
+    /// params it declares, flowed from this page (`section_link`).
+    pub link: Option<String>,
 }
 
 /// An action point a run placed: the point and the context the page gave
@@ -335,6 +338,7 @@ impl<'a> PageRunner<'a> {
                     error: None,
                     replaced_by: None,
                     action_point: None,
+                    link: None,
                 };
                 return Ok(PageRun {
                     page,
@@ -812,6 +816,7 @@ impl<'a> PageRunner<'a> {
                 error: None,
                 replaced_by: None,
                 action_point: None,
+                link: self.section_link(node, params),
             };
             match &node.kind {
                 NodeKind::Stack { children } | NodeKind::Grid { children } => {
@@ -836,6 +841,7 @@ impl<'a> PageRunner<'a> {
                             error: None,
                             replaced_by: None,
                             action_point: None,
+                            link: None,
                         };
                         for mount in self.mounts(&page.id, name) {
                             let r = self
@@ -930,6 +936,64 @@ impl<'a> PageRunner<'a> {
 }
 
 impl PageRunner<'_> {
+    /// The URI that opens `page` with `values` (param name, text): oxplow's
+    /// own extensions' pages by slug alone, as `v_page.uri` names them; a
+    /// value of a filter, selection or view param after the `#`, the rest
+    /// in the query.
+    fn page_uri(&self, page: &Page, values: Vec<(String, String)>) -> String {
+        use crate::pages::spec::ParamRole;
+        let core = self
+            .catalog
+            .unpinned(self.root, "a page link names a page by its extension")
+            .iter()
+            .any(|e| {
+                e.name == page.extension
+                    && e.namespace == crate::extension::extensions::CORE_NAMESPACE
+            });
+        let named = if core {
+            page.slug.clone()
+        } else {
+            page.id.clone()
+        };
+        let mut query: Vec<(String, String)> = vec![("page".into(), named)];
+        let mut view: Vec<(String, String)> = Vec::new();
+        for (name, text) in values {
+            let in_view = page.params.iter().any(|p| {
+                p.name == name
+                    && matches!(
+                        p.role,
+                        Some(ParamRole::Filter | ParamRole::Selection | ParamRole::View)
+                    )
+            });
+            if in_view { &mut view } else { &mut query }.push((name, text));
+        }
+        let q: Vec<(&str, &str)> = query
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let w: Vec<(&str, &str)> = view.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        oxplow_domain::uri::build::of_with_view(oxplow_domain::uri::resources::PAGE, &q, &w)
+    }
+
+    /// A section's `link`: its page with this page's params of the names
+    /// that page declares. Not a loader's column, as an embed takes: the
+    /// rows under a heading are not what its page is about. A page that is
+    /// not there gives no link.
+    fn section_link(&self, node: &Node, params: &BTreeMap<String, SqlCell>) -> Option<String> {
+        let target = self.find(node.link.as_deref()?).ok()?;
+        let values = target
+            .params
+            .iter()
+            .filter_map(|p| {
+                Some((
+                    p.name.clone(),
+                    param_text_of_cell(params.get(&p.name)?.clone())?,
+                ))
+            })
+            .collect();
+        Some(self.page_uri(&target, values))
+    }
+
     /// `page`'s "See also" links, resolved in order with a uri once. A page
     /// that is not there, or a loader that failed, gives no link: never an
     /// error.
@@ -940,7 +1004,6 @@ impl PageRunner<'_> {
         loaders: &BTreeMap<String, LoaderRun>,
     ) -> Vec<SeeAlso> {
         use super::schema::SeeAlsoDecl;
-        use crate::pages::spec::ParamRole;
         let mut out: Vec<SeeAlso> = Vec::new();
         let mut push = |link: SeeAlso| {
             if !link.title.is_empty() && !out.iter().any(|l| l.uri == link.uri) {
@@ -956,56 +1019,13 @@ impl PageRunner<'_> {
                     let Ok(child) = self.find(target) else {
                         continue;
                     };
-                    // The page's own URI as `v_page.uri` names it: oxplow's
-                    // own extensions' pages by slug alone.
-                    let core = self
-                        .catalog
-                        .unpinned(self.root, "a see-also link names a page by its extension")
-                        .iter()
-                        .any(|e| {
-                            e.name == child.extension
-                                && e.namespace == crate::extension::extensions::CORE_NAMESPACE
-                        });
-                    let named = if core {
-                        child.slug.clone()
-                    } else {
-                        child.id.clone()
-                    };
-                    let mut query: Vec<(String, String)> = vec![("page".into(), named)];
-                    let mut view: Vec<(String, String)> = Vec::new();
-                    for (name, value) in bind_args(given, params, loaders) {
-                        let text = match value {
-                            serde_json::Value::Null => continue,
-                            serde_json::Value::String(s) if s.is_empty() => continue,
-                            serde_json::Value::String(s) => s,
-                            other => other.to_string(),
-                        };
-                        let in_view = child.params.iter().any(|p| {
-                            p.name == name
-                                && matches!(
-                                    p.role,
-                                    Some(
-                                        ParamRole::Filter | ParamRole::Selection | ParamRole::View
-                                    )
-                                )
-                        });
-                        if in_view { &mut view } else { &mut query }.push((name, text));
-                    }
-                    let pairs = |v: &[(String, String)]| -> Vec<(String, String)> { v.to_vec() };
-                    let (query, view) = (pairs(&query), pairs(&view));
-                    let q: Vec<(&str, &str)> = query
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v.as_str()))
+                    let values = bind_args(given, params, loaders)
+                        .into_iter()
+                        .filter_map(|(name, value)| Some((name, param_text_of_json(value)?)))
                         .collect();
-                    let w: Vec<(&str, &str)> =
-                        view.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
                     push(SeeAlso {
                         title: child.title.clone(),
-                        uri: oxplow_domain::uri::build::of_with_view(
-                            oxplow_domain::uri::resources::PAGE,
-                            &q,
-                            &w,
-                        ),
+                        uri: self.page_uri(&child, values),
                         description: Some(child.description.clone()).filter(|d| !d.is_empty()),
                     });
                 }
@@ -1169,6 +1189,7 @@ impl PageRunner<'_> {
             error: None,
             replaced_by: None,
             action_point: None,
+            link: None,
         };
         match self.find(id) {
             Err(e) => out.error = Some(e.to_string()),
@@ -1525,6 +1546,28 @@ fn on_demand_loaders(page: &Page, shown: &[String]) -> Vec<String> {
         .into_iter()
         .filter(|n| !shown.contains(n) && !pinned.contains(n))
         .collect()
+}
+
+/// A param's value as a link's text; null and blank are left out.
+fn param_text_of_json(value: serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) if s.is_empty() => None,
+        serde_json::Value::String(s) => Some(s),
+        other => Some(other.to_string()),
+    }
+}
+
+/// A flowed param's value as a link's text; null and blank are left out.
+fn param_text_of_cell(cell: SqlCell) -> Option<String> {
+    match cell {
+        SqlCell::Null(()) => None,
+        SqlCell::Text(s) if s.is_empty() => None,
+        SqlCell::Text(s) => Some(s),
+        SqlCell::Int(i) => Some(i.to_string()),
+        SqlCell::Real(f) => Some(f.to_string()),
+        SqlCell::Bool(b) => Some(b.to_string()),
+    }
 }
 
 /// An embedded page's params, by name: what the embed names explicitly,

@@ -1,18 +1,37 @@
-# The review's `duplication` signals: a block of a changed file that copies
-# code elsewhere in the tree, with the copy in the evidence. The scan runs
-# after the rest of the analysis.
+# The review's `duplication` signals: a block the change copied, on its
+# changed lines, one row per block, the copies it repeats in `related`. A
+# changed file's copies the change didn't touch are no signal of it. The
+# scan runs after the rest of the analysis.
 requires: [oxplow-rust]
 given:
-  - observe: { turn: { prompt: base, write: { path: src/a.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
-  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/a.rs] } }
+  - observe: { turn: { prompt: base, write: { path: src/m.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - observe: { turn: { prompt: base n, write: { path: src/n.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n\npub fn other() -> i64 {\n    1\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/m.rs, src/n.rs] } }
   - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
   - observe: { turn: { prompt: copy, write: { path: src/b.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
-  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/b.rs] } }
+  # n.rs changes away from its copy: the copy was there before.
+  - observe: { turn: { prompt: other, write: { path: src/n.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n\npub fn other() -> i64 {\n    2\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/b.rs, src/n.rs] } }
   - { command: oxplow.vcs.commit, input: { stream: str1, message: "Copy compute" }, bind: change }
   - observe: { commit: { sha: $change.rev, subject: Copy compute } }
   - observe: { analyze: { kind: commit, sha: $change.rev } }
-when:
-  sql: SELECT change_id, area, signal, severity, path, line, end_line, title, why FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_duplication'
-expect:
-  rows:
-    - { change_id: 1, area: code, signal: duplicated-block, severity: info, path: src/b.rs, line: 1, end_line: 11, title: Duplicated block, why: "11 lines copy src/a.rs:1-11." }
+steps:
+  - when:
+      sql: SELECT change_id, area, signal, severity, path, line, end_line, title, why, related FROM v_oxplow_review_signal WHERE source = 'oxplow/review_signal_duplication'
+    expect:
+      rows:
+        - { change_id: 1, area: code, signal: duplicated-block, severity: info, path: src/b.rs, line: 1, end_line: 11, title: Duplicated block, why: "11 lines that repeat code in 2 places.", related: '[{"text":"src/m.rs:1-11","uri":"oxplow:oxplow/file?path=src/m.rs#lines=1-11"},{"text":"src/n.rs:1-11","uri":"oxplow:oxplow/file?path=src/n.rs#lines=1-11"}]' }
+  # The Code page lists the same blocks, one row per block, and the
+  # Review page's Code section counts them.
+  - when: { page: change-review-code, params: { change_id: 1 } }
+    expect:
+      loaders:
+        duplicates:
+          rows:
+            - { path: src/b.rs, lines: 1–11, why: "11 lines that repeat code in 2 places.", related: '[{"text":"src/m.rs:1-11","uri":"oxplow:oxplow/file?path=src/m.rs#lines=1-11"},{"text":"src/n.rs:1-11","uri":"oxplow:oxplow/file?path=src/n.rs#lines=1-11"}]' }
+  - when: { page: change-review, params: { change_id: 1 } }
+    expect:
+      loaders:
+        code_summary:
+          rows:
+            - { duplicates: 1 block on changed lines repeats other code }

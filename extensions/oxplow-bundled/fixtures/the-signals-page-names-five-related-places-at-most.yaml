@@ -1,0 +1,24 @@
+# The Signals page names five related places of a signal at most: the
+# rest are one item that counts them and names them on hover. The
+# signal itself keeps them all.
+requires: [oxplow-rust]
+given:
+  - observe: { turn: { prompt: base 1, write: { path: src/m1.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - observe: { turn: { prompt: base 2, write: { path: src/m2.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - observe: { turn: { prompt: base 3, write: { path: src/m3.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - observe: { turn: { prompt: base 4, write: { path: src/m4.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - observe: { turn: { prompt: base 5, write: { path: src/m5.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - observe: { turn: { prompt: base 6, write: { path: src/m6.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/m1.rs, src/m2.rs, src/m3.rs, src/m4.rs, src/m5.rs, src/m6.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: copy, write: { path: src/b.rs, body: "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/b.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: "Copy compute" }, bind: change }
+  - observe: { commit: { sha: $change.rev, subject: Copy compute } }
+  - observe: { analyze: { kind: commit, sha: $change.rev } }
+when: { page: change-review-signals, params: { change_id: 1, source: oxplow/review_signal_duplication } }
+expect:
+  loaders:
+    signals:
+      rows:
+        - { file: src/b.rs, lines: 1–11, why: "11 lines that repeat code in 6 places.", related: '[{"text":"src/m1.rs:1-11","uri":"oxplow:oxplow/file?path=src/m1.rs#lines=1-11"},{"text":"src/m2.rs:1-11","uri":"oxplow:oxplow/file?path=src/m2.rs#lines=1-11"},{"text":"src/m3.rs:1-11","uri":"oxplow:oxplow/file?path=src/m3.rs#lines=1-11"},{"text":"src/m4.rs:1-11","uri":"oxplow:oxplow/file?path=src/m4.rs#lines=1-11"},{"text":"src/m5.rs:1-11","uri":"oxplow:oxplow/file?path=src/m5.rs#lines=1-11"},{"text":"1 more","hint":"src/m6.rs:1-11"}]' }

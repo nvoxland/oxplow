@@ -153,9 +153,13 @@ WHERE f.path LIKE 'db/schema/%'
 ```
 
 - Columns: `change_id, source, area, signal, severity, path, line, end_line,
-  title, why, uri`. `source` is `<namespace>/<dataset>`, the dataset's own name.
+  title, why, uri, related`. `source` is `<namespace>/<dataset>`, the dataset's own name.
   `path` is repo-relative, or NULL for the whole change. `line` and `end_line`
-  are on the head side. `uri` is what the row links to.
+  are on the head side. `uri` is what the row links to. `related` is the
+  other places the signal is about, as a JSON array of `{ text, uri? }`
+  (the copies of a block, the files a file usually changes with). Give one
+  row per place in the change and put the other places in `related`: do
+  not give one row for each pair.
 - `area` groups rows on the By Area table: `tests`, `verification`, `code`,
   `dependencies`, `history`, `scope` or `other`.
 - `severity`: `high` and `medium` put the file in Look Here. `info` is

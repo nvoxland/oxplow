@@ -24,22 +24,21 @@ facts AS (
    AND located.line BETWEEN hk.head_start AND hk.head_end
   WHERE located.line IS NOT NULL
 ),
-analysis AS (
-  SELECT c.id AS change_id, o.payload_json,
-         row_number() OVER (PARTITION BY c.id ORDER BY o.seq DESC) AS nth
-  FROM ref('change') c
-  JOIN ref('request_observation') o
-    ON c.kind = 'request' AND o.request_id = CAST(c.target AS INTEGER) AND o.kind = 'static-analysis'
-  WHERE c.status = 'done'
-),
+-- A request's latest static-analysis observation, looked up by its
+-- request: a window over every change's observations would rank them all
+-- before the read narrowed to one change.
 findings AS (
-  SELECT a.change_id, json_extract(x.value, '$.path') AS path,
+  SELECT c.id AS change_id, json_extract(x.value, '$.path') AS path,
          json_extract(x.value, '$.line') AS line,
          json_extract(x.value, '$.rule') AS rule,
          json_extract(x.value, '$.severity') AS severity,
          json_extract(x.value, '$.message') AS message
-  FROM analysis a, json_each(a.payload_json, '$.findings') AS x
-  WHERE a.nth = 1
+  FROM ref('change') c
+  JOIN ref('request_observation') o ON o.seq = (
+    SELECT max(o2.seq) FROM ref('request_observation') o2
+     WHERE o2.request_id = CAST(c.target AS INTEGER) AND o2.kind = 'static-analysis')
+  , json_each(o.payload_json, '$.findings') AS x
+  WHERE c.kind = 'request' AND c.status = 'done'
 )
 SELECT DISTINCT facts.change_id, 'oxplow/review_signal_findings' AS source, 'code' AS area,
        'lint-' || coalesce(facts.rule, facts.measure_key) AS signal,

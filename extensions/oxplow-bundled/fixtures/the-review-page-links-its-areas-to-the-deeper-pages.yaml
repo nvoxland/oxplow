@@ -1,5 +1,6 @@
-# The Review page's By Area rows open Signals narrowed to the area, and
-# Tests or Code for the areas those pages cover.
+# The Review page's By Area rows open Signals narrowed to the area. The
+# Tests and Code sections sum up what the change did to its tests and its
+# code; their headings open the Tests and Code pages.
 requires: [oxplow-rust]
 given:
   - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
@@ -17,6 +18,13 @@ expect:
   loaders:
     by_area:
       rows:
-        - { area: tests, signals: "oxplow:oxplow/page?change_id=1&page=change-review-signals#area=tests", more: "oxplow:oxplow/page?change_id=1&page=change-review-tests", more_label: Tests }
-        - { area: code, signals: "oxplow:oxplow/page?change_id=1&page=change-review-signals#area=code", more: "oxplow:oxplow/page?change_id=1&page=change-review-code", more_label: Code }
-        - { area: history, more: null, more_label: null }
+        - { area: tests, signals: "oxplow:oxplow/page?area=tests&change_id=1&page=change-review-signals" }
+        - { area: code, signals: "oxplow:oxplow/page?area=code&change_id=1&page=change-review-signals" }
+        - { area: history }
+    tests_summary:
+      rows:
+        # A commit has no runs and no coverage: only a request has them.
+        - { test_files: "1 changed · tests 2 → 1 · assertions 3 → 1 · skips 0 → 1", test_files_tone: warning, weakened: 3 high, weakened_tone: danger, runs: Only a request has runs, uncovered: Only a request has coverage }
+    code_summary:
+      rows:
+        - { functions: 1 changed, complexity: No function got more complex, api: 1 signature changed, api_tone: warning, duplicates: None }

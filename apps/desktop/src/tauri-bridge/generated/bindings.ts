@@ -5975,6 +5975,11 @@ export type RunNode_Deserialize = {
 	replacedBy: string | null,
 	/**  An action point node's point and its context, bound. */
 	actionPoint: ActionPointRun | null,
+	/**
+	 *  What the arrow beside its heading opens: the `link:` page with the
+	 *  params it declares, flowed from this page (`section_link`).
+	 */
+	link: string | null,
 };
 
 /**  A node of a run's tree: the page's node by id, and what it resolved to. */
@@ -5996,6 +6001,11 @@ export type RunNode_Serialize = {
 	replacedBy: string | null,
 	/**  An action point node's point and its context, bound. */
 	actionPoint: ActionPointRun | null,
+	/**
+	 *  What the arrow beside its heading opens: the `link:` page with the
+	 *  params it declares, flowed from this page (`section_link`).
+	 */
+	link: string | null,
 };
 
 /**  One `run_patterns:` entry as the extension declares it. */

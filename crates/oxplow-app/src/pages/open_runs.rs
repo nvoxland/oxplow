@@ -701,6 +701,7 @@ mod diff_tests {
             error: None,
             replaced_by: None,
             action_point: None,
+            link: None,
         };
         PageRun {
             inactive: None,
@@ -753,6 +754,7 @@ mod diff_tests {
             error: None,
             replaced_by: None,
             action_point: None,
+            link: None,
         });
         let mut new = old.clone();
         new.rail
@@ -781,6 +783,7 @@ mod diff_tests {
             error: None,
             replaced_by: None,
             action_point: None,
+            link: None,
         });
         let mut new = old.clone();
         new.rail.as_mut().unwrap().embed = None;

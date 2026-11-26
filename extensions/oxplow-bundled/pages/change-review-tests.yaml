@@ -1,10 +1,14 @@
 title: Tests
 description: What a change did to its tests, and what checked it. Read it to tell a test that was weakened from one that was only moved.
-label: Tests
+label: '{{row.tab}}'
 params:
 - name: change_id
   label: Change
 loaders:
+  name:
+    sql: |
+      -- The tab's name ({{row.tab}} in the label): this loader comes first.
+      SELECT 'Tests · ' || name AS tab FROM v_oxplow_review_change_name WHERE change_id = CAST(:change_id AS INTEGER)
   weakened:
     sql: |
       SELECT s.path, s.line, s.severity,

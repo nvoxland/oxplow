@@ -1,5 +1,6 @@
-# The Signals page is every signal of a change in one table, worst first;
-# an empty filter means all, a set one narrows.
+# The Signals page is every signal of a change under a heading per file,
+# the worst file first and its worst signal first; the heading counts its
+# high and medium signals. An empty filter means all, a set one narrows.
 requires: [oxplow-rust]
 given:
   - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
@@ -13,26 +14,26 @@ given:
   - observe: { commit: { sha: $change.rev, subject: Make grow add two numbers } }
   - observe: { analyze: { kind: commit, sha: $change.rev } }
 steps:
-  # Worst first, then by path and line.
+  # The worst file first, each file's worst signal first, then by line.
   - when: { page: change-review-signals, params: { change_id: 1 } }
     expect:
       loaders:
         signals:
           rows:
-            - { path: tests/it.rs, severity: high, signal: fewer-assertions, line: null }
-            - { path: tests/it.rs, severity: high, signal: skip-added, line: null }
-            - { path: tests/it.rs, severity: high, signal: test-deleted, line: 8 }
-            - { path: src/lib.rs, severity: medium, signal: signature-changed, line: 1 }
-            - { path: src/lib.rs, severity: info }
-            - { path: src/lib.rs, severity: info }
-            - { path: tests/it.rs, severity: info }
+            - { file: "tests/it.rs · 3 high", severity: high, signal: fewer-assertions, line: null }
+            - { file: "tests/it.rs · 3 high", severity: high, signal: skip-added, line: null }
+            - { file: "tests/it.rs · 3 high", severity: high, signal: test-deleted, line: 8 }
+            - { file: "tests/it.rs · 3 high", severity: info }
+            - { file: "src/lib.rs · 1 medium", severity: medium, signal: signature-changed, line: 1 }
+            - { file: "src/lib.rs · 1 medium", severity: info }
+            - { file: "src/lib.rs · 1 medium", severity: info }
   - when: { page: change-review-signals, params: { change_id: 1, area: history } }
     expect:
       loaders:
         signals:
           rows:
-            - { path: src/lib.rs, area: history }
-            - { path: tests/it.rs, area: history }
+            - { file: src/lib.rs, path: src/lib.rs, area: history }
+            - { file: tests/it.rs, path: tests/it.rs, area: history }
   - when: { page: change-review-signals, params: { change_id: 1, severity: medium } }
     expect:
       loaders:
