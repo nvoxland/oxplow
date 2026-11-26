@@ -113,8 +113,10 @@ A window is drawn by one shell (`apps/desktop/src/shells/`), chosen once
 per load by `useShellKind` (`chooseShell`): a test's override first (the
 page's `?shell=desktop|tablet` or the window context's `shell`), then the
 device's own choice (the `shell` app preference, per device), then its
-kind (a desktop gets `desktop`; a tablet, and a phone until it has its own
-shell, get `tablet`).
+kind: a desktop gets `desktop`; a tablet, and a phone until it has its own
+shell, get `tablet` once that shell is complete (`shellComplete`: no gap in
+the contract below), `desktop` until then, so no device lands in a shell
+that hides a feature.
 
 - **`desktop`** is `App.tsx`'s own layout: menu bar, title bar, Navigator,
   rail, `CenterTabs`, dock.
