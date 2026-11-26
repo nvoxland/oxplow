@@ -56,7 +56,8 @@ cargo run -q -p oxplow-dev -- extension deploy   # deploy what changed (oxplow q
 
 ### Sign dev builds (macOS)
 
-The daemon reads AI keys from the macOS keychain. An unsigned build is a new
+The daemon reads AI keys from the macOS keychain, and the shell the device
+tokens for hosts on other machines. An unsigned build is a new
 app to the keychain after every rebuild, so macOS asks again (twice: once for
 the item's trusted apps, once for its partition list), even after Always
 Allow. A build signed with one stable identity is the same app every time.
@@ -67,8 +68,9 @@ sh scripts/dev-signing-identity.sh    # makes "oxplow dev" in the login keychain
 ```
 
 From then on `bun run build:dev` (so `run:dev`) signs `target/debug/oxplow-daemon`
-with it (identifier `net.voxland.oxplow.daemon`) before staging, and only when it
-isn't signed by it already. At the next keychain prompt choose **Always Allow**;
+(identifier `net.voxland.oxplow.daemon`; the AI keys) and `target/debug/oxplow`
+(`net.voxland.oxplow`; the device tokens for hosts on other machines) with it
+(`scripts/sign-dev.sh`), and only when one isn't signed by it already. At the next keychain prompt choose **Always Allow**;
 later rebuilds don't ask. The first signing may also ask to let `codesign` use
 the key: Always Allow that too. `OXPLOW_DEV_SIGNING_IDENTITY` names another
 identity. Without one the build stays unsigned and works as before.

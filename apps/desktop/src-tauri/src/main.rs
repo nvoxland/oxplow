@@ -454,6 +454,19 @@ fn open_startup_windows(app: &tauri::AppHandle, startup: Startup) {
                     }
                 }
             }
+            // Projects on another machine's host: the work went on there;
+            // their windows come back.
+            for (origin, project) in windows::ShellWindows::remote_restorable(&entries) {
+                match app
+                    .state::<windows::ShellWindows>()
+                    .open_remote(app, &origin, &project)
+                {
+                    Ok(_) => opened += 1,
+                    Err(e) => {
+                        tracing::warn!(error = %e, origin, project, "a window on another machine was not restored")
+                    }
+                }
+            }
             if opened == 0 {
                 show_launcher(app);
             }

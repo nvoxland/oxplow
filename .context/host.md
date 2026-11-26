@@ -4,8 +4,8 @@
 `OXPLOW_HOME`. It holds no project state. It keeps a registry of projects and
 the holds devices have on them, and it runs one `oxplow-daemon` per held
 project. Built so far: the core, routing, the served UI, the Mac app's own
-host, HTTPS, pairing and the Mac app's Devices window. Not built yet: the app
-using a headless host.
+host, HTTPS, pairing, the Mac app's Devices window, and the app using a host on
+another machine. Not built yet: `/host/events`.
 
 There are two kinds of host, and no host ever stops because nothing is held
 or nobody is connected:
@@ -121,8 +121,21 @@ The app's host is a child of the app, as a daemon is a child of the host
   Cancel that leaves no window shows the launcher. Dock ▸ Quit and a logout
   cannot ask.
 - **Headless.** `oxplow host <args>` runs the sidecar with `<args>` (exec), as
-  on a server. The app does not use a headless host on its own home before
-  pairing: it has no token for it.
+  on a server. The app's own host cannot start on a home a headless host has
+  (it says so); use another `OXPLOW_HOME`, or connect to it as below.
+- **Other computers** (the launcher's section; `oxplow_host::remote`,
+  `commands/remote_hosts.rs`): the app pairs with a host on another machine
+  as a `desktop` device, with its address (`https` unless it says `http`) and
+  a code from `oxplow host pair` there. The device token is in the keychain
+  (account `oxplow-host:<origin>`; the shell's dev build is signed for it,
+  DEV.md "Sign dev builds"), the host in `remote-hosts.json` (origin, the id
+  and name the host gave this Mac). The launcher lists each host's projects
+  (and says when it runs another version); Open holds one there and opens a
+  window on `<origin>/p/<id>` with that token and no `projectDir` (its files
+  are there). Closing the window lets go there; quitting the app does not
+  (the work goes on), and the window comes back at the next start
+  (`session.json` keeps it as `<origin>/p/<id>`). Forget tells the host and
+  drops the token. The app's CSP allows `https:`/`wss:` for these windows.
 
 
 ## HTTPS
@@ -273,5 +286,4 @@ Tauri's asset protocol).
 
 ## Later steps
 
-`/host/events` (project states, for the tablet shell), and the app using a
-headless host.
+`/host/events` (project states, for the tablet shell).

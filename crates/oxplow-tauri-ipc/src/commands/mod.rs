@@ -22,6 +22,7 @@ pub mod oauth_redirect;
 pub mod os_open;
 pub mod page_refs;
 pub mod page_visit;
+pub mod remote_hosts;
 pub mod search;
 pub mod streams;
 pub mod threads;

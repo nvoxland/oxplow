@@ -73,20 +73,10 @@ fi
 cargo build $profile_flag -p oxplow-daemon -p oxplow-script -p oxplow-host --bins --manifest-path "$repo_root/Cargo.toml"
 
 # A debug daemon is signed with one stable local identity when this Mac has
-# it (DEV.md "Sign dev builds"), so the keychain trusts every rebuild as the
-# same app: after one Always Allow it stops asking for the AI keys. Without
-# the identity the build stays unsigned and macOS asks on each new build.
-# Signed in place, before staging, and only when not already signed by it:
-# a signature records its time, so signing twice would change the bytes and
-# restage (and relink) on every run.
-identity="${OXPLOW_DEV_SIGNING_IDENTITY:-oxplow dev}"
-if [ "$profile" = debug ] && [ "$(uname)" = Darwin ] &&
-  security find-identity -p codesigning 2>/dev/null | grep -qF "\"$identity\""; then
-  daemon="$repo_root/target/debug/oxplow-daemon"
-  if ! codesign -dvv "$daemon" 2>&1 | grep -qxF "Authority=$identity"; then
-    codesign --force --sign "$identity" --identifier net.voxland.oxplow.daemon --timestamp=none "$daemon"
-    echo "signed $daemon ($identity)"
-  fi
+# it (`scripts/sign-dev.sh`, DEV.md "Sign dev builds"), so the keychain
+# trusts every rebuild as the same app. Signed in place, before staging.
+if [ "$profile" = debug ]; then
+  bash "$repo_root/scripts/sign-dev.sh" "$repo_root/target/debug/oxplow-daemon" net.voxland.oxplow.daemon
 fi
 
 # Copied only when it changed: tauri-build reruns oxplow-desktop's build

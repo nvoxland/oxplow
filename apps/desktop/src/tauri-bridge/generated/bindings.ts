@@ -825,6 +825,21 @@ export const commands = {
 	address: string,
 	name: string | null,
 } | null, IpcError_Serialize>(__TAURI_INVOKE("host_tailscale")),
+	/**  Pair this Mac with a host on another machine. */
+	connectHost: (connect: ConnectHost) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("connect_host", { connect })),
+	/**  Each paired host, with its projects (or why it did not answer). */
+	remoteHosts: () => typedError<RemoteHostView[], IpcError_Serialize>(__TAURI_INVOKE("remote_hosts")),
+	/**
+	 *  Open a project of a host on another machine in a window of its own;
+	 *  `close_caller` closes the window that asked (the launcher), as an open
+	 *  from it does.
+	 */
+	openRemoteProject: (origin: string, project: string, closeCaller: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("open_remote_project", { origin, project, closeCaller })),
+	/**
+	 *  Forget a host on another machine: this Mac's device goes there, and the
+	 *  token here.
+	 */
+	forgetRemoteHost: (origin: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_remote_host", { origin })),
 };
 
 /* Types */
@@ -1960,6 +1975,12 @@ export type ConfigurationFile_Serialize = {
 export type Confirm = "never" | "always" |
 /**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
+
+export type ConnectHost = {
+	/**  `server.tailnet.ts.net:7400`, `https://…`. */
+	address: string,
+	code: string,
+};
 
 /**  One key of a point's context. */
 export type ContextKey = {
@@ -5931,6 +5952,29 @@ export type Relationship = {
 export type RelationshipDecl = {
 	from: string,
 	to: string,
+};
+
+export type RemoteHostView = {
+	origin: string,
+	/**  What the host calls this Mac. */
+	deviceName: string,
+	/**  Its version, when it answered. */
+	version: string | null,
+	/**  It runs another version than this app (said, never fixed here). */
+	otherVersion: boolean,
+	projects: RemoteProjectView[],
+	/**  Why it did not answer. */
+	error: string | null,
+};
+
+export type RemoteProjectView = {
+	id: string,
+	name: string,
+	/**  `starting`, `running`, `stopping`, `stopped` or `crashed`. */
+	state: string,
+	/**  How many devices hold it now. */
+	holds: number,
+	heldByYou: boolean,
 };
 
 export type RenameDevice = {

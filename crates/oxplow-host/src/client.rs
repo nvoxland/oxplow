@@ -278,32 +278,69 @@ impl HostClient {
             .await?
             .json()
             .await?;
-        self.hold(device, &project.id).await?;
+        self.open_held(&project.id, device).await
+    }
+
+    /// Hold the registered project `id` for `device` (a paired device's own:
+    /// the host makes it so) and wait until its daemon runs. One that does not
+    /// start is let go of again.
+    pub async fn open_held(&self, id: &str, device: &str) -> Result<OpenedProject, ClientError> {
+        self.hold(device, id).await?;
         let started = Instant::now();
         loop {
-            let view = self.project(&project.id).await?;
+            let view = self.project(id).await?;
             match view.state {
                 DaemonState::Running => {
                     return Ok(OpenedProject {
-                        base: format!("{}/p/{}", self.base, project.id),
-                        id: project.id,
-                        name: project.name,
+                        base: format!("{}/p/{}", self.base, view.id),
+                        id: view.id,
+                        name: view.name,
                     })
                 }
                 DaemonState::Crashed { message, .. } => {
-                    let _ = self.release(&project.id, device).await;
+                    let _ = self.release(id, device).await;
                     return Err(ClientError::Crashed {
-                        name: project.name,
+                        name: view.name,
                         reason: message,
                     });
                 }
                 _ if started.elapsed() >= OPEN_TIMEOUT => {
-                    let _ = self.release(&project.id, device).await;
-                    return Err(ClientError::Slow(project.name, OPEN_TIMEOUT));
+                    let _ = self.release(id, device).await;
+                    return Err(ClientError::Slow(view.name, OPEN_TIMEOUT));
                 }
                 _ => tokio::time::sleep(POLL).await,
             }
         }
+    }
+
+    /// As a paired device: hold `id` (its daemon starts).
+    pub async fn hold_project(&self, id: &str) -> Result<(), ClientError> {
+        self.hold("", id).await
+    }
+
+    /// The host's projects, as this caller sees them (`held_by_you` for a
+    /// device).
+    pub async fn projects(&self) -> Result<Vec<serde_json::Value>, ClientError> {
+        Ok(self
+            .send(self.http.get(self.url("/host/projects")))
+            .await?
+            .json()
+            .await?)
+    }
+
+    /// The host's version (`/host/status`).
+    pub async fn version(&self) -> Result<String, ClientError> {
+        let status: serde_json::Value = self
+            .send(self.http.get(self.url("/host/status")))
+            .await?
+            .json()
+            .await?;
+        Ok(status["version"].as_str().unwrap_or_default().to_string())
+    }
+
+    pub(crate) async fn delete_me(&self) -> Result<(), ClientError> {
+        self.send(self.http.delete(self.url("/host/me"))).await?;
+        Ok(())
     }
 
     /// A pairing code for a device (`ABCD-EFGH`) and the seconds it is good.
@@ -427,7 +464,7 @@ impl HostClient {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::host::tests::{Fixture, RUNS};
     use crate::instance::HostInstance;
@@ -436,7 +473,7 @@ mod tests {
     const TOKEN: &str = "app-token";
 
     /// A host for `fx`'s home in this process, as `serve` runs one.
-    async fn run_host(fx: &Fixture, token: &str) -> String {
+    pub(crate) async fn run_host(fx: &Fixture, token: &str) -> String {
         let instance = HostInstance::acquire(&fx.home()).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());

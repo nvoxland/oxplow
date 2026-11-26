@@ -5148,6 +5148,7 @@ dependencies = [
  "fs2",
  "futures",
  "hex",
+ "oxplow-ai",
  "oxplow-app",
  "oxplow-config",
  "oxplow-domain",
@@ -5443,6 +5444,7 @@ name = "oxplow-tauri-ipc"
 version = "0.9.0"
 dependencies = [
  "git2",
+ "oxplow-ai",
  "oxplow-app",
  "oxplow-code-deps",
  "oxplow-code-metrics",

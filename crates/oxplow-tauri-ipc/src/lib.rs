@@ -45,7 +45,9 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "answer_oauth_redirect",
     "await_oauth_redirect",
     "clipboard_read_text",
+    "connect_host",
     "create_project",
+    "forget_remote_host",
     "host_devices",
     "host_pairing_code",
     "host_remove_device",
@@ -57,6 +59,8 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "open_external_url",
     "open_path",
     "open_project",
+    "open_remote_project",
+    "remote_hosts",
     "remove_recent_project",
     "reveal_path",
     "set_host_settings",
@@ -265,6 +269,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::devices::host_remove_device,
             commands::devices::set_host_settings,
             commands::devices::host_tailscale,
+            // hosts on other machines
+            commands::remote_hosts::connect_host,
+            commands::remote_hosts::remote_hosts,
+            commands::remote_hosts::open_remote_project,
+            commands::remote_hosts::forget_remote_host,
         ])
 }
 

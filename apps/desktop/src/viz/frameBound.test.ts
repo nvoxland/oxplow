@@ -11,7 +11,11 @@ import { join } from "node:path";
 // to: a browser that reached the daemon as `localhost` builds its
 // frames' URLs from that base. Not `[::1]`: a CSP host source can't be an
 // IPv6 literal (Chromium logs it invalid and ignores it), so the
-// daemon doesn't serve bundles there either.
+// daemon doesn't serve bundles there either. And `https:`: a window on a
+// host on another machine (`.context/host.md` "Other computers") gets its
+// frames from that host's origin, which the app cannot know when it is
+// built; such a host is HTTPS (plain HTTP only through a tunnel to
+// loopback).
 
 const DESKTOP = join(import.meta.dir, "..", "..");
 
@@ -29,14 +33,14 @@ function directives(policy: string): Record<string, string[]> {
   );
 }
 
-test("the window frames only this machine, and the page says the same", () => {
+test("the window frames this machine and HTTPS hosts, and the page says the same", () => {
   const conf = JSON.parse(readFileSync(join(DESKTOP, "src-tauri", "tauri.conf.json"), "utf8")) as {
     app: { security: { csp: string } };
   };
   const tauri = directives(conf.app.security.csp);
   // `blob:` is the media viz's PDF frame, a file's bytes the page itself
   // holds; the loopback names are the daemon's component bundles.
-  expect(tauri["frame-src"]).toEqual(["blob:", "http://127.0.0.1:*", "http://localhost:*"]);
+  expect(tauri["frame-src"]).toEqual(["blob:", "http://127.0.0.1:*", "http://localhost:*", "https:"]);
   expect(tauri["default-src"]).toEqual(["'self'"]);
 
   const html = readFileSync(join(DESKTOP, "index.html"), "utf8");

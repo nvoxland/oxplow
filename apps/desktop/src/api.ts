@@ -763,6 +763,27 @@ export async function hostTailscale(): Promise<import("./tauri-bridge/generated/
   return unwrap(await commands.hostTailscale());
 }
 
+// ---- Hosts on other machines (the launcher) ----
+
+/// Pair this Mac with a host on another machine (`oxplow host pair` there).
+export async function connectHost(address: string, code: string): Promise<void> {
+  unwrap(await commands.connectHost({ address, code }));
+}
+
+export async function remoteHosts(): Promise<import("./tauri-bridge/generated/bindings.js").RemoteHostView[]> {
+  return unwrap(await commands.remoteHosts());
+}
+
+/// Open a project of a host on another machine; `closeCaller` closes the
+/// window that asked (the launcher).
+export async function openRemoteProject(origin: string, project: string, closeCaller: boolean): Promise<void> {
+  unwrap(await commands.openRemoteProject(origin, project, closeCaller));
+}
+
+export async function forgetRemoteHost(origin: string): Promise<void> {
+  unwrap(await commands.forgetRemoteHost(origin));
+}
+
 // ---- Launcher / multi-window ----
 
 /// Recent projects for the launcher, most-recent first, each tagged

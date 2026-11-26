@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { createProject, desktopBridge, listRecentProjects, openProject, removeRecentProject } from "../api.js";
 import { DEVICES_MENU_ID, DevicesSlideover } from "../host/DevicesSlideover.js";
+import { RemoteHostsSection } from "./RemoteHostsSection.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
 import { useRowContextMenu } from "../components/useRowContextMenu.js";
@@ -175,6 +176,7 @@ export function Launcher() {
           </ul>
         )}
 
+        <RemoteHostsSection />
       </div>
     </div>
   );

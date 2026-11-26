@@ -78,8 +78,29 @@ pub struct WindowRegistry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenWindow {
     pub label: String,
+    /// The project's folder here; for a project on another machine's host,
+    /// its address (`<origin>/p/<id>`), which is also its restore entry.
     pub dir: PathBuf,
     pub project: String,
+    /// The origin of the host on another machine it is on; `None`: the
+    /// app's own host.
+    pub remote: Option<String>,
+}
+
+/// The restore entry of a project on another machine's host. Pure.
+pub fn remote_entry(origin: &str, project: &str) -> String {
+    format!("{origin}/p/{project}")
+}
+
+/// A restore entry that names a project on another machine's host: its
+/// origin and project id. Pure.
+pub fn parse_remote_entry(entry: &str) -> Option<(String, String)> {
+    if !(entry.starts_with("https://") || entry.starts_with("http://")) {
+        return None;
+    }
+    let (origin, project) = entry.rsplit_once("/p/")?;
+    (!project.is_empty() && !project.contains('/'))
+        .then(|| (origin.to_string(), project.to_string()))
 }
 
 impl WindowRegistry {
@@ -91,6 +112,19 @@ impl WindowRegistry {
             label: label.to_string(),
             dir,
             project: project.to_string(),
+            remote: None,
+        });
+    }
+
+    /// A window on `project` of the host at `origin` (another machine).
+    pub fn insert_remote(&self, label: &str, origin: &str, project: &str) {
+        let mut open = self.lock();
+        open.retain(|w| w.label != label);
+        open.push(OpenWindow {
+            label: label.to_string(),
+            dir: PathBuf::from(remote_entry(origin, project)),
+            project: project.to_string(),
+            remote: Some(origin.to_string()),
         });
     }
 
@@ -449,6 +483,77 @@ impl ShellWindows {
         self.device.as_ref()
     }
 
+    /// Open (or focus) `project` of the host at `origin` on another machine,
+    /// as the device this Mac is there. **Blocking** while its daemon starts.
+    pub fn open_remote(
+        &self,
+        app: &tauri::AppHandle,
+        origin: &str,
+        project: &str,
+    ) -> Result<String, String> {
+        use tauri::Manager;
+        let entry = PathBuf::from(remote_entry(origin, project));
+        if let Some(label) = self.registry.label_for(&entry) {
+            if let Some(win) = app.get_webview_window(&label) {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+                return Ok(label);
+            }
+            self.registry.remove(&label);
+        }
+        let config_dir = oxplow_config::global_config_dir()
+            .ok_or("no config folder for this user; set OXPLOW_HOME")?;
+        let paired = oxplow_host::remote::list(&config_dir)
+            .into_iter()
+            .find(|h| h.origin == origin)
+            .ok_or_else(|| format!("this Mac is not paired with {origin}; connect to it first"))?;
+        let host = oxplow_host::remote::client(&oxplow_ai::secrets::KeychainSecrets, origin)?;
+        let opened = tauri::async_runtime::block_on(host.open_held(project, ""))
+            .map_err(|e| e.to_string())?;
+        let label = next_project_label();
+        let device = oxplow_config::ThisDevice {
+            id: oxplow_domain::DeviceId::parse(&paired.device_id)
+                .map_err(|_| format!("the id {origin} gave this Mac is not a device id"))?,
+            name: paired.device_name.clone(),
+        };
+        let host_name = origin.split("://").nth(1).unwrap_or(origin);
+        let built = build_shell_window(
+            app,
+            &label,
+            &format!("{} — {host_name}", opened.name),
+            &WindowContext {
+                base: Some(&opened.base),
+                token: Some(host.token()),
+                kind: KIND_PROJECT,
+                // Its files are on that machine, not this one.
+                project_dir: None,
+                device: Some(&device),
+            },
+        );
+        if let Err(e) = built {
+            self.release_remote(origin.to_string(), opened.id);
+            return Err(format!("could not create the window: {e}"));
+        }
+        self.registry.insert_remote(&label, origin, &opened.id);
+        self.write_session();
+        tracing::info!(origin, project = %opened.id, label, "opened a project on another machine");
+        Ok(label)
+    }
+
+    /// Let go of `project` on the host at `origin`, in the background.
+    fn release_remote(&self, origin: String, project: String) {
+        let Ok(host) = oxplow_host::remote::client(&oxplow_ai::secrets::KeychainSecrets, &origin)
+        else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = host.release(&project, "").await {
+                tracing::warn!(origin, project, error = %e, "could not release the project there");
+            }
+        });
+    }
+
     /// Let go of `project` on the host, in the background.
     fn release(&self, project: String) {
         let host = self
@@ -479,8 +584,15 @@ impl ShellWindows {
         let Some(closed) = self.registry.remove(label) else {
             return false; // not a project window (launcher, setup, ext-url)
         };
-        if !self.is_quitting() {
-            self.release(closed.project);
+        match &closed.remote {
+            // On another machine's host: closing the window is letting go
+            // there; a quit lets go of nothing (the work goes on).
+            Some(origin) if !self.is_quitting() => {
+                self.release_remote(origin.clone(), closed.project.clone())
+            }
+            Some(_) => {}
+            None if !self.is_quitting() => self.release(closed.project.clone()),
+            None => {}
         }
         tracing::info!(project = %closed.dir.display(), label, "closed project window");
         // Closing one window while others are open means "I'm done with
@@ -517,6 +629,17 @@ impl ShellWindows {
             .map(|e| canonical(Path::new(e)))
             .filter(|dir| is_project(dir))
             .filter(|dir| seen.insert(dir.clone()))
+            .collect()
+    }
+
+    /// Session entries that name a project on another machine's host, in
+    /// order, once each. Pure.
+    pub fn remote_restorable(entries: &[String]) -> Vec<(String, String)> {
+        let mut seen = std::collections::HashSet::new();
+        entries
+            .iter()
+            .filter_map(|e| parse_remote_entry(e))
+            .filter(|r| seen.insert(r.clone()))
             .collect()
     }
 
@@ -610,6 +733,33 @@ pub fn quit_question(
     Some(format!(
         "{names} {verb} using Oxplow on this computer. Quitting stops their projects and agents too."
     ))
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+
+    /// A window on another machine's project is kept in the session as its
+    /// address, and only such an entry reads back as one.
+    #[test]
+    fn a_remote_window_is_its_address_in_the_session() {
+        let entry = remote_entry("https://server.ts.net:7400", "prj-1");
+        assert_eq!(entry, "https://server.ts.net:7400/p/prj-1");
+        assert_eq!(
+            parse_remote_entry(&entry),
+            Some(("https://server.ts.net:7400".into(), "prj-1".into()))
+        );
+        assert_eq!(parse_remote_entry("/Users/me/src/p"), None);
+        assert_eq!(parse_remote_entry("https://x/p/"), None);
+        let entries = vec![entry.clone(), "/Users/me/a".into(), entry];
+        assert_eq!(ShellWindows::remote_restorable(&entries).len(), 1);
+        assert!(ShellWindows::restorable(&entries, &|_| false).is_empty());
+
+        let reg = WindowRegistry::default();
+        reg.insert_remote("project-9", "https://server.ts.net:7400", "prj-1");
+        let w = reg.remove("project-9").unwrap();
+        assert_eq!(w.remote.as_deref(), Some("https://server.ts.net:7400"));
+    }
 }
 
 #[cfg(test)]
