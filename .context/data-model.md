@@ -1866,8 +1866,8 @@ foundation's `thread-activity`, bundled's `usage`), which re-run on `DatasetsCha
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
 V126 (P6.G1), in three lists since V79, and each device's own since V85
-(`device_id`, in the unique index; the rows there were went, so each device
-starts from the panels' declared order): a device's left-nav layout in this
+(`device_id`, in the unique index; the old shared rows were dropped, so each
+device starts from the panels' declared order): a device's left-nav layout in this
 project. A row is a panel (`ext:<namespace>/<id>`) at a
 `visibility_scope` — `thread` (`thread_id`), `stream` (`stream_id`) or
 `project` (neither), FKs cascading as bookmarks' — with its `position` in

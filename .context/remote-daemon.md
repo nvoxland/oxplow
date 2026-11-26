@@ -8,6 +8,24 @@ machine (e.g. an EC2 dev box). Single-user by design; SSH is the auth
 layer. User-facing setup lives in the user docs — this note is the
 developer-facing mechanics.
 
+## What each device has of its own
+
+One daemon serves every device of the person (the Mac app, a paired
+browser, a tablet), and each request names its caller ("Who is asking").
+**Shared by every device:** streams, threads, agent sessions, terminals,
+tasks, bookmarks, and a custom component's memory. **Each device's own:**
+the stream it shows and the thread it shows in each stream
+([data-model.md](./data-model.md) "device_view_state and thread_selection"),
+its tabs of each thread (`tab_session`; [pages-and-tabs.md](./pages-and-tabs.md)
+"Persistence"), its preferences and page memory (`ui_preference`, "Page
+state"), its left-nav panel layout (`panel_layout`) and its page visits
+(`page_visit.device_id`). A device has one window per project ("One window per
+device"). The daemon knows which device was used last ("Last used"), whether
+a window is still there ("Liveness"), and keeps the tabs an agent opens for a
+device that is away ("An agent's tab on a device"). Agents read every
+device's tabs ([pages-and-tabs.md](./pages-and-tabs.md) "What agents see of
+the tabs").
+
 ## Pieces
 
 The event socket says who it is in its query, beside its token: `device`,
@@ -73,8 +91,8 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
 
   **Two lanes, so a stream switch is never starved.** The webview holds six
   HTTP/1.1 connections to a daemon, and `/ipc` calls share them. A refetch
-  storm used to fill all six, and a stream switch took minutes. `invoke`
-  now sends each call through one of two first-in first-out lanes
+  storm can fill all six, so `invoke` sends each call through one of two
+  first-in first-out lanes
   (`createLanes`): **bulk** (4 in flight) and **priority** (2 in flight,
   `PRIORITY_COMMANDS`: `switch_stream`). The two add up to six, so a full
   bulk lane leaves the priority lane its connections; what waits in one
@@ -148,15 +166,14 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
   next bullet.
 - **Auto-resync on reconnect.** Recovery re-hydrates the client stores
   in place — *no* manual full-page reload. The top-level loader
-  (`loadInitialAppState` in `window/useWindowStreams.ts`: streams, current stream + its
-  threads, workspace context), the core-store
+  (`loadInitialAppState` in `window/useWindowStreams.ts`: streams, the caller's
+  stream and its threads, workspace context), the core-store
   subscriptions (`useBackendSubscriptions`: config, agent
   statuses) all register
   `onRemoteReconnect` handlers. The daemon health probe (App.tsx, 2s
-  `/ipc/ping` poll) used to `window.location.reload()` on recovery;
-  it now `triggerRemoteResync()`s instead, so an HTTP-level recovery
-  takes the same in-place resync path (a reload would drop unsaved
-  editor drafts). To make a new surface live-again after a drop,
+  `/ipc/ping` poll) calls `triggerRemoteResync()` on recovery, so an
+  HTTP-level recovery takes the same in-place resync path (a reload would
+  drop unsaved editor drafts). To make a new surface live-again after a drop,
   register an `onRemoteReconnect` re-fetch alongside its event
   subscription.
 - **Launcher connect flow** — `launcher/Launcher.tsx`
@@ -464,8 +481,8 @@ the window used last gets the call ("Last used").
 ## Known v1 gaps
 
 - **Picking a different project** = restarting the daemon with a
-  different `--project` (it's project-scoped, like the shell's
-  shell owns windows, daemons own projects). No remote directory browser.
+  different `--project` (a daemon is project-scoped: the shell owns
+  windows, daemons own projects). No remote directory browser.
 - External-URL tabs and the native menu/clipboard stay local to the
   shell in both modes.
 

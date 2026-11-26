@@ -356,9 +356,9 @@ page link, a backlink row, a search hit, a component's `navigate` and
 (history, bookmarks, a restored tab) and is not an opener: every oxplow
 URI and every allowlisted http(s) URL is a tab, else null. A stream's or
 thread's URI selects it; every other URI opens as itself. Comment anchors
-carry one `data-ref="<uri>"`. Tab sessions are stored under
-`oxplow.layout.v7.sessions`; old
-tabs aren't migrated.
+carry one `data-ref="<uri>"`. Tab sessions are kept by the
+daemon, one per device and thread (`tab_session`); a stored session of an old
+shape isn't migrated.
 
 ## Strict vocabulary candidates
 

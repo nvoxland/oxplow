@@ -24,8 +24,8 @@ command):
 
 | Write | Why it isn't a command |
 |---|---|
-| select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
-| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: a command run record per tab switch would flood `command_run`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
+| select a thread, switch stream (each the caller device's own), report the tabs a window shows (`report_tabs`, live facts only) | UI selection pointers, not project facts |
+| page visits (each tagged with the device it was opened on), usage recording, forgetting a page | implicit navigation telemetry, not an intent: a command run record per tab switch would flood `command_run`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |

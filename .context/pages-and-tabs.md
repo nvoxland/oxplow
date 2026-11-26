@@ -17,9 +17,12 @@ pages are THE shell.
   open settings, close or remove; `+ Add stream` at the panel's foot
   opens the `new-stream` page. The launcher's New Thread… / New Stream…
   reach the same flows. See the Navigator row in "Modules".
-- **Each thread owns its own set of open tabs and an active tab.**
+- **Each thread owns its own set of open tabs and an active tab, on each
+  device.** The daemon keeps them per device (`tab_session`, "Persistence").
   Switching threads restores its tab set; switching streams swaps to the
-  selected thread of the new stream.
+  thread this device shows in the new stream. Each device shows its own
+  stream and thread ([remote-daemon.md](./remote-daemon.md) "What each
+  device has of its own").
 - **A thread's agents are its agent sessions, one tab each.** Every open
   `agent_session` row has a pinned tab (`agent_session:ses3`) leading the
   thread's tabs, in the order the sessions opened its terminal. The tabs follow the rows — `useThreadSessions` reads
@@ -28,8 +31,7 @@ pages are THE shell.
   tab and the active tab would fall to the MRU), and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
   keeps each open session's tab first and drops a closed one's — a
   session opened later still goes ahead of every other tab. **A new
-  thread** (one with no tab list yet; they persist, so it's one never
-  opened here) with no session opens the **session picker** (the
+  thread** (one this device has no stored tabs for yet) with no session opens the **session picker** (the
   `new-session` page). The picker is an ordinary tab after that: its ×
   closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
@@ -94,10 +96,10 @@ what they return.
 | `useWindowStreams` | Every stream and its threads, the shown stream and thread, the switch, the person's stream and thread commands; loaded on mount and on every reconnect. |
 | `useWindowTabs` | Every thread's session of tabs, what each tab registers (title, unsaved edits, Save, Find, actions), the shown thread's active tab and its operations, the agent sessions' tabs, a new thread's first tabs, the tab cap, the buffers the tabs keep. `HOME_TAB`. |
 | `useWindowOpeners` | Where a ref opens (its tab, its file, a symbol's line, an agent session or its transcript, a thread, a stream), in-tab navigation, closing a file with unsaved edits; `handleOpenPageRef` for callers made before it. |
-| `useWindowHost` | The window as the daemon's host (`clientHost.ts`), taken once the window is ready, and the tab report agents read, with focus and visibility. |
+| `useWindowHost` | The window as the daemon's host (`clientHost.ts`), taken once the window is ready, the live tab report agents read (focus, visibility, the shown thread, page detail, runs), and the tabs agents queued while the device was away (`list_queued_tabs`, `forget_queued_tabs`). |
 | `useWindowCommands` | The context keys a command's `when` reads, the person's offers, the commands the window runs itself, the keyboard shortcuts. |
 | `useWindowPages` | The shown thread's tabs as `WindowTab[]` (`window/windowTab.ts`): what draws each page, each body in its navigation context. |
-| `<WindowProviders>` | What every shell's window sits in: the panels' runs and layout, the live origins of the shown thread's tabs, the alert toasts. |
+| `<WindowProviders>` | What every shell's window sits in: the panels' runs and layout, the live origins of the shown thread's tabs, the alert toasts, and `useReportUse` (tells the daemon, at most once a second, that the person uses this window: the device used last). |
 
 Each hook has its own test (`window/*.test.tsx`), and
 `tests-e2e/specs/shell/window.spec.ts` pins the window's behavior across
@@ -276,12 +278,8 @@ chosen", never a tab), and "is this the editor's working-tree file" is
 `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD`, which is a read-only viewer tab).
 
 **No compatibility layer for old ids.** When a kind is renamed or a page
-moves into an extension, its saved tabs/bookmarks/history are dropped
-(the tab-layout keys started fresh again as `oxplow.layout.v3.*` when
-pages became declared, 2026-10-17, as `oxplow.layout.v5.*` when ids
-became URIs, as `oxplow.layout.v6.*` when the view moved to the `#`, and
-as `oxplow.layout.v7.*` when a tab became just its URI; bookmarks
-moved into the project DB and started fresh again) — see the decision in [resources.md](./resources.md).
+moves into an extension, its saved tabs, bookmarks and history are dropped:
+a stored session (`tab_session`) of an old shape reads as none — see the decision in [resources.md](./resources.md).
 
 | Thing | Id format | Example |
 |---|---|---|
@@ -1638,7 +1636,7 @@ thread it shows, whether it is focused and visible, its page runs, and the
 detail the shown page publishes through `tabs/openPageDetail.ts` (a page
 file's `{runId, focus: {node}}`, published by `PageHost`; an editor's
 `{path, caret, selection}`). The report holds no tabs, so it changes only
-when one of those changes. A window is its renderer's `getUiClientId()`. The
+when one of those changes. A window is a page load, named by its renderer's `getUiClientId()` (`con-<uuid>`). The
 backend keeps the reports in memory (`oxplow_app::client_reports`): a window
 not heard from for 5 minutes is forgotten, a report older than a minute is
 listed as stale.
@@ -1793,7 +1791,7 @@ the docs and the skill:
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
 | **page memory** | this page, for the person on this device, every tab of it, across restarts | `ui_preference` (by device), scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
 | **app preference** | the whole app, for the person on this device | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
-| (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
+| (a panel's memory) | a left-nav panel, for the person on this device | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |
 
 `prefs/remembered.ts` holds page memory and app preferences: one store
@@ -1805,7 +1803,7 @@ written, or whose save failed (sent again after a delay and at each read),
 wins over a reloaded one, a value equal to what's there writes
 nothing; tests give it a backend
 (`RememberedContext`). **Nothing touches the browser's storage but
-`shellStorage.ts`**, which holds only the shell's own keys (the tab
+`shellStorage.ts`**, which holds only the shell's own keys (the
 remote daemon and its token, the recent remotes, this browser's device id); `no-direct-storage.test.ts` holds
 every other file to it.
 

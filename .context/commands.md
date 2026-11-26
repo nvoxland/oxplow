@@ -387,7 +387,8 @@ in `CommandSpec::op`.
   the window through `client_host::ClientHost`: an
   `OxplowEvent::ClientCall { id, client, thread_id, actor, scope, op, input }`
   addressed to one window that hosts the scope — the window of the device
-  the run was asked from (its caller), else the window the person used last
+  the run was asked from (its caller; a person's run has no other), else, for
+  a run with no caller, the window the person used last
   (`ClientDevices::last_used`, `.context/remote-daemon.md` "Last used"),
   else the last registered — which does it and answers `answer_client_call { id,
   result | error }` (another window's answer is ignored); the run

@@ -511,7 +511,8 @@ The outer shell should remain app-specific and stream-aware.
 
 The shell should continue to own:
 
-- current stream selection
+- each device's current stream and thread selection (the daemon keeps them
+  per device; the shell follows the caller's)
 - the stream + thread Navigator
 - left sidebar modes
 - bottom panel
