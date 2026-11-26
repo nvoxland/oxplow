@@ -1620,40 +1620,54 @@ window (`editor/buffers.ts`).
 
 ## What agents see of the tabs
 
-Each window reports what it shows (`report_tabs`, debounced 300 ms from
-`window/useWindowHost.ts`, built by the pure `tabs/tabReport.ts` from the sessions):
-every thread's tabs with their shown titles (the tab strip's label, else
-a page's own title, else its kind's label), each tab's `back` and
-`forward` (the ids of its entries before and after, oldest first) and
-`origin` (the title of the collection it was opened from), the one
-selected in each, the thread it shows,
-whether it is focused and visible, and the detail the shown page
-publishes through `tabs/openPageDetail.ts` (a page file's `{runId, focus: {node}}`,
-published by `PageHost`; an editor's `{path, caret, selection}`). A window is its renderer's
-`getUiClientId()`. The backend keeps the reports in memory
-(`oxplow_app::client_reports`): a window not heard from for 5 minutes is
-forgotten, a report older than a minute is listed as stale.
+A device's tabs are its stored ones (`tab_session`, "Persistence"): the
+daemon reads them directly, so an agent sees a device's tabs while the
+device is away. The strip's label of each tab is kept in its current
+entry's `title` (`useWindowPages`), so the stored tab carries the title an
+agent reads; a tab with no title reads as its kind. A tab's `kind` is
+`recordedPageKind` ported to Rust (`client_reports/stored_tabs.rs`): a
+page's route, else the resource, else `http`/`https`, else `link`. `back`
+and `forward` are the ids of the entries before and after the current one,
+oldest first, and `origin` is the title of the collection the entry was
+opened from. A stored session that does not parse is skipped with a
+warning.
+
+Each window also reports what is live (`report_tabs`, debounced 300 ms from
+`window/useWindowHost.ts`, built by the pure `tabs/tabReport.ts`): the
+thread it shows, whether it is focused and visible, its page runs, and the
+detail the shown page publishes through `tabs/openPageDetail.ts` (a page
+file's `{runId, focus: {node}}`, published by `PageHost`; an editor's
+`{path, caret, selection}`). The report holds no tabs, so it changes only
+when one of those changes. A window is its renderer's `getUiClientId()`. The
+backend keeps the reports in memory (`oxplow_app::client_reports`): a window
+not heard from for 5 minutes is forgotten, a report older than a minute is
+listed as stale.
 
 - `oxplow_list_tabs { scope?, thread? }` lists the tabs of a thread
-  (default the caller's), its stream's threads or every thread, in every
-  window: id (a ref), kind, title, thread, stream, agent session for a
-  session tab, `selected` (in its thread, in that window), `visible`
-  (selected, in the thread its window shows, in a visible window),
-  window (`client`: its connection, the page load) and its `device`, and staleness;
-  `unreported` names the threads no window reported. A window's report is
-  keyed by its page load, comes from the request's caller (the report itself
-  names no window), and is dropped when the window's event socket closes;
-  the window sends it again as soon as its socket is back
+  (default the caller's), its stream's threads or every thread, on every
+  device that has tabs stored for them, connected or not, the device used
+  last first: id (a ref), kind, title, thread, stream, agent session for a
+  session tab, `selected` (the device's active tab in that thread),
+  `visible` (selected, and the device's window shows that thread and is
+  visible), `device`, `deviceName` (null when the device is away) and
+  `connected`. A connected device adds `client` (its connection, the page
+  load); a device with a live report adds `reportedAt` and `stale`.
+  `unreported` names the threads no device has tabs stored for. A window's
+  report is keyed by its page load, comes from the request's caller (the
+  report itself names no window), and is dropped when the window's event
+  socket closes; the window sends it again as soon as its socket is back
   (`tabs/useTabReportRepeats.ts`), as well as on its minute heartbeat.
-- `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
-  thread in the window the person used last (`ClientDevices::last_used`),
-  else the one focused last,
-  with `others` (each other window's), or the listed `tab`: its
-  `pageId`, its `page` (the identity, the id without its `#`) and `view`
-  (the `#`, decoded — `uri::build::view_of`; an agent never parses an id), its tab's
-  `back`, `forward` and `origin`, and, for a page file, its tree and run as
-  text (`pages/text.rs`). Detail comes only from a window showing that thread's page. Two windows never
-  collapse into one "open page".
+- `oxplow_get_open_page { thread_id, tab? }` is the tab selected in the
+  thread on the device the person used last (`ClientDevices::last_used`),
+  else on the next device with one, with `others` (each other device's), or
+  the listed `tab`: its `pageId`, its `page` (the identity, the id without
+  its `#`) and `view` (the `#`, decoded — `uri::build::view_of`; an agent
+  never parses an id), its tab's `back`, `forward` and `origin`, its device
+  facts as in the list, and, for a page file, its tree and run as text
+  (`pages/text.rs`). `detail` comes from the device's live report, only for
+  the page its window shows in that thread. Two devices never collapse into
+  one "open page". With nothing open, `reason` says why and `shown` lists
+  what the live windows look at.
 
 Both are read-only: nothing an agent reads activates a tab or a window.
 

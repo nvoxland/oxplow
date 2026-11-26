@@ -457,11 +457,11 @@ export function App() {
     selectedThreadId,
     selectedThreadSessions,
     extensions,
-    tabs: { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread },
+    tabs: { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, openingThread },
     openers: { handleOpenPageRef, handleNavigateInTab },
     switchStream: handleSwitch,
     selectThread: handleSelectThread,
-    view: { effectiveCenterActive, visitContextRef, tabLabelByIdRef },
+    view: { effectiveCenterActive, visitContextRef },
     openQuickOpen: (query) => {
       setQuickOpenQuery(query);
       setQuickOpenVisible(true);

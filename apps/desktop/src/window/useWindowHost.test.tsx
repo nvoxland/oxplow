@@ -57,7 +57,6 @@ function setup(ready: { extensions: unknown[] | null }) {
         view: {
           effectiveCenterActive: tabs.centerActive,
           visitContextRef: { current: { pageTabs: [] } } as never,
-          tabLabelByIdRef: { current: {} },
         },
         openQuickOpen: () => {},
       });

@@ -1481,7 +1481,6 @@ mod tests {
                 focused: true,
                 visible: true,
                 shown_thread: None,
-                threads: vec![],
                 detail_json: None,
                 runs: vec![],
             },

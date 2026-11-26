@@ -43,18 +43,15 @@ export interface WindowHostOptions {
     | "setCenterActive"
     | "tabSavesRef"
     | "tabFindsRef"
-    | "pageTitles"
     | "openingThread"
   >;
   openers: Pick<ReturnType<typeof useWindowOpeners>, "handleOpenPageRef" | "handleNavigateInTab">;
   switchStream: (streamId: string) => Promise<void>;
   selectThread: (streamId: string, threadId: string) => Promise<void>;
-  /** What the shell shows: the active tab it draws, and each page tab's
-   *  label and visit context. */
+  /** What the shell shows: the active tab it draws and its visit context. */
   view: {
     effectiveCenterActive: string;
     visitContextRef: { current: { pageTabs: { id: string }[] } };
-    tabLabelByIdRef: { current: Record<string, string> };
   };
   /** The shell's Quick Open, with a query. */
   openQuickOpen: (query: string) => void;
@@ -79,9 +76,9 @@ export function useWindowHost({
   view,
   openQuickOpen,
 }: WindowHostOptions) {
-  const { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, pageTitles, openingThread } = tabs;
+  const { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, openingThread } = tabs;
   const { handleOpenPageRef, handleNavigateInTab } = openers;
-  const { effectiveCenterActive, visitContextRef, tabLabelByIdRef } = view;
+  const { effectiveCenterActive, visitContextRef } = view;
   // Read when a call comes, so the handlers needn't be made again for it.
   const openQuickOpenRef = useRef(openQuickOpen);
   openQuickOpenRef.current = openQuickOpen;
@@ -127,15 +124,13 @@ export function useWindowHost({
         focused: windowFocused,
         visible: windowVisible,
         shownThread: selectedThreadId ?? null,
-        sessions,
-        titleOf: (tab) => tabLabelByIdRef.current[tab.id] ?? pageTitles[tab.id],
         detail: shown ? getPageDetailStore().get(shown.id) : null,
       });
       lastTabReportRef.current = report;
       tabReporter.send(report);
     }, 300);
     return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, pageRunsTick, windowFocused, windowVisible, tabReporter]);
+  }, [effectiveCenterActive, selectedThreadId, pageDetailTick, pageRunsTick, windowFocused, windowVisible, tabReporter]);
 
   // The window as a command host (`clientHost.ts`): what only it can do,
   // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in

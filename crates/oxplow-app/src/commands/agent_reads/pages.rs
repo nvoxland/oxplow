@@ -1,19 +1,20 @@
-//! What the person's windows show (`.context/pages-and-tabs.md` "What
-//! agents see of the tabs"), read from `ClientReports`:
+//! What the person's devices have open (`.context/pages-and-tabs.md` "What
+//! agents see of the tabs"): each device's stored tabs (`tab_session`),
+//! joined with what its window reports live (`ClientReports`):
 //!
 //! - `pages.read/open { thread_id, tab? }`: the page a thread has open —
-//!   in the window the person used last, with the other windows' beside
+//!   on the device the person used last, with the other devices' beside
 //!   it — or the named tab; for a page, the window's own open run of it
 //!   (`pageRun`), as text, with the node they are on.
 //! - `pages.read/list_tabs { scope?, thread? }`: the tabs of a thread, its
-//!   stream's threads or every thread, in every window, each with whether
-//!   it is selected and on screen and how fresh its report is.
+//!   stream's threads or every thread, on every device with some (connected
+//!   or not), each with whether it is selected and on screen.
 
 use std::sync::Arc;
 
 use oxplow_db::SqlCell;
 use oxplow_domain::uri::build as refs;
-use oxplow_domain::{Actor, CommandError, StreamId, ThreadId, Timestamp};
+use oxplow_domain::{Actor, CommandError, DeviceId, StreamId, ThreadId, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -21,6 +22,8 @@ use serde_json::{json, Value};
 use super::super::ops::Op;
 use super::super::util::{failed, invalid, parse, schema, ServicesSlot};
 use super::super::{Handler, HandlerOutput, Invocation};
+use crate::client_reports::stored_tabs::{self, StoredTab, StoredThread};
+use crate::client_reports::LiveWindow;
 use crate::Services;
 
 /// The commands its operations are declared as.
@@ -88,6 +91,135 @@ async fn threads(svc: &Services) -> Result<Vec<(ThreadId, StreamId)>, CommandErr
         .collect())
 }
 
+/// One device's stored tabs, with what is known of the device now.
+struct DeviceTabs {
+    device: DeviceId,
+    /// Its name, while it is connected.
+    name: Option<String>,
+    /// Its page load, while it is connected.
+    connection: Option<String>,
+    /// What its window shows, when it has reported.
+    live: Option<LiveWindow>,
+    threads: Vec<StoredThread>,
+}
+
+impl DeviceTabs {
+    /// `tab` is on screen: selected in `thread`, which the window shows.
+    fn visible(&self, thread: ThreadId, tab: &StoredTab) -> bool {
+        let selected = self
+            .threads
+            .iter()
+            .find(|t| t.thread == thread)
+            .and_then(StoredThread::selected);
+        selected.is_some_and(|s| s.slot == tab.slot)
+            && self.live.as_ref().is_some_and(|l| l.shows(thread))
+    }
+
+    /// The facts of the device an agent is told beside a tab.
+    fn facts(&self) -> serde_json::Map<String, Value> {
+        let mut out = serde_json::Map::new();
+        out.insert("device".into(), json!(self.device.as_str()));
+        out.insert("deviceName".into(), json!(self.name));
+        out.insert("connected".into(), json!(self.connection.is_some()));
+        if let Some(c) = &self.connection {
+            out.insert("client".into(), json!(c));
+        }
+        out
+    }
+
+    fn report_facts(&self, out: &mut serde_json::Map<String, Value>) {
+        if let Some(l) = &self.live {
+            out.insert("reportedAt".into(), json!(l.reported_at));
+            out.insert("stale".into(), json!(l.stale));
+        }
+    }
+}
+
+/// Every device with tabs stored for `wanted` (all threads when `None`):
+/// the one the person used last first, then the other connected devices by
+/// their windows' order, then the rest by id. A row that doesn't parse is
+/// skipped.
+async fn devices_with_tabs(
+    svc: &Services,
+    wanted: Option<&[ThreadId]>,
+    now: Timestamp,
+) -> Result<Vec<DeviceTabs>, CommandError> {
+    let rows = svc.tab_session_store.list_all().await.map_err(failed)?;
+    let mut by_device: Vec<DeviceTabs> = Vec::new();
+    let windows = svc.client_reports.windows(now);
+    for (device, row) in rows {
+        if wanted.is_some_and(|w| !w.contains(&row.thread_id)) {
+            continue;
+        }
+        let stored = match stored_tabs::parse(device.clone(), row.thread_id, &row.session_json) {
+            Ok(s) => s,
+            Err(error) => {
+                tracing::warn!(%error, device = %device.as_str(), thread = %row.thread_id,
+                    "skipping stored tabs that don't parse");
+                continue;
+            }
+        };
+        match by_device.iter_mut().find(|d| d.device == device) {
+            Some(d) => d.threads.push(stored),
+            None => by_device.push(DeviceTabs {
+                name: svc.client_devices.get(&device).map(|d| d.name),
+                connection: svc
+                    .client_devices
+                    .connection_of(&device)
+                    .map(|c| c.as_str().to_string()),
+                live: windows
+                    .iter()
+                    .find(|w| w.device == device.as_str())
+                    .cloned(),
+                device,
+                threads: vec![stored],
+            }),
+        }
+    }
+    let used = svc.client_devices.last_used().map(|(d, _)| d);
+    let rank = |d: &DeviceTabs| {
+        if Some(&d.device) == used.as_ref() {
+            return (0, 0);
+        }
+        match windows.iter().position(|w| w.device == d.device.as_str()) {
+            Some(i) => (1, i),
+            None => (2, 0),
+        }
+    };
+    by_device.sort_by(|a, b| {
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| a.device.as_str().cmp(b.device.as_str()))
+    });
+    Ok(by_device)
+}
+
+/// The tab selected in `thread` on each device that has one, in device order.
+fn selected_in(devices: &[DeviceTabs], thread: ThreadId) -> Vec<(&DeviceTabs, &StoredTab)> {
+    devices
+        .iter()
+        .filter_map(|d| {
+            let t = d.threads.iter().find(|t| t.thread == thread)?;
+            Some((d, t.selected()?))
+        })
+        .collect()
+}
+
+/// A page open on a device, as an agent reads it.
+fn open_json(thread: ThreadId, device: &DeviceTabs, tab: &StoredTab) -> Value {
+    let mut out = device.facts();
+    out.insert("pageId".into(), json!(tab.id));
+    out.insert("kind".into(), json!(tab.kind));
+    out.insert("back".into(), json!(tab.back));
+    out.insert("forward".into(), json!(tab.forward));
+    out.insert("origin".into(), json!(tab.origin));
+    out.insert("visible".into(), json!(device.visible(thread, tab)));
+    out.insert("reportedAt".into(), Value::Null);
+    out.insert("stale".into(), Value::Null);
+    device.report_facts(&mut out);
+    Value::Object(out)
+}
+
 async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandError> {
     let thread = ThreadId::try_from_str(&input.thread_id).ok_or_else(|| {
         invalid(
@@ -96,48 +228,68 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         )
     })?;
     let now = Timestamp::now();
-    let pages = svc.client_reports.open_pages(thread, now);
-    let (page_id, kind, detail) = match &input.tab {
+    let devices = devices_with_tabs(svc, None, now).await?;
+    let selected = selected_in(&devices, thread);
+    // The page asked for, else the one open on the device used last.
+    let this: Option<(&DeviceTabs, &StoredTab)> = match &input.tab {
         Some(tab) => {
-            let listed = svc.client_reports.tabs(&[thread], now);
-            let Some(found) = listed.iter().find(|t| &t.tab == tab) else {
+            let found = devices.iter().find_map(|d| {
+                let t = d.threads.iter().find(|t| t.thread == thread)?;
+                Some((d, t.tabs.iter().find(|x| &x.id == tab)?))
+            });
+            if found.is_none() {
                 return Err(invalid(
                     "/tab",
                     format!(
-                        "no window shows `{tab}` in this thread; `oxplow_list_tabs` lists them"
+                        "no device has `{tab}` open in this thread; `oxplow_list_tabs` lists them"
                     ),
                 ));
-            };
-            let detail = pages
-                .iter()
-                .find(|p| &p.page_id == tab)
-                .and_then(|p| p.detail_json.clone());
-            (found.tab.clone(), found.kind.clone(), detail)
-        }
-        None => match pages.first() {
-            Some(p) => (p.page_id.clone(), p.kind.clone(), p.detail_json.clone()),
-            None => {
-                // Say why nothing is open, so a null isn't read as "the person
-                // has nothing open": no window reports this thread, or its
-                // window has no tab selected in it — and where the person is.
-                let reported = svc.client_reports.reported_threads(now);
-                let shown: Vec<Value> = svc
-                    .client_reports
-                    .shown(now)
-                    .into_iter()
-                    .map(|(t, tab)| json!({ "thread": refs::thread_uri(t), "selected": tab }))
-                    .collect();
-                let reason = if !reported.contains(&thread) {
-                    "no window reports this thread's tabs (none is open on it, or none has told oxplow since it started); `shown` lists the threads the person's windows are looking at"
-                } else {
-                    "a window reports this thread's tabs but none is selected in it"
-                };
-                return Ok(json!({ "open": null, "others": [], "reason": reason, "shown": shown }));
             }
-        },
+            found
+        }
+        None => selected.first().copied(),
     };
-    let detail: Value = detail
-        .as_deref()
+    let Some((device, tab)) = this else {
+        // Say why nothing is open, so a null isn't read as "the person has
+        // nothing open": no device has tabs stored for this thread, or none
+        // has one selected in it — and where the person is.
+        let stored = devices
+            .iter()
+            .any(|d| d.threads.iter().any(|t| t.thread == thread));
+        let shown: Vec<Value> = svc
+            .client_reports
+            .windows(now)
+            .into_iter()
+            .filter_map(|w| {
+                let t = w.shown_thread?;
+                let selected = devices
+                    .iter()
+                    .filter(|d| d.device.as_str() == w.device)
+                    .find_map(|d| d.threads.iter().find(|x| x.thread == t))
+                    .and_then(StoredThread::selected)
+                    .map(|s| s.id.clone());
+                Some(json!({ "thread": refs::thread_uri(t), "selected": selected }))
+            })
+            .collect();
+        let reason = if !stored {
+            "no device has tabs stored for this thread (none is open on it, or none has told oxplow since it started); `shown` lists the threads the person's windows are looking at"
+        } else {
+            "a device has this thread's tabs stored but none is selected in it"
+        };
+        return Ok(json!({ "open": null, "others": [], "reason": reason, "shown": shown }));
+    };
+    // The window publishes detail for the page it shows.
+    let is_shown = device
+        .threads
+        .iter()
+        .find(|t| t.thread == thread)
+        .and_then(StoredThread::selected)
+        .is_some_and(|s| s.slot == tab.slot);
+    let detail: Value = device
+        .live
+        .as_ref()
+        .filter(|l| is_shown && l.shown_thread == Some(thread))
+        .and_then(|l| l.detail_json.as_deref())
         .and_then(|d| serde_json::from_str(d).ok())
         .unwrap_or(Value::Null);
     // A page: the window's own open run, as the person sees it.
@@ -160,42 +312,28 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         },
         None => Value::Null,
     };
-    let this = pages.iter().find(|p| p.page_id == page_id);
     // What it is (the URI without its `#`) and how it's viewed (the `#`'s
     // params: a filter, a pick, a line); a URI that isn't oxplow's is as it is.
-    let (page, view) = match oxplow_domain::uri::oxplow_uri::OxplowUri::parse(&page_id) {
+    let (page, view) = match oxplow_domain::uri::oxplow_uri::OxplowUri::parse(&tab.id) {
         Ok(u) => (u.identity(), u.view().clone()),
-        Err(_) => (page_id.clone(), Default::default()),
+        Err(_) => (tab.id.clone(), Default::default()),
     };
     let view: serde_json::Map<String, Value> = view
         .into_iter()
         .map(|(k, v)| (k, Value::String(v)))
         .collect();
-    let others: Vec<&crate::client_reports::OpenPage> = pages
+    let others: Vec<Value> = selected
         .iter()
-        .filter(|p| this.is_none_or(|t| t.client != p.client))
+        .filter(|(d, _)| d.device != device.device)
+        .map(|(d, t)| open_json(thread, d, t))
         .collect();
-    Ok(json!({
-        "open": {
-            "pageId": page_id,
-            // What it is and how it's viewed, apart: the id is only their
-            // string form.
-            "page": page,
-            "view": view,
-            "kind": kind,
-            "detail": detail,
-            "back": this.map(|p| p.back.clone()).unwrap_or_default(),
-            "forward": this.map(|p| p.forward.clone()).unwrap_or_default(),
-            "origin": this.and_then(|p| p.origin.clone()),
-            "client": this.map(|p| p.client.clone()),
-            "device": this.map(|p| p.device.clone()),
-            "visible": this.is_some_and(|p| p.visible),
-            "reportedAt": this.map(|p| p.reported_at),
-            "stale": this.is_some_and(|p| p.stale),
-        },
-        "others": serde_json::to_value(others).map_err(failed)?,
-        "pageRun": page_run,
-    }))
+    let mut open = open_json(thread, device, tab);
+    let fields = open.as_object_mut().expect("an object");
+    // What it is and how it's viewed, apart: the id is only their string form.
+    fields.insert("page".into(), json!(page));
+    fields.insert("view".into(), Value::Object(view));
+    fields.insert("detail".into(), detail);
+    Ok(json!({ "open": open, "others": others, "pageRun": page_run }))
 }
 
 async fn list_tabs(
@@ -230,36 +368,51 @@ async fn list_tabs(
             ))
         }
     };
-    let now = Timestamp::now();
-    let reported = svc.client_reports.reported_threads(now);
-    let tabs: Vec<Value> = svc
-        .client_reports
-        .tabs(&wanted, now)
-        .into_iter()
-        .map(|t| {
-            json!({
-                "tab": t.tab,
-                "kind": t.kind,
-                "title": t.title,
-                "thread": t.thread.to_string(),
-                "stream": stream_of(t.thread).map(|s| s.to_string()),
+    let devices = devices_with_tabs(svc, Some(&wanted), Timestamp::now()).await?;
+    let mut tabs: Vec<Value> = Vec::new();
+    for device in &devices {
+        for stored in &device.threads {
+            let selected = stored.selected().map(|s| s.slot.as_str());
+            for tab in &stored.tabs {
+                let mut row = device.facts();
+                row.insert("tab".into(), json!(tab.id));
+                row.insert("kind".into(), json!(tab.kind));
+                row.insert("title".into(), json!(tab.title));
+                row.insert("thread".into(), json!(stored.thread.to_string()));
+                row.insert(
+                    "stream".into(),
+                    json!(stream_of(stored.thread).map(|s| s.to_string())),
+                );
                 // A session's tab is its session: what the tab names, not
                 // what the window called its kind.
-                "session": (oxplow_domain::uri::build::resource_of(&t.tab).as_deref()
-                    == Some(oxplow_domain::uri::resources::AGENT_SESSION))
-                .then(|| oxplow_domain::uri::build::id_of(&t.tab, oxplow_domain::uri::resources::AGENT_SESSION).ok()).flatten(),
-                "selected": t.selected,
-                "visible": t.visible,
-                "client": t.client,
-                "device": t.device,
-                "reportedAt": t.reported_at,
-                "stale": t.stale,
-            })
-        })
-        .collect();
+                row.insert(
+                    "session".into(),
+                    json!((oxplow_domain::uri::build::resource_of(&tab.id).as_deref()
+                        == Some(oxplow_domain::uri::resources::AGENT_SESSION))
+                    .then(|| oxplow_domain::uri::build::id_of(
+                        &tab.id,
+                        oxplow_domain::uri::resources::AGENT_SESSION
+                    )
+                    .ok())
+                    .flatten()),
+                );
+                row.insert(
+                    "selected".into(),
+                    json!(selected == Some(tab.slot.as_str())),
+                );
+                row.insert("visible".into(), json!(device.visible(stored.thread, tab)));
+                device.report_facts(&mut row);
+                tabs.push(Value::Object(row));
+            }
+        }
+    }
     let unreported: Vec<String> = wanted
         .iter()
-        .filter(|t| !reported.contains(t))
+        .filter(|t| {
+            !devices
+                .iter()
+                .any(|d| d.threads.iter().any(|s| s.thread == **t))
+        })
         .map(|t| refs::thread_uri(*t))
         .collect();
     Ok(json!({ "tabs": tabs, "unreported": unreported }))
@@ -309,18 +462,81 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client_reports::{ReportedTab, TabReport, ThreadTabs};
+    use crate::client_reports::TabReport;
     use crate::test_fixtures::services_with_thread;
+    use oxplow_domain::{DeviceDescriptor, DeviceKind};
 
-    fn tab(id: &str, kind: &str) -> ReportedTab {
-        ReportedTab {
-            id: id.into(),
-            kind: kind.into(),
-            title: format!("{id} title"),
-            back: Vec::new(),
-            forward: Vec::new(),
-            origin: None,
+    /// The page load a test names `a`, `b`, `w1`…: a fixed `con-<uuid>` per
+    /// name.
+    pub(super) fn con(name: &str) -> String {
+        let n: u32 = name.bytes().map(u32::from).sum();
+        format!("con-00000000-0000-4000-8000-{n:012x}")
+    }
+
+    /// The device a test names: a fixed `dev-<uuid>` per name.
+    pub(super) fn device(name: &str) -> DeviceId {
+        let n: u32 = name.bytes().map(u32::from).sum();
+        DeviceId::parse(&format!("dev-00000000-0000-4000-8000-{n:012x}")).unwrap()
+    }
+
+    pub(super) fn caller(name: &str) -> oxplow_domain::Caller {
+        oxplow_domain::Caller {
+            device: device(name),
+            connection: oxplow_domain::ConnectionId::parse(&con(name)).unwrap(),
         }
+    }
+
+    /// The device `name` connects (its window is `con(name)`).
+    pub(super) fn connect(svc: &Services, name: &str) {
+        svc.client_devices
+            .connected(
+                DeviceDescriptor {
+                    id: device(name),
+                    name: format!("{name} device"),
+                    kind: DeviceKind::Desktop,
+                },
+                caller(name).connection,
+            )
+            .unwrap();
+    }
+
+    /// `name`'s window reports showing `thread`.
+    pub(super) fn report(svc: &Services, name: &str, focused: bool, thread: ThreadId) {
+        svc.client_reports.report(
+            &caller(name),
+            TabReport {
+                runs: Vec::new(),
+                focused,
+                visible: true,
+                shown_thread: Some(thread),
+                detail_json: Some(r#"{"line":3}"#.into()),
+            },
+            Timestamp::now(),
+        );
+    }
+
+    /// `name`'s stored tabs of `thread`: one entry per tab (an id and its
+    /// title), `active` selected.
+    pub(super) async fn store(
+        svc: &Services,
+        name: &str,
+        thread: ThreadId,
+        tabs: &[(&str, &str)],
+        active: usize,
+    ) {
+        let tabs: Vec<Value> = tabs
+            .iter()
+            .enumerate()
+            .map(|(i, (id, title))| {
+                json!({ "slot": format!("t{i}"), "at": 0,
+                    "entries": [{ "ref": { "id": id }, "title": title }] })
+            })
+            .collect();
+        let session = json!({ "tabs": tabs, "active": format!("t{active}"), "mru": [], "next": 9 });
+        svc.tab_session_store
+            .save(&device(name), &thread, session.to_string(), None)
+            .await
+            .unwrap();
     }
 
     /// The open page reads as what it is and how it's viewed: its identity
@@ -335,22 +551,24 @@ mod tests {
             stream_id: None,
         };
         let id = "oxplow:oxplow/page?page=acme/commits#q=numbat%20bay&range=7d";
-        report(
-            &fx.svc,
-            "a",
-            true,
-            fx.thread,
-            vec![ReportedTab {
-                back: vec!["oxplow:oxplow/knowledge?id=home&store=oxwiki".into()],
-                forward: vec![
-                    "oxplow:oxplow/page?page=acme/commits#commit=abc&q=numbat%20bay&range=7d"
-                        .into(),
-                ],
-                origin: Some("Recent commits".into()),
-                ..tab(id, "acme/commits")
-            }],
-            id,
-        );
+        let next = "oxplow:oxplow/page?page=acme/commits#commit=abc&q=numbat%20bay&range=7d";
+        let home = "oxplow:oxplow/knowledge?id=home&store=oxwiki";
+        let session = json!({
+            "tabs": [{ "slot": "t1", "at": 1, "entries": [
+                { "ref": { "id": home } },
+                { "ref": { "id": id }, "title": "Commits",
+                  "from": { "title": "Recent commits", "items": [], "index": 0 } },
+                { "ref": { "id": next } },
+            ] }],
+            "active": "t1", "mru": ["t1"], "next": 2
+        });
+        fx.svc
+            .tab_session_store
+            .save(&device("a"), &fx.thread, session.to_string(), None)
+            .await
+            .unwrap();
+        connect(&fx.svc, "a");
+        report(&fx.svc, "a", true, fx.thread);
         let open = fx
             .svc
             .commands
@@ -364,67 +582,21 @@ mod tests {
             .unwrap()
             .result;
         assert_eq!(open["open"]["pageId"], id);
+        assert_eq!(open["open"]["kind"], "acme/commits");
         assert_eq!(open["open"]["page"], "oxplow:oxplow/page?page=acme/commits");
         assert_eq!(
             open["open"]["view"],
             json!({ "range": "7d", "q": "numbat bay" })
         );
-        assert_eq!(
-            open["open"]["back"],
-            json!(["oxplow:oxplow/knowledge?id=home&store=oxwiki"])
-        );
-        assert_eq!(
-            open["open"]["forward"][0],
-            "oxplow:oxplow/page?page=acme/commits#commit=abc&q=numbat%20bay&range=7d"
-        );
+        assert_eq!(open["open"]["back"], json!([home]));
+        assert_eq!(open["open"]["forward"], json!([next]));
         assert_eq!(open["open"]["origin"], "Recent commits");
     }
 
-    /// The page load a test names `a`, `b`, `w1`…: a fixed `con-<uuid>` per
-    /// name, on one device.
-    pub(super) fn con(name: &str) -> String {
-        let n: u32 = name.bytes().map(u32::from).sum();
-        format!("con-00000000-0000-4000-8000-{n:012x}")
-    }
-
-    pub(super) fn caller(name: &str) -> oxplow_domain::Caller {
-        oxplow_domain::Caller {
-            device: oxplow_domain::DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427")
-                .unwrap(),
-            connection: oxplow_domain::ConnectionId::parse(&con(name)).unwrap(),
-        }
-    }
-
-    fn report(
-        svc: &Services,
-        client: &str,
-        focused: bool,
-        thread: ThreadId,
-        tabs: Vec<ReportedTab>,
-        active: &str,
-    ) {
-        svc.client_reports.report(
-            &caller(client),
-            TabReport {
-                runs: Vec::new(),
-                focused,
-                visible: true,
-                shown_thread: Some(thread),
-                threads: vec![ThreadTabs {
-                    thread,
-                    tabs,
-                    active: Some(active.into()),
-                }],
-                detail_json: Some(r#"{"line":3}"#.into()),
-            },
-            Timestamp::now(),
-        );
-    }
-
-    /// What a window reported open in a thread reads back through the bus
-    /// (null while nothing has been reported), naming its window, with the
-    /// other windows' pages beside it; a listed tab reads by its id; a
-    /// non-thread id is refused at its field.
+    /// What a device stored open in a thread reads back through the bus
+    /// (null while nothing is stored), naming its device, with the other
+    /// devices' pages beside it; a listed tab reads by its id; a non-thread
+    /// id is refused at its field.
     #[tokio::test]
     async fn the_open_page_reads_through_the_bus() {
         let fx = services_with_thread().await;
@@ -443,40 +615,39 @@ mod tests {
         assert_eq!(none.result["open"], Value::Null);
         assert!(none.command_run_id.is_none(), "a read leaves no record");
 
-        report(
-            &fx.svc,
-            "b",
-            false,
-            fx.thread,
-            vec![tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki")],
-            "oxplow:oxplow/knowledge?id=home&store=oxwiki",
-        );
-        report(
+        let home = "oxplow:oxplow/knowledge?id=home&store=oxwiki";
+        let file = "oxplow:oxplow/file?path=src/a.rs";
+        let settings = "oxplow:oxplow/page?page=settings";
+        store(&fx.svc, "b", fx.thread, &[(home, "Home")], 0).await;
+        store(
             &fx.svc,
             "a",
-            true,
             fx.thread,
-            vec![
-                tab("oxplow:oxplow/file?path=src/a.rs", "file"),
-                tab("oxplow:oxplow/page?page=settings", "settings"),
-            ],
-            "oxplow:oxplow/file?path=src/a.rs",
-        );
+            &[(file, "a.rs"), (settings, "Settings")],
+            0,
+        )
+        .await;
+        connect(&fx.svc, "b");
+        connect(&fx.svc, "a");
+        report(&fx.svc, "b", false, fx.thread);
+        report(&fx.svc, "a", true, fx.thread);
+        // The person uses a last: it leads.
+        fx.svc.client_devices.used(&device("a"));
         let open = run(json!({ "thread_id": tid })).await.unwrap().result;
-        assert_eq!(open["open"]["pageId"], "oxplow:oxplow/file?path=src/a.rs");
+        assert_eq!(open["open"]["pageId"], file);
         assert_eq!(open["open"]["client"], con("a"));
-        assert_eq!(open["open"]["device"], caller("a").device.to_string());
+        assert_eq!(open["open"]["device"], device("a").to_string());
+        assert_eq!(open["open"]["connected"], true);
+        assert_eq!(open["open"]["visible"], true);
         assert_eq!(open["open"]["detail"]["line"], 3);
-        assert_eq!(
-            open["others"][0]["pageId"],
-            "oxplow:oxplow/knowledge?id=home&store=oxwiki"
-        );
+        assert_eq!(open["others"][0]["pageId"], home);
+        assert_eq!(open["others"][0]["device"], device("b").to_string());
 
-        let by_tab = run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/page?page=settings" }))
+        let by_tab = run(json!({ "thread_id": tid, "tab": settings }))
             .await
             .unwrap()
             .result;
-        assert_eq!(by_tab["open"]["pageId"], "oxplow:oxplow/page?page=settings");
+        assert_eq!(by_tab["open"]["pageId"], settings);
         assert_eq!(
             by_tab["open"]["detail"],
             Value::Null,
@@ -499,7 +670,8 @@ mod tests {
     }
 
     /// The tabs of the caller's thread by default, of its stream or the
-    /// project on request; a thread no window reported is named as such.
+    /// project on request; a thread no device stored tabs for is named as
+    /// such.
     #[tokio::test]
     async fn tabs_are_listed_by_scope() {
         let fx = services_with_thread().await;
@@ -523,37 +695,39 @@ mod tests {
         assert_eq!(empty["tabs"], json!([]));
         assert_eq!(empty["unreported"], json!([refs::thread_uri(fx.thread)]));
 
-        report(
+        let home = "oxplow:oxplow/knowledge?id=home&store=oxwiki";
+        store(
             &fx.svc,
             "a",
-            true,
             fx.thread,
-            vec![
-                tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki"),
-                tab("oxplow:oxplow/agent_session?id=ses1", "agent_session"),
+            &[
+                (home, "Home"),
+                ("oxplow:oxplow/agent_session?id=ses1", "Session"),
             ],
-            "oxplow:oxplow/knowledge?id=home&store=oxwiki",
-        );
+            0,
+        )
+        .await;
+        connect(&fx.svc, "a");
+        report(&fx.svc, "a", true, fx.thread);
         let listed = run(json!({ "scope": "stream" })).await;
         let rows = listed["tabs"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0]["tab"],
-            "oxplow:oxplow/knowledge?id=home&store=oxwiki"
-        );
-        assert_eq!(
-            rows[0]["title"],
-            "oxplow:oxplow/knowledge?id=home&store=oxwiki title"
-        );
+        assert_eq!(rows[0]["tab"], home);
+        assert_eq!(rows[0]["title"], "Home");
+        assert_eq!(rows[0]["kind"], "oxplow/knowledge");
         assert_eq!(rows[0]["thread"], fx.thread.to_string());
         assert_eq!(rows[0]["client"], con("a"));
-        assert_eq!(rows[0]["device"], caller("a").device.to_string());
+        assert_eq!(rows[0]["device"], device("a").to_string());
+        assert_eq!(rows[0]["deviceName"], "a device");
+        assert_eq!(rows[0]["connected"], true);
         assert_eq!(
             (rows[0]["selected"].clone(), rows[0]["visible"].clone()),
             (json!(true), json!(true))
         );
+        assert_eq!(rows[0]["stale"], false);
         assert_eq!(rows[1]["session"], "ses1");
         assert_eq!(rows[1]["selected"], false);
+        assert_eq!(rows[1]["visible"], false);
         assert_eq!(listed["unreported"], json!([]));
         assert_eq!(
             run(json!({ "scope": "project" })).await["tabs"]
@@ -565,6 +739,93 @@ mod tests {
         let named = run(json!({ "thread": fx.thread.to_string() })).await;
         assert_eq!(named["tabs"].as_array().unwrap().len(), 2);
     }
+
+    /// A device that is not connected still lists its tabs: not connected,
+    /// with no window to name, nothing on screen and no report to age.
+    #[tokio::test]
+    async fn a_device_that_is_away_still_lists_its_tabs() {
+        let fx = services_with_thread().await;
+        let actor = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let home = "oxplow:oxplow/knowledge?id=home&store=oxwiki";
+        store(&fx.svc, "tablet", fx.thread, &[(home, "Home")], 0).await;
+        let listed = fx
+            .svc
+            .commands
+            .run(&actor, PAGE_LIST_TABS, json!({}), false)
+            .await
+            .unwrap()
+            .result;
+        let row = &listed["tabs"][0];
+        assert_eq!(row["tab"], home);
+        assert_eq!(row["connected"], false);
+        assert_eq!(row["device"], device("tablet").to_string());
+        assert_eq!(row["selected"], true);
+        assert_eq!(row["visible"], false);
+        assert!(row.get("client").is_none(), "{row}");
+        assert!(row.get("stale").is_none(), "{row}");
+        assert_eq!(listed["unreported"], json!([]));
+
+        let open = fx
+            .svc
+            .commands
+            .run(
+                &actor,
+                PAGE_OPEN,
+                json!({ "thread_id": fx.thread.to_string() }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(open["open"]["pageId"], home);
+        assert_eq!(open["open"]["connected"], false);
+        assert_eq!(open["open"]["detail"], Value::Null);
+    }
+
+    /// The device the person used last leads, ahead of one that only
+    /// reported more lately and of one that is away; a stored session that
+    /// doesn't parse is skipped.
+    #[tokio::test]
+    async fn the_device_used_last_leads() {
+        let fx = services_with_thread().await;
+        let actor = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let page = |n: &str| format!("oxplow:oxplow/page?page={n}");
+        for name in ["a", "b", "c"] {
+            store(&fx.svc, name, fx.thread, &[(&page(name), name)], 0).await;
+        }
+        fx.svc
+            .tab_session_store
+            .save(&device("bad"), &fx.thread, "{\"tabs\":3}".into(), None)
+            .await
+            .unwrap();
+        connect(&fx.svc, "a");
+        connect(&fx.svc, "b");
+        report(&fx.svc, "a", true, fx.thread);
+        report(&fx.svc, "b", false, fx.thread);
+        fx.svc.client_devices.used(&device("b"));
+        let listed = fx
+            .svc
+            .commands
+            .run(&actor, PAGE_LIST_TABS, json!({}), false)
+            .await
+            .unwrap()
+            .result;
+        let order: Vec<&str> = listed["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(order, ["b", "a", "c"]);
+    }
 }
 
 #[cfg(test)]
@@ -573,8 +834,8 @@ mod page_run_tests {
     use oxplow_domain::{Actor, Timestamp};
     use serde_json::json;
 
+    use super::tests::{caller, connect, store};
     use super::PAGE_OPEN;
-    use crate::client_reports::{ReportedTab, TabReport, ThreadTabs};
     use crate::pages::runner::{RunRequest, RunTarget};
     use crate::pages::test_support::fixture;
 
@@ -596,30 +857,20 @@ mod page_run_tests {
                     ctx: crate::pages::spec::ViewContext::default(),
                     viewer: Actor::Human,
                 },
-                &super::tests::con("w1"),
+                caller("w1").connection.as_str(),
             )
             .await
             .unwrap();
         let id = "oxplow:oxplow/page?page=acme/numbers#n=3&node=big";
+        store(&svc, "w1", thread, &[(id, "Numbers")], 0).await;
+        connect(&svc, "w1");
         svc.client_reports.report(
-            &super::tests::caller("w1"),
-            TabReport {
+            &caller("w1"),
+            crate::client_reports::TabReport {
                 runs: Vec::new(),
                 focused: true,
                 visible: true,
                 shown_thread: Some(thread),
-                threads: vec![ThreadTabs {
-                    thread,
-                    tabs: vec![ReportedTab {
-                        id: id.into(),
-                        kind: "acme/numbers".into(),
-                        title: "Numbers".into(),
-                        back: vec![],
-                        forward: vec![],
-                        origin: None,
-                    }],
-                    active: Some(id.into()),
-                }],
                 detail_json: Some(
                     json!({ "runId": run_id, "focus": { "node": "big" } }).to_string(),
                 ),

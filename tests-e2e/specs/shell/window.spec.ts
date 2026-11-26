@@ -198,12 +198,16 @@ test("the tab report lists the strip's labels and its open page is the shown tab
   await open(page, daemon, home, { new_tab: true });
   await until("report of the home tab", 15_000, selectedIs(home));
 
-  const tabs = await listed();
-  expect(tabs.map((t) => [t.tab, t.title, t.selected])).toEqual([
+  const want = [
     [newSession, "New Session", false],
     [second, "Suite Second", false],
     [home, "Suite Home", true],
-  ]);
+  ];
+  const shape = (all: Tab[]) => JSON.stringify(all.map((t) => [t.tab, t.title, t.selected]));
+  // The strip's labels reach the stored tabs with the next save.
+  await until("the stored titles", 15_000, async () => shape(await listed()) === JSON.stringify(want));
+  const tabs = await listed();
+  expect(tabs.map((t) => [t.tab, t.title, t.selected])).toEqual(want);
   // Each title is the label the strip draws on that tab.
   for (const t of tabs) await expect(tab(page, t.tab)).toContainText(t.title);
   expect(await openPage()).toMatchObject({ pageId: home, kind: "e2e/home" });

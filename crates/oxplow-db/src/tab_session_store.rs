@@ -74,6 +74,37 @@ impl TabSessionStore {
             .await
     }
 
+    /// Every device's tabs of every thread, by device then thread: what an
+    /// agent reads of the tabs open on the person's devices.
+    pub async fn list_all(&self) -> Result<Vec<(DeviceId, TabSession)>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT device_id, thread_id, session_json, revision FROM tab_session
+                     ORDER BY device_id, thread_id",
+                )?;
+                let rows = stmt.query_map([], |r| {
+                    let device: String = r.get(0)?;
+                    Ok((
+                        device,
+                        TabSession {
+                            thread_id: ThreadId::new(r.get(1)?),
+                            session_json: r.get(2)?,
+                            revision: TabRevision(r.get(3)?),
+                        },
+                    ))
+                })?;
+                // A device id that doesn't parse can't have been saved (the
+                // RPC layer takes it from a caller), so such a row is skipped.
+                Ok(rows
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter_map(|(d, s)| DeviceId::parse(&d).ok().map(|d| (d, s)))
+                    .collect())
+            })
+            .await
+    }
+
     /// Keep `session_json` as `device`'s tabs of `thread`, if the row is still
     /// at `revision` (`None`: the device has no row for it yet). When it moved
     /// on since, nothing is written and the answer says where it is.
@@ -241,6 +272,19 @@ mod tests {
         );
         // Another device has its own.
         assert!(store.list(&tablet).await.unwrap().is_empty());
+        store
+            .save(&tablet, &thread, "{\"b\":1}".into(), None)
+            .await
+            .unwrap();
+        let all = store.list_all().await.unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all
+            .iter()
+            .any(|(d, s)| d == &tablet && s.session_json == "{\"b\":1}"));
+        assert!(all
+            .iter()
+            .any(|(d, s)| d == &mac && s.session_json == "{\"a\":2}"));
+        store.forget(&tablet, &thread).await.unwrap();
 
         store.forget(&mac, &thread).await.unwrap();
         assert!(store.list(&mac).await.unwrap().is_empty());

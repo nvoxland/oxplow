@@ -22,6 +22,9 @@ function thread(): Session {
   return navigate(s, s.active!, { ref: second });
 }
 
+let updates: Array<[string, Session]> = [];
+const thread1 = thread();
+
 function setup(over: { pageTitles?: Record<string, string>; dirtyTabs?: Record<string, boolean> } = {}) {
   const noop = () => {};
   return renderHook(() =>
@@ -37,7 +40,7 @@ function setup(over: { pageTitles?: Record<string, string>; dirtyTabs?: Record<s
       bookmarks: [],
       tabs: {
         sessions: { thr1: thread() },
-        updateSession: noop,
+        updateSession: (thread: string, f: (s: Session) => Session) => updates.push([thread, f(thread === "thr1" ? thread1 : thread1)]),
         openTab: noop,
         closePageTab: noop,
         handleGoBack: noop,
@@ -75,4 +78,11 @@ test("a page's own title and unsaved edits show on its tab", () => {
   const tab = hook.result.current.windowTabs.find((t) => t.id === second.id)!;
   expect(tab.label).toBe("Item two");
   expect(tab.dirty).toBe(true);
+});
+
+test("each tab's strip label is kept as its current entry's title, for agents", () => {
+  updates = [];
+  setup({ pageTitles: { [second.id]: "Item two" } });
+  const titled = updates.find(([, s]) => s.tabs.some((t) => t.entries[t.at]!.title === "Item two"));
+  expect(titled?.[0]).toBe("thr1");
 });

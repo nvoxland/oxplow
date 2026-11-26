@@ -31,7 +31,7 @@ import { type TabRef } from "../tabs/tabState.js";
 import { type Page as PageFile } from "../tauri-bridge/generated/bindings.js";
 import { identityOf, paramOf, parseUri, typeOf } from "../uri/uri.js";
 import { type VisibilityScope } from "../visibilityScope.js";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 export interface WindowPagesOptions {
   stream: Stream | null;
   selectedThread: Thread | null;
@@ -408,6 +408,24 @@ export function useWindowPages({
     extensions,
     renderersOf,
   ]);
+
+  // Each tab's label is kept as its current entry's title: agents read the
+  // stored tabs (`tab_session`), and the label's rule stays here, in one place.
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    const session = sessions[selectedThreadId];
+    if (!session) return;
+    const labels = tabLabelByIdRef.current;
+    const stale = session.tabs.filter((t) => {
+      const entry = currentEntry(t);
+      const label = labels[entry.ref.id];
+      return !!label && label !== entry.title;
+    });
+    if (stale.length === 0) return;
+    updateSession(selectedThreadId, (s) =>
+      stale.reduce((acc, t) => sessionSetTitle(acc, t.slot, labels[currentEntry(t).ref.id]!), s),
+    );
+  }, [windowTabs, sessions, selectedThreadId, updateSession, tabLabelByIdRef]);
 
   return { windowTabs, renderersOf };
 }

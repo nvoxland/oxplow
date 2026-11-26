@@ -382,7 +382,11 @@ it sends `{"channel":"used"}` on its event socket, at most once a second
 device's last use in memory (`ClientDevices::used`) and answers which
 connected page load was used last (`ClientDevices::last_used`; before any use
 is told, the newest connection): "last used in this project", where a call
-that no device asked for goes.
+that no device asked for goes. An agent reads the tabs of every device, the
+one used last first (`.context/pages-and-tabs.md` "What agents see of the
+tabs"): the tabs are the device's stored ones, so an away device lists them
+too; the window's tab report holds only live facts (the shown thread, focus,
+visibility, detail, runs).
 
 ### One window per device
 

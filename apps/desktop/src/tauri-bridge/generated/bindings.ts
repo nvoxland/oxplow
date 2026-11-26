@@ -5871,31 +5871,6 @@ export type ReportInput = {
 	format?: string,
 };
 
-/**  One tab, as its window shows it. */
-export type ReportedTab = {
-	/**
-	 *  Its tab id: a canonical ref (`oxplow:oxplow/task?id=tsk3&provider=oxtask`,
-	 *  `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
-	 */
-	id: string,
-	/**  Its page kind (`task`, `page`, `agent_session`). */
-	kind: string,
-	/**  The title on the tab. */
-	title: string,
-	/**
-	 *  Where its Back leads: the ids of the entries before the one it
-	 *  shows, oldest first.
-	 */
-	back?: string[],
-	/**  Where its Forward leads (the ids of the entries after it). */
-	forward?: string[],
-	/**
-	 *  The collection the page was opened from (its title), whose items
-	 *  Up and Down step through.
-	 */
-	origin?: string | null,
-};
-
 /**  A declared resource. */
 export type ResourceDecl = {
 	/**  `<extension>/<name>` (`oxplow/file`). */
@@ -6449,7 +6424,6 @@ export type TabReport = {
 	visible: boolean,
 	/**  The thread the window shows. */
 	shown_thread: ThreadId | null,
-	threads: ThreadTabs[],
 	/**
 	 *  The detail the shown thread's active page publishes (JSON text: a
 	 *  page's `{pageId, params}`, an editor's `{path, revision, selection}`).
@@ -6564,14 +6538,6 @@ export type ThreadMark = "amber" | "red" | "green" | "blue" | "violet";
 export type ThreadState = {
 	selectedThreadId: ThreadId | null,
 	threads: Thread[],
-};
-
-/**  A thread's tabs in one window. */
-export type ThreadTabs = {
-	thread: ThreadId,
-	tabs: ReportedTab[],
-	/**  The tab selected in the thread (its id); none when none is. */
-	active: string | null,
 };
 
 /**
