@@ -441,6 +441,11 @@ device's own (migration V82; the device is the request's caller,
   this device has no row for, with no agent session, opens the session
   picker on it (the new-thread signal, per device).
 
+- `tab_queued(id, device_id, thread_id, uri, queued_at)` (V87): a tab an
+  agent opened for a device that was away (`TabQueueStore`). The device takes
+  its rows, oldest first, when its window next connects, and they are
+  deleted as they are read; a thread that goes takes its rows.
+
 A device's choice that was archived (a stream) or closed (a thread) since,
 on another device say, reads as no choice: the primary stream, the
 stream's first open thread. Closing a thread keeps its `tab_session` rows;

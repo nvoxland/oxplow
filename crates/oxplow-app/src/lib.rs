@@ -619,6 +619,8 @@ pub struct Services {
     pub ui_preference_store: oxplow_db::SqliteUiPreferenceStore,
     /// Each device's tabs of each thread.
     pub tab_session_store: Arc<oxplow_db::tab_session_store::TabSessionStore>,
+    /// Tabs an agent opened for a device that was away.
+    pub tab_queue_store: Arc<oxplow_db::tab_queue_store::TabQueueStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Git history and branches (`v_commit`, `v_branch`, …).
@@ -1662,6 +1664,7 @@ impl Services {
         let tab_session_store = Arc::new(oxplow_db::tab_session_store::TabSessionStore::new(
             db.clone(),
         ));
+        let tab_queue_store = Arc::new(oxplow_db::tab_queue_store::TabQueueStore::new(db.clone()));
         for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
             .chain(commands::agent_settings::ops(
@@ -1728,7 +1731,7 @@ impl Services {
             .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
-            .chain(client_host::ops(&client_host))
+            .chain(client_host::ops(&client_host, services_slot.clone()))
             .chain([
                 commands::file::save_op(services_slot.clone()),
                 commands::file::create_op(workspace_files.clone()),
@@ -1875,6 +1878,7 @@ impl Services {
             panel_layout_store,
             ui_preference_store,
             tab_session_store,
+            tab_queue_store,
             tool_call_store,
             git_store,
             diagnostic_store,

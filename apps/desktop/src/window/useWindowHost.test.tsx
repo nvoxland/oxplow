@@ -16,9 +16,16 @@ mock.module("../clientHost.js", () => ({
 }));
 const realApi = { ...(await import("../api.js")) };
 const reports: Array<{ shown_thread: string | null }> = [];
+let queued: Array<{ threadId: string; uri: string }> = [];
+const reconnects = new Set<() => void>();
 mock.module("../api.js", () => ({
   ...realApi,
   listTabSessions: async () => [],
+  takeQueuedTabs: async () => queued.splice(0),
+  onRemoteReconnect: (fn: () => void) => {
+    reconnects.add(fn);
+    return () => reconnects.delete(fn);
+  },
   saveTabSession: async () => ({ saved: true, revision: 1 }),
   forgetTabSession: async () => {},
   reportTabs: async (report: { shown_thread: string | null }) => {
@@ -63,6 +70,7 @@ function setup(ready: { extensions: unknown[] | null }) {
 beforeEach(() => {
   started = 0;
   reports.length = 0;
+  queued = [];
 });
 afterEach(() => cleanup());
 
@@ -89,4 +97,18 @@ test("an agent's tab open lands in its own thread and leaves the shown tab", asy
 test("the window reports the thread it shows", async () => {
   setup({ extensions: [] });
   await waitFor(() => expect(reports.at(-1)?.shown_thread).toBe("thr1"));
+});
+
+test("the tabs agents opened while the device was away open in their threads, now and after a reconnect", async () => {
+  queued = [{ threadId: "thr2", uri: page(2).id }];
+  const hook = setup({ extensions: [] });
+  act(() => hook.result.current.tabs.openTab(page(1)));
+  await waitFor(() => expect(hook.result.current.tabs.threadPageTabs.thr2?.map((t) => t.id)).toEqual([page(2).id]));
+  // Opened without focus: the shown tab stays.
+  expect(hook.result.current.tabs.centerActive).toBe(page(1).id);
+  queued.push({ threadId: "thr2", uri: page(3).id });
+  await act(async () => {
+    for (const fn of reconnects) fn();
+  });
+  await waitFor(() => expect(hook.result.current.tabs.threadPageTabs.thr2.map((t) => t.id)).toEqual([page(2).id, page(3).id]));
 });

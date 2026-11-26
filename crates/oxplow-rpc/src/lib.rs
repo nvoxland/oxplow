@@ -283,6 +283,8 @@ macro_rules! oxplow_command_table {
                 list_tab_sessions => $crate::commands::tabs::list_tab_sessions {} -> Vec<::oxplow_db::tab_session_store::TabSession>,
                 save_tab_session => $crate::commands::tabs::save_tab_session { thread_id: ::oxplow_domain::ThreadId, session_json: String, revision: Option<::oxplow_db::tab_session_store::TabRevision> } -> ::oxplow_db::tab_session_store::TabSave,
                 forget_tab_session => $crate::commands::tabs::forget_tab_session { thread_id: ::oxplow_domain::ThreadId } -> (),
+                // the tabs agents opened for this device while it was away (`.context/remote-daemon.md` "An agent's tab on a device")
+                take_queued_tabs => $crate::commands::tabs::take_queued_tabs {} -> Vec<$crate::commands::tabs::QueuedTab>,
                 // what a device remembers (`.context/data-model.md` "ui_preference")
                 get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
                 set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),

@@ -3505,6 +3505,7 @@ mod tests {
             "threads",
             "thread_selection",
             "tab_session",
+            "tab_queued",
             "component_memory",
             "agent_turn",
             "page_visit",

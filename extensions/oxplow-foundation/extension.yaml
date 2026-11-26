@@ -1523,7 +1523,7 @@ commands:
     tool: find_page
     example: {"question": "which tests failed this week"}
   - name: page.show
-    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save as a knowledge page or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
+    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save as a knowledge page or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short. `client` names the device to open it on: its id (`dev-…`, as `oxplow_list_tabs` shows `device`) or a connected device's name; without it, the window the person used last. A device that is not connected, named by id, gets the tab when it next connects (`queued: true`)."
     scope: pages.show
     op: show
     tool: show_page
@@ -1905,7 +1905,7 @@ commands:
     op: copy_text
     example: {"text": "https://github.com/acme/app/blob/abc1234/src/main.rs"}
   - name: window.navigate
-    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, knowledge page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, knowledge page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. `client` names the device to show it on: its id (`dev-…`, as `oxplow_list_tabs` shows `device`) or a connected device's name; without it, the window the person used last. A device that is not connected, named by id, gets the page as a tab of your thread when it next connects (`{ queued: true, device }`). Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}

@@ -5,6 +5,7 @@ import type {
   TabReportAnswer,
   TabSave,
   TabSession,
+  QueuedTab,
   HookEnvelope,
   OpOutcome,
   PointOffer,
@@ -503,6 +504,12 @@ export async function listTabSessions(): Promise<TabSession[]> {
 /// since, nothing is written and the answer names the revision they are at.
 export async function saveTabSession(threadId: string, sessionJson: string, revision: number | null): Promise<TabSave> {
   return unwrap(await commands.saveTabSession(threadId, sessionJson, revision));
+}
+
+/// The tabs agents opened for this device while it was away, oldest first;
+/// the daemon forgets them once they are read.
+export async function takeQueuedTabs(): Promise<QueuedTab[]> {
+  return unwrap(await commands.takeQueuedTabs());
 }
 
 /// Forget this device's tabs of `threadId`.

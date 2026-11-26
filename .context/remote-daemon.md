@@ -413,6 +413,28 @@ the same connection and replaces nothing. The Mac app is one device, with one
 window per project, so it never meets this. Two browsers, two profiles or two
 addresses of the host are separate devices.
 
+## An agent's tab on a device
+
+An agent can open a page on a device it names: `oxplow_show_page` and
+`oxplow_navigate` take an optional `client`, a device id (`dev-…`, as
+`oxplow_list_tabs` shows `device`) or a connected device's name. Without it,
+the window used last gets the call ("Last used").
+
+- A connected device: the call goes to its page load
+  (`ClientHost::call_on`). A name that two devices share, or that no
+  connected device has, is refused (`Invalid`, `/client`). A device whose
+  window is not open, or does not host the scope, is refused `Unavailable`,
+  and the answer says so.
+- A device named by id that is not connected: the tab waits
+  (`tab_queued`, `TabQueueStore`), and the tool answers
+  `{ queued: true, device }`. Names are known only while a device is
+  connected, so a name never queues. Only an agent on a thread can queue: the
+  tab opens in that thread.
+- The device's window takes its queue (`take_queued_tabs`: read and emptied
+  in one transaction) when it starts to host the daemon's calls and after
+  each reconnect, and opens each tab in its thread without focus, as an
+  agent's open does (`window/useWindowHost.ts`).
+
 ## Known v1 gaps
 
 - **Picking a different project** = restarting the daemon with a

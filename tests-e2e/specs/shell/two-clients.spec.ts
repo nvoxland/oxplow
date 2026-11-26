@@ -126,3 +126,33 @@ test("a project's window never shows another project's tabs", async ({ page, bro
     await second.stop();
   }
 });
+
+const SHOWN = `title: Sent Quokka
+loaders:
+  count:
+    sql: SELECT count(*) AS n FROM v_oxplow_task
+view: { id: count, viz: number, from: count }
+`;
+
+/// An agent's open names the device it is for: the second client gets the
+/// tab, the first never does. The agent's tool runs the bus command
+/// `oxplow.page.show` (a spec runs it as the person, which is the same call
+/// with no device of its own).
+test("a page shown on a named device opens on that device only", async ({ page, browser, baseURL, daemon }) => {
+  await load(page);
+  const b = await client(browser, baseURL!, daemon);
+  try {
+    await load(b.page);
+    const device = await b.page.evaluate((key) => localStorage.getItem(key), DEVICE_KEY);
+    expect(device).toMatch(/^dev-/);
+    const shown = await run<{ result: { uri: string; opened: boolean; why?: string } }>(daemon, "oxplow.page.show", {
+      spec: SHOWN,
+      client: device,
+    });
+    expect(shown.result.opened, shown.result.why).toBe(true);
+    await expect(b.page.getByTestId(`center-tab-${shown.result.uri}`)).toBeVisible();
+    await expect(page.getByTestId(`center-tab-${shown.result.uri}`)).toBeHidden();
+  } finally {
+    await b.context.close();
+  }
+});

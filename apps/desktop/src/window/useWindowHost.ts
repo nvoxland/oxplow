@@ -2,7 +2,7 @@ import type { Extension } from "../tauri-bridge/generated/bindings.js";
 import type { AgentSessionRow } from "../agentSessions.js";
 import type { Stream, ThreadState } from "../api.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import { desktopBridge, getCurrentStream, getThreadState, openInSystemBrowser, openProject, reportTabs } from "../api.js";
+import { desktopBridge, getCurrentStream, getThreadState, onRemoteReconnect, openInSystemBrowser, openProject, reportTabs, takeQueuedTabs } from "../api.js";
 import { startClientHost, type ClientCallContext, type ClientHandlers } from "../clientHost.js";
 import { copyText } from "../clipboard.js";
 import { buffers } from "../editor/openFiles.js";
@@ -334,6 +334,27 @@ export function useWindowHost({
     return startClientHost(() => windowHandlersRef.current, undefined, undefined, () => {
       document.documentElement.dataset.oxplowReady = "true";
     });
+  }, [hosting]);
+
+  // The tabs agents opened for this device while it was away open now, in
+  // their threads and without focus, as an agent's open does; again after a
+  // reconnect, since the device was away while the socket was down.
+  useEffect(() => {
+    if (!hosting) return;
+    const take = () =>
+      void takeQueuedTabs()
+        .then(async (queued) => {
+          for (const tab of queued) {
+            try {
+              await windowHandlersRef.current["tabs.write"]!.open!({ uri: tab.uri }, { threadId: tab.threadId, actor: "human", call: null });
+            } catch {
+              // A page that can't open (a file since deleted) leaves the others.
+            }
+          }
+        })
+        .catch(() => {});
+    take();
+    return onRemoteReconnect(take);
   }, [hosting]);
 
   return { windowHandlersRef, windowFocused, windowVisible };

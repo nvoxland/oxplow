@@ -316,6 +316,12 @@ export const commands = {
 	 */
 	forgetTabSession: (threadId: ThreadId) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_tab_session", { threadId })),
 	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	takeQueuedTabs: () => typedError<QueuedTab[], IpcError_Serialize>(__TAURI_INVOKE("take_queued_tabs")),
+	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
 	 */
@@ -5756,6 +5762,12 @@ export type PublicContracts = {
 	 *  another extension).
 	 */
 	withheld?: Withheld[],
+};
+
+/**  A tab waiting for a device: the page, and the thread it opens in. */
+export type QueuedTab = {
+	threadId: ThreadId,
+	uri: string,
 };
 
 /**

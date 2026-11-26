@@ -66,9 +66,92 @@ pub async fn forget_tab_session(req: &RpcRequest<'_>, thread_id: ThreadId) -> Re
     Ok(())
 }
 
+/// The tabs agents opened for the caller device while it was away, oldest
+/// first, each with the thread it opens in; they are gone from the queue
+/// once read. A request with no device has none.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "off the bus: the tabs an agent opened for a device that was away"
+)]
+pub async fn take_queued_tabs(req: &RpcRequest<'_>) -> Result<Vec<QueuedTab>, IpcError> {
+    let Some(caller) = req.caller else {
+        return Ok(Vec::new());
+    };
+    Ok(req
+        .tab_queue_store
+        .take(&caller.device)
+        .await?
+        .into_iter()
+        .map(|(thread_id, uri)| QueuedTab { thread_id, uri })
+        .collect())
+}
+
+/// A tab waiting for a device: the page, and the thread it opens in.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTab {
+    pub thread_id: ThreadId,
+    pub uri: String,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    /// A device takes the tabs agents opened for it while it was away, once;
+    /// another device, or a request with none, gets none.
+    #[tokio::test]
+    async fn a_device_takes_the_tabs_opened_for_it() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .selected_or_first(None, &stream.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let mac = crate::test_support::caller();
+        let tablet = oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::generate(),
+            connection: oxplow_domain::ConnectionId::generate(),
+        };
+        // An agent shows a page on the tablet, which is away.
+        let shown = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Agent {
+                    session_id: None,
+                    thread_id: Some(thread),
+                    stream_id: None,
+                },
+                "oxplow.page.show",
+                json!({
+                    "spec": "title: Waiting\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { id: n, viz: number, from: n }\n",
+                    "client": tablet.device.to_string(),
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(shown.result["queued"], json!(true));
+        let uri = shown.result["uri"].clone();
+        let take = |caller: Option<&oxplow_domain::Caller>| {
+            let svc = svc.clone();
+            let caller = caller.cloned();
+            async move {
+                crate::dispatch_as("take_queued_tabs", json!({}), &svc, caller.as_ref())
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(take(Some(&mac)).await, json!([]));
+        assert_eq!(take(None).await, json!([]));
+        assert_eq!(
+            take(Some(&tablet)).await,
+            json!([{ "threadId": thread.to_string(), "uri": uri }])
+        );
+        assert_eq!(take(Some(&tablet)).await, json!([]), "taken once");
+    }
 
     /// A device's tabs read back as it saved them; another device, or a
     /// request with none, has none; a save that read an old revision is

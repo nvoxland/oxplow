@@ -393,10 +393,13 @@ in `CommandSpec::op`.
   result | error }` (another window's answer is ignored); the run
   waits (15 s), its answer the run's result. A window uses its own id for
   one page load (`uiClientId.ts`, the id its socket, tab reports and logs
-  carry; a reload is a new window). These commands take no `client`: the
-  window is the request's own page load (its `Oxplow-Connection`,
+  carry; a reload is a new window). The window is the request's own page
+  load (its `Oxplow-Connection`,
   `.context/remote-daemon.md` "Who is asking"), and a request with none is
-  refused. It says it's open — and what it hosts — with
+  refused. An agent's `oxplow.window.navigate` and `oxplow.page.show` may
+  name a `client` (a device id or a connected device's name): the call goes to that device's window (`ClientHost::call_on`),
+  or waits for it when it is away (`.context/remote-daemon.md` "An agent's
+  tab on a device"). It says it's open — and what it hosts — with
   `register_client_host { scopes }` once it is ready to do a
   call as asked (`window/useWindowHost.ts` `windowReady`: its stream and thread loaded,
   the thread's first tabs opened, the extensions loaded; before that a

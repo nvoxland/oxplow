@@ -19,6 +19,7 @@ use super::super::ops::Op;
 use super::super::util::{failed, invalid, parse, schema, ServicesSlot};
 use super::super::{Handler, HandlerOutput, Invocation};
 use super::{check_stream_id, stream_or_actors};
+use crate::client_host::Sent;
 use crate::pages::runner::{PageRun, PageRunner, RunNode, RunRequest, RunTarget};
 use crate::pages::schema::{
     parse_inline_page, parse_temp_page, temp_file_name, NodeKind, PageKind, TEMP_EXTENSION,
@@ -491,6 +492,12 @@ pub struct ShowPageInput {
     /// page.
     #[serde(default)]
     pub spec: Option<String>,
+    /// The device to show it on: its id (`dev-…`) or a connected device's
+    /// name (`oxplow_list_tabs` shows `device`). Without it, the window the
+    /// person used last. A device that is not connected, named by id, gets
+    /// the tab when it next connects (`queued`).
+    #[serde(default)]
+    pub client: Option<String>,
 }
 
 /// The id of the view `yaml` is, on `oxplow:temp`: a hash of its text, so
@@ -602,13 +609,34 @@ fn show_op(services: ServicesSlot) -> Op {
                     .map_err(failed)?;
                 // Beside the conversation: a tab of the caller's thread in
                 // its window, if one is open.
-                let opened = svc
+                let sent = svc
                     .client_host
-                    .call(&invocation.run, "tabs.write", "open", json!({ "uri": uri }))
+                    .call_for(
+                        &svc.tab_queue_store,
+                        &invocation.run,
+                        p.client.as_deref(),
+                        "tabs.write",
+                        "open",
+                        json!({ "uri": uri }),
+                    )
                     .await;
-                let mut result = json!({ "uri": uri, "text": text, "opened": opened.is_ok() });
-                if let Err(e) = opened {
-                    result["why"] = json!(e.to_string());
+                // A device named wrongly is the agent's mistake to fix, not
+                // a window that was not open.
+                if let Err(e @ CommandError::Invalid { .. }) = &sent {
+                    return Err(e.clone());
+                }
+                let mut result = json!({
+                    "uri": uri,
+                    "text": text,
+                    "opened": matches!(sent, Ok(Sent::Answered(_))),
+                });
+                match sent {
+                    Ok(Sent::Queued(device)) => {
+                        result["queued"] = json!(true);
+                        result["device"] = json!(device);
+                    }
+                    Ok(Sent::Answered(_)) => {}
+                    Err(e) => result["why"] = json!(e.to_string()),
                 }
                 Ok(HandlerOutput {
                     result,

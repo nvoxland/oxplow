@@ -195,6 +195,12 @@ impl ClientDevices {
         current
     }
 
+    /// The page load a connected device is on now.
+    pub fn connection_of(&self, device: &DeviceId) -> Option<ConnectionId> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.devices.get(device).map(|e| e.connection.clone())
+    }
+
     /// A connected device, as it named itself.
     pub fn get(&self, device: &DeviceId) -> Option<DeviceDescriptor> {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
