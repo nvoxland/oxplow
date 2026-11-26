@@ -1,4 +1,4 @@
-import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
 export interface TabsProps {
   /** What the tabs choose between, for screen readers. */
@@ -9,13 +9,18 @@ export interface TabsProps {
   /** Picks a tab; absent, the tabs only say which is in view. */
   onPick?(id: string): void;
   testId?: string;
+  /** The panel fills the height it is given (a terminal, a diff). */
+  fill?: boolean;
   /** The panel of the tab in view. */
   children: ReactNode;
 }
 
+const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
+
 /** A row of tabs over the one panel in view: a page's `switch` inside its
- *  body. Left and Right move to the previous and next tab, and wrap. */
-export function Tabs({ label, tabs, current, onPick, testId, children }: TabsProps) {
+ *  body. Left and Right move to the previous and next tab, and wrap; Home
+ *  and End go to the first and last. A modified key is the shell's. */
+export function Tabs({ label, tabs, current, onPick, testId, fill = false, children }: TabsProps) {
   const base = useId();
   const strip = useRef<HTMLDivElement>(null);
   const tabId = (id: string) => `${base}-tab-${id}`;
@@ -23,15 +28,21 @@ export function Tabs({ label, tabs, current, onPick, testId, children }: TabsPro
     if (id !== current) onPick?.(id);
   };
   const onKeyDown = (e: KeyboardEvent, index: number) => {
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (step === 0 || tabs.length === 0) return;
+    if (tabs.length === 0 || e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const to =
+      e.key === "ArrowRight" ? (index + 1) % tabs.length
+      : e.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length
+      : e.key === "Home" ? 0
+      : e.key === "End" ? tabs.length - 1
+      : null;
+    if (to === null) return;
     e.preventDefault();
-    const next = tabs[(index + step + tabs.length) % tabs.length]!;
+    const next = tabs[to]!;
     pick(next.id);
     strip.current?.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
   };
   return (
-    <div className="ox-tabs" data-testid={testId}>
+    <div className="ox-tabs" data-testid={testId} style={fill ? fillStyle : undefined}>
       <div role="tablist" aria-label={label} className="ox-tabs-strip" ref={strip}>
         {tabs.map((t, i) => {
           const on = t.id === current;
@@ -55,7 +66,7 @@ export function Tabs({ label, tabs, current, onPick, testId, children }: TabsPro
           );
         })}
       </div>
-      <div role="tabpanel" className="ox-tabs-panel" aria-labelledby={current ? tabId(current) : undefined}>
+      <div role="tabpanel" className="ox-tabs-panel" aria-labelledby={current ? tabId(current) : undefined} style={fill ? fillStyle : undefined}>
         {children}
       </div>
     </div>

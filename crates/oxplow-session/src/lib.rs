@@ -244,8 +244,12 @@ impl StreamService {
         if worktree_path.exists() {
             // Scan existing streams for the path; if found, return that
             // stream (idempotent ensure semantics).
+            // The same stream asked for again is that stream; a stream on
+            // another branch has the folder, so this name can't be used.
             for existing in self.streams.list().await? {
-                if existing.worktree_path == worktree_path.to_string_lossy() {
+                if existing.worktree_path == worktree_path.to_string_lossy()
+                    && existing.branch == branch
+                {
                     return Ok(existing);
                 }
             }
@@ -331,6 +335,15 @@ impl StreamService {
             .await?
             .into_iter()
             .find(|w| w.branch.as_deref() == Some(branch.as_str()));
+        // A working copy whose folder is gone still holds its branch in git
+        // until pruned: prune it, and the branch gets a new working copy.
+        let holder = match holder {
+            Some(w) if !Path::new(&w.path).exists() => {
+                self.vcs.remove_workspace(repo, Path::new(&w.path)).await?;
+                None
+            }
+            other => other,
+        };
         if let Some(w) = holder {
             let at = canon(Path::new(&w.path));
             let stream = self

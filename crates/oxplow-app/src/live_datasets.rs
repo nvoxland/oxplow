@@ -1045,23 +1045,37 @@ impl LiveSources {
         let mut out = Vec::with_capacity(workspaces.len());
         for w in workspaces {
             let path = std::path::PathBuf::from(&w.path);
+            // One whose folder is gone is git's stale record, not a working
+            // copy: nothing can be adopted there.
+            if !path.exists() {
+                continue;
+            }
             let at = canon(&path);
             let stream = streams.iter().find(|(p, _)| *p == at).map(|(_, id)| *id);
-            // Its head commit and its changed files: a worktree that can't
-            // be read (gone from disk) leaves them NULL, never the list.
-            let head = self
-                .vcs
-                .log(
-                    &path,
-                    oxplow_domain::vcs::LogQuery {
-                        limit: Some(1),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .ok()
-                .and_then(|log| log.into_iter().next());
-            let changes = self.vcs.status(&path).await.ok().map(|s| s.entries.len());
+            // Its head commit and its changed files, for one no stream uses
+            // (what a new stream can adopt): a stream's own pages say them
+            // for its copy, and a status per copy is a full walk.
+            let loose = stream.is_none() && !w.is_main;
+            let head = if loose {
+                self.vcs
+                    .log(
+                        &path,
+                        oxplow_domain::vcs::LogQuery {
+                            limit: Some(1),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .ok()
+                    .and_then(|log| log.into_iter().next())
+            } else {
+                None
+            };
+            let changes = if loose {
+                self.vcs.status(&path).await.ok().map(|s| s.entries.len())
+            } else {
+                None
+            };
             out.push(vec![
                 text(w.path),
                 opt(w.branch),

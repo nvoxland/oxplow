@@ -659,7 +659,8 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, then one `View as <renderer title>` link per other renderer of the tab's URI, `RailSeeAlso`; the view links come from the same `openWithOf` list as the nav bar's View as and run the same pick, so the default renderer drops the key; none for a route or a single renderer; not in the ☰ See also submenu, View as is there); every group's body sits a little in from its heading, the same in each (`.ox-rail-group > :not(.ox-rail-group-head)`; the Contents active bar hangs in that indent)
 in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
-from the run: with nothing in it (no switch, `filter` or `selection` param,
+from the run: with nothing in it (no root switch, `filter` param other than
+a switch's, or `selection` param,
 `rail:` node, `see_also` link or another view of the item (a page that fills doesn't count them) or open save form, and no Contents) `rightRail` is undefined,
 `Page` draws no Details card and the body takes the full width. Contents is
 automatic only for a page that does not fill: two or more titled
@@ -708,7 +709,8 @@ replacement's shares its target's. `PageRail` lists the filter
 params (`ParamList`; a change is `setParams`) and draws `run.rail`.
 `PageTree` draws a `RunNode` tree (`compact` in a rail panel): a node
 another extension's page stands in for (`replacedBy`) draws its embed in `Replaced`; stack → `Section`s, grid → `TileGrid`
-at each child's `size`, switch → its one child, viz → `VizView`
+at each child's `size`, switch → its one child (under a `Tabs` strip when it
+is inside the body, not the page's view), viz → `VizView`
 (`viz/VizView.tsx`, the one component that draws a viz) over
 `nodeRunOf` (`viz/nodeRun.ts`, the server's `node_run`), embed → a
 nested tree with ids `<embed>/<id>`, slot → its children, markdown → the

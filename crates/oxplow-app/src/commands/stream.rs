@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use oxplow_db::stream_store::{get_tx, upsert_tx};
 use oxplow_domain::uri::build::stream_uri;
-use oxplow_domain::{CommandCall, CommandError, Confirm, Stream, StreamId, Timestamp};
+use oxplow_domain::{CommandCall, CommandError, Confirm, Stream, StreamId, StreamKind, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -234,6 +234,9 @@ pub fn create_op(deps: StreamDeps) -> Op {
                 }
                 .map_err(session)?;
                 start_capture(&deps, &stream);
+                // No ref moved, but a branch now has a stream: the branch
+                // list (`v_branch.stream_id`) is read again.
+                deps.ref_moves.moved(stream.id);
                 Ok(result(&stream))
             })
         })),
@@ -346,6 +349,13 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                     .archive_stream(&id, input.delete_worktree)
                     .await
                     .map_err(session)?;
+                // Its branch has no stream now: the branch list, the
+                // repository's, is read again. Said of the primary: what
+                // follows a stream's moves must never look for this one.
+                let streams = deps.streams.list_streams().await.unwrap_or_default();
+                if let Some(primary) = streams.iter().find(|s| s.kind == StreamKind::Primary) {
+                    deps.ref_moves.moved(primary.id);
+                }
                 // Its files leave the search index; nothing routes to it.
                 if let Err(e) = deps.search.purge_stream_files(&id.to_string()).await {
                     tracing::warn!(error = %e, stream = %id, "purging an archived stream's search rows failed");
@@ -683,6 +693,81 @@ mod tests {
             ),
             "origin/remote-only"
         );
+        // A new branch started from a remote branch is new work: it tracks
+        // nothing, whatever git's autoSetupMerge would do.
+        create(
+            &fx,
+            json!({ "title": "Side", "source": "new", "new_branch": "side", "start_point": "origin/remote-only" }),
+        )
+        .await
+        .unwrap();
+        let upstream = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "side@{upstream}"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(!upstream.status.success(), "{upstream:?}");
+    }
+
+    /// A branch git still lists in a working copy whose folder is gone: the
+    /// stale record is pruned and the stream gets a new working copy, never
+    /// one on a folder that isn't there.
+    #[tokio::test]
+    async fn a_branch_in_a_deleted_worktree_gets_a_new_one() {
+        let fx = services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let gone = root.join(format!(
+            "../{}-gone",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "gone",
+                gone.to_str().unwrap(),
+            ],
+        );
+        std::fs::remove_dir_all(&gone).unwrap();
+        let made = create(
+            &fx,
+            json!({ "title": "Back again", "source": "existing", "existing_branch": "gone" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.branch, "gone");
+        assert!(
+            std::path::Path::new(&made.worktree_path).exists(),
+            "{}",
+            made.worktree_path
+        );
+        assert!(
+            made.worktree_path.ends_with("-back-again"),
+            "{}",
+            made.worktree_path
+        );
+    }
+
+    /// A name whose folder another stream already has is refused at the
+    /// name, never answered with that other stream.
+    #[tokio::test]
+    async fn a_name_whose_folder_a_stream_has_is_refused() {
+        let fx = services_with_thread().await;
+        let main = main_branch(&fx).await;
+        create(
+            &fx,
+            json!({ "title": "Fix", "source": "new", "new_branch": "fix-login", "start_point": main }),
+        )
+        .await
+        .unwrap();
+        let message = refused_at(
+            create(&fx, json!({ "title": "Fix", "source": "new", "new_branch": "fix", "start_point": main })).await,
+            "/title",
+        );
+        assert!(message.contains("fix"), "{message}");
     }
 
     /// A branch already checked out in a working copy no stream uses: the
@@ -792,6 +877,47 @@ mod tests {
             create(&fx, json!({ "title": "Dash", "source": "new", "new_branch": "-x", "start_point": main })).await,
             "/new_branch",
         );
+    }
+
+    /// Creating a stream and archiving one move no ref, but they change which
+    /// stream has which branch (`v_branch.stream_id`): each says its refs
+    /// moved, so the branch list is read again.
+    #[tokio::test]
+    async fn creating_and_archiving_a_stream_say_its_refs_moved() {
+        let fx = services_with_thread().await;
+        let main = main_branch(&fx).await;
+        let mut moves = fx.svc.ref_moves.subscribe();
+        let made = create(
+            &fx,
+            json!({ "title": "Moved", "source": "new", "new_branch": "moved", "start_point": main }),
+        )
+        .await
+        .unwrap();
+        let heard = |m: Option<crate::ref_moves::Moved>| m.is_some_and(|m| m.may_concern(made.id));
+        let any = |m: Option<crate::ref_moves::Moved>| m.is_some();
+        assert!(heard(
+            tokio::time::timeout(std::time::Duration::from_secs(5), moves.recv())
+                .await
+                .ok()
+                .flatten()
+        ));
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                ARCHIVE,
+                json!({ "stream": made.id.to_string(), "delete_worktree": true }),
+                true,
+            )
+            .await
+            .unwrap();
+        assert!(any(tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            moves.recv()
+        )
+        .await
+        .ok()
+        .flatten()));
     }
 
     /// Each source needs its own fields, named when they are missing.

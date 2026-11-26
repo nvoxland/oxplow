@@ -282,6 +282,7 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
           current={at.children[0]?.id ?? null}
           onPick={setParam ? (child) => setParam(def.param, child) : undefined}
           testId={`switch-${id}`}
+          fill={at.children.some((child) => fillsNode(props.run, child))}
         >
           {kids("bare")}
         </Tabs>

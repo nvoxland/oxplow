@@ -32300,6 +32300,53 @@
       "key": [
         "path"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Where it is on disk."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "The branch it has checked out; NULL on a detached HEAD."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The commit it is at."
+        },
+        {
+          "name": "is_main",
+          "type": "INT",
+          "doc": "1 for the repository's primary working copy."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream working in it (v_stream.id); NULL when none does."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "For a working copy no stream uses (not the primary), its head commit's subject; NULL for the others and when it can't be read. (v2; v3 narrows it)"
+        },
+        {
+          "name": "committed_at",
+          "type": "TEXT",
+          "doc": "For a working copy no stream uses, when its head commit was made (RFC 3339). (v2; v3 narrows it)"
+        },
+        {
+          "name": "changes",
+          "type": "INT",
+          "doc": "For a working copy no stream uses, how many files differ from its head (changed, added, untracked), as of the read. (v2; v3 narrows it)"
+        }
+      ],
+      "key": [
+        "path"
+      ]
     }
   },
   "extension_deployment": {

@@ -114,8 +114,9 @@ pub enum EnsureWorktreeError {
 /// Ensure that a worktree exists at `worktree_path` checked out to
 /// `branch`, creating the branch from `branch_source` if needed. A branch
 /// made from the remote-tracking branch of its own name (`foo` from
-/// `origin/foo`) tracks it, whatever `branch.autoSetupMerge` says: that is
-/// a remote branch checked out, not a new line of work.
+/// `origin/foo`) tracks it, and any other new branch tracks nothing,
+/// whatever `branch.autoSetupMerge` says: the first is a remote branch
+/// checked out, the second a new line of work.
 ///
 /// Idempotent: if the worktree already exists, this is a no-op.
 /// Uses `git worktree add` shell-out because libgit2's worktree
@@ -169,9 +170,9 @@ pub fn ensure_worktree(
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(repo_root).arg("worktree").arg("add");
     if !branch_exists {
-        if tracks {
-            cmd.arg("--track");
-        }
+        // Anything else made from a remote branch is a new line of work:
+        // it tracks nothing, whatever `branch.autoSetupMerge` says.
+        cmd.arg(if tracks { "--track" } else { "--no-track" });
         cmd.arg("-b")
             .arg(branch)
             .arg("--")

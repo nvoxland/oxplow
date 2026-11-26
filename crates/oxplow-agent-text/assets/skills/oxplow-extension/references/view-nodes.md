@@ -62,8 +62,11 @@ view:
   heading. Write one where the heading alone would leave a reader
   guessing (an Alerts section: what lands there and how it leaves).
 - `switch: { param, children }` shows the one child whose `id` equals the
-  param's value (else the first). The param is a filter, drawn in the rail.
-  Loaders only hidden children show do not run. Children may be switches.
+  param's value (else the first). The page's own view as a switch lists its
+  children in the rail as links; a switch inside the body (under a `stack`)
+  draws as tabs, each tab its child's `title`. Either way its param is never
+  among the rail's Filters. Loaders only hidden children show do not run.
+  Children may be switches.
 - `when:` on any node shows it only while params say: `when: { empty: [q,
   author] }` while every listed param is empty (absent, null or blank),
   `when: { not_empty: [q, author] }` while one is set. Two nodes with the

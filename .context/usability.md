@@ -1379,7 +1379,8 @@ and a block above the body, which a one-line fact is not. A `rail:` tree
 that is a form (Task List's New item) is something to do, not what the
 page is about: it draws last, under Filters, Selection and See also
 (`railTreeLast` in `pages/PageRail.tsx`). **The rail is drawn only when something is in it.** A page has a
-"Details" card when it has a switch, a `filter` param, a `selection`
+"Details" card when it has a switch as its view, a `filter` param (a
+nested switch's param is its tabs, not a filter), a `selection`
 param, a `rail:` node, the save-a-view form open, or a Contents of its
 own; with none, no card is drawn (a document page keeps its reading
 column; only a filling page and the wide kinds take the full width)

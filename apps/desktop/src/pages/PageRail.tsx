@@ -9,7 +9,8 @@ import { useMemo } from "react";
 import { isDefault, OptionsSourceContext, ParamList } from "../kit/ParamControls.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { switchParams } from "./pageFiles.js";
 import { PageTree } from "./PageTree.js";
 import { pageOptionsSource, usePageReads } from "./pageReads.js";
 import { RailSelection, type PickedRow } from "./railGroups.js";
@@ -36,17 +37,6 @@ export function switchSections(run: PageRun): { param: string; sections: { id: s
     sections: view.children.map((c) => ({ id: c.id, title: c.title ?? c.id })),
     current: run.tree.children[0]?.id ?? null,
   };
-}
-
-/** The params the page's switches pick their child by, wherever they are. */
-export function switchParams(node: Node): Set<string> {
-  const out = new Set<string>();
-  const walk = (n: Node) => {
-    if (n.kind === "switch") out.add(n.param);
-    if (n.kind === "stack" || n.kind === "grid" || n.kind === "switch") n.children.forEach(walk);
-  };
-  walk(node);
-  return out;
 }
 
 /** Whether the page's `rail:` tree draws at the rail's bottom: a form (a
@@ -76,7 +66,7 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = n
   // own switch is its sections, drawn as links here; one inside the body is
   // tabs there. No role is a resource, as the server reads it.
   const sw = switchSections(run);
-  const switched = switchParams(run.page.view);
+  const switched = switchParams(run.page);
   const filters = run.page.params.filter((p) => p.role === "filter" && !switched.has(p.name));
   // A filter's `options_from` is resolved by the daemon for this page.
   const reads = usePageReads();
