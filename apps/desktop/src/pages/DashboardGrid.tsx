@@ -2,6 +2,7 @@
  * source and goes through write_page; tile order previews immediately. */
 import { useRunner } from "../commands/RunnerContext.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MoreButton } from "../components/MoreButton.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { TileGrid, TileSlot, type TileSize } from "../kit/Tiles.js";
 import { moveTile, removeTile } from "./dashboardEdits.js";
@@ -80,6 +81,7 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
             onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setRemoving(null); } }}>
             <span>Remove this tile? </span><button autoFocus type="submit">Confirm</button><button type="button" onClick={() => setRemoving(null)}>Cancel</button>
           </form> : null}
+          {writable ? <span style={tileMore}><MoreButton testId={`dashboard-tile-more-${tile.id}`} label="Tile actions" onOpen={(at) => menu.openAt(at, items)} /></span> : null}
           {tile.body}
         </TileSlot>;
       })}
@@ -87,3 +89,6 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
     {menu.menu}
   </>;
 }
+
+/** A finger's way to a tile's menu: its top right corner, over the tile. */
+const tileMore = { position: "absolute", top: 4, right: 4, zIndex: 1 } as const;

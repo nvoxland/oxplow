@@ -2,6 +2,7 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import type { MenuItem } from "../menu.js";
+import { MoreButton } from "../components/MoreButton.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { kindForTabId, PageKindIcon } from "../pageKinds.js";
@@ -52,7 +53,7 @@ export function BacklinksList({
 }: BacklinksListProps) {
   const ctxNav = useOptionalPageNavigation();
   const openRef = ctxNav?.openRef ?? openRefInWindow;
-  const { open: openMenu, menu } = useContextMenu();
+  const { open: openMenu, openAt: openMenuAt, menu } = useContextMenu();
   // Pre-compute the origin (the regular `entries` only — commit
   // entries open slideovers and don't participate in tab-
   // level navigation). The destination page receives this as its
@@ -113,6 +114,10 @@ export function BacklinksList({
           if (items.length > 0) openMenu(e, items, entry.label);
           else e.preventDefault();
         };
+        const more =
+          items.length > 0 ? (
+            <MoreButton testId={`backlinks-more-${entry.target}`} label={`Actions for ${entry.label}`} onOpen={(at) => openMenuAt(at, items, entry.label)} />
+          ) : null;
         if (!page) {
           // Nothing opens: a dead link shows its raw ref, muted; a ref that
           // resolves but has no page shows its label.
@@ -130,12 +135,13 @@ export function BacklinksList({
               {entry.subtitle ? (
                 <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{entry.subtitle}</span>
               ) : null}
+              {more}
             </div>
           );
         }
         return (
+        <div key={page} style={pageRowStyle}>
         <button
-          key={page}
           type="button"
           data-testid={`backlinks-entry-${page}`}
           onClick={(e: MouseEvent) => {
@@ -152,7 +158,7 @@ export function BacklinksList({
             if (e.button === 1) { e.preventDefault(); openRef(page, { newTab: true }); }
           }}
           onContextMenu={onContextMenu}
-          style={rowStyle}
+          style={{ ...rowStyle, flex: 1, minWidth: 0 }}
         >
           <PageKindIcon kind={kindForTabId(page)} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -162,6 +168,8 @@ export function BacklinksList({
             <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{entry.subtitle}</span>
           ) : null}
         </button>
+        {more}
+        </div>
         );
       })}
       {menu}
@@ -171,6 +179,9 @@ export function BacklinksList({
 
 /** Shown on a dead link: its ref names something nothing resolves. */
 const DEAD_LINK_TIP = "nothing resolves this ref; its extension may be gone";
+
+/** A row that opens a page, with a finger's ☰ beside it. */
+const pageRowStyle = { display: "flex", alignItems: "center" } as const;
 
 const rowStyle = {
   display: "flex",

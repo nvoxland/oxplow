@@ -828,6 +828,12 @@ is text on a coarse pointer (`useCoarsePointer`):
 > selected text) keep their right-click menus below; a page's body has
 > none (its ☰ in the nav bar holds it all).
 
+- **On a touch screen, a page-layer menu also has a ☰.** A finger's long
+  press opens any right-click menu (`touchHints.ts`), but nothing shows it
+  is there: a backlink row and a dashboard tile draw a `MoreButton`
+  (`components/MoreButton.tsx`) that opens the same menu below itself,
+  only for a coarse pointer (a mouse keeps the row's space). Desktop chrome
+  the tablet shell replaces (tab strip, rail, Navigator) gets none.
 - **Outside page rows, right-click opens a row's menu.** The shared hook is
   `apps/desktop/src/components/useRowContextMenu.tsx`:
   - `useRowContextMenu(items, header?)` — bind the items when the row is
