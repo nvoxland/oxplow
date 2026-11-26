@@ -42,6 +42,9 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
     activeTabId: "a",
     activateTab: (id) => log.push(`activate ${id}`),
     closeTab: (id) => log.push(`close ${id}`),
+    reorderTabs: (ids) => log.push(`order ${ids.join(",")}`),
+    gitDialogs: <div data-testid="the-git-dialogs" />,
+    statusBar: <div data-testid="the-status-bar" />,
     openPage: noop,
     openSearch: () => log.push("search"),
     menu: [{ id: "shell.menu.file", label: "File", enabled: true, submenu: [{ id: "save", label: "Save", enabled: true, run: () => void log.push("save") }] }],
@@ -76,10 +79,27 @@ test("a tab's menu is the window's tab menu", () => {
   expect(w.log).toEqual(["close b"]);
 });
 
+// A finger cannot drag a tab: its menu moves it a place left or right,
+// past no pinned session.
+test("a tab's menu moves it left or right", () => {
+  const w = win();
+  const view = render(<TabletShell win={w} />);
+  fireEvent.contextMenu(view.getByTestId("tablet-tab-a"), { clientX: 10, clientY: 10 });
+  expect(view.getByTestId("menu-item-tab.move-left").hasAttribute("disabled")).toBe(true);
+  fireEvent.click(view.getByTestId("menu-item-tab.move-right"));
+  expect(w.log).toEqual(["order session,b,a"]);
+});
+
+test("the git dialogs and the status bar are drawn", () => {
+  const view = render(<TabletShell win={win()} />);
+  expect(view.getByTestId("the-git-dialogs")).not.toBeNull();
+  expect(view.getByTestId("the-status-bar")).not.toBeNull();
+});
+
 test("search and the tray are drawn", () => {
   const w = win();
   const view = render(<TabletShell win={w} />);
-  fireEvent.click(view.getByTestId("tablet-search"));
+  fireEvent.click(view.getByTestId("title-bar-search"));
   expect(w.log).toEqual(["search"]);
   expect(view.getByTestId("tablet-tray").contains(view.getByTestId("the-tray"))).toBe(true);
 });

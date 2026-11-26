@@ -87,9 +87,11 @@ pages are THE shell.
 ## The window's hooks
 
 A window's logic is shell-neutral hooks in `apps/desktop/src/window/`, so
-every shell (the desktop now, a tablet shell later) draws the same window.
-`App.tsx` is the desktop shell: it calls them, in this order, and lays out
-what they return.
+every shell (the desktop's and the tablet's, "Shells" below) draws the same
+window. `App.tsx` is the window: it calls them, in this order, builds the
+`ShellWindow` a shell draws, and lays out the desktop shell itself.
+`useStreamThreadMenus` is the one a shell calls (the Navigator, the tablet
+shell), since it draws that hook's flows where it lists streams.
 
 | Hook | Owns |
 |---|---|
@@ -104,13 +106,16 @@ what they return.
 
 Each hook has its own test (`window/*.test.tsx`), and
 `tests-e2e/specs/shell/window.spec.ts` pins the window's behavior across
-them. What stays in `App.tsx` is the desktop's: the menu bar and native
-menu, the rail, the dock, the strip, the page-visit recorder, the layout.
+them. What stays in `App.tsx`'s desktop branch is the desktop's: the menu
+bar and native menu, the rail, the dock, the strip, the layout. The Git
+dialogs and the status bar come from the `ShellWindow` in both shells.
 
 ### Shells
 
-A window is drawn by one shell (`apps/desktop/src/shells/`), chosen once
-per load by `useShellKind` (`chooseShell`): a test's override first (the
+A window is drawn by one shell (`apps/desktop/src/shells/`), chosen by
+`useShellKind` (`chooseShell`; it reads only the `shell` preference, so the
+window re-renders when that changes, not on other writes; a device whose
+preference differs from its default switches once it loads): a test's override first (the
 page's `?shell=desktop|tablet` or the window context's `shell`), then the
 device's own choice (the `shell` app preference, per device), then its
 kind: a desktop gets `desktop`; a tablet, and a phone until it has its own
@@ -140,8 +145,12 @@ that hides a feature.
 
 App builds one `ShellWindow` (`shells/shellWindow.ts`): the streams and
 threads and their operations, the shown thread's tabs, `closeTab` (a file's
-tab closes its file, a diff's its diff, a session's the session), opening a
-page and search, and the tray. Both shells draw tab bodies through
+tab closes its file, a diff's its diff, a session's the session),
+`reorderTabs`, opening a page and search, the menu bar's commands, the tray,
+the Git dialogs and the status bar. A tablet tab's menu also has Move Left
+and Move Right (no drag on a finger). Tablet bodies are keyed by stream, as
+the desktop's strip is. The dock's panel opens over the column a shell
+marks `data-dock-column`. Both shells draw tab bodies through
 `TabBodies` (`components/CenterTabs/TabBodies.tsx`: mounted when first
 shown, then kept; `center-tab-body-<id>`). Toasts, confirmations, Quick
 Open, the daemon-down dialogs and the connection banner are drawn outside
@@ -149,7 +158,8 @@ the shell, for both.
 
 **The contract** (`shells/shellContract.ts`): every shell draws every
 contribution the window has (tabs, tab menus, streams and threads, panels,
-dock panels, panel alerts, menu commands, search). `SHELL_PLACES` names
+dock panels, panel alerts, menu commands, search, tab order, Git dialogs,
+background tasks). `SHELL_PLACES` names
 where; a `null` is a gap still to build, and `TabletShell.test.tsx` holds
 the list of gaps so it only shrinks.
 

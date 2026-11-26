@@ -37,6 +37,8 @@ export interface ShellWindow {
   activeTabId: string | null;
   activateTab(id: string): void;
   closeTab(id: string): void;
+  /** The strip's new order (every tab id), as the desktop strip's drag gives it. */
+  reorderTabs(orderedIds: string[]): void;
   openPage(ref: TabRef): void;
   /** Open Quick Open (search, Go To, the commands). */
   openSearch(): void;
@@ -46,4 +48,8 @@ export interface ShellWindow {
   /** The window's panels: the dock today (`Dock`), drawn where the shell
    *  keeps them. */
   tray: ReactNode;
+  /** Git ▸'s dialogs (Compare with…, Rollback…), docked over the page. */
+  gitDialogs: ReactNode;
+  /** What runs in the background (`StatusBar`). */
+  statusBar: ReactNode;
 }

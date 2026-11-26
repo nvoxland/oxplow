@@ -660,11 +660,22 @@ export function App() {
     activeTabId: effectiveCenterActive,
     activateTab: (id) => setCenterActive(id),
     closeTab,
+    reorderTabs: handleReorderCenterTabs,
     openPage: handleOpenPage,
     openSearch: () => setQuickOpenVisible(true),
     // View is the rail's panels; a shell with no rail draws its own.
     menu: shellMenu(menuGroups.filter((g) => g.id !== "view")),
     tray: <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+    gitDialogs: stream ? (
+      <GitDialogs
+        streamId={stream.id}
+        openRef={(ref) => {
+          const tab = refFromTabId(ref);
+          if (tab) handleOpenPageRef.current?.(tab);
+        }}
+      />
+    ) : null,
+    statusBar: <StatusBar />,
   };
   // The window's errors, a line above the page in every shell.
   const errorBar = (
@@ -752,7 +763,7 @@ export function App() {
           onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
           vcsEnabled={workspaceContext.vcsEnabled}
         />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
+        <div data-dock-column="" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0, position: "relative" }}>
         <NarrowRail narrow={narrowWindow}>
           {(closeRail) => (
@@ -794,19 +805,11 @@ export function App() {
               onReorder={handleReorderCenterTabs}
             />
           ) : <TabLoading />}
-          {stream ? (
-            <GitDialogs
-              streamId={stream.id}
-              openRef={(ref) => {
-                const tab = refFromTabId(ref);
-                if (tab) handleOpenPageRef.current?.(tab);
-              }}
-            />
-          ) : null}
+          {shellWindow.gitDialogs}
         </div>
         </div>
         <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage}>
-          <StatusBar />
+          {shellWindow.statusBar}
         </Dock>
         </div>
       </div>

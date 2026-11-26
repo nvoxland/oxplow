@@ -23,9 +23,6 @@ interface CenterTabsProps {
 
 export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReorder }: CenterTabsProps) {
   const active = tabs.find((t) => t.id === activeId) ?? tabs.find((t) => !t.hidden) ?? tabs[0] ?? null;
-  // The bodies shown so far: a tab not yet shown mounts nothing, so a
-  // window arriving on a stream (or opening with many tabs) draws only the
-  // selected one.
   const stripTabs = tabs.filter((t) => !t.hidden);
   const cm = useContextMenu();
   const [hoverId, setHoverId] = useState<string | null>(null);

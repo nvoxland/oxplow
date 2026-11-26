@@ -4,6 +4,8 @@ import { Menu as MenuGlyph, Search, X } from "lucide-react";
 
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { buildTabMenu } from "../components/CenterTabs/tabMenu.js";
+import { moveToIndex } from "../components/CenterTabs/centerTabsReorder.js";
+import type { MenuItem } from "../menu.js";
 import { TabBodies } from "../components/CenterTabs/TabBodies.js";
 import { useContextMenu, useRowContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { WindowTab } from "../window/windowTab.js";
@@ -60,7 +62,7 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
   const active = win.tabs.find((t) => t.id === win.activeTabId) ?? shown[0] ?? null;
   const bulkClosable = shown.map((t) => ({ id: t.id, closable: t.closable && !t.pinned }));
   return (
-    <div data-testid="tablet-shell" style={frame}>
+    <div data-testid="tablet-shell" data-dock-column="" style={frame}>
       <div style={topLine}>
         <button type="button" data-testid="tablet-context" style={contextButton} title="Projects, streams and threads" aria-haspopup="dialog" onClick={() => setSwitching(true)}>
           <span style={{ fontWeight: 600 }}>{win.stream?.title ?? "…"}</span>
@@ -72,13 +74,13 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
               key={tab.id}
               tab={tab}
               active={tab.id === active?.id}
-              menu={() => buildTabMenu({ tab, bulkClosable, activeId: active?.id ?? "", onClose: win.closeTab, onActivate: win.activateTab })}
+              menu={() => withMoves(buildTabMenu({ tab, bulkClosable, activeId: active?.id ?? "", onClose: win.closeTab, onActivate: win.activateTab }), tab, shown, win.reorderTabs)}
               onActivate={() => win.activateTab(tab.id)}
               onClose={() => win.closeTab(tab.id)}
             />
           ))}
         </div>
-        <button type="button" className="ox-icon-button" aria-label="Search" data-testid="tablet-search" onClick={win.openSearch}>
+        <button type="button" className="ox-icon-button" aria-label="Search" data-testid="title-bar-search" onClick={win.openSearch}>
           <Search size={16} aria-hidden />
         </button>
         {/* The menu bar's commands: Save, Find, the extensions' menu items. */}
@@ -97,10 +99,13 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
         </button>
       </div>
       <div style={pageArea}>
-        <TabBodies tabs={win.tabs} activeId={active?.id ?? null} />
+        {/* Per stream: its threads' tab keys repeat across streams. */}
+        <TabBodies key={win.stream?.id ?? ""} tabs={win.tabs} activeId={active?.id ?? null} />
+        {win.gitDialogs}
       </div>
       <div data-testid="tablet-tray" style={trayLine}>
         {win.tray}
+        {win.statusBar}
       </div>
       <TabletSwitcher
         open={switching}
@@ -120,10 +125,26 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
   );
 }
 
+/** A finger cannot drag a tab: its menu moves it a place left or right
+ *  (Move Left / Move Right), never before a pinned session, as the desktop
+ *  strip's drag does. */
+function withMoves(items: MenuItem[] | Promise<MenuItem[]>, tab: WindowTab, shown: WindowTab[], reorder: (ids: string[]) => void): MenuItem[] | Promise<MenuItem[]> {
+  const movable = (t: WindowTab | undefined) => !!t && t.closable && !t.pinned;
+  if (!movable(tab)) return items;
+  const ids = shown.map((t) => t.id);
+  const at = ids.indexOf(tab.id);
+  const moves: MenuItem[] = [
+    { id: "tab.move-sep", label: "", enabled: false, separator: true },
+    { id: "tab.move-left", label: "Move Left", enabled: movable(shown[at - 1]), run: () => reorder(moveToIndex(ids, tab.id, at - 1)) },
+    { id: "tab.move-right", label: "Move Right", enabled: movable(shown[at + 1]), run: () => reorder(moveToIndex(ids, tab.id, at + 2)) },
+  ];
+  return items instanceof Promise ? items.then((list) => [...list, ...moves]) : [...items, ...moves];
+}
+
 /** One tab of the strip: a tap shows it, its × closes it, and a long press
  *  (or the Menu key) opens the window's tab menu. */
 function TabletTab({ tab, active, menu, onActivate, onClose }: { tab: WindowTab; active: boolean; menu(): MenuItems; onActivate(): void; onClose(): void }) {
-  const { menu: menuNode, ...menuHandlers } = useRowContextMenu(menu, tab.label);
+  const { menu: menuNode, openAt: _openAt, ...menuHandlers } = useRowContextMenu(menu, tab.label);
   return (
     <div
       role="tab"

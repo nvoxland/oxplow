@@ -110,7 +110,7 @@ export function extensionDockPanel(panel: ExtensionPanel, extensions: Extension[
     Body({ onOpenPage, streamId }) {
       const page = usePanelRuns().runs[panel.id]?.body;
       return page ? (
-        <PanelBody body={page} testIdPrefix="dock-panel" streamId={streamId} onOpenPage={onOpenPage} onMore={() => onOpenPage(panelOpenRef(panel, extensions))} />
+        <PanelBody body={page} filled testIdPrefix="dock-panel" streamId={streamId} onOpenPage={onOpenPage} onMore={() => onOpenPage(panelOpenRef(panel, extensions))} />
       ) : (
         <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Loading…</div>
       );

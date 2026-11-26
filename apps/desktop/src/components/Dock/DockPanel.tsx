@@ -35,11 +35,12 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
   const drag = useRef<{ startY: number; base: number } | null>(null);
   const [columnHeight, setColumnHeight] = useState(Number.POSITIVE_INFINITY);
 
-  // The column is the dock's parent's parent (the dock wraps bar and panel).
+  // The column the panel opens over: the shell marks it `data-dock-column`
+  // (the desktop's center column, the tablet's whole window).
   useEffect(() => {
     if (!panel) return;
     const measure = () => {
-      const column = rootRef.current?.parentElement?.parentElement;
+      const column = rootRef.current?.closest<HTMLElement>("[data-dock-column]");
       if (column && column.clientHeight > 0) setColumnHeight(column.clientHeight);
     };
     measure();

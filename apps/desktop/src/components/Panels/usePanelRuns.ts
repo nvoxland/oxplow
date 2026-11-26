@@ -11,7 +11,7 @@
 /// viewer's picks, and each part's run says what it gives the panel
 /// (`PartView`: whether the header counts by it, the count, the body's
 /// toggles). The window reads those; it decides none of them.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { windowPageRuns, type PageRuns } from "../../pageRuns.js";
 import { pageFileUri } from "../../pages/pageFiles.js";
@@ -88,10 +88,18 @@ export function useExtensionPanelRuns(
 ): Record<string, PanelRuns> {
   const [state, setState] = useState<Record<string, Partial<Record<Part, OpenPanelRun | null>>>>({});
   const choicesKey = JSON.stringify(choices);
+  // What the runs are of: a new stream, thread or set of panels starts them
+  // empty; a pick of a choice keeps the shown ones until the new ones come
+  // (an emptied header would unmount its toggles and drop the focus).
+  const scopeKey = `${streamId}|${threadId}|${panels.map((p) => p.id).join(",")}`;
+  const shownScope = useRef(scopeKey);
   useEffect(() => {
     const runs = store ?? windowPageRuns();
     const offs: (() => void)[] = [];
-    setState({});
+    if (shownScope.current !== scopeKey) {
+      shownScope.current = scopeKey;
+      setState({});
+    }
     for (const p of panels) {
       const parts: [Part, string | null][] = [
         ["body", p.body],
