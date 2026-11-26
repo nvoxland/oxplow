@@ -728,6 +728,13 @@ not a pick and isn't in the address.
 
 ## Hover reveals, click rearranges
 
+**A finger holds where a mouse hovers.** A press and hold (400 ms) on an
+icon-only control (a `title`, or an `aria-label` with no text of its own)
+shows its label in a bubble above it, and the press then does nothing more
+(`touchHints.ts`, one listener for the page, touch presses only). So an
+icon button's `title` is enough on a tablet too; never put a control's only
+explanation anywhere a finger cannot reach.
+
 > **These rules are enforced by code, not just written down here.** The
 > open/close state machine for a slide-out glyph strip lives in
 > `apps/desktop/src/components/useSlideoutStrip.ts`, with the shared
