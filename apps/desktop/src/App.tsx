@@ -1,6 +1,7 @@
 import { useResourcesLoader } from "./resources.js";
-import { useShellKind } from "./shells/shellChoice.js";
-import { shellMenu } from "./shells/shellMenu.js";
+import { useLayoutItems, useShellKind } from "./shells/shellChoice.js";
+import { PanelTray, PinnedPanel } from "./shells/PanelTray.js";
+import { shellMenu, withLayouts } from "./shells/shellMenu.js";
 import type { ShellWindow } from "./shells/shellWindow.js";
 import { TabletShell } from "./shells/TabletShell.js";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -634,6 +635,8 @@ export function App() {
   };
   
   const shell = useShellKind();
+  // Desktop Layout / Tablet Layout, where a choice makes sense (not the Mac).
+  const layouts = useLayoutItems(shell);
   // The window as a shell draws it (`shells/shellWindow.ts`).
   const shellWindow: ShellWindow = {
     streams,
@@ -664,8 +667,12 @@ export function App() {
     openPage: handleOpenPage,
     openSearch: () => setQuickOpenVisible(true),
     // View is the rail's panels; a shell with no rail draws its own.
-    menu: shellMenu(menuGroups.filter((g) => g.id !== "view")),
-    tray: <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+    menu: [
+      ...shellMenu(menuGroups.filter((g) => g.id !== "view")),
+      ...(layouts.length > 0 ? [{ id: "shell.menu.layout", label: "Layout", enabled: true, submenu: layouts }] : []),
+    ],
+    tray: <PanelTray dock={<Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />} streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+    aside: <PinnedPanel streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
     gitDialogs: stream ? (
       <GitDialogs
         streamId={stream.id}
@@ -730,7 +737,7 @@ export function App() {
           webview reaches the top edge: the title bar is the window's top,
           its empty space drags it and its start leaves room for the
           floating traffic lights. Elsewhere it sits under the menu bar. */}
-      {!isMac ? <Menubar groups={menuGroups} /> : null}
+      {!isMac ? <Menubar groups={withLayouts(menuGroups, layouts)} /> : null}
       <TitleBar
         stream={stream}
         thread={selectedThread ? { id: selectedThread.id, title: selectedThread.title } : null}

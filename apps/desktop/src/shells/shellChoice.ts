@@ -1,4 +1,5 @@
-import { useAppPreferenceValue } from "../prefs/remembered.js";
+import type { MenuItem } from "../menu.js";
+import { useAppPreferenceValue, useSetAppPreference } from "../prefs/remembered.js";
 import { getDevice, type Device } from "../device.js";
 import { readWindowContext } from "../windowContext.js";
 import { SHELL_CONTRIBUTIONS, SHELL_PLACES } from "./shellContract.js";
@@ -50,4 +51,22 @@ export function useShellKind(): ShellKind {
     preference,
     deviceKind: getDevice().kind,
   });
+}
+
+/** The person's choice of layout, as menu items: Desktop Layout and Tablet
+ *  Layout, the one in force checked; a pick is kept as the device's
+ *  `shell` preference. Pure. */
+export function layoutItems(shell: ShellKind, set: (value: ShellKind) => void): MenuItem[] {
+  return [
+    { id: "shell.desktop", label: "Desktop Layout", enabled: true, checked: shell === "desktop", run: () => set("desktop") },
+    { id: "shell.tablet", label: "Tablet Layout", enabled: true, checked: shell === "tablet", run: () => set("tablet") },
+  ];
+}
+
+/** The layout items where a choice makes sense: a device that is no desktop
+ *  (a tablet, a phone) or one that chose the tablet's; none otherwise (the
+ *  Mac app). */
+export function useLayoutItems(shell: ShellKind): MenuItem[] {
+  const set = useSetAppPreference("shell");
+  return getDevice().kind !== "desktop" || shell === "tablet" ? layoutItems(shell, set) : [];
 }

@@ -272,6 +272,12 @@ export function useAppPreferenceValue(key: string): unknown {
   return useSyncExternalStore(store.subscribe, () => store.get("app", key));
 }
 
+/** Set one app preference, without reading it (no re-render on writes). */
+export function useSetAppPreference(key: string): (value: unknown) => void {
+  const store = useContext(RememberedContext) ?? appStore();
+  return useCallback((value: unknown) => store.set("app", key, value), [store, key]);
+}
+
 /** A left-nav panel's memory: one value it remembers for the person. */
 export function usePanelMemory<T>(panel: string, key: string, initial: T): [T, (value: T) => void] {
   return useRemembered(panelScope(panel), key, initial);

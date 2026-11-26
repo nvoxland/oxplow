@@ -20,3 +20,10 @@ function tidy(items: MenuItem[]): MenuItem[] {
   while (out.length > 0 && out[out.length - 1]!.separator) out.pop();
   return out;
 }
+
+/** The menu bar's groups with the layout choice at the end of View (on a
+ *  device that has one to make). */
+export function withLayouts<G extends MenuGroup>(groups: G[], layouts: MenuItem[]): G[] {
+  if (layouts.length === 0) return groups;
+  return groups.map((g) => (g.id === "view" ? { ...g, items: [...g.items, { id: "view.layout-sep", label: "", enabled: false, separator: true }, ...layouts] } : g));
+}

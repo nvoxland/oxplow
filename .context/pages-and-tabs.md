@@ -127,7 +127,7 @@ that hides a feature.
   rail, `CenterTabs`, dock.
 - **`tablet`** is `TabletShell`: one line at the top (the context: stream
   and thread, then the thread's tabs, then search), the page at full width,
-  the panels' tray at the bottom (the dock, until the tray is built). A tab's
+  the panels' tray at the bottom. A tab's
   long press opens the window's tab menu (`buildTabMenu`).
   A tap on the context opens the **switcher** (`TabletSwitcher`, a
   `Slideover`): on a host's page the host's projects first (`/host/projects`;
@@ -142,6 +142,18 @@ that hides a feature.
   Find, the extensions' `ui.menu` ones) as File ▸ and Edit ▸ (`shellMenu`:
   the OS's own edit items left out). View is not there: it is the rail's
   panels, and this shell has its tray.
+  The **tray** (`shells/PanelTray.tsx`) is the rail's panels in the
+  device's rail order (`usePanelLayout`), each a button with its icon, name
+  and count, then the dock's bar. A tap opens the panel as a sheet (its
+  choices, its body whole, Open, Pin); **Pin** keeps one panel beside the
+  page as a column (`PinnedPanel`), by the device's `tablet.pinnedPanel`
+  preference, until its pin is pressed again.
+
+**Choosing the layout.** Where a choice makes sense (a device that is no
+desktop, or one that chose the tablet's), both shells offer Desktop Layout
+and Tablet Layout (`layoutItems`): the tablet's ☰ under Layout ▸, the
+desktop's in-window View menu at its end. A pick is the device's `shell`
+preference. The Mac app offers none.
 
 App builds one `ShellWindow` (`shells/shellWindow.ts`): the streams and
 threads and their operations, the shown thread's tabs, `closeTab` (a file's

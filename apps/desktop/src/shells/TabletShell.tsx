@@ -98,10 +98,13 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
           <MenuGlyph size={16} aria-hidden />
         </button>
       </div>
-      <div style={pageArea}>
-        {/* Per stream: its threads' tab keys repeat across streams. */}
-        <TabBodies key={win.stream?.id ?? ""} tabs={win.tabs} activeId={active?.id ?? null} />
-        {win.gitDialogs}
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        <div style={pageArea}>
+          {/* Per stream: its threads' tab keys repeat across streams. */}
+          <TabBodies key={win.stream?.id ?? ""} tabs={win.tabs} activeId={active?.id ?? null} />
+          {win.gitDialogs}
+        </div>
+        {win.aside}
       </div>
       <div data-testid="tablet-tray" style={trayLine}>
         {win.tray}
@@ -222,5 +225,5 @@ const tabStyle: CSSProperties = {
 };
 const activeTab: CSSProperties = { background: "var(--surface-app)", color: "var(--text-primary)" };
 const tabLabel: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const pageArea: CSSProperties = { flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative", background: "var(--surface-app)" };
+const pageArea: CSSProperties = { flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative", background: "var(--surface-app)" };
 const trayLine: CSSProperties = { flexShrink: 0, borderTop: "1px solid var(--border-strong)" };

@@ -45,9 +45,11 @@ export interface ShellWindow {
   /** The menu bar's commands (Save, Find, the extensions' `ui.menu` ones)
    *  for a shell with no menu bar: File ▸, Edit ▸ (`shellMenu`). */
   menu: MenuItem[];
-  /** The window's panels: the dock today (`Dock`), drawn where the shell
-   *  keeps them. */
+  /** The window's panels as a tray (`PanelTray`: the rail's panels, then
+   *  the dock), for a shell with no rail. */
   tray: ReactNode;
+  /** The panel the device pinned beside the page (`PinnedPanel`). */
+  aside: ReactNode;
   /** Git ▸'s dialogs (Compare with…, Rollback…), docked over the page. */
   gitDialogs: ReactNode;
   /** What runs in the background (`StatusBar`). */

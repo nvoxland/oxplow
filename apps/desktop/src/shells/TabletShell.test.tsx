@@ -43,6 +43,7 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
     activateTab: (id) => log.push(`activate ${id}`),
     closeTab: (id) => log.push(`close ${id}`),
     reorderTabs: (ids) => log.push(`order ${ids.join(",")}`),
+    aside: <div data-testid="the-aside" />,
     gitDialogs: <div data-testid="the-git-dialogs" />,
     statusBar: <div data-testid="the-status-bar" />,
     openPage: noop,
@@ -94,6 +95,7 @@ test("the git dialogs and the status bar are drawn", () => {
   const view = render(<TabletShell win={win()} />);
   expect(view.getByTestId("the-git-dialogs")).not.toBeNull();
   expect(view.getByTestId("the-status-bar")).not.toBeNull();
+  expect(view.getByTestId("the-aside")).not.toBeNull();
 });
 
 test("search and the tray are drawn", () => {
@@ -117,6 +119,6 @@ test("the menu holds the menu bar's commands", async () => {
 // named gap. The gaps shrink to none as the tablet shell is built.
 test("the tablet shell's gaps are the known ones", () => {
   const gaps = SHELL_CONTRIBUTIONS.filter((c) => SHELL_PLACES.tablet[c] === null);
-  expect(gaps).toEqual(["panels"]);
+  expect(gaps).toEqual([]);
   expect(SHELL_CONTRIBUTIONS.filter((c) => SHELL_PLACES.desktop[c] === null)).toEqual([]);
 });

@@ -27,3 +27,24 @@ test("the context line opens the switcher; a new thread made there is listed, an
   await expect(page.getByTestId("tablet-switcher")).toBeHidden();
   await expect(page.getByTestId("tablet-context")).toContainText("Tablet thread");
 });
+
+test("the tray's panel opens as a sheet, and pinned it stays beside the page", async ({ page }) => {
+  await load(page, "/?shell=tablet");
+  const first = page.getByTestId("tablet-panels").getByRole("button").first();
+  const name = (await first.textContent()) ?? "";
+  await first.click();
+  await expect(page.getByTestId("tablet-panel-sheet")).toBeVisible();
+  await page.getByTestId("tablet-panel-sheet").getByTestId("tablet-panel-pin").click();
+  await expect(page.getByTestId("tablet-panel-sheet")).toBeHidden();
+  await expect(page.getByTestId("tablet-pinned-panel")).toBeVisible();
+  expect(name).toContain((await page.getByTestId("tablet-pinned-panel").getAttribute("aria-label")) ?? "?");
+  await page.getByTestId("tablet-pinned-panel").getByTestId("tablet-panel-pin").click();
+  await expect(page.getByTestId("tablet-pinned-panel")).toBeHidden();
+});
+
+test("the menu offers Layout ▸ Desktop Layout", async ({ page }) => {
+  await load(page, "/?shell=tablet");
+  await page.getByTestId("tablet-menu").click();
+  await page.getByTestId("menu-item-shell.menu.layout").click();
+  await expect(page.getByTestId("menu-item-shell.desktop")).toBeVisible();
+});

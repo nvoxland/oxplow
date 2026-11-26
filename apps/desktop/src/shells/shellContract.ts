@@ -54,9 +54,8 @@ export const SHELL_PLACES: Record<ShellKind, Record<ShellContribution, string | 
     tabs: "tablet-tabs",
     "tab menus": "tablet-tabs (long press)",
     "streams and threads": "tablet-context → TabletSwitcher",
-    // The tray and sheet are after the switcher; the dock stands in.
-    panels: null,
-    "dock panels": "tablet-tray (the dock)",
+    panels: "tablet-tray (PanelTray: a sheet, or pinned beside the page)",
+    "dock panels": "tablet-tray (the dock's bar after the panels)",
     "panel alerts": "tablet-tray (the dock's Alerts) and toasts",
     "menu commands": "tablet-menu (File ▸, Edit ▸)",
     search: "title-bar-search → QuickOpenOverlay",
