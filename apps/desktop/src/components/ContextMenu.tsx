@@ -56,7 +56,10 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
   }, [items, minWidth, position]);
 
   useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
+    // A pointer's press, not the mouse event a touch screen sends at a
+    // finger's lift: a long press opens the menu, and its lift must not
+    // close it.
+    function handlePointerDown(event: PointerEvent) {
       if (rootRef.current?.contains(event.target as Node)) return;
       onClose();
     }
@@ -67,10 +70,10 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
       }
     }
 
-    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleEscape);
     return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleEscape);
     };
   }, [onClose]);
@@ -88,7 +91,7 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
         minWidth,
         zIndex,
       }}
-      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
       // The menu is rendered inline inside the row it acts on, so a
       // menu-item click would otherwise bubble to the row's onClick —
       // selecting the row / closing the navigator slideout.

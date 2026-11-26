@@ -20,8 +20,9 @@ import { describeChain, shouldSuppressContextMenu } from "./context-menu.js";
 export const HOLD_MS = 400;
 /** How long a finger holds before it is a right-click. */
 export const MENU_MS = 550;
-/** How long after a hold its click is taken as the hold's own. */
-const SWALLOW_MS = 800;
+/** How long after the lift what the browser sends is still the press's
+ *  (its mouse events, a late menu of its own). */
+const AFTER_LIFT_MS = 400;
 /** How far a finger may move and still be holding, not scrolling. */
 const SLOP_PX = 10;
 
@@ -46,36 +47,37 @@ export function hintFor(el: Element | null): string | null {
 }
 
 export function installTouchHints(doc: Document = document): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let menuTimer: ReturnType<typeof setTimeout> | null = null;
-  let start: { x: number; y: number } | null = null;
-  // This press has had its menu (the browser's or ours): no second one.
-  let menuSent = false;
+  /** The finger's press: from its pointerdown to a little after its lift
+   *  (`AFTER_LIFT_MS`), so what the browser sends at the lift is still its. */
+  type Press = {
+    target: Element;
+    at: { x: number; y: number };
+    /** It had its menu (the browser's or ours): no second one. */
+    menuSent: boolean;
+    /** A hint or a menu showed: the lift's mouse events are the hold's. */
+    held: boolean;
+    timers: ReturnType<typeof setTimeout>[];
+  };
+  let press: Press | null = null;
+  let ending: ReturnType<typeof setTimeout> | null = null;
   let sending = false;
   let bubble: HTMLElement | null = null;
-  let swallowClick = false;
-  let swallowTimer: ReturnType<typeof setTimeout> | null = null;
-  const endSwallow = () => {
-    swallowClick = false;
-    if (swallowTimer !== null) clearTimeout(swallowTimer);
-    swallowTimer = null;
-  };
 
   const hide = () => {
     bubble?.remove();
     bubble = null;
   };
-  const cancel = () => {
-    if (timer !== null) clearTimeout(timer);
-    if (menuTimer !== null) clearTimeout(menuTimer);
-    timer = null;
-    menuTimer = null;
-    start = null;
+  /** The hold is over (a move, a scroll, a drag, the lift): no hint, no
+   *  menu, but the press stays known until it ends. */
+  const stopTimers = () => {
+    for (const t of press?.timers ?? []) clearTimeout(t);
+    if (press) press.timers = [];
   };
-  const swallowNextClick = () => {
-    swallowClick = true;
-    if (swallowTimer !== null) clearTimeout(swallowTimer);
-    swallowTimer = setTimeout(endSwallow, SWALLOW_MS);
+  const end = () => {
+    stopTimers();
+    if (ending !== null) clearTimeout(ending);
+    ending = null;
+    press = null;
   };
   const show = (target: Element, text: string) => {
     hide();
@@ -110,62 +112,6 @@ export function installTouchHints(doc: Document = document): () => void {
     bubble.style.left = `${left}px`;
   };
 
-  const onDown = (e: PointerEvent) => {
-    // A new press: whatever a hold before it waited to swallow is over
-    // (Chrome may send no click after a long press).
-    endSwallow();
-    hide();
-    cancel();
-    menuSent = false;
-    if (e.pointerType !== "touch") return;
-    const target = e.target instanceof Element ? e.target : null;
-    if (!target) return;
-    const at = { x: e.clientX, y: e.clientY };
-    start = at;
-    const text = hintFor(target);
-    if (text !== null) {
-      timer = setTimeout(() => {
-        timer = null;
-        show(target, text);
-        swallowNextClick();
-      }, HOLD_MS);
-    }
-    // Where the OS's own long press is the right one (text), none of ours.
-    if (!shouldSuppressContextMenu(describeChain(target))) return;
-    menuTimer = setTimeout(() => {
-      menuTimer = null;
-      if (menuSent || !target.isConnected) return;
-      menuSent = true;
-      sending = true;
-      try {
-        target.dispatchEvent(
-          new MouseEvent("contextmenu", { bubbles: true, cancelable: true, composed: true, button: 2, clientX: at.x, clientY: at.y }),
-        );
-      } finally {
-        sending = false;
-      }
-      swallowNextClick();
-      afterMenu();
-    }, MENU_MS);
-  };
-  const onMove = (e: PointerEvent) => {
-    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > SLOP_PX) cancel();
-  };
-  // A lifted finger ends the hold; `start` stays until the next press so a
-  // browser menu sent at the lift is still this press's.
-  const onUp = () => {
-    if (timer !== null) clearTimeout(timer);
-    if (menuTimer !== null) clearTimeout(menuTimer);
-    timer = null;
-    menuTimer = null;
-  };
-  // The hold showed the label: the press was a question, not a press.
-  const onClick = (e: MouseEvent) => {
-    if (!swallowClick) return;
-    endSwallow();
-    e.preventDefault();
-    e.stopPropagation();
-  };
   // When a menu of the app's opened (it draws `data-oxplow-menu`), it is the
   // answer: the bubble goes. A press that opened none keeps its hint.
   const afterMenu = () => {
@@ -173,52 +119,113 @@ export function installTouchHints(doc: Document = document): () => void {
       if (doc.querySelector("[data-oxplow-menu]")) hide();
     }, 0);
   };
-  const onContextMenu = (e: Event) => {
-    if (sending) return;
-    if (start !== null) {
-      // A finger's press: the browser's own long press.
-      if (menuSent) {
-        // Ours went first: this press has its menu.
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return;
-      }
-      menuSent = true;
-      // The browser's menu leaves the finger on the item it opened from; a
-      // tap on the menu is a tap.
-      endSwallow();
+
+  const onDown = (e: PointerEvent) => {
+    end();
+    hide();
+    if (e.pointerType !== "touch") return;
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+    const p: Press = { target, at: { x: e.clientX, y: e.clientY }, menuSent: false, held: false, timers: [] };
+    press = p;
+    const text = hintFor(target);
+    if (text !== null) {
+      p.timers.push(
+        setTimeout(() => {
+          if (p.menuSent) return;
+          show(target, text);
+          p.held = true;
+        }, HOLD_MS),
+      );
     }
+    // Where the OS's own long press is the right one (text), and inside an
+    // open menu (a slow tap on an item is a tap), none of ours.
+    if (!shouldSuppressContextMenu(describeChain(target)) || target.closest("[data-oxplow-menu]")) return;
+    p.timers.push(
+      setTimeout(() => {
+        if (p.menuSent || !target.isConnected) return;
+        p.menuSent = true;
+        p.held = true;
+        sending = true;
+        try {
+          target.dispatchEvent(
+            new MouseEvent("contextmenu", { bubbles: true, cancelable: true, composed: true, button: 2, clientX: p.at.x, clientY: p.at.y }),
+          );
+        } finally {
+          sending = false;
+        }
+        afterMenu();
+      }, MENU_MS),
+    );
+  };
+  const onMove = (e: PointerEvent) => {
+    if (press && Math.hypot(e.clientX - press.at.x, e.clientY - press.at.y) > SLOP_PX) stopTimers();
+  };
+  // The lift: the hold is over; the press ends a little later, so the
+  // mouse events and a menu the browser sends at the lift are still its.
+  const onUp = () => {
+    if (!press) return;
+    stopTimers();
+    if (ending !== null) clearTimeout(ending);
+    ending = setTimeout(end, AFTER_LIFT_MS);
+  };
+  // A hold showed a hint or a menu: the press was a question, not a press.
+  const onMouse = (e: MouseEvent) => {
+    if (!press?.held) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onContextMenu = (e: Event) => {
+    if (sending || !press) {
+      if (!sending) afterMenu();
+      return;
+    }
+    if (press.menuSent) {
+      // This press had its menu already: no second one.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    // The browser's own long press: it is the press's menu, and no hint
+    // draws over it.
+    press.menuSent = true;
+    press.held = true;
+    stopTimers();
+    hide();
     afterMenu();
   };
   const onDrag = () => {
-    cancel();
+    stopTimers();
     hide();
-    endSwallow();
+    if (press) press.held = false;
   };
-  const onScroll = () => {
-    cancel();
+  // Only a scroll of what holds the finger ends the hold (a log streaming
+  // in another pane does not).
+  const onScroll = (e: Event) => {
+    if (!press) return;
+    const node = e.target;
+    const scrolled = node instanceof Document ? doc.documentElement : node instanceof Node ? node : null;
+    if (scrolled && !scrolled.contains(press.target)) return;
+    stopTimers();
     hide();
   };
 
-  doc.addEventListener("pointerdown", onDown, true);
-  doc.addEventListener("pointermove", onMove, true);
-  doc.addEventListener("pointerup", onUp, true);
-  doc.addEventListener("pointercancel", onUp, true);
-  doc.addEventListener("click", onClick, true);
-  doc.addEventListener("contextmenu", onContextMenu, true);
-  doc.addEventListener("scroll", onScroll, true);
-  doc.addEventListener("dragstart", onDrag, true);
+  const listeners: Array<[string, (e: never) => void]> = [
+    ["pointerdown", onDown],
+    ["pointermove", onMove],
+    ["pointerup", onUp],
+    ["pointercancel", onUp],
+    ["mousedown", onMouse],
+    ["mouseup", onMouse],
+    ["click", onMouse],
+    ["contextmenu", onContextMenu],
+    ["scroll", onScroll],
+    ["dragstart", onDrag],
+  ];
+  for (const [type, fn] of listeners) doc.addEventListener(type, fn as EventListener, true);
   return () => {
-    cancel();
+    end();
     hide();
-    endSwallow();
-    doc.removeEventListener("dragstart", onDrag, true);
-    doc.removeEventListener("pointerdown", onDown, true);
-    doc.removeEventListener("pointermove", onMove, true);
-    doc.removeEventListener("pointerup", onUp, true);
-    doc.removeEventListener("pointercancel", onUp, true);
-    doc.removeEventListener("click", onClick, true);
-    doc.removeEventListener("contextmenu", onContextMenu, true);
-    doc.removeEventListener("scroll", onScroll, true);
+    for (const [type, fn] of listeners) doc.removeEventListener(type, fn as EventListener, true);
   };
 }

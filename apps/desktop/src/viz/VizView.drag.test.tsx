@@ -308,3 +308,27 @@ test("on a touch screen a row's menu moves it up or down as a drop would", async
     globalThis.matchMedia = real;
   }
 });
+
+// Review E2 M2: in a `depth` list an epic steps past its children, not
+// between them.
+test("on a touch screen Move Down on a parent row passes its children", async () => {
+  const real = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
+  try {
+    const cols = ["uri", "title", "d"];
+    const deep: SqlCell[][] = [["e", "Epic", 0], ["c1", "child", 1], ["t", "Task", 0]];
+    const run = {
+      config: { ...base, depth: "d", actions: [reorder] },
+      params: {},
+      result: { columns: cols, rows: deep, truncated: false, reads: { datasets: [], tables: [], measures: [] } },
+    } as unknown as VizRun;
+    const view = render(<VizView run={run} onOpenPage={() => {}} />);
+    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.click(await view.findByTestId("menu-item-viz.move.down"));
+    await waitFor(() => expect(ran).toHaveLength(1));
+    expect(ran[0]).toMatchObject({ row: { uri: "e" }, drop: { after: { uri: "t" }, before: null } });
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});

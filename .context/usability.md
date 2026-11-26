@@ -733,16 +733,23 @@ icon-only control (a `title`, an `aria-label` with no text of its own or
 only a glyph like ×, or a label cut short) shows its label in a bubble
 above it (below it near the top of the screen), and the press then does
 nothing more (`touchHints.ts`, one listener for the page, touch presses
-only). The click after a hold is swallowed only until the next press, a
-drag, or a menu the long press opened (which hides the bubble): Android's
-own long press may come before or after 400 ms. So an
+only). After a hold that showed a hint or a menu, what the browser sends
+at the lift (mousedown, mouseup, click) is the hold's, until 400 ms after
+the lift; a drag ends that. Android's own long press may come before or
+after 400 ms: when it comes first no hint draws over its menu. A menu closes
+on a `pointerdown` outside it, never on the lift's mouse events. Only a
+scroll of what holds the finger ends the hold. So an
 icon button's `title` is enough on a tablet too; never put a control's only
 explanation anywhere a finger cannot reach.
 
 **A long press is a right-click.** A finger held still for 550 ms is a
 `contextmenu` at the finger (`touchHints.ts`), so every menu of the page
 opens by touch with no code at the site; Android's own long press counts
-instead when it comes first, and one press opens one menu. Text fields,
+instead when it comes first, and one press opens one menu (a Menu key
+after the press opens its own). No long press menu starts inside an open
+menu: a slow tap on an item is a tap. On a touch screen controls and rows
+take no text selection and no OS callout (`index.html`), so the press stays
+the page's. Text fields,
 rich text and the code editor keep the OS's own long press (select, paste;
 the editor has its touch bar). A long press on a link opens it in a new tab,
 as its right-click does. A menu draws `data-oxplow-menu` on its root, so the
@@ -830,7 +837,7 @@ is text on a coarse pointer (`useCoarsePointer`):
 
 - **On a touch screen, a page-layer menu also has a ☰.** A finger's long
   press opens any right-click menu (`touchHints.ts`), but nothing shows it
-  is there: a backlink row and a dashboard tile draw a `MoreButton`
+  is there: a backlink row and a dashboard tile (on a line above it) draw a `MoreButton`
   (`components/MoreButton.tsx`) that opens the same menu below itself,
   only for a coarse pointer (a mouse keeps the row's space). Desktop chrome
   the tablet shell replaces (tab strip, rail, Navigator) gets none.
@@ -1096,16 +1103,20 @@ its right-click menu.
   Dragging a marked row drags every marked row. A drop's place shows as a
   line above or below the row, or the row or group outlined
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
-  the marked rows). A drag action runs only on a drop: it is never a row's menu item, click, key or bulk button.
+  the marked rows). A drag action runs only on a drop or, on a touch screen,
+  its Move items below: it is never a row's click, key or bulk button.
   On a touch screen (no Cmd or Shift), where the page has a bulk action,
   a row's menu has **Select** (Unselect when marked), and while rows are
   marked a tap marks or unmarks a row instead of opening it; Clear ends it.
-  A finger cannot drag on iPad, so on a touch screen a row's menu also has
-  the drops a drag would make (`movePlaces` in `viz/rowInteract.ts`):
-  **Move Up**, **Move Down**, **Move Into Row Above** (where a drop onto a
-  row nests) and **Move To ▸** another group or board column, each only
-  where a drag action takes it, for that row alone. A dashboard tile's
-  menu has **Move Earlier** and **Move Later**.
+  A finger's drag is unreliable (a long press is the menu), so on a touch
+  screen a row's menu also has the drops a drag would make (`movePlaces`
+  in `viz/rowInteract.ts`): **Move Up**, **Move Down**, **Move Into Row
+  Above** (where a drop onto a row nests) and **Move To ▸** another group
+  or board column, each only where a drag action takes it (a step only
+  where it names `before`, `after` or the order), for that row alone. In a
+  `depth` list a step is among the row's siblings (`siblingsOf`): a parent
+  passes its children whole. A dashboard tile's menu has **Move Earlier**
+  and **Move Later**, for a mouse too.
   Marks are per page and kept in the entry's history
   state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
   too: focusable, right-click and the Menu key open their row actions,

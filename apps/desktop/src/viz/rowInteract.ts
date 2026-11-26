@@ -188,3 +188,23 @@ export function movePlaces(
   }
   return out;
 }
+
+/** Row `index`'s siblings in a `depth` list, itself among them, in drawing
+ *  order: the rows at its depth under the same parent (the run between the
+ *  shallower rows around it). */
+export function siblingsOf<R>(rows: readonly R[], index: number, depthOf: (row: R) => number): R[] {
+  const d = depthOf(rows[index]!);
+  let from = index;
+  while (from > 0 && depthOf(rows[from - 1]!) >= d) from--;
+  let to = index;
+  while (to < rows.length - 1 && depthOf(rows[to + 1]!) >= d) to++;
+  return rows.slice(from, to + 1).filter((r) => depthOf(r) === d);
+}
+
+/** Whether `action` uses a row's place among its neighbours (`before`,
+ *  `after` or the order): a board's move to a column names only the group,
+ *  so a step up or down there is no move. */
+export function takesSteps(action: PageAction): boolean {
+  const scopes = scopesOf(action.input);
+  return scopes.has("before") || scopes.has("after") || scopes.has("order");
+}

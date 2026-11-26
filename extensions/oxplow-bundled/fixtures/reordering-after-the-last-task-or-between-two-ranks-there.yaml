@@ -1,0 +1,27 @@
+# A drop at the end of a queue has only the row above it (`after`): the
+# task goes last. A drop between two rows names both: `before` places it.
+requires: [oxtask]
+given:
+  - observe:
+      turn:
+        prompt: Do three things
+        during:
+          - { command: oxtask.task.create, input: { title: A, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: B, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: C, stage: ready }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress }, as: agent }
+when:
+  command: oxplow.tasks.reorder
+  input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", after: "oxplow:oxplow/task?id=tsk3&provider=oxtask" }
+expect: { ok: true, result: { rank: 3 } }
+steps:
+  - when: { sql: "SELECT title FROM v_oxplow_task ORDER BY rank" }
+    expect: { rows: [{ title: B }, { title: C }, { title: A }] }
+  - when:
+      command: oxplow.tasks.reorder
+      input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", before: "oxplow:oxplow/task?id=tsk3&provider=oxtask", after: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }
+    expect: { ok: true, result: { rank: 1.5 } }
+  - when: { sql: "SELECT title FROM v_oxplow_task ORDER BY rank" }
+    expect: { rows: [{ title: B }, { title: A }, { title: C }] }

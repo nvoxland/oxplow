@@ -127,7 +127,9 @@ import {
   movePlaces,
   rowKey,
   shownMarks,
+  siblingsOf,
   takesOnto,
+  takesSteps,
   withOrder,
   type DropAt,
 } from "./rowInteract.js";
@@ -827,12 +829,15 @@ function RowsBody({
   const touchMoveItems = (row: SqlCell[]): MenuItem[] => {
     if (!actions || dragActions.length === 0) return [];
     const record = recordOf(row);
-    const list = drawn.filter((r) => sameGroup(r, row));
+    const inGroup = drawn.filter((r) => sameGroup(r, row));
+    // In a `depth` list a step is among the row's siblings.
+    const list = viz.depth ? siblingsOf(inGroup, inGroup.indexOf(row), (r) => rowDepth(viz, result.columns, r)) : inGroup;
     const others = (groups ?? []).map((g) => ({ key: g.key, label: g.label, value: g.value, rows: g.rows.filter((r) => r !== row).map(recordOf) }));
     const runs = movePlaces(list.map(recordOf), list.indexOf(row), groupOf(row), others, onto).flatMap((m) => {
       const at = withOrder(m.place, result.rows.map(recordOf), [record]);
       const action = dragActionFor(dragActions, record, at);
-      return action ? [{ ...m, run: () => actions.runDrops(action, [{ row: record, drop: at }]) }] : [];
+      const step = m.id === "up" || m.id === "down";
+      return action && (!step || takesSteps(action)) ? [{ ...m, run: () => actions.runDrops(action, [{ row: record, drop: at }]) }] : [];
     });
     const steps = runs.filter((m) => !m.id.startsWith("group:"));
     const away = runs.filter((m) => m.id.startsWith("group:"));

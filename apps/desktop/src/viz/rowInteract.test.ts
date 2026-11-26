@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { PageAction } from "../tauri-bridge/generated/bindings.js";
-import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, movePlaces, NOWHERE, shownMarks, withOrder } from "./rowInteract.js";
+import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, movePlaces, NOWHERE, siblingsOf, takesSteps, shownMarks, withOrder } from "./rowInteract.js";
 
 // Marks, drops and keys are rules over rows, tested without a page.
 
@@ -117,4 +117,23 @@ describe("movePlaces", () => {
     expect(places.map((p) => [p.id, p.label])).toEqual([["group:g2", "Done"]]);
     expect(places[0]!.place).toMatchObject({ after: x, group: "done" });
   });
+});
+
+// In a `depth` list a step is among a row's siblings: an epic passes its
+// children, a child stays under its parent.
+test("siblingsOf keeps a row's level under its parent", () => {
+  const rows = ["Epic", "child1", "child2", "Task", "Epic2", "kid"];
+  const depth: Record<string, number> = { Epic: 0, child1: 1, child2: 1, Task: 0, Epic2: 0, kid: 1 };
+  const of = (i: number) => siblingsOf(rows, i, (r) => depth[r]!);
+  expect(of(0)).toEqual(["Epic", "Task", "Epic2"]);
+  expect(of(3)).toEqual(["Epic", "Task", "Epic2"]);
+  expect(of(2)).toEqual(["child1", "child2"]);
+  expect(of(5)).toEqual(["kid"]);
+});
+
+test("takesSteps: only an action that names a neighbour or the order", () => {
+  const a = (input: unknown) => ({ input }) as unknown as PageAction;
+  expect(takesSteps(a({ uri: "{{row.uri}}", before: "{{before.uri}}" }))).toBe(true);
+  expect(takesSteps(a({ ids: "{{order.uri}}" }))).toBe(true);
+  expect(takesSteps(a({ uri: "{{row.uri}}", stage: "{{group.value}}" }))).toBe(false);
 });

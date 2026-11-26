@@ -45,7 +45,7 @@ const CONTEXT_MENU_EXEMPT = [
   "components/useRowContextMenu.tsx",
   // The page-wide backstop that cancels the OS's own menu.
   "context-menu.ts",
-  // Listens only: a menu of the app's hides the touch hint's bubble.
+  // A finger's long press: sends a contextmenu, and stops a second one.
   "touchHints.ts",
 ];
 /** Raw `onContextMenu=` sites still to move onto the hook (file -> count). */

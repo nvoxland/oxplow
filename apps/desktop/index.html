@@ -273,6 +273,14 @@
         --text-xs: 13px;
         --text-sm: 14px;
       }
+      /* A finger's long press on a control or a row is its menu
+         (touchHints.ts): the OS's text selection and its callout must not
+         take the press first (iPad). Text, fields and the editor keep both. */
+      :root[data-density="touch"] :is(button, a, [role=button], [role=row], [role=option], [role=tab], tr, li, .ox-tile-slot, [data-testid^="viz-row-"]) {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
 
       html, body, #root {
         margin: 0;

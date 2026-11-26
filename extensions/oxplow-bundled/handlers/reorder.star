@@ -1,6 +1,7 @@
-# oxplow.tasks.reorder { uri, before?|after? }: a task's place in its
+# oxplow.tasks.reorder { uri, before?, after? }: a task's place in its
 # assignee's queue (or among the unassigned): before or after another task
-# of that queue. Its rank goes between the neighbours'; when a neighbour
+# of that queue. A drop names both neighbours where it has them: `before`
+# (the row it lands above) places it then; at the end only `after` is given. Its rank goes between the neighbours'; when a neighbour
 # has no rank yet (the queue came from starts, not from this command) the
 # whole queue is numbered 0, 1, … in its shown order, the task in its new
 # place. The undo writes every rank it changed back.
@@ -13,8 +14,10 @@ def transform(x):
     i = x["input"]
     before = i.get("before")
     after = i.get("after")
-    if (before == None) == (after == None):
-        return {"refuse": "give `before` or `after`, not both and not neither"}
+    if before == None and after == None:
+        return {"refuse": "give `before` or `after`"}
+    if before != None:
+        after = None
     anchor = before if before != None else after
     found = scope("sql.read", {
         "sql": "SELECT state, assignee FROM v_oxplow_task WHERE uri = :u",

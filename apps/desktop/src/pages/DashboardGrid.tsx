@@ -92,7 +92,7 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
             onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setRemoving(null); } }}>
             <span>Remove this tile? </span><button autoFocus type="submit">Confirm</button><button type="button" onClick={() => setRemoving(null)}>Cancel</button>
           </form> : null}
-          {writable ? <span style={tileMore}><MoreButton testId={`dashboard-tile-more-${tile.id}`} label="Tile actions" onOpen={(at) => menu.openAt(at, items)} /></span> : null}
+          {writable ? <div style={tileMore}><MoreButton testId={`dashboard-tile-more-${tile.id}`} label="Tile actions" onOpen={(at) => menu.openAt(at, items)} /></div> : null}
           {tile.body}
         </TileSlot>;
       })}
@@ -101,5 +101,6 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
   </>;
 }
 
-/** A finger's way to a tile's menu: its top right corner, over the tile. */
-const tileMore = { position: "absolute", top: 4, right: 4, zIndex: 1 } as const;
+/** A finger's way to a tile's menu: a line of its own above the tile (drawn
+ *  only on a touch screen), so it covers nothing of the tile's. */
+const tileMore = { display: "flex", justifyContent: "flex-end" } as const;

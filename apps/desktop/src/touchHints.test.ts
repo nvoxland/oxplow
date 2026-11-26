@@ -171,3 +171,64 @@ test("the hint goes only when a menu opened", async () => {
   await wait(MENU_MS + 50);
   expect(document.querySelector("[data-testid=touch-hint]")).toBeNull();
 });
+
+// Review E2: the lift after our menu (iPad sends mousedown, mouseup, click
+// at the lift, however long the hold) does nothing.
+test("the lift after a long press menu sends no mousedown, mouseup or click on", async () => {
+  stop = installTouchHints();
+  const row = el(`<div>A row</div>`);
+  const seen: string[] = [];
+  for (const t of ["mousedown", "mouseup", "click"]) row.addEventListener(t, () => seen.push(t));
+  press(row, "pointerdown");
+  await wait(MENU_MS + 900);
+  press(row, "pointerup");
+  for (const t of ["mousedown", "mouseup", "click"]) row.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true }));
+  expect(seen).toEqual([]);
+});
+
+// The press ends a little after the lift: a Menu key's contextmenu then
+// opens its menu.
+test("a keyboard contextmenu after a long press is not stopped", async () => {
+  stop = installTouchHints();
+  const row = el(`<div>A row</div>`);
+  const seen = menus(row);
+  press(row, "pointerdown");
+  await wait(MENU_MS + 50);
+  press(row, "pointerup");
+  await wait(600);
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  expect(seen.length).toBe(2);
+});
+
+// A scroll somewhere else (a streaming log) does not cancel the hold.
+test("a scroll elsewhere leaves the hold alone", async () => {
+  stop = installTouchHints();
+  document.body.innerHTML = `<div id="log"></div><div id="r">row</div>`;
+  const r = document.getElementById("r")!;
+  const seen = menus(r);
+  press(r, "pointerdown");
+  document.getElementById("log")!.dispatchEvent(new Event("scroll"));
+  await wait(MENU_MS + 50);
+  expect(seen.length).toBe(1);
+});
+
+// The browser's menu at 400 ms: no hint bubble over it.
+test("no hint after the browser opened its menu", async () => {
+  stop = installTouchHints();
+  const button = el(`<button title="Refresh"><svg></svg></button>`);
+  press(button, "pointerdown");
+  button.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  await wait(HOLD_MS + 50);
+  expect(document.querySelector("[data-testid=touch-hint]")).toBeNull();
+});
+
+// A slow tap on an open menu's item is a tap, not another menu.
+test("no long press menu inside an open menu", async () => {
+  stop = installTouchHints();
+  document.body.innerHTML = `<div data-oxplow-menu=""><button id="item">Remove</button></div>`;
+  const item = document.getElementById("item")!;
+  const seen = menus(document.body);
+  press(item, "pointerdown");
+  await wait(MENU_MS + 50);
+  expect(seen.length).toBe(0);
+});
