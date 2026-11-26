@@ -2,6 +2,9 @@ title: Thread Go To
 description: "The pages a thread goes to, of one kind (`mode`): its bookmarks (`bookmarks`, as `thread-bookmarks` has them), the pages it opened last (`recent`), or the ones it opens most over 30 days (`top`) — `limit` at most for the last two (20 unless given: the panel's body, which grows to show them all; its collapsed icons ask for 6). A row whose page, file or record no longer exists is left out. Each row's `grp` names the kind, `at` when it was last opened (recent), `times` how often (top)."
 params:
 - name: thread_id
+# The viewing device, supplied by the view: its visits and the ones from
+# before devices; no device sees every device's.
+- name: device_id
 - name: mode
 - name: limit
   default: '20'
@@ -21,6 +24,7 @@ loaders:
                row_number() OVER (PARTITION BY page_id ORDER BY visited_at DESC, id DESC) AS latest
         FROM v_page_visit
         WHERE thread_id = :thread_id AND page_kind <> 'agent_session'
+          AND (:device_id IS NULL OR device_id IS NULL OR device_id = :device_id)
       ),
       recent AS (
         SELECT uri, page_kind, label, visited_at, row_number() OVER (ORDER BY visited_at DESC) AS ord

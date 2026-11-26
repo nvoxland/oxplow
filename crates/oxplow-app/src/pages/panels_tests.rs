@@ -100,6 +100,7 @@ async fn a_thread_panel_runs_every_part_for_the_thread_and_the_toggle_only_on_th
     let ctx = ViewContext {
         stream_id: Some(1),
         thread_id: Some(1),
+        device_id: None,
         active: None,
     };
     let run = run_panel(&svc, "acme/things", ctx.clone(), &BTreeMap::new())
@@ -220,6 +221,7 @@ async fn each_part_run_says_what_it_gives_its_panel() {
     let ctx = ViewContext {
         stream_id: Some(1),
         thread_id: Some(1),
+        device_id: None,
         active: None,
     };
     let picks = BTreeMap::from([("mode".to_string(), "many".to_string())]);
@@ -245,6 +247,7 @@ async fn an_open_part_run_carries_its_view_on_every_snapshot() {
     let ctx = ViewContext {
         stream_id: Some(1),
         thread_id: Some(1),
+        device_id: None,
         active: None,
     };
     let p = find_panel(&svc, "acme/things").await.unwrap();
@@ -283,6 +286,7 @@ async fn a_part_request_names_its_page_and_every_part_that_declares_a_toggle_tak
     let ctx = ViewContext {
         stream_id: Some(1),
         thread_id: Some(1),
+        device_id: None,
         active: None,
     };
     let gone = BTreeMap::from([("mode".to_string(), "gone".to_string())]);

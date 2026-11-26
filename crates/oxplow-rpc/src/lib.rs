@@ -252,6 +252,10 @@ macro_rules! oxplow_command_table {
                 open_panel_part => $crate::commands::pages::open_panel_part { panel: String, part: ::oxplow_app::pages::panels::PanelPart, choices: Option<::std::collections::BTreeMap<String, String>>, stream_id: Option<String>, thread_id: Option<String> } -> $crate::commands::pages::OpenedRun,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
+                // page visits: the device that opened the page owns the visit
+                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
+                list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
+                top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
                 // each device's own stream and thread (`.context/data-model.md` "device_view_state")
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
@@ -336,10 +340,7 @@ macro_rules! oxplow_command_table {
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
                 // comments
                 // page_visit
-                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
                 finish_page_visit => $crate::commands::page_visit::finish_page_visit { id: String, duration_ms: u32 } -> (),
-                list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
-                top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),
                 // usage
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,

@@ -367,7 +367,8 @@ export const commands = {
 	listOutbound: (source: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_outbound", { source, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	recordPageVisit: (pageKind: string, pageId: string, label: string | null, threadId: string | null) => typedError<PageVisit, IpcError_Serialize>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, threadId })),
 	/**
@@ -377,12 +378,14 @@ export const commands = {
 	finishPageVisit: (id: string, durationMs: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("finish_page_visit", { id, durationMs })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError_Serialize>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError_Serialize>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
 	/**

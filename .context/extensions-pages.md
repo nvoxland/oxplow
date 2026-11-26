@@ -246,7 +246,9 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   the matching dataset, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound
   to the viewer's context (`ViewContext`, numeric ids) unless the caller
-  supplies it. Precedence: supplied, then context, then `default`.
+  supplies it. `device_id` is the viewing device's id (`dev-…`, text; NULL
+  for a viewer with no device) and binds the same way: a page that shows
+  what a device did (Go To's visits) keeps that device's rows. Precedence: supplied, then context, then `default`.
   `view_context(svc, stream?, thread?)` resolves it: the given stream
   (else the thread's, else the primary) and the given thread (else the
   stream's selected-or-first one). IPC `open_page` and `run_page_action`

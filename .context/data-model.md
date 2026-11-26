@@ -2168,7 +2168,15 @@ recorded open when its page is shown (`record_page_visit`, no length) and
 finished by `finish_page_visit { id, duration_ms }` when it ends: another
 page shown, the thread changed, or the window's `pagehide`. The length is
 time with the window visible (`apps/desktop/src/pageVisitTimer.ts`); a
-visit whose end the app missed (it quit) keeps NULL. Indexes on
+visit whose end the app missed (it quit) keeps NULL. `device_id?` (V86)
+is the device the page was opened on, taken from the request's caller. A
+visit with a NULL `device_id` is from before devices (or recorded with no
+device) and counts as every device's. What a page shows of the visits is the
+viewing device's: its own and the NULL ones. `list_recent`, `list_top` and
+`list_frequent` take the device; with none they read every device's. The
+`device_id` page param is supplied by the view context, and Go To
+(`go-to`, `thread-go-to`) filters on it. The project-wide analytics pages
+(Usage, Dashboards) read every device's visits. Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and
 `(thread_id, visited_at DESC)`. Aggregates derived by query:
 

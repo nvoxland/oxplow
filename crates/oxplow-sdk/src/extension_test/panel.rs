@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 /// The keys a `panel` fixture's `when` takes.
-const WHEN_KEYS: &[&str] = &["panel", "thread", "stream", "choices"];
+const WHEN_KEYS: &[&str] = &["panel", "thread", "stream", "device", "choices"];
 
 /// The keys its `expect` takes: a part's run (checked as a page's is), or
 /// what the panel says as a whole.
@@ -87,6 +87,17 @@ pub(super) async fn panel_example(
             .fix("`stream: str1`, `thread: thr1`"),
         );
     };
+    let Ok(device) = super::page::device_of(ex.when.get("device")) else {
+        return report.errors.push(
+            error(
+                shown,
+                ex.line("when"),
+                "fixture.view",
+                "a panel's `device` isn't a device id",
+            )
+            .fix("`device: dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427`"),
+        );
+    };
     let picks: BTreeMap<String, String> = ex
         .when
         .get("choices")
@@ -103,7 +114,8 @@ pub(super) async fn panel_example(
         })
         .unwrap_or_default();
     host.current().await;
-    let ctx = oxplow_app::pages::spec::view_context(&host.svc, None, stream, thread).await;
+    let ctx =
+        oxplow_app::pages::spec::view_context(&host.svc, device.as_ref(), stream, thread).await;
     let run = match oxplow_app::pages::panels::run_panel(&host.svc, &id, ctx.clone(), &picks).await
     {
         Ok(run) => run,

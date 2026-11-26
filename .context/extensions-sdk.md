@@ -349,7 +349,7 @@ check already reported is not repeated.
   descriptors by public id, `unsupported` what only the app shows
   (decorators, replacements, skills; a slot mount runs in its
   host page's run, so a fixture of the host page checks it). A panel is
-  run whole by a `when: { panel, thread?, stream?, choices? }` fixture
+  run whole by a `when: { panel, thread?, stream?, device?, choices? }` fixture
   (`extension_test/panel.rs` over `oxplow_app::pages::panels::run_panel`,
   the rules the rail uses): each part checked as a page's `expect`, and the
   header's `count`, the `alert` and the toggles in force; a `params` key is
@@ -470,7 +470,7 @@ fails when the table is stale (`OXPLOW_BLESS=1` writes it). A new kind is
 a `KINDS` entry and a `dispatch` arm. The forms:
 
 - `when: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
-  `view: { stream?, thread? }` and `steps: [..]` beside `when`, and
+  `view: { stream?, thread?, device? }` and `steps: [..]` beside `when`, and
   `expect: { loaders?: { <name>: { rows: n | $any | [ { col: val } | [ val,
   … ] ] | { contains: [..] }, columns? } }, nodes?: [{ id, kind?,
   actions? }], text?, alert?,

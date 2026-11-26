@@ -126,7 +126,7 @@ const MAX_COLUMNS: usize = 8;
 /// The params of a page shown in the launcher (it has a `category`) that
 /// nothing fills in when it opens there: no default, no
 /// options from a loader, and not one in the `#` view (a filter, selection or view
-/// param starts empty on purpose). The viewer's `stream_id`, `thread_id` and `head_sha`
+/// param starts empty on purpose). The viewer's `stream_id`, `thread_id`, `device_id` and `head_sha`
 /// are filled in for it.
 pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
     use crate::pages::spec::ParamRole;
@@ -140,7 +140,7 @@ pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
             p.default.is_none()
                 && p.options_from.is_none()
                 && !p.role.is_some_and(ParamRole::rides_view)
-                && !["stream_id", "thread_id", "head_sha"].contains(&p.name.as_str())
+                && !["stream_id", "thread_id", "device_id", "head_sha"].contains(&p.name.as_str())
         })
         .map(|p| p.name.clone())
         .collect()

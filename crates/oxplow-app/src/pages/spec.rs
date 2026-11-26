@@ -2596,6 +2596,9 @@ impl VizConfig {
 pub struct ViewContext {
     pub stream_id: Option<i64>,
     pub thread_id: Option<i64>,
+    /// The device viewing (`dev-…`); `None` for a viewer with no device.
+    /// Pages keep what the device opened with it (`v_page_visit`).
+    pub device_id: Option<String>,
     /// What's active, to check a viz's needs against; `None` checks
     /// nothing.
     pub active: Option<crate::capabilities::Active>,
@@ -2603,7 +2606,7 @@ pub struct ViewContext {
 
 impl ViewContext {
     /// The params the context supplies when the caller doesn't.
-    const SUPPLIED: &[&str] = &["stream_id", "thread_id"];
+    const SUPPLIED: &[&str] = &["stream_id", "thread_id", "device_id"];
 
     /// Whether a param named `name` is one the context supplies.
     pub fn supplies(name: &str) -> bool {
@@ -2615,6 +2618,7 @@ impl ViewContext {
         match name {
             "stream_id" => self.stream_id.map(SqlCell::Int),
             "thread_id" => self.thread_id.map(SqlCell::Int),
+            "device_id" => self.device_id.clone().map(SqlCell::Text),
             _ => None,
         }
     }
@@ -2663,6 +2667,7 @@ pub async fn view_context(
     ViewContext {
         stream_id: stream.map(|s| s.value()),
         thread_id: thread.map(|t| t.value()),
+        device_id: device.map(|d| d.as_str().to_string()),
         active: Some(
             svc.capabilities
                 .snapshot(&crate::config_service::read_config(&svc.config)),

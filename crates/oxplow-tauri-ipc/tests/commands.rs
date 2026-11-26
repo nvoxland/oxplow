@@ -75,19 +75,27 @@ async fn list_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_page_visits_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    let v = commands::generated::list_recent_page_visits(app.state(), 10, None)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
+    let v = rpc(
+        &app,
+        "list_recent_page_visits",
+        serde_json::json!({ "limit": 10, "threadId": null }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v, serde_json::json!([]));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn top_visited_pages_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    let v = commands::generated::top_visited_pages(app.state(), 10, None)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
+    let v = rpc(
+        &app,
+        "top_visited_pages",
+        serde_json::json!({ "limit": 10, "threadId": null }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v, serde_json::json!([]));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

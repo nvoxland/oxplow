@@ -3,6 +3,7 @@ description: The Go To panel collapsed — the first six of its open view's page
 params:
 - name: thread_id
   label: Thread
+- name: device_id
 - name: mode
   role: filter
   label: Show
@@ -15,7 +16,7 @@ loaders:
   go_to:
     page: oxplow/thread-go-to
     loader: pages
-    params: { thread_id: { param: thread_id }, mode: { param: mode }, limit: '6' }
+    params: { thread_id: { param: thread_id }, device_id: { param: device_id }, mode: { param: mode }, limit: '6' }
 view:
   from: go_to
   viz: icons

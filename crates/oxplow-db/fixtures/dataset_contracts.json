@@ -10556,6 +10556,51 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Visit id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the page was opened in."
+        },
+        {
+          "name": "page_kind",
+          "type": "TEXT",
+          "doc": "Page kind (`task`, `file`, `page`, …)."
+        },
+        {
+          "name": "page_id",
+          "type": "TEXT",
+          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "Title shown at the time."
+        },
+        {
+          "name": "visited_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "doc": "How long the page was shown, in milliseconds, counting only time with the window visible; NULL while the visit is open and for one whose end the app missed (it quit). (v4: recorded when the visit ends)"
+        },
+        {
+          "name": "device_id",
+          "type": "TEXT",
+          "doc": "The device it was opened on (`dev-…`); NULL for visits from before devices, which count as every device's. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "search_comment": {
