@@ -56,7 +56,18 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
   return <>
     <TileGrid testId="dashboard-grid" aria-busy={busy}>
       {shown.map((tile, index) => {
-        const items = [{ id: "remove", label: "Remove tile…", enabled: !busy, run: () => setRemoving(tile.id) }];
+        // A drag's move, by menu: a finger cannot drag on iPad.
+        const moveTo = (to: number) => () => {
+          const next = shown.map((t) => t.id).filter((id) => id !== tile.id);
+          next.splice(to, 0, tile.id);
+          void edit((yaml) => moveTile(yaml, tile.id, to), next);
+        };
+        const items = [
+          { id: "move-earlier", label: "Move Earlier", enabled: !busy && index > 0, run: moveTo(index - 1) },
+          { id: "move-later", label: "Move Later", enabled: !busy && index < shown.length - 1, run: moveTo(index + 1) },
+          { id: "remove-separator", label: "", enabled: false, separator: true },
+          { id: "remove", label: "Remove tile…", enabled: !busy, run: () => setRemoving(tile.id) },
+        ];
         return <TileSlot key={tile.id} size={tile.size} tabIndex={writable ? 0 : undefined}
           data-testid={`dashboard-tile-${tile.id}`} draggable={writable && !busy}
           style={over === tile.id ? { outline: "2px solid var(--accent)" } : undefined}

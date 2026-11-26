@@ -1,7 +1,7 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import type { PageAction } from "../tauri-bridge/generated/bindings.js";
-import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, NOWHERE, shownMarks, withOrder } from "./rowInteract.js";
+import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, movePlaces, NOWHERE, shownMarks, withOrder } from "./rowInteract.js";
 
 // Marks, drops and keys are rules over rows, tested without a page.
 
@@ -88,4 +88,33 @@ test("a key runs the row action that declares it", () => {
 
 test("a key never runs a drag action: it has no drop", () => {
   expect(keyAction([action({ id: "r", key: "r", drag: true })], "r")).toBeNull();
+});
+
+// A finger cannot drag on iPad: a row's menu offers the drops a drag would
+// make, as places — a step up or down in its group, into the row above
+// (where a drop onto a row nests), or the end of another group.
+describe("movePlaces", () => {
+  const a = { id: "a" };
+  const b = { id: "b" };
+  const c = { id: "c" };
+  const x = { id: "x" };
+  test("the middle row moves up, down and into the row above", () => {
+    const places = movePlaces([a, b, c], 1, "todo", [], true);
+    expect(places.map((p) => p.id)).toEqual(["up", "down", "into"]);
+    expect(places[0]!.place).toMatchObject({ before: a, after: null, group: "todo" });
+    expect(places[1]!.place).toMatchObject({ before: null, after: c, group: "todo" });
+    expect(places[2]!.place).toMatchObject({ onto: a });
+  });
+  test("an end row has no step past its end; no onto, no into", () => {
+    expect(movePlaces([a, b], 0, null, [], false).map((p) => p.id)).toEqual(["down"]);
+    expect(movePlaces([a, b], 1, null, [], false).map((p) => p.id)).toEqual(["up"]);
+  });
+  test("another group's end is a place; its own group is not", () => {
+    const places = movePlaces([a], 0, "todo", [
+      { key: "g1", label: "To do", value: "todo", rows: [a] },
+      { key: "g2", label: "Done", value: "done", rows: [x] },
+    ], false);
+    expect(places.map((p) => [p.id, p.label])).toEqual([["group:g2", "Done"]]);
+    expect(places[0]!.place).toMatchObject({ after: x, group: "done" });
+  });
 });

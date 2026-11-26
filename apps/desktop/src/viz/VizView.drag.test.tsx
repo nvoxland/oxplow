@@ -290,3 +290,21 @@ test("on a touch screen marks that are no longer shown leave taps alone", async 
     globalThis.matchMedia = real;
   }
 });
+
+// A finger cannot drag on iPad: a row's menu moves it as a drop would, and
+// offers only what a drag action takes.
+test("on a touch screen a row's menu moves it up or down as a drop would", async () => {
+  const real = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
+  try {
+    const view = render(<VizView run={runOf({ actions: [reorder] })} onOpenPage={() => {}} />);
+    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    expect(view.queryByTestId("menu-item-viz.move.up")).toBeNull();
+    fireEvent.click(await view.findByTestId("menu-item-viz.move.down"));
+    await waitFor(() => expect(ran).toHaveLength(1));
+    expect(ran[0]).toMatchObject({ action: "reorder", row: record(0), drop: { before: record(2), after: record(1), order: [record(1), record(0), record(2)] } });
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});

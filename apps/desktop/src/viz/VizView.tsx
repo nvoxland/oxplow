@@ -124,6 +124,7 @@ import {
   dropZone,
   keyAction,
   marksAfterClick,
+  movePlaces,
   rowKey,
   shownMarks,
   takesOnto,
@@ -809,6 +810,7 @@ function RowsBody({
           },
         ]
       : []),
+    ...(coarse ? touchMoveItems(row) : []),
     {
       id: "add-row-to-context",
       label: "Add to Context",
@@ -820,6 +822,32 @@ function RowsBody({
       .filter((a) => actionOffered(a, rowRecord(result.columns, row)))
       .map((a) => actionMenuItem(a, rowRecord(result.columns, row), actionOptions[a.id] ?? null, actions)),
   ];
+  // A finger cannot drag on iPad: the drops a drag would make, by menu
+  // (`movePlaces`), each where a drag action takes it. This row alone moves.
+  const touchMoveItems = (row: SqlCell[]): MenuItem[] => {
+    if (!actions || dragActions.length === 0) return [];
+    const record = recordOf(row);
+    const list = drawn.filter((r) => sameGroup(r, row));
+    const others = (groups ?? []).map((g) => ({ key: g.key, label: g.label, value: g.value, rows: g.rows.filter((r) => r !== row).map(recordOf) }));
+    const runs = movePlaces(list.map(recordOf), list.indexOf(row), groupOf(row), others, onto).flatMap((m) => {
+      const at = withOrder(m.place, result.rows.map(recordOf), [record]);
+      const action = dragActionFor(dragActions, record, at);
+      return action ? [{ ...m, run: () => actions.runDrops(action, [{ row: record, drop: at }]) }] : [];
+    });
+    const steps = runs.filter((m) => !m.id.startsWith("group:"));
+    const away = runs.filter((m) => m.id.startsWith("group:"));
+    return [
+      ...steps.map((m) => ({ id: `viz.move.${m.id}`, label: m.label, enabled: actions.busy === null, run: m.run })),
+      ...(away.length > 0
+        ? [{
+            id: "viz.move.to",
+            label: "Move To",
+            enabled: actions.busy === null,
+            submenu: away.map((m) => ({ id: `viz.move.${m.id}`, label: m.label, enabled: true, run: m.run })),
+          }]
+        : []),
+    ];
+  };
   // Every row of every row component: focusable, with its menu from the
   // ☰ button at its end (`rowMenu.button`) or the keyboard (Menu key /
   // Shift+F10). A right-click on a row opens nothing: on a tablet there is

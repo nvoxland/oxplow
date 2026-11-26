@@ -156,3 +156,35 @@ export function chainedDrops(at: DropAt, dragged: readonly Record<string, SqlCel
 export function keyAction(actions: readonly PageAction[], key: string): PageAction | null {
   return actions.find((a) => a.row && !a.inForm && !a.drag && a.key !== null && a.key !== undefined && a.key === key) ?? null;
 }
+
+/** A place a row's menu can move it to: what a drag there would drop. */
+export interface MovePlace {
+  /** `up`, `down`, `into` (onto the row above), or `group:<key>`. */
+  id: string;
+  label: string;
+  place: DropAt;
+}
+
+/** The places a finger moves row `index` of `rows` (its group's rows in
+ *  drawing order, the row among them) to by menu, as a drag would drop it:
+ *  a step up or down, into the row above when a drop onto a row is taken
+ *  (`onto`), and the end of each other group. Which of them a drag action
+ *  takes is the caller's (`dragActionFor`). */
+export function movePlaces(
+  rows: readonly Record<string, SqlCell>[],
+  index: number,
+  group: SqlCell | null,
+  groups: readonly { key: string; label: string; value: SqlCell; rows: readonly Record<string, SqlCell>[] }[],
+  onto: boolean,
+): MovePlace[] {
+  const rest = rows.filter((_, i) => i !== index);
+  const out: MovePlace[] = [];
+  if (index > 0) out.push({ id: "up", label: "Move Up", place: dropBeside(rest, index - 1, "before", group) });
+  if (index < rows.length - 1) out.push({ id: "down", label: "Move Down", place: dropBeside(rest, index, "after", group) });
+  if (onto && index > 0) out.push({ id: "into", label: "Move Into Row Above", place: dropBeside(rest, index - 1, "onto", group) });
+  for (const g of groups) {
+    if (g.value === group) continue;
+    out.push({ id: `group:${g.key}`, label: g.label, place: dropInGroup(g.rows, g.value) });
+  }
+  return out;
+}

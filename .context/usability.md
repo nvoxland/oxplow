@@ -1100,6 +1100,12 @@ its right-click menu.
   On a touch screen (no Cmd or Shift), where the page has a bulk action,
   a row's menu has **Select** (Unselect when marked), and while rows are
   marked a tap marks or unmarks a row instead of opening it; Clear ends it.
+  A finger cannot drag on iPad, so on a touch screen a row's menu also has
+  the drops a drag would make (`movePlaces` in `viz/rowInteract.ts`):
+  **Move Up**, **Move Down**, **Move Into Row Above** (where a drop onto a
+  row nests) and **Move To ▸** another group or board column, each only
+  where a drag action takes it, for that row alone. A dashboard tile's
+  menu has **Move Earlier** and **Move Later**.
   Marks are per page and kept in the entry's history
   state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
   too: focusable, right-click and the Menu key open their row actions,
