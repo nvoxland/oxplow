@@ -220,6 +220,8 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .ox-cell-badges { margin-left: auto; flex-shrink: 0; display: inline-flex; gap: var(--space-1); align-self: center; }
 /* A cut cell of parts (its text, then pills): the text is cut, the pills stay. */
 .ox-truncate .ox-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A tap on a cut cell shows its whole text (a finger has no hover). */
+.ox-truncate[data-expanded], .ox-truncate[data-expanded] .ox-cell-text { overflow: visible; text-overflow: clip; white-space: normal; }
 
 /* Document pages: a title, an intro, then sections. A section is a
    heading over a rule, no box (document style); sections stack apart. */

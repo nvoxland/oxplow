@@ -735,6 +735,22 @@ shows its label in a bubble above it, and the press then does nothing more
 icon button's `title` is enough on a tablet too; never put a control's only
 explanation anywhere a finger cannot reach.
 
+**Nothing is only on hover.** Where there is no hover (`@media (hover:
+none)`), what a rule shows on hover is always shown: one block in
+`apps/desktop/index.html` next to the hover rules (the blame and link
+kebabs, a section's Copy / Add to Context, a code block's Copy). A new
+hover reveal is added to that block. Content that exists only as a tooltip
+is text on a coarse pointer (`useCoarsePointer`):
+
+- A section's `help:` is a line under the heading, not the `?` icon's
+  `title`.
+- A tap on a cut table cell shows its whole text; another tap cuts it again
+  (`data-expanded`). A tap on a link or button in the cell is the control's.
+  A hold does not do this: the cell's `title` is its own text, which the
+  hold hint skips.
+- The agent dot's question needs nothing more: the dot has a `title` and no
+  text, so a hold shows it ("Waiting on your answer: ...").
+
 > **These rules are enforced by code, not just written down here.** The
 > open/close state machine for a slide-out glyph strip lives in
 > `apps/desktop/src/components/useSlideoutStrip.ts`, with the shared

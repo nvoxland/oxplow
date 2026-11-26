@@ -1,4 +1,5 @@
 import { Fragment, type HTMLAttributes, type Key, type ReactNode } from "react";
+import { useCoarsePointer } from "../coarsePointer.js";
 
 export interface DataColumn<R> {
   key: string;
@@ -66,8 +67,24 @@ function showWhole(e: React.MouseEvent<HTMLTableCellElement>) {
   else td.removeAttribute("title");
 }
 
+/** A finger has no hover: a tap on a cut cell shows its whole text, and
+ *  another tap cuts it again. A tap on a control in the cell is that
+ *  control's, not the cell's. */
+function toggleWhole(e: React.MouseEvent<HTMLTableCellElement>) {
+  if ((e.target as HTMLElement).closest("a, button, input, select, textarea, [role=button]")) return;
+  const td = e.currentTarget;
+  if (td.hasAttribute("data-expanded")) {
+    td.removeAttribute("data-expanded");
+    return;
+  }
+  const text = td.querySelector<HTMLElement>(".ox-cell-text");
+  const cut = (el: HTMLElement) => el.scrollWidth > el.clientWidth;
+  if (cut(td) || (text !== null && cut(text))) td.setAttribute("data-expanded", "true");
+}
+
 /** The one table: core pages and viz nodes draw rows through it. */
 export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetail, cellStyle, header = true, testId, tableProps }: DataTableProps<R>) {
+  const coarse = useCoarsePointer();
   // A cut column needs a fixed layout too: an automatic one grows to fit.
   const fixed = columns.some((c) => c.width !== undefined || c.truncate === true);
   const parts: readonly { key: string; heading: ReactNode | null; rows: readonly R[] }[] =
@@ -122,6 +139,7 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetai
                         className={[wrapClass(c), c.numeric ? "ox-num" : "", cut ? "ox-truncate" : ""].filter(Boolean).join(" ") || undefined}
                         title={title}
                         onMouseEnter={cut && title === undefined ? showWhole : undefined}
+                        onClick={cut && coarse ? toggleWhole : undefined}
                         style={cellStyle?.(row, c, j)}
                       >
                         {c.render(row)}

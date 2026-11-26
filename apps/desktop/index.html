@@ -487,6 +487,15 @@
       }
       .oxplow-md-code:hover .oxplow-md-code-copy,
       .oxplow-md-code-copy:focus-visible { opacity: 1; }
+      /* A finger cannot hover: what the rules above show on hover (the blame
+         and link kebabs, a section's Copy / Add to Context, a code block's
+         Copy) is always shown where there is no hover. */
+      @media (hover: none) {
+        .oxplow-blame-row-kebab,
+        .oxplow-md-link-kebab,
+        .lens-section [data-testid="lens-actions"],
+        .oxplow-md-code-copy { opacity: 1; }
+      }
       .oxplow-md blockquote {
         border-left: 3px solid var(--border-subtle);
         padding: 0.1em 0 0.1em 0.9em;
