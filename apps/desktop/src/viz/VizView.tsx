@@ -100,7 +100,6 @@ import { CodeViz } from "./CodeViz.js";
 import { MediaViz } from "./MediaViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
-import { iconFor } from "../icons.js";
 import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
@@ -1032,28 +1031,6 @@ function RowsBody({
     heading,
     groupDrop,
     rowLook,
-    // A row whose click opens a form (its primary action's) shows it: an
-    // icon at its end, a pencil unless the action names one, its label the
-    // hover. A click that opens a page or runs at once needs none.
-    rowButton: (row) => {
-      const primary = actions ? primaryOf(row) : null;
-      if (!primary?.form) return null;
-      const Glyph = iconFor(primary.icon ?? "pencil") ?? iconFor("pencil")!;
-      const name = actionName(primary.label);
-      return (
-        <button
-          type="button"
-          className="ox-icon-button"
-          data-testid={`viz-row-button-${result.rows.indexOf(row)}`}
-          title={name}
-          aria-label={name}
-          disabled={actions!.busy !== null}
-          onClick={() => actions!.run(primary, rowRecord(result.columns, row))}
-        >
-          <Glyph size={14} aria-hidden />
-        </button>
-      );
-    },
     cursor: {
       // The list takes the keys itself: a row's own (Enter that picks, the
       // menu key) and a control's (an input in a cell) go first.
@@ -1159,9 +1136,6 @@ interface RowsView {
   /** A drop target for a whole group (a board column). */
   groupDrop(g: RowGroup): Record<string, unknown>;
   rowLook: RowLook;
-  /** A table row's button at its end, when its click opens a form: what
-   *  says the row is clickable and what it does. */
-  rowButton?(row: SqlCell[]): ReactNode;
   /** The keyboard cursor over the drawn rows (list and table). */
   cursor: {
     listProps: React.HTMLAttributes<HTMLElement>;
@@ -1508,7 +1482,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
         serverErrors={form.serverErrors}
         schemaHelp={false}
         mode={mode}
-        submitLabel={mode === "edit" ? undefined : run.config.title}
+        submitLabel={mode === "edit" ? undefined : (run.config.form?.submit ?? run.config.title)}
         draft={draft}
         onDraft={setDraft}
         busy={form.busy}
@@ -2470,10 +2444,6 @@ function TableViz({ rows, cols, cell, rowMenu, view, header, revealed, singleLin
     const el = tableRef.current?.querySelector<HTMLElement>('[data-reveal="true"]');
     el?.scrollIntoView?.({ block: "nearest" });
   }, [revealedAt]);
-  // Rows whose click opens a form end in its button.
-  if (view?.rowButton && rows.some((row) => view.rowButton!(row) !== null)) {
-    columns.push({ key: "__row-button", label: "", width: 40, truncate: false, wrap: "nowrap", render: ([row]) => view.rowButton!(row) });
-  }
   // Every row ends in its menu's button.
   columns.push({ key: "__row-menu", label: "", width: 36, truncate: false, wrap: "nowrap", render: ([row]) => rowMenu.button(row) });
   const parts = sections(rows, view);

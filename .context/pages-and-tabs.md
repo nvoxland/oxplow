@@ -927,14 +927,14 @@ margin; an embed or a slot takes its title from the page it shows):
   `go-to`, `dashboards`, `hook-events`, `catalog` (foundation's);
   oxplow-bundled adds `wiki-index` and `wiki-freshness` (`slug`).
 - **Forms and settings.** `new-stream` (a `switch` on `tab` inside its
-  body, so tabs: Branch, a table of the branches a stream can start on —
-  local ones no stream has out, remote ones with no local copy as
-  `origin/<name>` — with each one's last commit and upstream marks, `select:
-  branch` filling the form under it; New branch, a name and a start point
-  offered from branches, remote branches and tags; Worktree, the working
-  copies no stream uses with their last commit and changed files, `select:
-  worktree`. Each form is `oxplow.stream.create` with its `source` and pick
-  fixed, the name from the pick), bundled's `new-task`,
+  body, so tabs: New Branch, a create form of a branch name and a start
+  point offered from branches, remote branches and tags, the stream named
+  for the branch (`submit: Create Stream`); From Worktree, the working copies no
+  stream uses; From Branch, the branches a stream can start on — local ones no
+  stream has out, remote ones with no local copy as `origin/<name>`. Both
+  are `single_line` tables with each one's last commit, and a click on a
+  row is its `primary` form action, Create Stream…, its pick fixed and the
+  stream's name starting as the branch's or folder's), bundled's `new-task`,
   `stream-settings` (param `stream`) and `thread-settings` (param
   `thread`; label `{{row.title}} settings`): a hint, the open sessions and
   the prompt as an edit `form` over `v_stream` / `v_thread` with

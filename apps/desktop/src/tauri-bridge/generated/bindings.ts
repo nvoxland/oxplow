@@ -3342,6 +3342,12 @@ export type FormSpec_Deserialize = {
 	 *  again with the `keep` fields' values carried over.
 	 */
 	again?: FormAgain | null,
+	/**
+	 *  Its button, when the node's title is the wrong words for it (a tab
+	 *  named for what it gathers, a button for what it does). None: the
+	 *  node's title.
+	 */
+	submit?: string | null,
 };
 
 /**  `form` viz: the command it submits and the values it starts from. */
@@ -3378,6 +3384,12 @@ export type FormSpec_Serialize = {
 	 *  again with the `keep` fields' values carried over.
 	 */
 	again?: FormAgain | null,
+	/**
+	 *  Its button, when the node's title is the wrong words for it (a tab
+	 *  named for what it gathers, a button for what it does). None: the
+	 *  node's title.
+	 */
+	submit?: string | null,
 };
 
 /**

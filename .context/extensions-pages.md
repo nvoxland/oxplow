@@ -570,6 +570,9 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   child — `name`, `title`, `kind` (`enum`, `text`, `number`), `values`,
   `read_only` — and its value is the object of those children; the form
   reads again when what the page read changes (`viz_actions::subfields_from`).
+  `submit: <label>` names a create form's button when the node's title
+  is the wrong words for it (a tab named "New Branch" whose button is
+  "Create Stream"); without it the button is the title.
   `again: { label, keep: [...] }` adds a second submit ("Save and
   Another"). `form_fields_problem` and `page_ref_problem` are the load
   checks.
@@ -851,10 +854,8 @@ is gone, is the toast's (usability.md "A person's command that fails").
   person"). Without it the button is the label without its `…`. Load
   refuses it on an action that isn't a form, and blank.
 - `primary: true` (a row action) is what a click on the row, or Enter,
-  runs: the first one the row is offered (`when`). When it is a form, a
-  table row also has its icon button (a pencil, or its `icon`; the
-  label its hover: `rowButton`, `usability.md`) before the ☰ every row
-  ends in, which opens the row's whole menu (a right-click on a page row
+  runs: the first one the row is offered (`when`). It is also in the ☰
+  every row ends in (no button of its own), which opens the row's whole menu (a right-click on a page row
   opens nothing: `usability.md` "Per-row actions"). `prominent: true`
   keeps a page action a button in the nav bar; the rest go in the ☰ menu
   (`submenu` groups them). `bulk` runs once per marked row; `key` runs on

@@ -635,24 +635,13 @@ test("a form's `also` button shows only where its `when` offers it", async () =>
   expect(offered.getByTestId("viz-action-form-also-remove").textContent).toBe("Remove");
 });
 
-// A row whose click opens a form says so: an icon button at the row's end
-// (a pencil, unless the action names its own icon), the primary action's
-// label without its `…` its hover and name, that opens the same form. A
-// primary action that runs at once (or a viz with none) draws no button.
-test("a table row whose primary action is a form has a button at its end that opens it", async () => {
+// A row whose click opens a form draws no button of its own: the click on
+// the row opens it, and its ☰ holds the same action.
+test("a table row whose primary action is a form opens it on a click and has no button but its menu", async () => {
   const primaryForm = { ...run, config: { ...viz, actions: [{ ...viz.actions[0], primary: true }] } } as unknown as VizRun;
   const view = render(<VizView run={primaryForm} onOpenPage={() => {}} />);
-  const button = view.getByTestId("viz-row-button-0");
-  expect(button.getAttribute("aria-label")).toBe("Retitle");
-  expect(button.getAttribute("title")).toBe("Retitle");
-  expect(button.querySelector("svg")).not.toBeNull();
-  fireEvent.click(button);
+  expect(view.queryByTestId("viz-row-button-0")).toBeNull();
+  expect(view.getByTestId("viz-row-0").querySelectorAll("button")).toHaveLength(1);
+  fireEvent.click(view.getByTestId("viz-row-0").querySelector("td")!);
   await waitFor(() => view.getByTestId("viz-action-form"));
-  cleanup();
-  const runsAtOnce = { ...run, config: { ...viz, actions: [{ ...viz.actions[0], primary: true, form: false }] } } as unknown as VizRun;
-  const plain = render(<VizView run={runsAtOnce} onOpenPage={() => {}} />);
-  expect(plain.queryByTestId("viz-row-button-0")).toBeNull();
-  cleanup();
-  const none = render(<VizView run={run} onOpenPage={() => {}} />);
-  expect(none.queryByTestId("viz-row-button-0")).toBeNull();
 });
