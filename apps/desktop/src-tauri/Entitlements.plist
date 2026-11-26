@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The bundle is signed with the hardened runtime. tree-sitter runs the
+       language packs' wasm grammars through wasmtime, which compiles them
+       to machine code at run time and makes plain mapped memory executable
+       (not MAP_JIT): without both keys the kernel kills the daemon the
+       first time it runs that code ("Code Signature Invalid"). -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

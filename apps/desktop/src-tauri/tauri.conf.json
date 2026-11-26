@@ -29,7 +29,8 @@
     "shortDescription": "Oxplow",
     "longDescription": "Stream-aware IDE shell for AI agent workflows.",
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
     }
   }
 }

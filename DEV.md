@@ -318,7 +318,14 @@ build, and it runs on whatever project and home you start it with.
 1. **Once per Mac: make the signing identity.** A release bundle is
    ad-hoc signed (`"signingIdentity": "-"`). Thus each rebuild is a new
    app to the keychain, and macOS asks again for the AI keys. Sign with
-   the stable identity from "Sign dev builds" to stop this:
+   the stable identity from "Sign dev builds" to stop this. Either way
+   the bundle is signed with the hardened runtime and
+   `apps/desktop/src-tauri/Entitlements.plist`: tree-sitter runs the
+   language packs' wasm grammars through wasmtime, which compiles them
+   at run time, and without `allow-jit` and
+   `allow-unsigned-executable-memory` macOS kills the daemon the first
+   time it runs that code ("oxplow-daemon exited before reporting an
+   endpoint"; the crash report says "Code Signature Invalid"):
 
    ```
    sh scripts/dev-signing-identity.sh
