@@ -19,7 +19,7 @@ const reports: Array<{ shown_thread: string | null }> = [];
 mock.module("../api.js", () => ({
   ...realApi,
   listTabSessions: async () => [],
-  saveTabSession: async () => 1,
+  saveTabSession: async () => ({ saved: true, revision: 1 }),
   forgetTabSession: async () => {},
   reportTabs: async (report: { shown_thread: string | null }) => {
     reports.push(report);

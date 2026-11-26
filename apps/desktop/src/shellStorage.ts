@@ -2,13 +2,13 @@
  * The only code that touches the browser's storage (a guard,
  * `no-direct-storage.test.ts`, holds every other file to it). What lives
  * here is the shell's own: what must be there before the daemon answers,
- * or belongs to this window — the tab sessions, the remote daemon to
- * connect to and its token, the recent remotes, and this browser's device id. The
+ * or belongs to this window — the remote daemon to connect to and its
+ * token, the recent remotes, and this browser's device id. The
  * window's own id lives only in memory, one per page load (`uiClientId.ts`).
  *
  * Nothing else is kept in the browser. A page's view is its **view
- * params** and its own memory its **history state** (its tab, which this
- * stores as the tab sessions); what a page or the app remembers for the
+ * params** and its own memory its **history state** (its tab, which the
+ * daemon keeps: `tabs/useTabSessions.ts`); what a page or the app remembers for the
  * person is **page memory** and **app preferences** (`prefs/remembered.ts`,
  * the project's database). See `.context/pages-and-tabs.md` "Page state".
  *

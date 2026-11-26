@@ -1,12 +1,18 @@
 import { expect, test } from "bun:test";
 
 import { knowledgePageRef } from "./pageRefs.js";
-import { emptySession, open, serializeSession } from "./session.js";
-import { createSessionSaver, sessionsFromStored } from "./useTabSessions.js";
+import { emptySession, open, serializeSession, type Session } from "./session.js";
+import { applyEarly, createSessionSaver, sessionsFromStored } from "./useTabSessions.js";
 
 // A device's tabs are the daemon's (`tab_session`): read at start, and each
-// thread's saved as it changes, one save at a time, each giving the revision
-// it read, so a late save never overwrites a newer one.
+// thread's saved as it changes, one step at a time, each save giving the
+// revision it read, so a late save never overwrites a newer one. The live
+// window owns its device's tabs: a refused save is sent again over where
+// the row is.
+
+const flush = async () => {
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
+};
 
 test("the stored tabs read back by thread, and a bad thread drops alone", () => {
   const good = open(emptySession(), { ref: knowledgePageRef("oxwiki", "a") });
@@ -18,34 +24,82 @@ test("the stored tabs read back by thread, and a bad thread drops alone", () => 
   expect(revisions).toEqual({ thr1: 3 });
 });
 
-test("a thread's saves go one at a time, the newest waiting, each with the revision the last one gave", async () => {
-  const sent: Array<{ thread: string; json: string; revision: number | null }> = [];
-  const answers: Array<(revision: number | null) => void> = [];
-  const saver = createSessionSaver(
-    (thread, json, revision) => {
-      sent.push({ thread, json, revision });
-      return new Promise((resolve) => answers.push(resolve));
+function backend() {
+  const steps: string[] = [];
+  const answers: Array<(a: { saved: boolean; revision: number | null }) => void> = [];
+  let failNext = false;
+  return {
+    steps,
+    answers,
+    failOnce: () => (failNext = true),
+    write: {
+      save: (thread: string, json: string, revision: number | null) => {
+        steps.push(`save ${thread} ${json} @${revision}`);
+        if (failNext) {
+          failNext = false;
+          return Promise.reject(new Error("down"));
+        }
+        return new Promise<{ saved: boolean; revision: number | null }>((resolve) => answers.push(resolve));
+      },
+      forget: async (thread: string) => {
+        steps.push(`forget ${thread}`);
+      },
     },
-    { thr1: 4 },
-    () => {},
-  );
+  };
+}
+
+test("a thread's saves go one at a time, only the newest waiting, each with the revision the last gave", async () => {
+  const b = backend();
+  const saver = createSessionSaver(b.write, { thr1: 4 });
   saver.save("thr1", "a");
   saver.save("thr1", "b");
   saver.save("thr1", "c");
-  expect(sent).toEqual([{ thread: "thr1", json: "a", revision: 4 }]);
-  answers.shift()!(5);
-  await Promise.resolve();
-  await Promise.resolve();
-  // Only the newest of the ones that waited is sent, with the new revision.
-  expect(sent.at(-1)).toEqual({ thread: "thr1", json: "c", revision: 5 });
-  expect(sent).toHaveLength(2);
+  expect(b.steps).toEqual(["save thr1 a @4"]);
+  b.answers.shift()!({ saved: true, revision: 5 });
+  await flush();
+  expect(b.steps).toEqual(["save thr1 a @4", "save thr1 c @5"]);
 });
 
-test("a save the daemon refuses as stale is told, so the window takes the stored copy", async () => {
-  const stale: string[] = [];
-  const saver = createSessionSaver(async () => null, {}, (thread) => stale.push(thread));
-  saver.save("thr2", "x");
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(stale).toEqual(["thr2"]);
+test("a refused save is sent again over the revision the daemon has", async () => {
+  const b = backend();
+  const saver = createSessionSaver(b.write, { thr1: 4 });
+  saver.save("thr1", "a");
+  b.answers.shift()!({ saved: false, revision: 9 });
+  await flush();
+  expect(b.steps).toEqual(["save thr1 a @4", "save thr1 a @9"]);
+});
+
+test("a forget waits for the save in flight, and the next save starts a new row", async () => {
+  const b = backend();
+  const saver = createSessionSaver(b.write, { thr1: 4 });
+  saver.save("thr1", "a");
+  saver.forget("thr1");
+  saver.save("thr1", "fresh");
+  expect(b.steps).toEqual(["save thr1 a @4"]);
+  b.answers.shift()!({ saved: true, revision: 5 });
+  await flush();
+  expect(b.steps).toEqual(["save thr1 a @4", "forget thr1", "save thr1 fresh @null"]);
+});
+
+test("a save that fails is kept, and sent again on retry", async () => {
+  const b = backend();
+  const saver = createSessionSaver(b.write, {});
+  b.failOnce();
+  saver.save("thr1", "a");
+  await flush();
+  expect(b.steps).toEqual(["save thr1 a @null"]);
+  saver.retry();
+  expect(b.steps).toEqual(["save thr1 a @null", "save thr1 a @null"]);
+});
+
+test("changes made before the stored tabs arrive are made over them", () => {
+  const stored = open(emptySession(), { ref: knowledgePageRef("oxwiki", "kept") });
+  const early: Array<[string, (s: Session) => Session]> = [
+    ["thr1", (s) => open(s, { ref: knowledgePageRef("oxwiki", "new") })],
+  ];
+  const out = applyEarly({ thr1: stored }, early);
+  expect(out.thr1!.tabs.map((t) => t.entries[0]!.ref.id)).toEqual([
+    knowledgePageRef("oxwiki", "kept").id,
+    knowledgePageRef("oxwiki", "new").id,
+  ]);
 });

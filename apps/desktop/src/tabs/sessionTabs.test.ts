@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { agentSessionRef, newSessionRef, knowledgePageRef } from "./pageRefs.js";
 import { emptySession, open, setStrip } from "./session.js";
-import { newThreadTabs, reconcileSessionTabs, storedSessionIsStale } from "./sessionTabs.js";
+import { newThreadTabs, reconcileSessionTabs } from "./sessionTabs.js";
 
 const knowledgeTab = knowledgePageRef("oxwiki", "a");
 
@@ -52,18 +52,5 @@ test("a new thread shows the picker without starting an agent", () => {
  *  can get an old thread's id: an entry whose agent-session tabs name sessions
  *  the thread no longer has (none of them is open) belongs to a thread that is
  *  gone, so the thread opens as a new one rather than on tabs that can't load. */
-test("a stored entry whose sessions are all gone is stale", () => {
-  const stored = setStrip(emptySession(), [agentSessionRef("ses1"), knowledgeTab]);
-  expect(storedSessionIsStale(stored, [])).toBe(true);
-  expect(storedSessionIsStale(stored, [{ id: "ses9" }])).toBe(true);
-});
-
 /** Any of its sessions still open, or none ever stored (a thread whose
  *  sessions were all closed keeps its page tabs): not stale. */
-test("a stored entry that still has a session, or never had one, is not stale", () => {
-  const stored = setStrip(emptySession(), [agentSessionRef("ses1"), knowledgeTab]);
-  expect(storedSessionIsStale(stored, [{ id: "ses1" }])).toBe(false);
-  expect(storedSessionIsStale(stored, [{ id: "ses9" }, { id: "ses1" }])).toBe(false);
-  expect(storedSessionIsStale(open(emptySession(), { ref: knowledgeTab }), [])).toBe(false);
-  expect(storedSessionIsStale(emptySession(), [])).toBe(false);
-});

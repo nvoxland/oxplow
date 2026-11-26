@@ -25,6 +25,14 @@ pub const MAX_SESSION_BYTES: usize = 256 * 1024;
 #[specta(transparent)]
 pub struct TabRevision(#[specta(type = oxplow_domain::JsNumber)] pub i64);
 
+/// What a save did: whether it wrote, and the row's revision now (the new
+/// one; for a refused save, the one the row is at, `None` for no row).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct TabSave {
+    pub saved: bool,
+    pub revision: Option<TabRevision>,
+}
+
 /// One thread's stored tabs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -67,15 +75,15 @@ impl TabSessionStore {
     }
 
     /// Keep `session_json` as `device`'s tabs of `thread`, if the row is still
-    /// at `revision` (`None`: the device has no row for it yet). The new
-    /// revision; `None` when the row moved on since (nothing is written).
+    /// at `revision` (`None`: the device has no row for it yet). When it moved
+    /// on since, nothing is written and the answer says where it is.
     pub async fn save(
         &self,
         device: &DeviceId,
         thread: &ThreadId,
         session_json: String,
         revision: Option<TabRevision>,
-    ) -> Result<Option<TabRevision>, DomainError> {
+    ) -> Result<TabSave, DomainError> {
         let revision = revision.map(|r| r.0);
         if session_json.len() > MAX_SESSION_BYTES {
             return Err(DomainError::Invalid(format!(
@@ -101,7 +109,10 @@ impl TabSessionStore {
                     })
                     .map_err(map_sql_err)?;
                 if current != revision {
-                    return Ok(None);
+                    return Ok(TabSave {
+                        saved: false,
+                        revision: current.map(TabRevision),
+                    });
                 }
                 let next = current.unwrap_or(0) + 1;
                 tx.execute(
@@ -114,7 +125,10 @@ impl TabSessionStore {
                     params![device, thread, session_json, next, now],
                 )
                 .map_err(map_sql_err)?;
-                Ok(Some(TabRevision(next)))
+                Ok(TabSave {
+                    saved: true,
+                    revision: Some(TabRevision(next)),
+                })
             })
             .await
     }
@@ -187,19 +201,35 @@ mod tests {
             .save(&mac, &thread, "{\"a\":1}".into(), None)
             .await
             .unwrap();
-        assert_eq!(first, Some(TabRevision(1)));
+        assert_eq!(
+            first,
+            TabSave {
+                saved: true,
+                revision: Some(TabRevision(1))
+            }
+        );
         let second = store
-            .save(&mac, &thread, "{\"a\":2}".into(), first)
+            .save(&mac, &thread, "{\"a\":2}".into(), first.revision)
             .await
             .unwrap();
-        assert_eq!(second, Some(TabRevision(2)));
-        // A late save that read revision 1 changes nothing.
+        assert_eq!(
+            second,
+            TabSave {
+                saved: true,
+                revision: Some(TabRevision(2))
+            }
+        );
+        // A late save that read revision 1 changes nothing, and says where the
+        // row is now.
         assert_eq!(
             store
-                .save(&mac, &thread, "{\"a\":1}".into(), first)
+                .save(&mac, &thread, "{\"a\":1}".into(), first.revision)
                 .await
                 .unwrap(),
-            None
+            TabSave {
+                saved: false,
+                revision: Some(TabRevision(2))
+            }
         );
         assert_eq!(
             store.list(&mac).await.unwrap(),
@@ -216,7 +246,10 @@ mod tests {
         assert!(store.list(&mac).await.unwrap().is_empty());
         assert_eq!(
             store.save(&mac, &thread, "{}".into(), None).await.unwrap(),
-            Some(TabRevision(1))
+            TabSave {
+                saved: true,
+                revision: Some(TabRevision(1))
+            }
         );
     }
 

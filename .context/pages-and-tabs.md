@@ -212,12 +212,10 @@ shown as itself, the default for one anywhere; the Text view stands
 aside for it), `tsv` (a TSV file as a table), `wiki-page`, `task`,
 `diff-view` for `oxplow/snapshot`, `oxplow/request` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
-session's tab follows its row (`reconcileSessionTabs`). The tabs a device keeps
-per thread (`tab_session`) go with their thread, but a stored entry can still
-name sessions the thread never had: when the window first sees a thread's
-open sessions, a stored entry whose agent-session tabs name none of them is
-forgotten and the thread opens as a new one (`storedSessionIsStale`), so it
-never sits on tabs that can't load. There is no `change-analysis` page.
+session's tab follows its row (`reconcileSessionTabs`): a session closed on
+another device loses its tab here too, and the thread's other tabs stay. The
+tabs a device keeps per thread (`tab_session`) go with their thread. There is
+no `change-analysis` page.
 
 ## Tab id format
 

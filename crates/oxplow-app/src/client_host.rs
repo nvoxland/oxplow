@@ -87,6 +87,11 @@ impl ClientHost {
 
     /// Window `client` closed: it takes no more calls, and the ones it
     /// hadn't answered are refused now rather than when they time out.
+    /// Whether window `client` hosts the daemon's calls now.
+    pub fn hosts(&self, client: &str) -> bool {
+        self.windows.lock().iter().any(|w| w.client == client)
+    }
+
     pub fn unregister(&self, client: &str) {
         self.windows.lock().retain(|w| w.client != client);
         // Dropping a waiting call's sender answers it "closed".

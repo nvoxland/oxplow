@@ -26,6 +26,10 @@ struct Inner {
     /// Page loads another page load of their device took over: refused for
     /// the rest of the daemon's life.
     replaced: HashSet<ConnectionId>,
+    /// Each device's latest page load, kept after its socket closes: a page
+    /// load that dropped is still the device's until a newer one connects,
+    /// so a newer one replaces it and it cannot take the device back.
+    latest: HashMap<DeviceId, ConnectionId>,
     /// The last socket handed out; each socket gets the next.
     sockets: u64,
 }
@@ -124,18 +128,21 @@ impl ClientDevices {
         let socket = SocketHandle::new(Socket(inner.sockets));
         let device = descriptor.id.clone();
         let previous = inner.devices.insert(
-            device,
+            device.clone(),
             Entry {
                 descriptor,
                 connection: connection.clone(),
                 socket: socket.clone(),
             },
         );
-        let replaced = match previous {
-            Some(old) if old.connection != connection => {
-                old.socket.replace();
-                inner.replaced.insert(old.connection.clone());
-                Some(old.connection)
+        // The live socket of the page load replaced is told to go.
+        if let Some(old) = previous.filter(|old| old.connection != connection) {
+            old.socket.replace();
+        }
+        let replaced = match inner.latest.insert(device, connection.clone()) {
+            Some(old) if old != connection => {
+                inner.replaced.insert(old.clone());
+                Some(old)
             }
             _ => None,
         };
@@ -257,6 +264,27 @@ mod tests {
         // The replaced one's late close changes nothing.
         assert!(!devices.closed(&tab.id, &old, first.socket.id()));
         assert_eq!(devices.get(&tab.id), Some(tab));
+    }
+
+    /// A page load whose socket dropped is still the device's: a new page
+    /// load that connects meanwhile replaces it, and it cannot come back.
+    #[test]
+    fn a_page_load_that_dropped_is_replaced_by_a_newer_one() {
+        let devices = ClientDevices::default();
+        let tab = device("Tab S9");
+        let (old, new) = (ConnectionId::generate(), ConnectionId::generate());
+        let first = devices.connected(tab.clone(), old.clone()).unwrap();
+        assert!(devices.closed(&tab.id, &old, first.socket.id()));
+        let second = devices.connected(tab.clone(), new.clone()).unwrap();
+        assert_eq!(second.replaced, Some(old.clone()));
+        assert!(devices.check(&old).is_err());
+        assert!(
+            devices.connected(tab.clone(), old).is_err(),
+            "the older one can't take it back"
+        );
+        // The same page load reconnecting is still itself.
+        assert!(devices.closed(&tab.id, &new, second.socket.id()));
+        assert_eq!(devices.connected(tab, new).unwrap().replaced, None);
     }
 
     #[test]

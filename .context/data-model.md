@@ -441,6 +441,11 @@ device's own (migration V82; the device is the request's caller,
   this device has no row for, with no agent session, opens the session
   picker on it (the new-thread signal, per device).
 
+A device's choice that was archived (a stream) or closed (a thread) since,
+on another device say, reads as no choice: the primary stream, the
+stream's first open thread. Closing a thread keeps its `tab_session` rows;
+only deleting it takes them.
+
 A reader with no device (an agent, a job, an effect, a script with the
 token) gets the defaults: the primary stream, a stream's first open thread
 (`ThreadService::selected_or_first(None, …)`), never one device's choice. A

@@ -21,7 +21,7 @@ mock.module("../api.js", () => ({
   ...realApiForTabs,
   // This device has no stored tabs yet; saves are kept nowhere.
   listTabSessions: async () => [],
-  saveTabSession: async () => 1,
+  saveTabSession: async () => ({ saved: true, revision: 1 }),
   forgetTabSession: async () => {},
 }));
 const { useWindowTabs } = await import("./useWindowTabs.js");

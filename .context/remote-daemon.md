@@ -371,6 +371,12 @@ upgrade replaces nothing; `client_reports::SocketLease::open`):
 - the connection it replaces is told: its socket closes with code 4001
   ("replaced", `devices::REPLACED_CLOSE_CODE`), and its tab report goes at
   once;
+- it stops hosting the daemon's calls (`ClientHost::unregister`: a call
+  waiting on it is answered at once); its page runs go when its socket
+  closes;
+- the daemon keeps each device's latest page load after its socket closes,
+  so a page load that dropped is still replaced by a newer one and cannot
+  take the device back; a daemon restart forgets this;
 - a replaced connection is refused from then on: `/ipc` answers `REPLACED`
   (`IpcError::replaced`) and a new socket closes at once with 4001. A
   replaced id never comes back.

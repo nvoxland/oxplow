@@ -27,7 +27,7 @@ import {
   stepOrigin,
   type OriginItem,
 } from "../tabs/session.js";
-import { reconcileSessionTabs, storedSessionIsStale } from "../tabs/sessionTabs.js";
+import { reconcileSessionTabs } from "../tabs/sessionTabs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { streamOfThread } from "../tabs/threadTabOps.js";
 import { useTabSessions } from "../tabs/useTabSessions.js";
@@ -59,7 +59,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
   // (`tabs/session.ts`), restored on start and stored on every change.
   // The strip, the bodies, history, origins and the active tab all come
   // from it (`.context/pages-and-tabs.md` "Navigation model").
-  const { sessions, loaded: sessionsLoaded, update: updateSession, forget: forgetSession } = useTabSessions();
+  const { sessions, loaded: sessionsLoaded, update: updateSession } = useTabSessions();
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -193,22 +193,9 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
   // The thread whose first tabs are still being opened: the window isn't
   // ready for a navigate until they are, or they would push it aside.
   const [openingThread, setOpeningThread] = useState<string | null>(null);
-  // The threads whose stored tabs were checked against their open sessions.
-  const checkedStored = useRef(new Set<string>());
   useEffect(() => {
     // Until this device's stored tabs are read, no thread is known to be new.
     if (!sessionsLoaded || !selectedThreadId || selectedThreadSessions === null) return;
-    // Tabs the browser kept from before a project reset can name sessions the
-    // thread never had (a new thread gets an old one's id): forget them once,
-    // when the thread is first seen, and open it as a new thread.
-    const stored = sessions[selectedThreadId];
-    if (!checkedStored.current.has(selectedThreadId)) {
-      checkedStored.current.add(selectedThreadId);
-      if (stored !== undefined && storedSessionIsStale(stored, selectedThreadSessions)) {
-        forgetSession(selectedThreadId);
-        return;
-      }
-    }
     if (sessions[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
       const threadId = selectedThreadId;
       updateSession(threadId, (session) => session);
@@ -217,7 +204,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
       return;
     }
     updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
-  }, [sessionsLoaded, selectedThreadId, selectedThreadSessions, sessions, updateSession, forgetSession]);
+  }, [sessionsLoaded, selectedThreadId, selectedThreadSessions, sessions, updateSession]);
 
   async function openNewThread(threadId: string) {
     try {

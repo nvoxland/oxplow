@@ -40,7 +40,10 @@ impl SocketLease {
             .client_devices
             .connected(descriptor, connection.clone())?;
         if let Some(old) = &opened.replaced {
+            // It stops being shown to agents, and stops hosting their calls
+            // (a waiting call is answered at once, not after its timeout).
             services.client_reports.forget(old);
+            services.client_host.unregister(old.as_str());
         }
         Ok(Self {
             _runs: services.page_runs.connect_client(connection.as_str()),

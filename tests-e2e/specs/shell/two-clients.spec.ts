@@ -1,7 +1,7 @@
 // One person on two clients of the same projects: what each client keeps of
 // its own, and what they share. A test that fails on today's code is marked
 // `test.fail()`: the mark comes off in the change that makes it pass
-// (per-device tabs, and the shared terminal's size rule).
+// (the shared terminal's size rule).
 import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
 import { client, connectedTo, expect, test } from "../../support/fixtures.js";
 import { load, open, reload } from "../../support/ui.js";

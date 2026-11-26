@@ -245,6 +245,43 @@ mod tests {
         );
     }
 
+    /// A device's stream that was archived since (on another device, say) is
+    /// no longer its stream: it shows the primary again.
+    #[tokio::test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test seeds the stream it archives"
+    )]
+    async fn an_archived_stream_is_no_devices_current_stream() {
+        use oxplow_domain::stores::StreamStore as _;
+        let (svc, _dir) = crate::test_support::services().await;
+        let primary = svc.streams.ensure_primary().await.unwrap();
+        let mut other = primary.clone();
+        other.id = oxplow_domain::StreamId::new(primary.id.value() + 1);
+        other.kind = oxplow_domain::StreamKind::Worktree;
+        other.title = "Other".into();
+        svc.stream_store.upsert(&other).await.unwrap();
+        let caller = crate::test_support::caller();
+        crate::dispatch_as(
+            "switch_stream",
+            serde_json::json!({ "id": other.id.to_string() }),
+            &svc,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        svc.stream_store.archive(&other.id).await.unwrap();
+        let current = crate::dispatch_as(
+            "get_current_stream",
+            serde_json::json!({}),
+            &svc,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        assert_eq!(current, serde_json::Value::Null, "{current}");
+    }
+
     #[tokio::test]
     async fn get_thread_state_dispatches() {
         let (svc, _dir) = crate::test_support::services().await;

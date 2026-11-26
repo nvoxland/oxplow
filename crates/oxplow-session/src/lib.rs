@@ -367,7 +367,13 @@ impl StreamService {
         };
         match self.streams.current_id(device).await? {
             None => Ok(None),
-            Some(id) => Ok(self.streams.get(&id).await?),
+            // A stream archived since (on another device, say) is no longer
+            // the one it shows.
+            Some(id) => Ok(self
+                .streams
+                .get(&id)
+                .await?
+                .filter(|s| s.archived_at.is_none())),
         }
     }
 

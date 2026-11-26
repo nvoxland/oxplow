@@ -3,6 +3,7 @@ import type {
   BackgroundTask,
   TabReport,
   TabReportAnswer,
+  TabSave,
   TabSession,
   HookEnvelope,
   OpOutcome,
@@ -498,9 +499,9 @@ export async function listTabSessions(): Promise<TabSession[]> {
 }
 
 /// Keep this device's tabs of `threadId`, if still at `revision` (the one
-/// last read; null for a thread it has no tabs of yet). The new revision;
-/// null when they moved on since (nothing was written).
-export async function saveTabSession(threadId: string, sessionJson: string, revision: number | null): Promise<number | null> {
+/// last read; null for a thread it has no tabs of yet). When they moved on
+/// since, nothing is written and the answer names the revision they are at.
+export async function saveTabSession(threadId: string, sessionJson: string, revision: number | null): Promise<TabSave> {
   return unwrap(await commands.saveTabSession(threadId, sessionJson, revision));
 }
 

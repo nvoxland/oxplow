@@ -66,17 +66,21 @@ impl ThreadService {
         device: Option<&DeviceId>,
         stream: &StreamId,
     ) -> Result<Option<ThreadId>, ThreadError> {
-        if let Some(id) = self.selected(device, stream).await? {
-            return Ok(Some(id));
-        }
         // `list_for_stream` returns them in their order.
-        Ok(self
+        let open: Vec<Thread> = self
             .threads
             .list_for_stream(stream)
             .await?
             .into_iter()
-            .find(Thread::is_open)
-            .map(|t| t.id))
+            .filter(Thread::is_open)
+            .collect();
+        // A choice that was closed since is no longer the device's thread.
+        if let Some(id) = self.selected(device, stream).await? {
+            if open.iter().any(|t| t.id == id) {
+                return Ok(Some(id));
+            }
+        }
+        Ok(open.first().map(|t| t.id))
     }
 
     /// `device` shows `thread` in `stream`.
@@ -201,6 +205,27 @@ mod tests {
         assert_eq!(
             f.svc.selected_or_first(None, &f.stream).await.unwrap(),
             Some(a_id)
+        );
+    }
+
+    /// A device's choice that was closed since (on another device, say) is no
+    /// longer its thread: the first open one is.
+    #[tokio::test]
+    async fn selected_or_first_passes_over_a_closed_choice() {
+        let f = fixture().await;
+        let a = add(&f, "a", true, 0).await;
+        let closed = add(&f, "closed", false, 1).await;
+        let mac = DeviceId::generate();
+        f.svc
+            .select(&mac, &f.stream, Some(&closed.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            f.svc
+                .selected_or_first(Some(&mac), &f.stream)
+                .await
+                .unwrap(),
+            Some(a.id)
         );
     }
 

@@ -12,12 +12,14 @@ mock.module("../newThreadSession.js", () => ({
     return opening;
   },
 }));
+// What the daemon has stored for this device (a test sets it).
+let stored: Array<{ threadId: string; sessionJson: string; revision: number }> = [];
 const realApiForTabs = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApiForTabs,
   // This device has no stored tabs yet; saves are kept nowhere.
-  listTabSessions: async () => [],
-  saveTabSession: async () => 1,
+  listTabSessions: async () => stored,
+  saveTabSession: async () => ({ saved: true, revision: 1 }),
   forgetTabSession: async () => {},
 }));
 const { HOME_TAB, useWindowTabs } = await import("./useWindowTabs.js");
@@ -73,4 +75,20 @@ test("with no tab chosen the thread's home tab shows: its first agent session's,
   act(() => hook.result.current.setCenterActive(HOME_TAB));
   expect(hook.result.current.centerActive).toBe(HOME_TAB);
   expect(hook.result.current.effectiveCenterActive).toBe("oxplow:oxplow/agent_session?id=ses1");
+});
+
+test("a thread whose stored tabs name a session closed elsewhere keeps its page tabs", async () => {
+  const { serializeSession, open: openTab, emptySession } = await import("../tabs/session.js");
+  let session = openTab(emptySession(), { ref: { id: "oxplow:oxplow/agent_session?id=ses1", pinned: true } }, { pinned: true });
+  session = openTab(session, { ref: page(1) });
+  stored = [{ threadId: "thr1", sessionJson: serializeSession(session), revision: 1 }];
+  try {
+    // The session closed on another device: the thread has none open.
+    const hook = setup([{ id: "ses2" } as never]);
+    await waitFor(() => expect(hook.result.current.sessionsLoaded).toBe(true));
+    await waitFor(() => expect(hook.result.current.threadPageTabs.thr1?.map((t) => t.id)).toContain(page(1).id));
+    expect(hook.result.current.threadPageTabs.thr1?.map((t) => t.id)).not.toContain("oxplow:oxplow/agent_session?id=ses1");
+  } finally {
+    stored = [];
+  }
 });

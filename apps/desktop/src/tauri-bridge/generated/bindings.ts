@@ -306,7 +306,7 @@ export const commands = {
 	 *  implementation and its docs live on the core. A request
 	 *  over Tauri IPC names no caller.
 	 */
-	saveTabSession: (threadId: ThreadId, sessionJson: string, revision: number | null) => typedError<number | null, IpcError_Serialize>(__TAURI_INVOKE("save_tab_session", { threadId, sessionJson, revision })),
+	saveTabSession: (threadId: ThreadId, sessionJson: string, revision: number | null) => typedError<TabSave, IpcError_Serialize>(__TAURI_INVOKE("save_tab_session", { threadId, sessionJson, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core. A request
@@ -6446,6 +6446,15 @@ export type TabReportAnswer = {
  *  next.
  */
 export type TabRevision = number;
+
+/**
+ *  What a save did: whether it wrote, and the row's revision now (the new
+ *  one; for a refused save, the one the row is at, `None` for no row).
+ */
+export type TabSave = {
+	saved: boolean,
+	revision: TabRevision | null,
+};
 
 /**  One thread's stored tabs. */
 export type TabSession = {

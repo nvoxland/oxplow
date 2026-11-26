@@ -5,7 +5,7 @@
 //! memory (`oxplow_app::client_reports`).
 
 use oxplow_app::client_reports::{TabReport, TabReportAnswer};
-use oxplow_db::tab_session_store::{TabRevision, TabSession};
+use oxplow_db::tab_session_store::{TabRevision, TabSave, TabSession};
 use oxplow_domain::{ThreadId, Timestamp};
 
 use crate::error::IpcError;
@@ -35,8 +35,8 @@ pub async fn list_tab_sessions(req: &RpcRequest<'_>) -> Result<Vec<TabSession>, 
 
 /// Keep `session_json` as the caller device's tabs of `thread_id`, if they
 /// are still at `revision` (the one it read; `None` for a thread it has no
-/// tabs of yet). The new revision; `None` when they moved on since, and
-/// nothing is written.
+/// tabs of yet). When they moved on since, nothing is written and the
+/// answer says the revision they are at.
 #[expect(
     clippy::disallowed_methods,
     reason = "off the bus: a device's tabs of a thread"
@@ -46,7 +46,7 @@ pub async fn save_tab_session(
     thread_id: ThreadId,
     session_json: String,
     revision: Option<TabRevision>,
-) -> Result<Option<TabRevision>, IpcError> {
+) -> Result<TabSave, IpcError> {
     let device = &req.caller()?.device;
     Ok(req
         .tab_session_store
@@ -104,19 +104,19 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(first, json!(1));
+        assert_eq!(first, json!({ "saved": true, "revision": 1 }));
         assert_eq!(
             ask("save_tab_session", save(json!(1)), Some(&mac))
                 .await
                 .unwrap(),
-            json!(2)
+            json!({ "saved": true, "revision": 2 })
         );
         assert_eq!(
             ask("save_tab_session", save(json!(1)), Some(&mac))
                 .await
                 .unwrap(),
-            serde_json::Value::Null,
-            "a save that read an old revision is refused"
+            json!({ "saved": false, "revision": 2 }),
+            "a save that read an old revision is refused, saying where the row is"
         );
         let listed = ask("list_tab_sessions", json!({}), Some(&mac))
             .await

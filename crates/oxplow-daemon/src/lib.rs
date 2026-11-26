@@ -1259,6 +1259,8 @@ mod tests {
             )
         };
         let (mut old, _) = tokio_tungstenite::connect_async(url(OLD)).await.unwrap();
+        // The older page load hosts the daemon's calls until it is replaced.
+        svc.client_host.register(OLD, vec!["tabs.write".into()]);
         let (_new, _) = tokio_tungstenite::connect_async(url(NEW)).await.unwrap();
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), old.next())
             .await
@@ -1266,6 +1268,10 @@ mod tests {
         assert!(
             closed_replaced(frame),
             "the older socket closes as replaced"
+        );
+        assert!(
+            !svc.client_host.hosts(OLD),
+            "the replaced page load hosts no more calls"
         );
 
         let ask = |connection: &'static str| {
