@@ -91,7 +91,9 @@ loaders:
                  WHEN 'none' THEN CASE WHEN c.problem IS NOT NULL THEN 'unavailable'
                                        WHEN c.session IS NOT NULL THEN 'open in ' || c.display_name || ' (' || c.thread_title || ')'
                                        ELSE 'open elsewhere' END
-                 ELSE CASE WHEN c.session IS NULL THEN 'not started in oxplow'
+                 -- One begun outside oxplow says nothing: its row has no oxplow
+                 -- mark, and that is the whole story.
+                 ELSE CASE WHEN c.session IS NULL THEN NULL
                            WHEN c.here THEN 'closed here'
                            ELSE 'from ' || coalesce(nullif(c.thread_title, ''), 'another thread') END
                END AS note,
@@ -99,7 +101,14 @@ loaders:
         FROM classified c
       )
       SELECT CASE WHEN s.action = 'switch' THEN s.session END AS session_uri,
-             s.label, s.note, s.harness, s.at, CASE WHEN s.turns > 0 THEN s.turns END AS turns, s.size_bytes,
+             -- What its name opens: the tab of one open here, else its
+             -- conversation's page, else (no conversation) its session's.
+             CASE WHEN s.action = 'switch' THEN s.session
+                  WHEN s.resume_native IS NOT NULL AND s.resume_native <> ''
+                    THEN uri('oxplow/agent_conversation', 'harness', s.harness, 'id', s.resume_native)
+                  ELSE s.session END AS opens,
+             CASE WHEN s.session IS NOT NULL THEN 'oxplow' END AS ran,
+             s.label, s.note, s.harness, s.at, s.size_bytes,
              s.action = 'reopen' AS can_reopen, s.action = 'resume' AS can_resume,
              s.session, s.resume_native AS conversation,
              (SELECT uri_param(t.uri, 'id') FROM v_thread t WHERE t.id = :thread_id) AS thread,
@@ -137,13 +146,14 @@ view:
     columns:
     - key: label
       label: Session
+      icon: ran
       link:
         kind: page
-        from: session_uri
+        from: opens
       tone: tone
     - key: note
       label: Status
-      width: 220
+      width: 180
       tone: tone
     - key: harness
       label: Agent
@@ -152,9 +162,6 @@ view:
       label: Last active
       format: relative
       width: 100
-    - key: turns
-      label: Turns
-      width: 60
     - key: size_bytes
       label: Size
       format: bytes

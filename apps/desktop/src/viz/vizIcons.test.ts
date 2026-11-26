@@ -75,3 +75,11 @@ test("a cell that opens a page draws the missing-page icon when its kind is unkn
   expect(cellIcon("ready", null)).toBeNull();
   expect(cellIcon("ready", { kind: "file" })).toBeNull();
 });
+
+// A row about something oxplow ran (an agent session) marks it with
+// oxplow's own ox, the app's logo.
+test("the oxplow icon is the app's logo", () => {
+  expect(VIZ_ICON_NAMES).toContain("oxplow");
+  const spec = vizIcon("oxplow");
+  expect(spec && "Icon" in spec ? spec.label : null).toBe("oxplow");
+});

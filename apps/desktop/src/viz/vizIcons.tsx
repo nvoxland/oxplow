@@ -11,6 +11,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { MISSING_PAGE_ICON, pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 import { ICONS } from "../icons.js";
+import { OxplowMark } from "../kit/OxplowMark.js";
 
 /** A semantic tone, drawn with a theme variable (`.context/theming.md`). */
 export type VizTone = "accent" | "success" | "warning" | "danger" | "muted";
@@ -67,6 +68,8 @@ const KINDS: Record<string, { Icon: LucideIcon | null; label: string }> = {
   viz: { Icon: pageKindIconComponent("viz"), label: "Viz" },
   metric: { Icon: pageKindIconComponent("metric"), label: "Metric" },
   dashboard: { Icon: pageKindIconComponent("dashboard"), label: "Dashboard" },
+  // Something oxplow ran (an agent session): the app's own logo.
+  oxplow: { Icon: OxplowMark as unknown as LucideIcon, label: "oxplow" },
 };
 
 /** Every name a column's `icon` may give: the status glyphs, the kinds,

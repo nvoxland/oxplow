@@ -1,0 +1,35 @@
+# A saved conversation has a page whether oxplow ran it or not. It shows what
+# its harness lists about it (its name, its first prompt, when it started and
+# was last active, its size) and, when an oxplow session ran it, that
+# session and the prompts oxplow recorded. Nothing is read from the
+# harness's transcript.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude, resume: c1 } }
+  - observe: { conversation: { harness: claude, id: c1, title: Fix the parser, first_prompt: the parser drops comments, started_at: "2026-10-10T09:00:00Z", updated_at: "2026-10-10T10:00:00Z", size_bytes: 2048 } }
+  - observe: { conversation: { harness: claude, id: x1, first_prompt: "why is the build slow?", updated_at: "2026-10-10T08:00:00Z", size_bytes: 512 } }
+steps:
+  # Begun outside oxplow: only what the harness lists.
+  - when: { page: oxplow/agent-conversation, params: { uri: "oxplow:oxplow/agent_conversation?harness=claude&id=x1" } }
+    expect:
+      label: why is the build slow?
+      loaders:
+        about:
+          rows:
+            - { title: why is the build slow?, harness: claude, conversation: x1, first_prompt: why is the build slow?, updated_at: "2026-10-10T08:00:00.000000Z", size_bytes: 512, session: null }
+        turns:
+          rows: []
+  # Run by oxplow: the session that ran it too.
+  - when: { page: oxplow/agent-conversation, params: { uri: "oxplow:oxplow/agent_conversation?harness=claude&id=c1" } }
+    expect:
+      label: Fix the parser
+      loaders:
+        about:
+          rows:
+            - { title: Fix the parser, started_at: "2026-10-10T09:00:00.000000Z", session: "oxplow:oxplow/agent_session?id=ses1" }
+  # One the harness no longer lists still names itself.
+  - when: { page: oxplow/agent-conversation, params: { uri: "oxplow:oxplow/agent_conversation?harness=claude&id=gone" } }
+    expect:
+      loaders:
+        about:
+          rows:
+            - { title: gone, harness: claude, conversation: gone, size_bytes: null }

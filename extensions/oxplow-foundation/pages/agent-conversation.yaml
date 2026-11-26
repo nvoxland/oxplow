@@ -1,0 +1,66 @@
+title: Agent Conversation
+description: "One saved agent conversation, begun in oxplow or outside it: what its harness lists about it (its name, first prompt, when it started and was last active, its size) and, when an oxplow session ran it, that session and the prompts oxplow recorded."
+label: '{{row.title}}'
+icon: message-square
+for: oxplow/agent_conversation
+default: true
+params:
+- name: uri
+answers:
+- {"question":"What is this saved agent conversation, and did oxplow run it?","params":{"uri":"oxplow:oxplow/agent_conversation?harness=claude&id=c1"},"skill":"oxplow-runtime"}
+loaders:
+  about:
+    sql: |
+      -- What the harness lists about it; one it no longer lists (past the
+      -- newest 50, or gone) still names itself by its id.
+      WITH want AS (SELECT uri_param(:uri, 'harness') AS harness, uri_param(:uri, 'id') AS id)
+      SELECT coalesce(nullif(trim(c.title), ''), nullif(trim(c.first_prompt), ''), w.id) AS title,
+             w.harness, w.id AS conversation, c.first_prompt, c.started_at, c.updated_at, c.size_bytes,
+             CASE WHEN c.parent IS NOT NULL THEN uri('oxplow/agent_conversation', 'harness', w.harness, 'id', c.parent) END AS parent,
+             (SELECT s.uri FROM v_agent_session s WHERE s.harness = w.harness AND s.resume_session_id = w.id
+               ORDER BY s.closed_at IS NULL DESC, s.id DESC LIMIT 1) AS session,
+             (SELECT uri('oxplow/page', 'page', 'session-transcript', 'session', 'ses' || s.id)
+                FROM v_agent_session s WHERE s.harness = w.harness AND s.resume_session_id = w.id
+               ORDER BY s.closed_at IS NULL DESC, s.id DESC LIMIT 1) AS transcript
+      FROM want w
+      LEFT JOIN v_agent_conversation c ON c.harness = w.harness AND c.native_id = w.id
+  turns:
+    sql: |
+      -- The prompts oxplow recorded, when an oxplow session ran it.
+      SELECT t.uri, t.started_at AS at, t.prompt
+      FROM v_agent_turn t JOIN v_agent_session s ON s.id = t.agent_session_id
+      WHERE s.harness = uri_param(:uri, 'harness') AND s.resume_session_id = uri_param(:uri, 'id')
+        AND t.prompt IS NOT NULL AND trim(t.prompt) <> ''
+      ORDER BY t.started_at, t.uri
+view:
+  stack:
+  - id: about
+    title: About
+    from: about
+    viz: detail
+    columns:
+    - { key: harness, label: Agent }
+    - { key: first_prompt, label: First prompt }
+    - { key: started_at, label: Started, format: relative }
+    - { key: updated_at, label: Last active, format: relative }
+    - { key: size_bytes, label: Size, format: bytes }
+    - key: parent
+      label: Forked from
+      link: { kind: page, from: parent }
+    - key: session
+      label: oxplow session
+      link: { kind: page, from: session }
+    - key: transcript
+      label: Transcript
+      link: { kind: page, from: transcript }
+  - id: turns
+    title: Prompts
+    description: The prompts oxplow recorded while one of its sessions ran this conversation. One begun outside oxplow has none here.
+    from: turns
+    viz: table
+    columns:
+    - key: prompt
+      label: Prompt
+      link: { kind: page, from: uri }
+    - { key: at, label: When, format: relative, width: 110 }
+    empty: oxplow ran no session of this conversation, so it recorded no prompts.

@@ -1,6 +1,7 @@
 # A session's own row on New Session, when its harness lists no conversation
 # for it: a closed session that never started anything isn't an earlier
-# session, and one that ran turns is (named by its last prompt). One whose
+# session, and one that ran turns is (named by its last prompt; with no
+# conversation, its name opens its session). One whose
 # conversation the harness didn't list keeps its id for a resume and the
 # person's title. A closed one no one can take (another thread's, with turns
 # but no conversation) is left out. One open here is a row to show, and one
@@ -30,5 +31,5 @@ expect:
       rows:
         - { label: $any, session_uri: "oxplow:oxplow/agent_session?id=ses5" }
         - { label: The parser, conversation: native-9, can_resume: 1 }
-        - { label: second, turns: 2, can_reopen: 1, session: "oxplow:oxplow/agent_session?id=ses2" }
+        - { label: second, can_reopen: 1, session: "oxplow:oxplow/agent_session?id=ses2", ran: oxplow, opens: "oxplow:oxplow/agent_session?id=ses2" }
         - { conversation: busy, can_reopen: 0, can_resume: 0, tone: muted }
