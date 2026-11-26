@@ -15,9 +15,11 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   is used as it is (see "Running it locally"). Every test boots its own
   daemon, so tests run fully parallel, files included.
 - **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
-  `oxplow-harness-fake` and `oxplow-provider-fake` and hands their paths to the
+  `oxplow-harness-fake`, `oxplow-provider-fake` and `oxplow-host` and hands their paths to the
   workers (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_HARNESS_FAKE`,
-  `OXPLOW_E2E_PROVIDER_FAKE`). With `OXPLOW_E2E_BIN=target/debug` it builds
+  `OXPLOW_E2E_PROVIDER_FAKE`, `OXPLOW_E2E_HOST`). `specs/host/` starts the host
+  (`support/host.ts`: its own home, `--daemon` the sim, `--ui` the built
+  `dist/`) and loads `/p/<project>/` from its origin. With `OXPLOW_E2E_BIN=target/debug` it builds
   nothing and runs the binaries already there.
 - **`fixtures/extension/`** — the test extension `e2e`, copied into every
   project before boot: a fake provider (`bin/provider`, written

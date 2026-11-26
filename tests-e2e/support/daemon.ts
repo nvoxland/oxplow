@@ -73,7 +73,7 @@ function installGithubExample(project: string): void {
  *  the person's own bin dirs, a plain `/bin/sh`, no global or system git
  *  config, and not Terminal.app's session (macOS's bash would save one into
  *  the home after its shell exits, racing the cleanup). */
-function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
+export function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     // The person's own bin dirs (an agent CLI installed under their home)

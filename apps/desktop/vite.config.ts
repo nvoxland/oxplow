@@ -7,6 +7,9 @@ import react from "@vitejs/plugin-react";
 // (../dist relative to src-tauri) consumes.
 export default defineConfig({
   plugins: [react()],
+  // Relative, so the same build loads from Tauri's asset protocol, from
+  // `vite preview` at `/`, and from the host under `/p/<project>/`.
+  base: "./",
   // Vite handles env vars prefixed with VITE_, and we set TAURI_DEBUG
   // here in case any code branches on it.
   envPrefix: ["VITE_", "TAURI_"],

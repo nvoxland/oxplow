@@ -79,7 +79,7 @@ impl Default for Liveness {
 }
 
 /// Equal without an early exit, so response timing can't reveal a prefix.
-fn same_secret(a: &str, b: &str) -> bool {
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())
@@ -917,6 +917,73 @@ mod tests {
                 let resp = get(path, host.clone()).await.unwrap();
                 assert_eq!(resp.status(), 404, "{host} {path}");
             }
+        }
+    }
+
+    /// Behind the host a bundle is reached by the host's name and a prefix.
+    /// The host says so in `Oxplow-Public-Base`, which counts only with the
+    /// daemon's own token: any other caller still has to be loopback.
+    #[tokio::test]
+    async fn a_public_base_from_the_host_builds_the_csp_and_only_with_the_token() {
+        let (svc, dir) = services().await;
+        let ext = dir.path().join(".oxplow/extensions/x");
+        std::fs::create_dir_all(ext.join("components/c")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
+        let version = load(&svc, dir.path(), "x", "c").await;
+        let folder = format!("/components/v/{version}/");
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let bare = reqwest::Client::new();
+        let public = "http://tablet.lan:7400/p/prj-1";
+        let get = |path: String, token: Option<&str>, base: &str| {
+            let mut req = bare
+                .get(format!("http://{}{path}", daemon.bind_addr))
+                .header("host", "tablet.lan:7400")
+                .header("oxplow-public-base", base.to_string());
+            if let Some(t) = token {
+                req = req.bearer_auth(t);
+            }
+            req.send()
+        };
+        let ok = get(folder.clone(), Some(UI_TOKEN), public).await.unwrap();
+        assert_eq!(ok.status(), 200);
+        assert_eq!(
+            ok.headers()["content-security-policy"].to_str().unwrap(),
+            oxplow_app::component_http::bundle_csp(
+                &format!("{public}{folder}"),
+                &format!("{public}/component-lib/")
+            ),
+        );
+        let lib = get(
+            "/component-lib/oxplow-component.js".into(),
+            Some(UI_TOKEN),
+            public,
+        )
+        .await
+        .unwrap();
+        assert_eq!(lib.status(), 200);
+        // No token, or the wrong one: the header is not believed, and the
+        // Host is not loopback.
+        for token in [None, Some("wrong")] {
+            let refused = get(folder.clone(), token, public).await.unwrap();
+            assert_eq!(refused.status(), 404, "{token:?}");
+        }
+        // A base that could break out of the CSP is refused whoever sends it.
+        for bad in [
+            "javascript:alert(1)",
+            "http://x.lan/p/a; script-src *",
+            "http://x.lan/p/a b",
+            "http://x.lan/",
+            "",
+        ] {
+            let refused = get(folder.clone(), Some(UI_TOKEN), bad).await.unwrap();
+            assert_eq!(refused.status(), 404, "{bad:?}");
         }
     }
 

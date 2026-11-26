@@ -9,6 +9,9 @@ export type WindowContext = {
   token?: string | null;
   kind: string;
   projectDir: string | null;
+  /// The host's id for the project, when a host served this page
+  /// (`/p/<project>/`); the shell names a project by its folder instead.
+  project?: string;
   /// The Mac app's device: its id is kept by the shell across runs.
   device?: { id: string; name: string };
 };

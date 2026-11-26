@@ -5143,7 +5143,9 @@ name = "oxplow-host"
 version = "0.9.0"
 dependencies = [
  "axum",
+ "bytes",
  "fs2",
+ "futures",
  "hex",
  "oxplow-app",
  "oxplow-config",
@@ -5155,6 +5157,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

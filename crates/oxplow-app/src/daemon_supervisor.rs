@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 /// Generous on purpose: the daemon runs the full boot orchestration
 /// (recovery, watchers, indexers) before it binds, which is seconds on a
 /// debug build over a large project.
-const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long a daemon gets to exit on SIGTERM before it is killed.
 const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
@@ -80,7 +80,9 @@ pub fn clear_daemon_info(project_dir: &Path) {
 /// following `tunnel: ssh -L …` hint — which also contains an address —
 /// can't be mistaken for it.
 pub fn parse_listening_line(line: &str) -> Option<String> {
-    let rest = line.trim().strip_prefix("oxplow-daemon listening on ")?;
+    let rest = line.trim().strip_prefix("oxplow-daemon")?;
+    let rest = rest.strip_prefix("-sim").unwrap_or(rest);
+    let rest = rest.strip_prefix(" listening on ")?;
     let url = rest.trim();
     url.starts_with("http://").then(|| url.to_string())
 }
@@ -249,7 +251,18 @@ impl BundledDaemon {
 
 impl DaemonLauncher for BundledDaemon {
     fn command(&self, project_dir: &Path) -> Command {
-        let mut cmd = Command::new(Self::binary_path());
+        BinaryDaemon(Self::binary_path()).command(project_dir)
+    }
+}
+
+/// A daemon binary at a path of the caller's choosing (`oxplow-host serve
+/// --daemon`: the browser suite runs the simulation daemon). It takes the
+/// same arguments as the bundled one.
+pub struct BinaryDaemon(pub PathBuf);
+
+impl DaemonLauncher for BinaryDaemon {
+    fn command(&self, project_dir: &Path) -> Command {
+        let mut cmd = Command::new(&self.0);
         cmd.arg("--project")
             .arg(project_dir)
             // Port 0: the OS picks, so two projects can't collide.
@@ -622,6 +635,15 @@ mod tests {
             None
         );
         assert_eq!(parse_listening_line("some other log line"), None);
+        // The simulation daemon (`oxplow-daemon-sim`) says it by its own name.
+        assert_eq!(
+            parse_listening_line("oxplow-daemon-sim listening on http://127.0.0.1:1"),
+            Some("http://127.0.0.1:1".to_string())
+        );
+        assert_eq!(
+            parse_listening_line("oxplow-daemon-simx listening on http://127.0.0.1:1"),
+            None
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use oxplow_app::daemon_supervisor::DaemonSupervisor;
+use oxplow_app::daemon_supervisor::{DaemonEndpoint, DaemonSupervisor};
 use serde::{Deserialize, Serialize};
 
 use crate::registry::{Project, Registry};
@@ -56,6 +56,19 @@ pub struct ProjectView {
     #[serde(flatten)]
     pub state: DaemonState,
     pub holds: usize,
+}
+
+/// What a request for a project's daemon finds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reach {
+    /// Running: where it listens and the token only the host holds.
+    Ready(DaemonEndpoint),
+    /// Booting: worth waiting for.
+    Starting,
+    /// No daemon: not held, stopped, stopping or crashed.
+    Down(DaemonState),
+    /// The registry has no such project.
+    Unknown,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -151,6 +164,25 @@ impl Host {
         let projects = self.registry.list();
         let inner = self.lock();
         projects.into_iter().map(|p| view(&inner, p)).collect()
+    }
+
+    /// Where `project`'s daemon is now, for a request to forward to it.
+    pub fn reach(&self, project: &str) -> Reach {
+        if self.registry.get(project).is_none() {
+            return Reach::Unknown;
+        }
+        let inner = self.lock();
+        let Some(rt) = inner.runtime.get(project) else {
+            return Reach::Down(DaemonState::Stopped);
+        };
+        match &rt.state {
+            DaemonState::Starting => Reach::Starting,
+            DaemonState::Running => self
+                .supervisor
+                .endpoint(&rt.path)
+                .map_or(Reach::Down(DaemonState::Stopped), Reach::Ready),
+            other => Reach::Down(other.clone()),
+        }
     }
 
     pub fn holds(&self) -> Vec<Hold> {

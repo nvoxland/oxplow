@@ -1,26 +1,34 @@
-//! `oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin]`
+//! `oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]
+//!   [--allow-host <name>]… [--daemon <path>]`
 //! `oxplow-host project <add <dir> | list | remove <id>>`
 //!
 //! The host has no stdin lifeline: it must outlive the app that started it.
 //! Its daemons have one, held by the host.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use oxplow_app::daemon_supervisor::{BundledDaemon, DaemonSupervisor};
+use oxplow_app::daemon_supervisor::{
+    BinaryDaemon, BundledDaemon, DaemonLauncher, DaemonSupervisor, DEFAULT_STARTUP_TIMEOUT,
+};
 use oxplow_host::host::{Host, DEFAULT_RESTART_AFTER};
 use oxplow_host::instance::HostInstance;
 use oxplow_host::registry::Registry;
 
 fn usage() -> ! {
     eprintln!(
-        "usage: oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin]\n\
+        "usage: oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]\n\
+         \x20                        [--allow-host <name>]... [--daemon <path>]\n\
          \x20      oxplow-host project add <dir>\n\
          \x20      oxplow-host project list\n\
          \x20      oxplow-host project remove <id>\n\
          \n\
          One host runs per OXPLOW_HOME. --token-stdin reads the host token from\n\
-         the first line of stdin; otherwise a fresh one is generated and printed."
+         the first line of stdin; otherwise a fresh one is generated and printed.\n\
+         --ui is the built UI (default: beside the binary, or apps/desktop/dist in a\n\
+         checkout). --allow-host names a host a request may reach this one by, besides\n\
+         loopback. --daemon runs another daemon binary (the browser suite's)."
     );
     std::process::exit(2);
 }
@@ -59,11 +67,31 @@ fn main() {
 fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     let mut bind = "127.0.0.1:0".to_string();
     let mut token_stdin = false;
+    let mut ui: Option<PathBuf> = None;
+    let mut allow_hosts: Vec<String> = Vec::new();
+    let mut daemon: Option<PathBuf> = None;
     let mut it = rest.iter();
     while let Some(arg) = it.next() {
         match *arg {
             "--bind" => bind = it.next().map(|s| s.to_string()).unwrap_or_else(|| usage()),
             "--token-stdin" => token_stdin = true,
+            "--ui" => {
+                ui = Some(
+                    it.next()
+                        .map(|s| PathBuf::from(*s))
+                        .unwrap_or_else(|| usage()),
+                )
+            }
+            "--allow-host" => {
+                allow_hosts.push(it.next().map(|s| s.to_string()).unwrap_or_else(|| usage()))
+            }
+            "--daemon" => {
+                daemon = Some(
+                    it.next()
+                        .map(|s| PathBuf::from(*s))
+                        .unwrap_or_else(|| usage()),
+                )
+            }
             _ => usage(),
         }
     }
@@ -94,7 +122,11 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         .build()
         .expect("tokio runtime")
         .block_on(async move {
-            let supervisor = Arc::new(DaemonSupervisor::with_launcher(Box::new(BundledDaemon)));
+            let launcher: Box<dyn DaemonLauncher> = match daemon {
+                Some(path) => Box::new(BinaryDaemon(path)),
+                None => Box::new(BundledDaemon),
+            };
+            let supervisor = Arc::new(DaemonSupervisor::with_launcher(launcher));
             let host = Host::open(config_dir, supervisor, DEFAULT_RESTART_AFTER);
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
@@ -119,7 +151,19 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                     let _ = tokio::task::spawn_blocking(move || host.poll_exits()).await;
                 }
             });
-            let app = oxplow_host::api::router(host.clone(), token);
+            let ui_dir = ui.or_else(default_ui_dir);
+            match &ui_dir {
+                Some(dir) => tracing::info!(ui = %dir.display(), "serving the UI"),
+                None => tracing::warn!("no UI folder found; pass --ui <dir>"),
+            }
+            let app = oxplow_host::web::app(oxplow_host::web::ServeConfig {
+                host: host.clone(),
+                token,
+                ui_dir,
+                allow_hosts,
+                // A daemon that boots no faster than this is a crash.
+                boot_wait: DEFAULT_STARTUP_TIMEOUT,
+            });
             let reason = tokio::select! {
                 served = axum::serve(listener, app) => format!("the server stopped: {served:?}"),
                 signal = terminated() => format!("received {signal}"),
@@ -130,6 +174,21 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             drop(instance);
             std::process::exit(0);
         });
+}
+
+/// The built UI when `--ui` is not given: a `ui` folder beside the binary
+/// (packaged), else `apps/desktop/dist` of the checkout the binary was built
+/// in (`target/<profile>/oxplow-host`).
+fn default_ui_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let beside = exe.parent()?;
+    [
+        beside.join("ui"),
+        beside.join("../Resources/ui"),
+        beside.join("../../apps/desktop/dist"),
+    ]
+    .into_iter()
+    .find(|dir| dir.join("index.html").is_file())
 }
 
 fn generate_token() -> String {

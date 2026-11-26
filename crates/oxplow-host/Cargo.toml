@@ -9,7 +9,8 @@ description = "oxplow's host: one headless process per OXPLOW_HOME that starts a
 
 # The host holds no project state. It keeps a registry of projects and the
 # holds on them, starts and stops one `oxplow-daemon` per held project
-# through `DaemonSupervisor`, and serves its own API under `/host/…`.
+# through `DaemonSupervisor`, serves its own API under `/host/…`, forwards
+# `/p/<project>/…` to a project's daemon and serves the built UI.
 # See .context/host.md.
 
 [[bin]]
@@ -20,7 +21,11 @@ path = "src/main.rs"
 oxplow-app = { workspace = true }
 oxplow-config = { workspace = true }
 
-axum = { version = "0.8", features = ["json"] }
+axum = { version = "0.8", features = ["json", "ws"] }
+bytes = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
 fs2 = "0.4"
 hex = { workspace = true }
 sha2 = { workspace = true }

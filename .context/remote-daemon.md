@@ -277,6 +277,13 @@ token**; only the person's renderer holds it.
   - `VITE_OXPLOW_REMOTE_TOKEN` in dev.
   A `#oxplow-token=` URL fragment wins (scripted and Playwright
   sessions).
+- **Through the host** (`.context/host.md`): a browser loads
+  `http://<host>/p/<project>/`, whose page states `window.__OXPLOW__ = {
+  kind: "project", base: "<origin>/p/<project>", project, token }`. Its calls
+  (`/ipc`, `/events`, `/components`) go to the host, which checks its own
+  token, swaps in the daemon's and forwards with the prefix removed, so a
+  client never holds a daemon token. The page's own `base` and `token` come
+  from the injection with no manual connect.
 - **Headless dev:** start the daemon, read its `ui token:` line, and run
   vite with `VITE_OXPLOW_REMOTE=… VITE_OXPLOW_REMOTE_TOKEN=…`.
 
@@ -293,11 +300,13 @@ an extension's own files, never project data (the frame reaches that
 only through the host's bridged RPCs). It is mounted **outside the
 permissive CORS layer**, so a web page can't read a bundle with `fetch`,
 and it answers only a loopback `Host` (`127.0.0.1` or `localhost`,
-optional port — `component_http::loopback_host`, shared with a test's harness; not `[::1]`, since the page's
+optional port — `component_http::loopback_host`, shared with a test's harness and the host's own `Host` check; not `[::1]`, since the page's
 `frame-src` can't name an IPv6 literal and a frame there would never load):
 without that, DNS rebinding (a
 page whose name flips to 127.0.0.1) would read bundles same-origin; the
-CSP's bundle-folder source is built from that validated `Host`. 404 for a
+CSP's bundle-folder source is built from that validated `Host`, or, behind the
+host, from the `Oxplow-Public-Base` it sends with the daemon's token
+(`.context/host.md` "Routing"). 404 for a
 foreign `Host`, a version that isn't loaded, or anything but exactly one
 of the snapshot's files (a map lookup). Every 200 has `Content-Type`
 from a small table (`content_type_for`), `X-Content-Type-Options:

@@ -90,11 +90,13 @@ pub fn library(file: &str) -> Option<Served> {
 
 /// `path` (`""`: `index.html`) of the bundle loaded at `version`, exactly
 /// one of its files — a name it lists, so nothing else can be named — read
-/// from its deployment on disk, for a request whose `Host` is `host` (a
-/// loopback one, [`loopback_host`]). `None` when there is no such file.
+/// from its deployment on disk, for a request that reaches the server at
+/// `base` (`http://127.0.0.1:7420` for a loopback `Host`, or the public base
+/// a host in front says, [`public_base`]; no trailing slash). `None` when
+/// there is no such file.
 pub async fn bundle_file(
     bundles: &ComponentBundles,
-    host: &str,
+    base: &str,
     version: &str,
     path: &str,
 ) -> Option<Served> {
@@ -104,8 +106,8 @@ pub async fn bundle_file(
         .await
         .ok()??;
     let name = if path.is_empty() { "index.html" } else { path };
-    let source = format!("http://{host}/components/v/{version}/");
-    let lib = format!("http://{host}{LIB_PATH}");
+    let source = format!("{base}/components/v/{version}/");
+    let lib = format!("{base}{LIB_PATH}");
     Some(Served {
         body,
         content_type: content_type_for(Path::new(name)),
@@ -143,6 +145,22 @@ pub fn content_type_for(path: &Path) -> &'static str {
         Some("txt" | "md") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
+}
+
+/// `value` when it can stand as the base of a bundle's URLs in a CSP: an
+/// `http(s)` URL of letters, digits and `.-_:/[]` with no trailing slash, so
+/// nothing in it can end a source or start another directive. The daemon
+/// believes it only from its host (the request carries the daemon's token).
+pub fn public_base(value: &str) -> Option<&str> {
+    let rest = value
+        .strip_prefix("http://")
+        .or_else(|| value.strip_prefix("https://"))?;
+    let clean = !rest.is_empty()
+        && !rest.ends_with('/')
+        && rest
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".-_:/[]".contains(&b));
+    clean.then_some(value)
 }
 
 /// `host` (a request's `Host`) when it names this machine's loopback —
@@ -210,6 +228,29 @@ mod tests {
             "{style}"
         );
         assert_eq!(csp.matches("/component-lib/").count(), 2, "{csp}");
+    }
+
+    #[test]
+    fn a_public_base_is_a_plain_url_without_a_trailing_slash() {
+        for ok in [
+            "http://tablet.lan:7400/p/prj-1",
+            "https://box.tail1234.ts.net/p/prj-ab12cd34",
+            "http://127.0.0.1:1",
+        ] {
+            assert_eq!(public_base(ok), Some(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "ftp://x/p/a",
+            "javascript:alert(1)",
+            "http://",
+            "http://x/",
+            "http://x/p/a b",
+            "http://x/p/a;script-src *",
+            "http://x/p/a'",
+        ] {
+            assert_eq!(public_base(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

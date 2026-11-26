@@ -57,7 +57,7 @@ pub fn router(host: Arc<Host>, token: String) -> Router {
 
 /// Equal without stopping at the first difference, so timing says nothing of
 /// how much of a guess was right.
-fn same_secret(a: &str, b: &str) -> bool {
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())
@@ -65,13 +65,16 @@ fn same_secret(a: &str, b: &str) -> bool {
             == 0
 }
 
-async fn require_token(State(state): State<ApiState>, req: Request, next: Next) -> Response {
-    let presented = req
-        .headers()
+/// The bearer token a request carries.
+pub(crate) fn bearer(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
-    match presented {
+        .and_then(|v| v.strip_prefix("Bearer "))
+}
+
+async fn require_token(State(state): State<ApiState>, req: Request, next: Next) -> Response {
+    match bearer(req.headers()) {
         Some(t) if same_secret(t, &state.token) => next.run(req).await,
         _ => (StatusCode::UNAUTHORIZED, "missing or wrong host token").into_response(),
     }
