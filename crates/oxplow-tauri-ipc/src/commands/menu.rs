@@ -26,6 +26,17 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 
 use crate::error::IpcError;
 
+/// The app menu's "Devices…": the renderer opens the Devices window.
+pub const DEVICES_MENU_ID: &str = "app.devices";
+/// The app menu's Quit. Not the predefined item: that is `terminate:`, which
+/// asks nobody, and quitting ends the host for every device, so the shell
+/// asks first when another device is connected (`ShellWindows` quit
+/// question). Handled in Rust, never sent to a window.
+pub const QUIT_MENU_ID: &str = "app.quit";
+
+/// What the shell does for Quit (`main.rs` gives it).
+pub type QuitHandler = std::sync::Arc<dyn Fn(&AppHandle) + Send + Sync>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct MenuItemSnapshot {
     pub id: String,
@@ -175,11 +186,17 @@ fn build_menu(app: &AppHandle, groups: &[MenuGroupSnapshot]) -> tauri::Result<Me
         let app_menu = SubmenuBuilder::new(app, "Oxplow")
             .item(&PredefinedMenuItem::about(app, None, None)?)
             .item(&PredefinedMenuItem::separator(app)?)
+            .item(&MenuItemBuilder::with_id(DEVICES_MENU_ID, "Devices…").build(app)?)
+            .item(&PredefinedMenuItem::separator(app)?)
             .item(&PredefinedMenuItem::hide(app, None)?)
             .item(&PredefinedMenuItem::hide_others(app, None)?)
             .item(&PredefinedMenuItem::show_all(app, None)?)
             .item(&PredefinedMenuItem::separator(app)?)
-            .item(&PredefinedMenuItem::quit(app, None)?)
+            .item(
+                &MenuItemBuilder::with_id(QUIT_MENU_ID, "Quit Oxplow")
+                    .accelerator("CmdOrCtrl+Q")
+                    .build(app)?,
+            )
             .build()?;
         menu = menu.item(&app_menu);
     }
@@ -288,10 +305,14 @@ fn is_separator_role(role: &str) -> bool {
 ///
 /// Activations go to the window that owns the menu bar, not to every
 /// window: with several projects open, Cmd-S belongs to exactly one.
-pub fn install_menu_handler(app: &AppHandle) {
+pub fn install_menu_handler(app: &AppHandle, quit: QuitHandler) {
     app.manage(MenuRegistry::default());
     let handle = app.clone();
     app.on_menu_event(move |_app, event| {
+        if event.id().0 == QUIT_MENU_ID {
+            quit(&handle);
+            return;
+        }
         let payload = MenuCommandEvent {
             id: event.id().0.clone(),
         };

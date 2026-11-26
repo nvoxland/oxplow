@@ -814,6 +814,17 @@ export const commands = {
 	 *  `~/.local/bin`.
 	 */
 	installCli: () => typedError<InstalledCli, IpcError_Serialize>(__TAURI_INVOKE("install_cli")),
+	hostDevices: () => typedError<DevicesView, IpcError_Serialize>(__TAURI_INVOKE("host_devices")),
+	hostPairingCode: () => typedError<PairingCodeView, IpcError_Serialize>(__TAURI_INVOKE("host_pairing_code")),
+	hostRenameDevice: (rename: RenameDevice) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("host_rename_device", { rename })),
+	hostRemoveDevice: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("host_remove_device", { id })),
+	/**  Keep "Allow other devices"; it applies at the next app start. */
+	setHostSettings: (settings: HostSettings) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_host_settings", { settings })),
+	/**  What Tailscale says about this machine, to fill the settings in. */
+	hostTailscale: () => typedError<{
+	address: string,
+	name: string | null,
+} | null, IpcError_Serialize>(__TAURI_INVOKE("host_tailscale")),
 };
 
 /* Types */
@@ -2268,6 +2279,29 @@ export type Descriptor = {
 	source: DeclaredAt,
 };
 
+export type DeviceView = {
+	id: string,
+	name: string,
+	/**  `desktop`, `tablet` or `phone`. */
+	kind: string,
+	/**  Seconds since the Unix epoch. */
+	pairedAt: number,
+	/**  It has a window open on this host now. */
+	connected: boolean,
+};
+
+export type DevicesView = {
+	/**  This Mac's own name, as other devices see it. */
+	thisDevice: string,
+	devices: DeviceView[],
+	/**  "Allow other devices", as saved. */
+	settings: HostSettings,
+	/**  Whether the host runs with them now (they apply at the next start). */
+	settingsApplied: boolean,
+	/**  The addresses a device opens: `https://<name>:<port>/`. */
+	openOnDevice: string[],
+};
+
 /**  One problem. */
 export type Diagnostic = {
 	severity: Severity,
@@ -3495,6 +3529,20 @@ export type HookKind =
  *  silently where a worktree path is reached (`WorktreeRoot::local_path`).
  */
 export type HostId = string;
+
+export type HostSettings = {
+	allowOtherDevices?: boolean,
+	/**
+	 *  Where other devices reach this machine: `100.101.102.103:7400`, or a
+	 *  bare address (the default port is added).
+	 */
+	address?: string,
+	/**  The names a device uses in its address bar (`mac.tailnet.ts.net`). */
+	names?: string[],
+	/**  PEM files for HTTPS (`tailscale cert <name>` writes both). */
+	tlsCert?: string | null,
+	tlsKey?: string | null,
+};
 
 /**  One implementation as the extension declares it. */
 export type ImplementationDecl = {
@@ -5539,6 +5587,12 @@ export type Page_Serialize = {
 	origin: PageProvenance,
 };
 
+export type PairingCodeView = {
+	/**  `ABCD-EFGH`. */
+	code: string,
+	expiresInSeconds: number,
+};
+
 /**
  *  A choice param of the body, as the panel's header toggle offers it: its
  *  options and the value in force.
@@ -5866,6 +5920,11 @@ export type Relationship = {
 export type RelationshipDecl = {
 	from: string,
 	to: string,
+};
+
+export type RenameDevice = {
+	id: string,
+	name: string,
 };
 
 /**  A page that can draw a URI. */
@@ -6493,6 +6552,16 @@ export type TabSession = {
 	sessionJson: string,
 	/**  Bumped by every save: the next save gives it back. */
 	revision: TabRevision,
+};
+
+/**
+ *  What Tailscale says about this machine, to fill the settings in: its
+ *  tailnet address and its MagicDNS name (`tailscale cert` makes a
+ *  certificate for that name).
+ */
+export type TailscaleSelf = {
+	address: string,
+	name: string | null,
 };
 
 /**  One `test_conventions:` entry as the extension declares it. */

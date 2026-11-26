@@ -86,7 +86,7 @@ impl Access {
 }
 
 /// A device with an open event socket now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct Connected {
     pub device: String,
     pub name: String,

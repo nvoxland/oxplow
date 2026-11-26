@@ -4,8 +4,8 @@
 `OXPLOW_HOME`. It holds no project state. It keeps a registry of projects and
 the holds devices have on them, and it runs one `oxplow-daemon` per held
 project. Built so far: the core, routing, the served UI, the Mac app's own
-host, HTTPS and pairing. Not built yet: the Mac app's Devices window, "Allow
-other devices", the quit warning, and the app using a headless host.
+host, HTTPS, pairing and the Mac app's Devices window. Not built yet: the app
+using a headless host.
 
 There are two kinds of host, and no host ever stops because nothing is held
 or nobody is connected:
@@ -94,6 +94,30 @@ The app's host is a child of the app, as a daemon is a child of the host
 - **Quit** drops the lifeline and waits for nothing: the host stops its daemons
   and ends. Nothing is released first. The windows to reopen are the app's own
   `session.json`, as before.
+- **Devices window** (Oxplow ▸ Devices…, in a project window or the
+  launcher; `host/DevicesSlideover.tsx`): Pair a Device shows a code, its
+  countdown and the address to open on the device; the paired devices
+  (rename in place, Remove after a confirm, a dot when connected); "Allow
+  other devices". Its calls are Tauri shell commands (`commands/devices.rs`)
+  to the app's own host client as its owner: no page calls `/host/*`, so the
+  host answers no CORS there.
+- **Allow other devices** is the shell's own file in the home,
+  `host-settings.json` (`oxplow_host::settings`, beside `device.json`):
+  `{ allowOtherDevices, address, names, tlsCert, tlsKey }`. The app reads it
+  when it starts its host and passes `--public-bind <address>` (port 7400 when
+  none is given: fixed, since a browser's origin holds its token), an
+  `--allow-host` per name, and the certificate. Never every network by
+  default: the person names an address (Use Tailscale fills the Mac's tailnet
+  address and MagicDNS name from `tailscale status --json`). A change applies
+  at the next app start (the window says whether the host runs with it). On,
+  the host starts with the app, not at the first open.
+- **Quit asks first** when another device has a window open (`/host/status`
+  `connected`): "<names> are using Oxplow on this computer. Quitting stops
+  their projects and agents too." The app menu's Quit is a custom item
+  (Cmd-Q, handled in Rust: the predefined one is `terminate:` and asks
+  nobody), and closing the launcher (an exit with no code) asks the same; a
+  Cancel that leaves no window shows the launcher. Dock ▸ Quit and a logout
+  cannot ask.
 - **Headless.** `oxplow host <args>` runs the sidecar with `<args>` (exec), as
   on a server. The app does not use a headless host on its own home before
   pairing: it has no token for it.
@@ -241,7 +265,5 @@ Tauri's asset protocol).
 
 ## Later steps
 
-`/host/events` (project states, for the tablet shell), the Mac app's Devices
-window and "Allow other devices" (the addresses, names and certificate given
-to the app's host at its start), a warning at quit when another device is
-connected, and the app using a headless host.
+`/host/events` (project states, for the tablet shell), and the app using a
+headless host.

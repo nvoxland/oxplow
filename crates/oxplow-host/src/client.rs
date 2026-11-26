@@ -95,7 +95,9 @@ pub fn binary_beside_exe() -> PathBuf {
 /// `listening on` line. It inherits the environment, so it serves the app's
 /// `OXPLOW_HOME`. A host that cannot start (another host has the home) ends,
 /// and its last stderr lines are the error. **Blocking.**
-pub fn start_own_host(mut host: Command) -> Result<OwnHost, ClientError> {
+/// `extra` are more `serve` flags ("Allow other devices",
+/// `crate::settings::HostSettings::serve_args`).
+pub fn start_own_host(mut host: Command, extra: &[String]) -> Result<OwnHost, ClientError> {
     let token = new_token();
     let program = PathBuf::from(host.get_program());
     let no_host = |e: std::io::Error| ClientError::NoHost(format!("{}: {e}", program.display()));
@@ -107,6 +109,7 @@ pub fn start_own_host(mut host: Command) -> Result<OwnHost, ClientError> {
             "--token-stdin",
             "--for-app",
         ])
+        .args(extra)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -303,6 +306,61 @@ impl HostClient {
         }
     }
 
+    /// A pairing code for a device (`ABCD-EFGH`) and the seconds it is good.
+    pub async fn pairing_code(&self) -> Result<(String, u64), ClientError> {
+        let answer: serde_json::Value = self
+            .send(self.http.post(self.url("/host/pairing")))
+            .await?
+            .json()
+            .await?;
+        Ok((
+            answer["code"].as_str().unwrap_or_default().to_string(),
+            answer["expires_in"].as_u64().unwrap_or_default(),
+        ))
+    }
+
+    pub async fn devices(&self) -> Result<Vec<crate::devices::PairedDevice>, ClientError> {
+        Ok(self
+            .send(self.http.get(self.url("/host/devices")))
+            .await?
+            .json()
+            .await?)
+    }
+
+    pub async fn rename_device(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> Result<crate::devices::PairedDevice, ClientError> {
+        Ok(self
+            .send(
+                self.http
+                    .patch(self.url(&format!("/host/devices/{id}")))
+                    .json(&serde_json::json!({ "name": name })),
+            )
+            .await?
+            .json()
+            .await?)
+    }
+
+    /// Forget a paired device: its token stops working, its holds go and its
+    /// pages ask to pair again.
+    pub async fn remove_device(&self, id: &str) -> Result<(), ClientError> {
+        self.send(self.http.delete(self.url(&format!("/host/devices/{id}"))))
+            .await?;
+        Ok(())
+    }
+
+    /// The devices with an open window on this host now.
+    pub async fn connected(&self) -> Result<Vec<crate::access::Connected>, ClientError> {
+        let status: serde_json::Value = self
+            .send(self.http.get(self.url("/host/status")))
+            .await?
+            .json()
+            .await?;
+        Ok(serde_json::from_value(status["connected"].clone()).unwrap_or_default())
+    }
+
     /// `device` lets go of `project`: the last release stops its daemon.
     pub async fn release(&self, project: &str, device: &str) -> Result<(), ClientError> {
         self.send(
@@ -394,6 +452,39 @@ mod tests {
             drop(instance);
         });
         url
+    }
+
+    /// The Devices window's calls: a code, the paired devices, a rename, a
+    /// removal, and who is connected.
+    #[tokio::test]
+    async fn the_owner_makes_a_code_and_keeps_the_devices() {
+        let fx = Fixture::new(RUNS);
+        let url = run_host(&fx, TOKEN).await;
+        let client = HostClient::new(&url, TOKEN);
+        let (code, expires_in) = client.pairing_code().await.unwrap();
+        assert_eq!(code.len(), 9, "{code}");
+        assert!(expires_in > 500, "{expires_in}");
+        let paired: serde_json::Value = reqwest::Client::new()
+            .post(format!("{url}/host/pair"))
+            .json(&serde_json::json!({ "code": code, "name": "Tab", "kind": "tablet" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let id = paired["device"]["id"].as_str().unwrap();
+        assert_eq!(client.devices().await.unwrap()[0].name, "Tab");
+        assert_eq!(
+            client.rename_device(id, "Kitchen").await.unwrap().name,
+            "Kitchen"
+        );
+        assert!(
+            client.connected().await.unwrap().is_empty(),
+            "no window open"
+        );
+        client.remove_device(id).await.unwrap();
+        assert!(client.devices().await.unwrap().is_empty());
     }
 
     #[tokio::test]

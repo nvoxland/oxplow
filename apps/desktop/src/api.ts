@@ -734,6 +734,35 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   return { vcsEnabled: ctx.vcs_enabled };
 }
 
+// ---- The Devices window (the app's own host, as its owner) ----
+
+export async function hostDevices(): Promise<import("./tauri-bridge/generated/bindings.js").DevicesView> {
+  return unwrap(await commands.hostDevices());
+}
+
+export async function hostPairingCode(): Promise<import("./tauri-bridge/generated/bindings.js").PairingCodeView> {
+  return unwrap(await commands.hostPairingCode());
+}
+
+export async function hostRenameDevice(id: string, name: string): Promise<void> {
+  unwrap(await commands.hostRenameDevice({ id, name }));
+}
+
+export async function hostRemoveDevice(id: string): Promise<void> {
+  unwrap(await commands.hostRemoveDevice(id));
+}
+
+/// Keep "Allow other devices"; it applies at the next app start.
+export async function setHostSettings(
+  settings: import("./tauri-bridge/generated/bindings.js").HostSettings,
+): Promise<void> {
+  unwrap(await commands.setHostSettings(settings));
+}
+
+export async function hostTailscale(): Promise<import("./tauri-bridge/generated/bindings.js").TailscaleSelf | null> {
+  return unwrap(await commands.hostTailscale());
+}
+
 // ---- Launcher / multi-window ----
 
 /// Recent projects for the launcher, most-recent first, each tagged

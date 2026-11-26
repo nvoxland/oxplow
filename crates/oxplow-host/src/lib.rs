@@ -13,6 +13,7 @@ pub mod instance;
 pub mod logging;
 pub mod proxy;
 pub mod registry;
+pub mod settings;
 pub mod tls;
 pub mod ui;
 pub mod web;

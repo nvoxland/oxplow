@@ -234,6 +234,8 @@ pub struct ShellWindows {
     /// The app's host once started; started again at the next open if it
     /// has ended (crashed).
     host: Mutex<Option<oxplow_host::client::OwnHost>>,
+    /// The "Allow other devices" settings the running host started with.
+    started_with: Mutex<Option<oxplow_host::settings::HostSettings>>,
     /// The global restore set, or `None` when the config dir can't be
     /// resolved (then the session simply isn't persisted).
     session: Option<oxplow_config::SessionProjects>,
@@ -244,6 +246,8 @@ pub struct ShellWindows {
     /// stops rewriting the restore set — Cmd-Q with three windows open
     /// must bring all three back.
     quitting: std::sync::atomic::AtomicBool,
+    /// The person said Quit (or nothing needed asking): the exit goes on.
+    quit_confirmed: std::sync::atomic::AtomicBool,
 }
 
 /// The name a person gave this Mac (System Settings › General › About),
@@ -270,6 +274,7 @@ impl Default for ShellWindows {
         Self {
             registry: WindowRegistry::default(),
             host: Mutex::new(None),
+            started_with: Mutex::new(None),
             session: oxplow_config::global_config_dir()
                 .map(|d| oxplow_config::SessionProjects::new(d.join("session.json"))),
             device: oxplow_config::global_config_dir().and_then(|d| {
@@ -278,6 +283,7 @@ impl Default for ShellWindows {
                     .ok()
             }),
             quitting: std::sync::atomic::AtomicBool::new(false),
+            quit_confirmed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -387,12 +393,52 @@ impl ShellWindows {
                 binary.display()
             ));
         }
-        tracing::info!(binary = %binary.display(), "starting the host");
-        let own = oxplow_host::client::start_own_host(std::process::Command::new(&binary))
+        // "Allow other devices", as saved: a setting that cannot work is
+        // said, and the host starts for this machine only.
+        let settings = oxplow_config::global_config_dir()
+            .map(|dir| oxplow_host::settings::HostSettings::load(&dir))
+            .unwrap_or_default();
+        let extra = settings.serve_args().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "Allow other devices is on but cannot work; this machine only");
+            Vec::new()
+        });
+        tracing::info!(binary = %binary.display(), others = !extra.is_empty(), "starting the host");
+        let own = oxplow_host::client::start_own_host(std::process::Command::new(&binary), &extra)
             .map_err(|e| e.to_string())?;
         let client = own.client.clone();
         *slot = Some(own);
+        *self.started_with.lock().unwrap_or_else(|e| e.into_inner()) = Some(settings);
         Ok(client)
+    }
+
+    /// The app's host, started if it is not running (the Devices window, or
+    /// "Allow other devices" at launch). **Blocking** while it starts.
+    pub fn host_client(&self) -> Result<oxplow_host::client::HostClient, String> {
+        self.host()
+    }
+
+    /// The app's host if it runs now; nothing is started.
+    pub fn running_host(&self) -> Option<oxplow_host::client::HostClient> {
+        let mut slot = self.host.lock().unwrap_or_else(|e| e.into_inner());
+        let own = slot.as_mut()?;
+        (!own.ended()).then(|| own.client.clone())
+    }
+
+    /// Whether the running host started with `settings` (a change applies
+    /// at the next start).
+    pub fn settings_applied(&self, settings: &oxplow_host::settings::HostSettings) -> bool {
+        self.running_host().is_some()
+            && self
+                .started_with
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                == Some(settings)
+    }
+
+    /// This install's device (the Mac app is one device).
+    pub fn device(&self) -> Option<&oxplow_config::ThisDevice> {
+        self.device.as_ref()
     }
 
     /// Let go of `project` on the host, in the background.
@@ -477,6 +523,25 @@ impl ShellWindows {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// The quit was asked and said yes (or needed no asking).
+    pub fn confirm_quit(&self) {
+        self.quit_confirmed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn quit_confirmed(&self) -> bool {
+        self.quit_confirmed
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// What to ask before quitting, if another device has a window open
+    /// on the app's host now. **Blocking** (one call to the host).
+    pub fn quit_question_now(&self) -> Option<String> {
+        let host = self.running_host()?;
+        let connected = tauri::async_runtime::block_on(host.connected()).ok()?;
+        quit_question(&connected, self.device().map(|d| d.id.as_str()))
+    }
+
     /// Whether a full app quit is under way.
     pub fn is_quitting(&self) -> bool {
         self.quitting.load(std::sync::atomic::Ordering::SeqCst)
@@ -500,6 +565,66 @@ impl ShellWindows {
         if let Some(session) = &self.session {
             session.replace(&self.registry.project_dirs());
         }
+    }
+}
+
+/// What quitting asks first, when another device than this Mac (`own`) has
+/// a window open on its host: quitting ends the host, and their projects
+/// with it. `None`: nothing to ask. Pure.
+pub fn quit_question(
+    connected: &[oxplow_host::access::Connected],
+    own: Option<&str>,
+) -> Option<String> {
+    let others: Vec<&str> = connected
+        .iter()
+        .filter(|c| Some(c.device.as_str()) != own)
+        .map(|c| c.name.as_str())
+        .collect();
+    let names = match others.as_slice() {
+        [] => return None,
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let verb = if others.len() == 1 { "is" } else { "are" };
+    Some(format!(
+        "{names} {verb} using Oxplow on this computer. Quitting stops their projects and agents too."
+    ))
+}
+
+#[cfg(test)]
+mod quit_tests {
+    use super::*;
+    use oxplow_host::access::Connected;
+
+    fn on(device: &str, name: &str) -> Connected {
+        Connected {
+            device: device.into(),
+            name: name.into(),
+            kind: None,
+        }
+    }
+
+    /// Quitting ends the host, every device's projects with it: when
+    /// another device has a window open, the app asks first and names it.
+    #[test]
+    fn quit_asks_first_only_when_another_device_is_connected() {
+        assert_eq!(quit_question(&[], Some("dev-mac")), None);
+        assert_eq!(
+            quit_question(&[on("dev-mac", "Studio")], Some("dev-mac")),
+            None,
+            "the Mac itself"
+        );
+        let asked = quit_question(
+            &[
+                on("dev-mac", "Studio"),
+                on("dev-tab", "Tab S9"),
+                on("dev-phone", "Phone"),
+            ],
+            Some("dev-mac"),
+        )
+        .unwrap();
+        assert!(asked.contains("Tab S9 and Phone"), "{asked}");
+        assert!(!asked.contains("Studio"), "{asked}");
     }
 }
 

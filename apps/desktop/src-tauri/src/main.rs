@@ -310,23 +310,34 @@ fn run_shell(ctx: tauri::Context) {
         .setup(move |app| {
             specta.mount_events(app);
             install_recent_projects(app.handle());
-            oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            oxplow_tauri_ipc::commands::menu::install_menu_handler(
+                app.handle(),
+                std::sync::Arc::new(request_quit),
+            );
             open_startup_windows(app.handle(), startup);
+            start_host_for_other_devices(app.handle());
             Ok(())
         })
         .build(ctx)
         .expect("error while building tauri application")
         .run(move |app, event| match event {
-            // Every route out of the app comes through here (Cmd-Q, OS
+            // Every route out of the app comes through here (Quit, OS
             // shutdown, the launcher closing). Freeze the restore set so
             // the per-window teardown doesn't empty it window by window.
             //
-            // Nothing is prevented: closing the last *project* window
-            // already put the launcher up (see `handle_window_event`), so
-            // reaching this point means the user closed the launcher
-            // itself — which is how you quit.
-            tauri::RunEvent::ExitRequested { .. } => {
-                app.state::<windows::ShellWindows>().begin_quit();
+            // Closing the last *project* window already put the launcher up
+            // (see `handle_window_event`), so an exit with no code is the
+            // person closing the launcher, which is how you quit. Quitting
+            // ends the host for every device, so it asks first, as Quit does
+            // (`request_quit`); an exit with a code is that one going on.
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                let shell = app.state::<windows::ShellWindows>();
+                if code.is_none() && !shell.quit_confirmed() {
+                    api.prevent_exit();
+                    request_quit(app);
+                    return;
+                }
+                shell.begin_quit();
             }
             // Dock-icon click with nothing on screen. The variant only
             // exists on macOS — there is no dock to click elsewhere —
@@ -353,6 +364,55 @@ fn run_shell(ctx: tauri::Context) {
             tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().end(),
             _ => {}
         });
+}
+
+/// With "Allow other devices" on, the host starts with the app, not at the
+/// first open: a tablet can reach it before any project is open here.
+fn start_host_for_other_devices(app: &tauri::AppHandle) {
+    let on = oxplow_config::global_config_dir()
+        .is_some_and(|dir| oxplow_host::settings::HostSettings::load(&dir).allow_other_devices);
+    if !on {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = app.state::<windows::ShellWindows>().host_client() {
+            tracing::warn!(error = %e, "the host for other devices did not start");
+        }
+    });
+}
+
+/// Quit, asking first when another device has a window open on the app's
+/// host (quitting ends it, and their projects with it). Off the main thread:
+/// the question to the host and the dialog both wait. Dock ▸ Quit and a
+/// logout do not come here; nothing can ask then.
+fn request_quit(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        let shell = app.state::<windows::ShellWindows>();
+        if let Some(question) = shell.quit_question_now() {
+            let quit = app
+                .dialog()
+                .message(question)
+                .title("Quit Oxplow?")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Quit".into(),
+                    "Cancel".into(),
+                ))
+                .blocking_show();
+            if !quit {
+                // Closing the launcher got here: never leave no window.
+                if app.webview_windows().is_empty() {
+                    let handle = app.clone();
+                    let _ = app.run_on_main_thread(move || show_launcher(&handle));
+                }
+                return;
+            }
+        }
+        shell.confirm_quit();
+        app.exit(0);
+    });
 }
 
 /// The configured dock tint for `dir`, read straight off disk — the

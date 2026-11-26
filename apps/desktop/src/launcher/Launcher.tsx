@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { createProject, listRecentProjects, openProject, removeRecentProject } from "../api.js";
+import { createProject, desktopBridge, listRecentProjects, openProject, removeRecentProject } from "../api.js";
+import { DEVICES_MENU_ID, DevicesSlideover } from "../host/DevicesSlideover.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { connectRemote, parseRemoteInput, probeRemoteDaemon } from "../tauri-bridge/transport.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
@@ -70,6 +71,16 @@ export function Launcher() {
 
   useEffect(reload, [reload]);
 
+  // Oxplow ▸ Devices…: pairing works with no project open.
+  const [devicesOpen, setDevicesOpen] = useState(false);
+  useEffect(
+    () =>
+      desktopBridge().onMenuCommand((id) => {
+        if (id === DEVICES_MENU_ID) setDevicesOpen(true);
+      }),
+    [],
+  );
+
   const handleOpen = useCallback(
     async (path: string, newWindow: boolean) => {
       setError(null);
@@ -124,6 +135,7 @@ export function Launcher() {
 
   return (
     <div data-testid="launcher" style={rootStyle}>
+      <DevicesSlideover open={devicesOpen} onClose={() => setDevicesOpen(false)} />
       <div style={cardStyle}>
         <header style={{ marginBottom: 20 }}>
           <h1 style={titleStyle}>Oxplow</h1>

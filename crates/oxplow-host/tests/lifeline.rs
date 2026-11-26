@@ -72,7 +72,7 @@ fn a_headless_host_runs_on_when_its_stdin_closes() {
 fn own_host(home: &std::path::Path) -> oxplow_host::client::OwnHost {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_oxplow-host"));
     cmd.env("OXPLOW_HOME", home);
-    oxplow_host::client::start_own_host(cmd).unwrap()
+    oxplow_host::client::start_own_host(cmd, &[]).unwrap()
 }
 
 fn answers(base: &str, token: &str) -> bool {
@@ -109,7 +109,7 @@ fn the_app_does_not_start_a_host_where_a_headless_one_runs() {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_oxplow-host"));
     cmd.env("OXPLOW_HOME", home.path());
     let started = Instant::now();
-    let err = oxplow_host::client::start_own_host(cmd)
+    let err = oxplow_host::client::start_own_host(cmd, &[])
         .err()
         .unwrap()
         .to_string();

@@ -46,6 +46,11 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "await_oauth_redirect",
     "clipboard_read_text",
     "create_project",
+    "host_devices",
+    "host_pairing_code",
+    "host_remove_device",
+    "host_rename_device",
+    "host_tailscale",
     "install_cli",
     "list_recent_projects",
     "listen_for_oauth_redirect",
@@ -54,6 +59,7 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "open_project",
     "remove_recent_project",
     "reveal_path",
+    "set_host_settings",
     "set_native_menu",
     "setup_project",
     "stop_oauth_redirect",
@@ -252,6 +258,13 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::launch::abort_setup,
             // "Install `oxplow` command line…"
             commands::install_cli::install_cli,
+            // the Devices window
+            commands::devices::host_devices,
+            commands::devices::host_pairing_code,
+            commands::devices::host_rename_device,
+            commands::devices::host_remove_device,
+            commands::devices::set_host_settings,
+            commands::devices::host_tailscale,
         ])
 }
 
