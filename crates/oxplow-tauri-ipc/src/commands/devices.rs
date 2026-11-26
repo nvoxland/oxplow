@@ -36,6 +36,10 @@ pub struct DevicesView {
     pub settings_applied: bool,
     /// The addresses a device opens: `https://<name>:<port>/`.
     pub open_on_device: Vec<String>,
+    /// Where the host listens for other devices now, or why it cannot.
+    pub public: Option<oxplow_host::access::PublicListener>,
+    /// Why the host did not answer: the settings still show, to fix.
+    pub host_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -123,11 +127,18 @@ pub async fn host_devices(app: tauri::AppHandle) -> Result<DevicesView, IpcError
         .device()
         .map(|d| d.name.clone())
         .unwrap_or_else(|| "This computer".into());
-    let (devices, connected) = with_host(app.clone(), |host| async move {
-        Ok((host.devices().await?, host.connected().await?))
-    })
-    .await?;
+    // The settings first: a host that does not answer (a setting that
+    // cannot work, say) must not hide the form that fixes it.
     let settings = oxplow_host::settings::HostSettings::load(&config_dir()?);
+    let answer = with_host(app.clone(), |host| async move {
+        let (connected, public) = host.status_parts().await?;
+        Ok((host.devices().await?, connected, public))
+    })
+    .await;
+    let (devices, connected, public, host_error) = match answer {
+        Ok((devices, connected, public)) => (devices, connected, Some(public), None),
+        Err(e) => (Vec::new(), Vec::new(), None, Some(e.message)),
+    };
     let devices = devices
         .into_iter()
         .map(|d| DeviceView {
@@ -145,7 +156,17 @@ pub async fn host_devices(app: tauri::AppHandle) -> Result<DevicesView, IpcError
         this_device,
         devices,
         open_on_device: open_on_device(&settings),
-        settings_applied: shell(&app).settings_applied(&settings),
+        // Applied: the host started with them and, when they let other
+        // devices in, it listens for them.
+        settings_applied: shell(&app).settings_applied(&settings)
+            && host_error.is_none()
+            && (!settings.allow_other_devices
+                || matches!(
+                    public,
+                    Some(oxplow_host::access::PublicListener::Listening { .. })
+                )),
+        public,
+        host_error,
         settings,
     })
 }

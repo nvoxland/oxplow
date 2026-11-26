@@ -174,15 +174,23 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     let bind: SocketAddr = bind
         .parse()
         .unwrap_or_else(|e| fail(format!("invalid --bind address: {e}")));
+    // The owner's token is good on this listener: it is for this machine.
+    if !bind.ip().is_loopback() {
+        fail("--bind is for this machine (a loopback address); other devices come in on --public-bind");
+    }
 
     let public_bind: Option<SocketAddr> = public_bind.map(|b| {
         b.parse()
             .unwrap_or_else(|e| fail(format!("invalid --public-bind address: {e}")))
     });
+    let tls_asked = tls_cert.is_some();
     let tls = match (tls_cert, tls_key) {
         (None, None) => None,
+        // A certificate that cannot be read leaves the listener for other
+        // devices out (never a plain one in its place); this machine's
+        // windows still work, and the Devices window says why.
         (Some(cert), Some(key)) if public_bind.is_some() => {
-            Some(oxplow_host::tls::acceptor(&cert, &key).unwrap_or_else(|e| fail(e)))
+            Some(oxplow_host::tls::acceptor(&cert, &key).map_err(|e| e.to_string()))
         }
         (Some(_), Some(_)) => fail("--tls-cert and --tls-key are for --public-bind"),
         _ => fail("--tls-cert and --tls-key go together"),
@@ -245,7 +253,8 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 HoldsKept::InFile
             };
             let host = Host::open(config_dir, supervisor, kept);
-            let devices = oxplow_host::devices::Devices::open(config_dir).unwrap_or_else(|e| fail(e));
+            let devices =
+                oxplow_host::devices::Devices::open(config_dir).unwrap_or_else(|e| fail(e));
             let access = oxplow_host::access::Access::new(
                 token.clone(),
                 devices,
@@ -286,15 +295,19 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 stop: stop.clone(),
                 scheme,
             };
-            let app = oxplow_host::web::app(config(oxplow_host::web::Scheme::Http, Listener::Loopback));
+            let app =
+                oxplow_host::web::app(config(oxplow_host::web::Scheme::Http, Listener::Loopback));
             // The CLI's way in (`oxplow host pair`): the owner, by the file's
             // mode. A headless host's owner token is printed once and kept
             // nowhere, so this is how it makes a pairing code.
             #[cfg(unix)]
-            let owner_socket = owner_socket(config_dir, oxplow_host::web::app(config(
-                oxplow_host::web::Scheme::Http,
-                Listener::OwnerSocket,
-            )));
+            let owner_socket = owner_socket(
+                config_dir,
+                oxplow_host::web::app(config(
+                    oxplow_host::web::Scheme::Http,
+                    Listener::OwnerSocket,
+                )),
+            );
             // Said once everything this machine reaches is up: the app (and
             // the CLI's socket) may use it from this line on.
             println!("oxplow-host listening on {base_url}");
@@ -306,13 +319,27 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             // was given.
             // One that cannot bind is said and left out: this machine's
             // windows still work.
+            let left_out = |error: String| {
+                eprintln!("oxplow-host: other devices cannot reach this host: {error}");
+                tracing::error!(%error, "the listener for other devices is left out");
+                *access.public.lock().unwrap_or_else(|e| e.into_inner()) =
+                    oxplow_host::access::PublicListener::Failed { error };
+            };
+            let tls = match tls {
+                Some(Err(e)) => {
+                    left_out(e);
+                    None
+                }
+                Some(Ok(acceptor)) => Some(acceptor),
+                None => None,
+            };
             let public_tcp = match public_bind {
                 None => None,
+                Some(_) if tls.is_none() && tls_asked => None,
                 Some(addr) => match tokio::net::TcpListener::bind(addr).await {
                     Ok(tcp) => Some(tcp),
                     Err(e) => {
-                        eprintln!("oxplow-host: other devices cannot reach this host: bind {addr} failed: {e}");
-                        tracing::error!(%addr, error = %e, "the listener for other devices did not bind");
+                        left_out(format!("bind {addr} failed: {e}"));
                         None
                     }
                 },
@@ -330,6 +357,10 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                         "oxplow-host listening for other devices on {}://{at}",
                         scheme.as_str()
                     );
+                    *access.public.lock().unwrap_or_else(|e| e.into_inner()) =
+                        oxplow_host::access::PublicListener::Listening {
+                            url: format!("{}://{at}", scheme.as_str()),
+                        };
                     tracing::info!(%at, scheme = scheme.as_str(), "listening for other devices");
                     let public_app = oxplow_host::web::app(config(scheme, Listener::Public));
                     Some(match tls.clone() {

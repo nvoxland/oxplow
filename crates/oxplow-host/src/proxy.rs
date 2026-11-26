@@ -321,6 +321,19 @@ pub(crate) async fn events(
         }
     };
     let lease = web.access.open_tunnel(connected);
+    // Removed while this socket was being set up (the daemon's boot can take
+    // a minute): its removal closed nothing, so ask again now it counts.
+    if let Caller::Device(d) = &who {
+        if !web
+            .access
+            .devices
+            .list()
+            .iter()
+            .any(|known| known.id == d.id)
+        {
+            return refuse(StatusCode::UNAUTHORIZED, "missing or wrong token");
+        }
+    }
     ws.on_upgrade(move |client| tunnel(client, upstream, lease))
 }
 
@@ -400,28 +413,37 @@ async fn tunnel(client: WebSocket, upstream: UpstreamSocket, lease: TunnelLease)
     };
     // The host closes it: the device was removed, or the host is ending.
     let ended = async {
-        let code = loop {
+        loop {
             if let Some(code) = *closed.borrow_and_update() {
-                break code;
+                return code;
             }
             if closed.changed().await.is_err() {
-                return std::future::pending::<()>().await;
+                return std::future::pending::<u16>().await;
             }
-        };
+        }
+    };
+    // Ends at once: no frame of the page passes once it is closed.
+    let code = tokio::select! {
+        _ = up => None,
+        _ = down => None,
+        code = ended => Some(code),
+    };
+    if let Some(code) = code {
         let reason = match code {
             crate::access::HOST_ENDING_CLOSE_CODE => "the host is ending",
             _ => "this device was removed",
         };
-        let _ = to_client
-            .lock()
-            .await
-            .send(Message::Close(Some(CloseFrame {
-                code,
-                reason: reason.into(),
-            })))
-            .await;
-    };
-    tokio::select! { _ = up => {}, _ = down => {}, _ = ended => {} }
+        let frame = Message::Close(Some(CloseFrame {
+            code,
+            reason: reason.into(),
+        }));
+        // A page that reads nothing does not hold the host up.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            to_client.lock().await.send(frame),
+        )
+        .await;
+    }
     drop(lease);
 }
 

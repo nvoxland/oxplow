@@ -353,12 +353,23 @@ impl HostClient {
 
     /// The devices with an open window on this host now.
     pub async fn connected(&self) -> Result<Vec<crate::access::Connected>, ClientError> {
+        Ok(self.status_parts().await?.0)
+    }
+
+    /// Who has a window open now, and where other devices reach this host
+    /// (or why they cannot).
+    pub async fn status_parts(
+        &self,
+    ) -> Result<(Vec<crate::access::Connected>, crate::access::PublicListener), ClientError> {
         let status: serde_json::Value = self
             .send(self.http.get(self.url("/host/status")))
             .await?
             .json()
             .await?;
-        Ok(serde_json::from_value(status["connected"].clone()).unwrap_or_default())
+        Ok((
+            serde_json::from_value(status["connected"].clone()).unwrap_or_default(),
+            serde_json::from_value(status["public"].clone()).unwrap_or_default(),
+        ))
     }
 
     /// `device` lets go of `project`: the last release stops its daemon.

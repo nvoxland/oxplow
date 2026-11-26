@@ -307,6 +307,11 @@ fn is_separator_role(role: &str) -> bool {
 /// window: with several projects open, Cmd-S belongs to exactly one.
 pub fn install_menu_handler(app: &AppHandle, quit: QuitHandler) {
     app.manage(MenuRegistry::default());
+    // The app menu (Devices…, Quit) from the start, before any window has
+    // pushed its own: else Tauri's default stands, whose Quit asks nobody.
+    if let Err(e) = install_menu(app, &[]) {
+        tracing::warn!(error = %e.message, "could not install the app menu");
+    }
     let handle = app.clone();
     app.on_menu_event(move |_app, event| {
         if event.id().0 == QUIT_MENU_ID {

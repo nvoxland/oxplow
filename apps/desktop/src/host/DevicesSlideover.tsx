@@ -135,8 +135,18 @@ export function DevicesSlideover({
   return (
     <Slideover open={open} onClose={onClose} title="Devices" testId="devices">
       {error ? (
-        <div role="alert" data-testid="devices-error" style={{ color: "var(--severity-critical)", marginBottom: 12 }}>
+        <div role="alert" data-testid="devices-error" style={alertStyle}>
           {error}
+        </div>
+      ) : null}
+      {view?.hostError ? (
+        <div role="alert" data-testid="devices-host-error" style={alertStyle}>
+          Oxplow's host did not answer: {view.hostError}. Fix the settings below and start Oxplow again.
+        </div>
+      ) : null}
+      {view?.public?.state === "failed" ? (
+        <div role="alert" data-testid="devices-public-failed" style={alertStyle}>
+          Other devices cannot reach this Mac: {view.public.error}
         </div>
       ) : null}
 
@@ -228,7 +238,25 @@ export function DevicesSlideover({
       </section>
 
       {draft ? (
-        <section style={sectionStyle}>
+        <form
+          style={sectionStyle}
+          data-testid="devices-settings"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!changed) return;
+            void run(async () => {
+              await api.setHostSettings(settingsOf(draft));
+              setSaved(draft);
+            });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && changed) {
+              e.preventDefault();
+              e.stopPropagation();
+              setDraft(saved);
+            }
+          }}
+        >
           <h3 style={headStyle}>Allow other devices</h3>
           <label style={fieldStyle}>
             <input
@@ -288,30 +316,21 @@ export function DevicesSlideover({
             Without HTTPS a device's browser has no microphone or clipboard here.
           </p>
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              data-testid="devices-save"
-              disabled={!changed}
-              onClick={() =>
-                void run(async () => {
-                  await api.setHostSettings(settingsOf(draft));
-                  setSaved(draft);
-                })
-              }
-            >
+            <button type="submit" data-testid="devices-save" disabled={!changed}>
               Save
             </button>
             <button type="button" data-testid="devices-discard" disabled={!changed} onClick={() => setDraft(saved)}>
               Discard
             </button>
           </div>
-        </section>
+        </form>
       ) : null}
     </Slideover>
   );
 }
 
 const sectionStyle: React.CSSProperties = { marginBottom: 20 };
+const alertStyle: React.CSSProperties = { color: "var(--severity-critical)", marginBottom: 12 };
 const headStyle: React.CSSProperties = {
   margin: "0 0 8px",
   fontSize: "var(--text-xs)",

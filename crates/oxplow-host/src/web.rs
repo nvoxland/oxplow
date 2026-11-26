@@ -3,9 +3,9 @@
 //! built UI at `/`.
 //!
 //! **Every request first passes the `Host` check.** A page on another name
-//! whose DNS now points here (rebinding) would otherwise read the project
-//! page, which carries the host token. Only the loopback names and the names
-//! given with `--allow-host` are served.
+//! whose DNS now points here (rebinding) would otherwise call the host as a
+//! same-origin page, with a device token kept for this origin. Only the
+//! loopback names and the names given with `--allow-host` are served.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1023,6 +1023,51 @@ mod tests {
         assert!(html.contains("\"kind\":\"hostHome\""), "{html}");
         assert!(!html.contains(&rig.id), "{html}");
         assert!(!html.contains("alpha"), "{html}");
+    }
+
+    /// On the listener for other devices the owner's token is no token: a
+    /// project's calls and socket need a device's.
+    #[tokio::test]
+    async fn the_owner_token_is_refused_on_the_public_listener() {
+        let rig = Rig::running().await;
+        rig.wait_running().await;
+        let public = serve(app(ServeConfig {
+            host: rig.fx.host.clone(),
+            access: rig.access.clone(),
+            listener: crate::access::Listener::Public,
+            ui_dir: None,
+            allow_hosts: vec![],
+            boot_wait: Duration::from_secs(5),
+            stop: Default::default(),
+            scheme: Default::default(),
+        }))
+        .await;
+        let call = http()
+            .post(format!("http://{public}/p/{}/ipc/x", rig.id))
+            .bearer_auth(HOST_TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(call.status(), 401);
+        let socket = tokio_tungstenite::connect_async(format!(
+            "ws://{public}/p/{}/events?token={HOST_TOKEN}",
+            rig.id
+        ))
+        .await;
+        assert!(socket.is_err(), "the socket never opens");
+        let (_, token) = rig
+            .access
+            .devices
+            .pair("Tab", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let device = http()
+            .post(format!("http://{public}/p/{}/ipc/x", rig.id))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(device.status(), 200, "a device's token is good there");
+        assert!(rig.log.lock().unwrap().paths.iter().all(|p| p == "/ipc/x"));
     }
 
     #[tokio::test]

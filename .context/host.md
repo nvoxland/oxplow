@@ -50,7 +50,9 @@ or nobody is connected:
   `crashed`. There is no restart loop: only a new hold (a person opening the
   project again) starts a crashed daemon.
 - **API**, all under `/host/` (`api.rs`; who may call each, see "Pairing"):
-  `GET /host/status` (version, pid, projects with state, `connected` devices),
+  `GET /host/status` (version, pid, projects with state, `connected` devices,
+  and `public`: the listener for other devices, `off`, `listening { url }` or
+  `failed { error }`),
   `GET /host/projects` (each with `held_by_you` for a device), `POST
   /host/projects` (JSON `{ path }`: register that folder, or find it
   registered; 400 for a folder that is not a project), `POST|DELETE
@@ -130,7 +132,9 @@ stays plain HTTP for this machine (the Mac app's windows reach their host on
 `127.0.0.1`, where a certificate for the tailnet name would not match). With
 `--tls-cert` and `--tls-key` (PEM; `tailscale cert <name>` writes both for
 the machine's tailnet name, `mkcert` for a LAN name) the public listener is
-HTTPS (`tls.rs`, rustls; each handshake in its own task, 10 s at most), and
+HTTPS (`tls.rs`, rustls; each handshake in its own task, 10 s at most; a
+certificate that cannot be read, like a bind that fails, leaves the listener
+out, never the host, and `/host/status` says why), and
 the second stdout line says `oxplow-host listening for other devices on
 https://…`. A page reached there gets an `https` base and its component
 frames an `https` CSP (`web::Scheme`). A browser needs HTTPS for a secure
@@ -189,7 +193,9 @@ the host's projects; Open holds one for the device and goes to it, Close lets
 go. A refused token (a 401 on a call, a 401 from `GET /host/me` after a drop
 — a browser cannot see a socket upgrade's 401 — or a 4003) forgets the token
 and pairs again. A 4002 shows "Oxplow was quit on the computer that runs it"
-and retries slowly. After each reconnect the page compares `/host/me`'s
+and retries slowly. A project page holds its project for the device at load
+and before each reconnect (`checkHost`): the app's host starts again with no
+holds, and holding twice is one hold. After each reconnect the page compares `/host/me`'s
 `build` (a hash of the served `index.html`) with the one it loaded with, and
 loads again when it changed.
 
@@ -199,9 +205,11 @@ Every request, whatever its route, must carry a `Host` the host allows: the
 loopback names (`127.0.0.1`, `localhost`, optional port; the same
 `component_http::loopback_host` the daemon uses) and the names given with
 `--allow-host` (name only, any port, case ignored). Anything else is `403`.
-Without it a page whose name flips to this machine (DNS rebinding) could load
-`/p/<id>/` and read the token in it. Start a host for other devices as
-`oxplow-host serve --bind 0.0.0.0:7400 --allow-host tablet.lan`.
+Without it a page whose name flips to this machine (DNS rebinding) could call
+the host as a same-origin page and act with a token kept there. `--bind` is
+loopback only (the owner's token is good there; `serve` refuses another
+address); other devices come in on `--public-bind`: `oxplow-host serve
+--public-bind 100.101.102.103:7400 --allow-host mac.tailnet.ts.net`.
 
 ## Routing: `/p/<project>/…`
 

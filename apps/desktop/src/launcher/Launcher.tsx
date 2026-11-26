@@ -60,13 +60,14 @@ export function Launcher() {
 
   // Oxplow ▸ Devices…: pairing works with no project open.
   const [devicesOpen, setDevicesOpen] = useState(false);
-  useEffect(
-    () =>
-      desktopBridge().onMenuCommand((id) => {
-        if (id === DEVICES_MENU_ID) setDevicesOpen(true);
-      }),
-    [],
-  );
+  useEffect(() => {
+    // The launcher's menu is the app menu alone; registering it makes this
+    // window the one a menu item (Devices…) goes to while it is in front.
+    void desktopBridge().setNativeMenu([]);
+    return desktopBridge().onMenuCommand((id) => {
+      if (id === DEVICES_MENU_ID) setDevicesOpen(true);
+    });
+  }, []);
 
   const handleOpen = useCallback(
     async (path: string, newWindow: boolean) => {

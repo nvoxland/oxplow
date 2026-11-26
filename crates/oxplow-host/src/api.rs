@@ -60,6 +60,8 @@ struct Status {
     projects: Vec<ProjectView>,
     /// Devices with an open event socket now.
     connected: Vec<Connected>,
+    /// Where other devices reach this host, or why they cannot.
+    public: crate::access::PublicListener,
 }
 
 #[derive(Deserialize)]
@@ -194,6 +196,12 @@ async fn status(State(s): State<ApiState>, headers: HeaderMap) -> Response {
         pid: std::process::id(),
         projects: s.host.projects(),
         connected: s.access.tunnels.connected(),
+        public: s
+            .access
+            .public
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
     })
     .into_response()
 }
@@ -285,7 +293,12 @@ async fn release(
 async fn pairing(State(s): State<ApiState>, headers: HeaderMap) -> Response {
     check!(owner(&s, &headers));
     let now = Instant::now();
-    let (code, expires) = s.access.pairing.lock().await.new_code(now);
+    let (code, expires) = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .new_code(now);
     tracing::info!("a pairing code was made");
     Json(Code {
         code: show_code(&code),
@@ -329,17 +342,24 @@ async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::
             "pairing needs { code, name, kind }",
         );
     };
-    let mut pairing = s.access.pairing.lock().await;
-    if !pairing.take(&req.code, Instant::now()) {
-        // Held while it waits: one attempt at a time.
+    // Held while a wrong code waits: one attempt at a time. The codes have
+    // their own lock, so the owner making one never waits here.
+    let turn = s.access.attempts.lock().await;
+    let good = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take(&req.code, Instant::now());
+    if !good {
         tokio::time::sleep(s.access.wrong_code_wait).await;
-        drop(pairing);
+        drop(turn);
         return refuse(
             StatusCode::UNAUTHORIZED,
             "that code is wrong or has expired; ask for a new one",
         );
     }
-    drop(pairing);
+    drop(turn);
     match s.access.devices.pair(&req.name, req.kind) {
         Ok((device, token)) => {
             tracing::info!(device = %device.id, name = %device.name, "a device paired");
@@ -734,15 +754,26 @@ mod tests {
         assert_eq!(own.status(), 200, "the code was still good");
     }
 
-    /// A wrong code costs a wait, and attempts take turns.
+    /// A wrong code costs a wait, and attempts take turns; the owner making
+    /// a code meanwhile does not wait.
     #[tokio::test]
     async fn a_wrong_code_costs_a_wait() {
         let fx = Fixture::new(RUNS);
         let api = api(&fx).await;
         let started = Instant::now();
-        let (a, b) = tokio::join!(
+        let (a, b, made) = tokio::join!(
             pair(&api.public, "AAAA-AAAA"),
-            pair(&api.public, "BBBB-BBBB")
+            pair(&api.public, "BBBB-BBBB"),
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                let asked = Instant::now();
+                code(&api).await;
+                asked.elapsed()
+            }
+        );
+        assert!(
+            made < std::time::Duration::from_millis(150),
+            "the owner waited {made:?}"
         );
         assert_eq!(
             (a.status(), b.status()),

@@ -82,3 +82,54 @@ fn other_devices_reach_the_host_over_https_and_this_machine_over_http() {
     );
     assert_eq!(plain.unwrap(), 200);
 }
+
+/// A certificate that cannot be read leaves the listener for other devices
+/// out, never the host: this machine's windows still work, and the status
+/// says why (the Devices window shows it).
+#[test]
+fn a_bad_certificate_leaves_other_devices_out_and_says_why() {
+    let home = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
+        .args(["serve", "--token-stdin", "--public-bind", "127.0.0.1:0"])
+        .args([
+            "--tls-cert",
+            "/nowhere/cert.pem",
+            "--tls-key",
+            "/nowhere/key.pem",
+        ])
+        .env("OXPLOW_HOME", home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "tok").unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let local = lines.next().unwrap().unwrap();
+    let local = local
+        .strip_prefix("oxplow-host listening on ")
+        .unwrap()
+        .to_string();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let status: serde_json::Value = rt.block_on(async {
+        reqwest::Client::new()
+            .get(format!("{local}/host/status"))
+            .bearer_auth("tok")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    });
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_eq!(status["public"]["state"], "failed", "{status}");
+    assert!(
+        status["public"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("cert.pem"),
+        "{status}"
+    );
+}

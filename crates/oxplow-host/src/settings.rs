@@ -78,7 +78,12 @@ impl HostSettings {
         } else {
             return Err(SettingsError::BadAddress(address.to_string()));
         };
-        let mut args = vec!["--public-bind".to_string(), bind];
+        // The address is a name a device may use too (`http://<ip>:7400/`).
+        let ip = bind
+            .parse::<std::net::SocketAddr>()
+            .map(|a| a.ip().to_string())
+            .unwrap_or_default();
+        let mut args = vec!["--public-bind".to_string(), bind, "--allow-host".into(), ip];
         for name in self
             .names
             .iter()
@@ -166,6 +171,8 @@ mod tests {
             [
                 "--public-bind",
                 "100.101.102.103:7400",
+                "--allow-host",
+                "100.101.102.103",
                 "--allow-host",
                 "mac.tailnet.ts.net",
                 "--tls-cert",

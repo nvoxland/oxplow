@@ -391,6 +391,9 @@ fn request_quit(app: &tauri::AppHandle) {
     std::thread::spawn(move || {
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
         let shell = app.state::<windows::ShellWindows>();
+        if !shell.begin_asking_quit() {
+            return; // the question is on screen already
+        }
         if let Some(question) = shell.quit_question_now() {
             let quit = app
                 .dialog()
@@ -402,6 +405,7 @@ fn request_quit(app: &tauri::AppHandle) {
                 ))
                 .blocking_show();
             if !quit {
+                shell.end_asking_quit();
                 // Closing the launcher got here: never leave no window.
                 if app.webview_windows().is_empty() {
                     let handle = app.clone();

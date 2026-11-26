@@ -2300,6 +2300,10 @@ export type DevicesView = {
 	settingsApplied: boolean,
 	/**  The addresses a device opens: `https://<name>:<port>/`. */
 	openOnDevice: string[],
+	/**  Where the host listens for other devices now, or why it cannot. */
+	public: PublicListener | null,
+	/**  Why the host did not answer: the settings still show, to fix. */
+	hostError: string | null,
 };
 
 /**  One problem. */
@@ -5842,6 +5846,13 @@ export type PublicContracts = {
 	 */
 	withheld?: Withheld[],
 };
+
+/**  The state of the listener for other devices (`serve --public-bind`). */
+export type PublicListener =
+/**  None was asked for: this machine only. */
+{ state: "off" } | { state: "listening"; url: string } |
+/**  Asked for, and left out: the bind or the certificate failed. */
+{ state: "failed"; error: string };
 
 /**  A tab waiting for a device: its row, the page, and the thread it opens in. */
 export type QueuedTab = {

@@ -137,10 +137,16 @@ export function forgetHostToken(): void {
 /// The served UI's build when this page loaded, from `/host/me`.
 let loadedBuild: string | null | undefined;
 
-/// Ask the host who this device is. A token it no longer knows means pair
-/// again (a browser cannot see the 401 on a socket's upgrade, so this is how
-/// a removed device finds out); a build that changed since this page loaded
-/// means load again (the app restarted with a new build).
+// A page the host served holds its project from the start (`checkHost`).
+if (hostOrigin() !== null && remoteToken !== null) queueMicrotask(() => void checkHost());
+
+/// Ask the host who this device is, and hold this page's project for it. A
+/// token it no longer knows means pair again (a browser cannot see the 401
+/// on a socket's upgrade, so this is how a removed device finds out); a
+/// build that changed since this page loaded means load again (the app
+/// restarted with a new build). The hold is taken at load and before each
+/// reconnect: a host that started again (the Mac app quit and opened)
+/// holds only what its devices ask for, and holding twice is one hold.
 async function checkHost(): Promise<void> {
   const host = hostOrigin();
   if (host === null || remoteToken === null) return;
@@ -149,6 +155,14 @@ async function checkHost(): Promise<void> {
     answer = await fetch(`${host}/host/me`, { headers: authHeaders(remoteToken) });
   } catch {
     return; // the host is away; the socket keeps trying
+  }
+  const project = readWindowContext()?.project;
+  if (answer.ok && project) {
+    await fetch(`${host}/host/holds`, {
+      method: "POST",
+      headers: { ...authHeaders(remoteToken), "Content-Type": "application/json" },
+      body: JSON.stringify({ project }),
+    }).catch(() => undefined);
   }
   if (answer.status === 401) {
     forgetHostToken();

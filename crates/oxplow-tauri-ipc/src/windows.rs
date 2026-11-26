@@ -248,6 +248,8 @@ pub struct ShellWindows {
     quitting: std::sync::atomic::AtomicBool,
     /// The person said Quit (or nothing needed asking): the exit goes on.
     quit_confirmed: std::sync::atomic::AtomicBool,
+    /// A quit is being asked about now: a second Quit asks nothing more.
+    asking_quit: std::sync::atomic::AtomicBool,
 }
 
 /// The name a person gave this Mac (System Settings › General › About),
@@ -284,6 +286,7 @@ impl Default for ShellWindows {
             }),
             quitting: std::sync::atomic::AtomicBool::new(false),
             quit_confirmed: std::sync::atomic::AtomicBool::new(false),
+            asking_quit: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -417,9 +420,14 @@ impl ShellWindows {
         self.host()
     }
 
-    /// The app's host if it runs now; nothing is started.
+    /// The app's host if it runs now; nothing is started, and a host that is
+    /// starting now (its lock held) is none: nothing waits on it.
     pub fn running_host(&self) -> Option<oxplow_host::client::HostClient> {
-        let mut slot = self.host.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = match self.host.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
         let own = slot.as_mut()?;
         (!own.ended()).then(|| own.client.clone())
     }
@@ -527,6 +535,19 @@ impl ShellWindows {
     pub fn confirm_quit(&self) {
         self.quit_confirmed
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Start asking about a quit; false when one is being asked already.
+    pub fn begin_asking_quit(&self) -> bool {
+        !self
+            .asking_quit
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The question was answered "Cancel".
+    pub fn end_asking_quit(&self) {
+        self.asking_quit
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn quit_confirmed(&self) -> bool {

@@ -45,12 +45,33 @@ pub enum Caller {
 pub struct Access {
     owner_token: String,
     pub devices: Devices,
+    /// The codes the owner made; never held across a wait, so making one
+    /// never waits behind someone guessing.
+    pub pairing: Mutex<Pairing>,
     /// One pairing attempt at a time: a wrong code costs a wait.
-    pub pairing: tokio::sync::Mutex<Pairing>,
+    pub attempts: tokio::sync::Mutex<()>,
     pub tunnels: Tunnels,
     /// What a wrong code costs, one attempt at a time: a code's 10 minutes
     /// then allow 600 guesses of 31^8.
     pub wrong_code_wait: std::time::Duration,
+    /// The listener for other devices: listening where, or why not.
+    pub public: Mutex<PublicListener>,
+}
+
+/// The state of the listener for other devices (`serve --public-bind`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum PublicListener {
+    /// None was asked for: this machine only.
+    #[default]
+    Off,
+    Listening {
+        url: String,
+    },
+    /// Asked for, and left out: the bind or the certificate failed.
+    Failed {
+        error: String,
+    },
 }
 
 /// What a wrong pairing code costs.
@@ -66,9 +87,11 @@ impl Access {
         Arc::new(Self {
             owner_token,
             devices,
-            pairing: tokio::sync::Mutex::new(Pairing::default()),
+            pairing: Mutex::new(Pairing::default()),
+            attempts: tokio::sync::Mutex::new(()),
             tunnels: Tunnels::default(),
             wrong_code_wait,
+            public: Mutex::new(PublicListener::Off),
         })
     }
 
