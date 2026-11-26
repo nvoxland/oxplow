@@ -161,8 +161,7 @@ pub fn ensure_worktree(
         let tracks = repo
             .find_branch(branch_source, git2::BranchType::Remote)
             .is_ok()
-            && branch_source
-                .split_once('/')
+            && crate::branch::split_remote_ref(&repo, &format!("refs/remotes/{branch_source}"))
                 .is_some_and(|(_, name)| name == branch);
         (exists, tracks)
     };
@@ -268,6 +267,28 @@ mod tests {
             .shorthand()
             .map(|s| s.to_string())
             .unwrap_or_else(|_| "main".into())
+    }
+
+    /// `x` made from a remote whose name has a `/` (`team/fork/x`) is that
+    /// remote branch checked out: it tracks it.
+    #[test]
+    fn a_branch_from_a_slashed_remote_of_its_name_tracks_it() {
+        let repo_dir = init_repo();
+        let repo = git2::Repository::open(repo_dir.path()).unwrap();
+        repo.remote("team/fork", "https://example.invalid/fork.git")
+            .unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap().id();
+        repo.reference("refs/remotes/team/fork/x", head, false, "")
+            .unwrap();
+        let wt_parent = tempfile::tempdir().unwrap();
+        let wt = wt_parent.path().join("x");
+        ensure_worktree(repo_dir.path(), &wt, "x", "team/fork/x").unwrap();
+        let repo = git2::Repository::open(repo_dir.path()).unwrap();
+        let local = repo.find_branch("x", git2::BranchType::Local).unwrap();
+        assert_eq!(
+            local.upstream().unwrap().name().unwrap(),
+            Some("team/fork/x")
+        );
     }
 
     #[test]

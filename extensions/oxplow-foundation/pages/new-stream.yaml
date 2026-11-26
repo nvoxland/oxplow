@@ -40,7 +40,7 @@ loaders:
       SELECT r.remote || '/' || r.name, r.name, r.remote, r.subject, r.committed_at,
              NULL, 'Makes a local branch that tracks it', 0
       FROM v_branch r
-      WHERE r.kind = 'remote' AND r.name <> 'HEAD'
+      WHERE r.kind = 'remote'
         AND NOT EXISTS (SELECT 1 FROM v_branch l WHERE l.kind = 'local' AND l.name = r.name)
       ORDER BY is_default DESC, committed_at DESC, value
   # The picked branch, fixed; the stream is named for it (a remote's
@@ -67,7 +67,7 @@ loaders:
         FROM v_branch WHERE kind = 'local'
         UNION ALL
         SELECT remote || '/' || name, remote || '/' || name, 'Remote branches', 1, 0
-        FROM v_branch WHERE kind = 'remote' AND name <> 'HEAD'
+        FROM v_branch WHERE kind = 'remote'
         UNION ALL
         SELECT name, name, 'Tags', 2, 0 FROM v_tag
       )

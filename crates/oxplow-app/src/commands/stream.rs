@@ -707,6 +707,54 @@ mod tests {
             .output()
             .unwrap();
         assert!(!upstream.status.success(), "{upstream:?}");
+
+        // A remote whose name has a `/`: its branch `forked` is checked out
+        // as `forked`, not `fork/forked`.
+        git(
+            &root,
+            &[
+                "remote",
+                "add",
+                "team/fork",
+                origin.path().to_str().unwrap(),
+            ],
+        );
+        git(
+            &root,
+            &["push", "-q", "team/fork", "HEAD:refs/heads/forked"],
+        );
+        git(&root, &["fetch", "-q", "team/fork"]);
+        let made = create(
+            &fx,
+            json!({ "title": "Forked", "source": "existing", "existing_branch": "team/fork/forked" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.branch, "forked");
+        assert_eq!(
+            git(&root, &["rev-parse", "--abbrev-ref", "forked@{upstream}"]),
+            "team/fork/forked"
+        );
+
+        // A remote's HEAD points at a branch and is none: refused at the
+        // field, before git runs.
+        git(
+            &root,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/remote-only",
+            ],
+        );
+        let message = refused_at(
+            create(
+                &fx,
+                json!({ "title": "Head", "source": "existing", "existing_branch": "origin/HEAD" }),
+            )
+            .await,
+            "/existing_branch",
+        );
+        assert!(message.contains("origin/HEAD"), "{message}");
     }
 
     /// A branch git still lists in a working copy whose folder is gone: the

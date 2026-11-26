@@ -729,7 +729,10 @@ draft of this doc described a single `snapshot_entry` table with a
   `v_stream.head_sha` (v4): a local branch's tracked branch and how far they
   have parted, each branch's head commit subject and time (read with the
   branch list, one peel per branch, so a branch no stream uses still says
-  what it holds: `v_commit` only has commits reachable from stream heads),
+  what it holds: `v_commit` only has commits reachable from stream heads;
+  a remote branch is split at the remote git's config names, since a
+  remote's name may hold `/` (`oxplow_git::split_remote_ref`), and a
+  remote's symbolic `HEAD` is no row),
   and where each stream's workspace is (detached or not).
 - **`snapshot`** (V13/V16/V42) — the grouping row, one per
   `request_snapshot()` call that had dirty files. Columns: `id,
