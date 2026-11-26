@@ -44,6 +44,7 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
     closeTab: (id) => log.push(`close ${id}`),
     openPage: noop,
     openSearch: () => log.push("search"),
+    menu: [{ id: "shell.menu.file", label: "File", enabled: true, submenu: [{ id: "save", label: "Save", enabled: true, run: () => void log.push("save") }] }],
     tray: <div data-testid="the-tray" />,
     log,
     ...over,
@@ -83,10 +84,19 @@ test("search and the tray are drawn", () => {
   expect(view.getByTestId("tablet-tray").contains(view.getByTestId("the-tray"))).toBe(true);
 });
 
+test("the menu holds the menu bar's commands", async () => {
+  const w = win();
+  const view = render(<TabletShell win={w} />);
+  fireEvent.click(view.getByTestId("tablet-menu"));
+  fireEvent.click(view.getByTestId("menu-item-shell.menu.file"));
+  fireEvent.click(await view.findByTestId("menu-item-save"));
+  expect(w.log).toEqual(["save"]);
+});
+
 // The contract: every contribution has a place in each shell, or is a
 // named gap. The gaps shrink to none as the tablet shell is built.
 test("the tablet shell's gaps are the known ones", () => {
   const gaps = SHELL_CONTRIBUTIONS.filter((c) => SHELL_PLACES.tablet[c] === null);
-  expect(gaps).toEqual(["panels", "menu commands"]);
+  expect(gaps).toEqual(["panels"]);
   expect(SHELL_CONTRIBUTIONS.filter((c) => SHELL_PLACES.desktop[c] === null)).toEqual([]);
 });

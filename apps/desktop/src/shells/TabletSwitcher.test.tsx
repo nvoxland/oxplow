@@ -40,6 +40,7 @@ function win(log: string[]): ShellWindow {
     closeTab: say("close"),
     openPage: say("open"),
     openSearch: say("search"),
+    menu: [],
     tray: null,
   };
 }

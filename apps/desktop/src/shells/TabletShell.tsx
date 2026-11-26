@@ -1,11 +1,11 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
-import { Search, X } from "lucide-react";
+import { Menu as MenuGlyph, Search, X } from "lucide-react";
 
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { buildTabMenu } from "../components/CenterTabs/tabMenu.js";
 import { TabBodies } from "../components/CenterTabs/TabBodies.js";
-import { useRowContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
+import { useContextMenu, useRowContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { WindowTab } from "../window/windowTab.js";
 import type { ShellWindow } from "./shellWindow.js";
 import { RemoveStreamDialog } from "../components/RemoveStreamDialog.js";
@@ -40,6 +40,7 @@ function pageHost(): SwitcherHost | null {
  */
 export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host?: SwitcherHost | null }) {
   const [switching, setSwitching] = useState(false);
+  const commands = useContextMenu();
   // The stream and thread menus and their flows: this shell has no
   // Navigator, so they are drawn in the switcher, which a flow opens.
   const menus = useStreamThreadMenus({
@@ -80,6 +81,20 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
         <button type="button" className="ox-icon-button" aria-label="Search" data-testid="tablet-search" onClick={win.openSearch}>
           <Search size={16} aria-hidden />
         </button>
+        {/* The menu bar's commands: Save, Find, the extensions' menu items. */}
+        <button
+          type="button"
+          className="ox-icon-button"
+          aria-label="Menu"
+          aria-haspopup="menu"
+          data-testid="tablet-menu"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            commands.openAt({ x: r.left, y: r.bottom + 2 }, win.menu);
+          }}
+        >
+          <MenuGlyph size={16} aria-hidden />
+        </button>
       </div>
       <div style={pageArea}>
         <TabBodies tabs={win.tabs} activeId={active?.id ?? null} />
@@ -100,6 +115,7 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
       />
       <RemoveStreamDialog removal={menus.removal} />
       {menus.requestedMenu}
+      {commands.menu}
     </div>
   );
 }

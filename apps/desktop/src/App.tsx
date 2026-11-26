@@ -1,5 +1,6 @@
 import { useResourcesLoader } from "./resources.js";
 import { useShellKind } from "./shells/shellChoice.js";
+import { shellMenu } from "./shells/shellMenu.js";
 import type { ShellWindow } from "./shells/shellWindow.js";
 import { TabletShell } from "./shells/TabletShell.js";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -661,6 +662,8 @@ export function App() {
     closeTab,
     openPage: handleOpenPage,
     openSearch: () => setQuickOpenVisible(true),
+    // View is the rail's panels; a shell with no rail draws its own.
+    menu: shellMenu(menuGroups.filter((g) => g.id !== "view")),
     tray: <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
   };
   // The window's errors, a line above the page in every shell.

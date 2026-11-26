@@ -133,6 +133,10 @@ that hides a feature.
   Navigator), and its flows are inline there: Rename, + New thread (made, it
   is listed; a tap selects it, as in the Navigator), Remove… (the shared
   `RemoveStreamDialog`). New Thread… from anywhere opens it on the field.
+  The top line's ☰ (`tablet-menu`) holds the menu bar's commands (Save,
+  Find, the extensions' `ui.menu` ones) as File ▸ and Edit ▸ (`shellMenu`:
+  the OS's own edit items left out). View is not there: it is the rail's
+  panels, and this shell has its tray.
 
 App builds one `ShellWindow` (`shells/shellWindow.ts`): the streams and
 threads and their operations, the shown thread's tabs, `closeTab` (a file's

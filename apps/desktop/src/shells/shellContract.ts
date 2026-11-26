@@ -49,7 +49,7 @@ export const SHELL_PLACES: Record<ShellKind, Record<ShellContribution, string | 
     panels: null,
     "dock panels": "tablet-tray (the dock)",
     "panel alerts": "tablet-tray (the dock's Alerts) and toasts",
-    "menu commands": null,
+    "menu commands": "tablet-menu (File ▸, Edit ▸)",
     search: "tablet-search → QuickOpenOverlay",
   },
 };

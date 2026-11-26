@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { Stream, Thread, ThreadMark, ThreadState } from "../api.js";
 import type { AgentStatusDotState } from "../components/AgentStatusDot.js";
+import type { MenuItem } from "../menu.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { WindowTab } from "../window/windowTab.js";
 
@@ -39,6 +40,9 @@ export interface ShellWindow {
   openPage(ref: TabRef): void;
   /** Open Quick Open (search, Go To, the commands). */
   openSearch(): void;
+  /** The menu bar's commands (Save, Find, the extensions' `ui.menu` ones)
+   *  for a shell with no menu bar: File ▸, Edit ▸ (`shellMenu`). */
+  menu: MenuItem[];
   /** The window's panels: the dock today (`Dock`), drawn where the shell
    *  keeps them. */
   tray: ReactNode;
