@@ -256,7 +256,22 @@
         --radius-md:   6px;
         --radius-pill: 999px;
 
+        /* Density: how big a control is and how small a target may be. A
+           touch screen (`data-density="touch"`, set from the pointer by
+           `followDensity`) makes both a finger's size. Component frames get
+           these through the kit's tokens like any other. */
+        --control-height: 28px;
+        --hit-min:        24px;
+
         color-scheme: dark;
+      }
+
+      :root[data-density="touch"] {
+        --control-height: 44px;
+        --hit-min:        44px;
+        /* The two smallest sizes are hard to read held at arm's length. */
+        --text-xs: 13px;
+        --text-sm: 14px;
       }
 
       html, body, #root {

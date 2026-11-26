@@ -20,3 +20,22 @@ export function useCoarsePointer(match: (query: string) => MediaQueryList | null
   }, [match]);
   return coarse;
 }
+
+/** Keep `root`'s `data-density` at `touch` while the main pointer is a
+ *  finger, following a change, so the density tokens (`--control-height`,
+ *  `--hit-min`, `apps/desktop/index.html`) are a finger's size there. A
+ *  shell or a test that sets the attribute itself calls nothing. Returns a
+ *  stop. */
+export function followDensity(
+  root: { setAttribute(name: string, value: string): void; removeAttribute(name: string): void },
+  match: (query: string) => MediaQueryList | null = browserMatch,
+): () => void {
+  const list = match(QUERY);
+  const update = () => {
+    if (list?.matches) root.setAttribute("data-density", "touch");
+    else root.removeAttribute("data-density");
+  };
+  update();
+  list?.addEventListener("change", update);
+  return () => list?.removeEventListener("change", update);
+}

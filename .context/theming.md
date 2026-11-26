@@ -193,6 +193,15 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
 When adding a new list surface, match these numbers — the
 "Metabase-clean" feel relies on them being consistent across panels.
 
+**Touch density.** `--control-height` (a control's height: 28px) and
+`--hit-min` (the least a target may be: 24px) are tokens on `:root`. A touch
+screen sets `data-density="touch"` on `<html>` (`followDensity` in
+`coarsePointer.ts`, from `(pointer: coarse)`, following a change; a shell or
+a test may set it itself), which makes both 44px and the two smallest text
+sizes a step bigger (`--text-xs` 13px, `--text-sm` 14px). A control sized
+for a finger uses `--control-height` / `--hit-min`, never a pixel literal;
+custom component frames get the same values with the other tokens.
+
 ## Spacing and radius
 
 Lengths are tokens too, on `:root` in `apps/desktop/index.html`:
