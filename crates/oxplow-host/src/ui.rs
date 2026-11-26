@@ -143,7 +143,7 @@ pub(crate) async fn root_file(State(web): State<Web>, uri: Uri) -> Response {
     file(&web, &decoded).await
 }
 
-fn percent_decode(path: &str) -> String {
+pub(crate) fn percent_decode(path: &str) -> String {
     let bytes = path.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

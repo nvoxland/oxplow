@@ -70,6 +70,12 @@ pub(crate) async fn rest(
     Path((id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
+    // A dot or empty segment could climb out of the route it was checked as
+    // (`components/../ipc/x` needs no token, and the URL parser makes `/ipc/x`
+    // of it): never forwarded.
+    if !plain_path(&rest) {
+        return refuse(StatusCode::NOT_FOUND, "no such route");
+    }
     let Some(needs_token) = daemon_route(&rest) else {
         return if req.method() == axum::http::Method::GET {
             ui::project_file(&web, &id, &rest).await
@@ -101,6 +107,20 @@ fn is_preflight(req: &Request) -> bool {
         && req
             .headers()
             .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
+}
+
+/// Whether `rest` is plain names: no `.` or `..` segment, decoded or not,
+/// no empty one but a trailing slash (a bundle's folder, `components/v/<v>/`),
+/// and no backslash.
+fn plain_path(rest: &str) -> bool {
+    let decoded = crate::ui::percent_decode(rest);
+    [rest, decoded.as_str()].iter().all(|path| {
+        let inner = path.strip_suffix('/').unwrap_or(path);
+        !path.contains('\\')
+            && inner
+                .split('/')
+                .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
+    })
 }
 
 /// The parsed pairs of a query.
@@ -189,7 +209,15 @@ async fn forward(
         .map(|q| format!("?{q}"))
         .unwrap_or_default();
     let url = format!("{}/{rest}{query}", endpoint.base_url);
-    let mut out = reqwest::Request::new(parts.method.clone(), url.parse().expect("a URL"));
+    let Ok(url) = url.parse::<reqwest::Url>() else {
+        return refuse(StatusCode::NOT_FOUND, "no such route");
+    };
+    // What reaches the daemon is the route that was checked, and no other.
+    if daemon_route(url.path().trim_start_matches('/')) != daemon_route(rest) {
+        tracing::warn!(project = %id, path = %rest, "a path that changes its route when parsed");
+        return refuse(StatusCode::NOT_FOUND, "no such route");
+    }
+    let mut out = reqwest::Request::new(parts.method.clone(), url);
     for (name, value) in &parts.headers {
         let lower = name.as_str();
         if HOP_BY_HOP.contains(&lower) || lower == "authorization" || lower == PUBLIC_BASE {

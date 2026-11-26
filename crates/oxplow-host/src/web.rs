@@ -510,6 +510,38 @@ mod tests {
         );
     }
 
+    /// A path with a dot segment never reaches the daemon: `components/..`
+    /// needs no token, and the URL parser would make `/ipc/x` of it, with the
+    /// daemon's own token. Sent raw: an HTTP client would remove the dots.
+    #[tokio::test]
+    async fn a_dot_segment_never_reaches_the_daemon() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let rig = Rig::running().await;
+        rig.wait_running().await;
+        let addr = rig.url.trim_start_matches("http://").to_string();
+        for path in [
+            "components/../ipc/x",
+            "components/%2e%2e/ipc/x",
+            "component-lib/./../ipc/x",
+            "components//../ipc/x",
+        ] {
+            let mut tcp = tokio::net::TcpStream::connect(&addr).await.unwrap();
+            let req = format!(
+                "POST /p/{}/{path} HTTP/1.1\r\nHost: {addr}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                rig.id
+            );
+            tcp.write_all(req.as_bytes()).await.unwrap();
+            let mut answer = String::new();
+            tcp.read_to_string(&mut answer).await.unwrap();
+            let status = answer.split_whitespace().nth(1).unwrap_or("").to_string();
+            assert!(status.starts_with('4'), "{path}: {answer}");
+        }
+        assert!(
+            rig.log.lock().unwrap().paths.is_empty(),
+            "nothing reached the daemon"
+        );
+    }
+
     #[tokio::test]
     async fn health_and_components_need_no_client_token_but_the_daemon_gets_its_own() {
         let rig = Rig::running().await;
