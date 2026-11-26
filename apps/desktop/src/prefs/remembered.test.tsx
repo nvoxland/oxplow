@@ -162,3 +162,28 @@ test("the store reads again when told to, keeping what is waiting to be saved ov
   await new Promise((r) => setTimeout(r, 0));
   expect(heard).toBe(before);
 });
+
+// A read that a newer one replaces doesn't count as loaded: `ready` waits
+// for the values to be there, so a component never reads its memory as
+// empty and writes its default over it.
+test("ready waits for a read that is applied, not the first one", async () => {
+  const answers: Array<(rows: UiPreference[]) => void> = [];
+  let watch: (() => void) | null = null;
+  const store = createRememberedStore({
+    load: () => new Promise<UiPreference[]>((resolve) => answers.push(resolve)),
+    save: async () => {},
+    watch: (reload) => {
+      watch = reload;
+      return () => {};
+    },
+  });
+  let ready = false;
+  void store.ready.then(() => (ready = true));
+  watch!(); // the socket opened: a second read replaces the first
+  answers[0]!([{ scope: "component:acme/x", key: "k", valueJson: "1" }]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(ready).toBe(false);
+  answers[1]!([{ scope: "component:acme/x", key: "k", valueJson: "2" }]);
+  await store.ready;
+  expect(store.get("component:acme/x", "k")).toBe(2);
+});

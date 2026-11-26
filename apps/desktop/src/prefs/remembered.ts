@@ -82,6 +82,11 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
   const saving = new Set<string>();
   const written = new Set<string>();
   let reading = 0;
+  // Loaded: once a read's rows are applied (or the newest read failed). A
+  // read a newer one replaced doesn't count, so nothing reads the values
+  // before they are there.
+  let loaded: () => void = () => {};
+  const ready = new Promise<void>((resolve) => (loaded = resolve));
   const read = (): Promise<void> => {
     const turn = ++reading;
     written.clear();
@@ -110,10 +115,14 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
           differs = true;
         }
         if (differs || turn === 1) changed();
+        loaded();
       })
-      .catch((e: unknown) => logUi("warn", "couldn't read what was remembered", { error: String(e) }));
+      .catch((e: unknown) => {
+        logUi("warn", "couldn't read what was remembered", { error: String(e) });
+        if (turn === reading) loaded();
+      });
   };
-  const ready = read();
+  void read();
   backend.watch?.(() => void read());
   return {
     ready,
