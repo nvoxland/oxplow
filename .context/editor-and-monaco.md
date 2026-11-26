@@ -108,6 +108,22 @@ webview's native menu never shows.
 The `ContextMenu` component handles its own viewport-clamping and
 submenu flip-up logic; never re-implement that per-call site.
 
+## Selecting by touch
+
+On a touch screen Monaco selects a word on a double tap and nothing more:
+there is no handle to stretch it. So under the editor, while the main
+pointer is a finger (`useCoarsePointer`), `EditorTouchBar`
+(`components/EditorTouchBar.tsx`) has: **Expand** and **Shrink** (Monaco's
+smart selection, `editor.action.smartSelect.expand` / `.shrink`: the word,
+the expression, the line, the block, the file), **Select to here** (armed,
+the next tap, a cursor move Monaco reports as `mouse`, stretches the
+selection from its start to the tapped spot; a key leaves it armed),
+**Line** (`expandLineSelection`), **All**, **Copy** (the selected text,
+`clipboard.ts`) and **Paste** (the clipboard over the selection, needs the
+secure context HTTPS gives a tablet). Its keys keep the editor's focus, so
+the on-screen keyboard stays; their look is the terminal's touch bar's
+(`touchBarStyles.ts`).
+
 ## Blame overlay
 
 The blame *state machine* — fetch, gutter scroll/line-height sync,

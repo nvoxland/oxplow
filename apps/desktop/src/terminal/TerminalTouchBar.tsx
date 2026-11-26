@@ -7,6 +7,7 @@
 import { useState, type CSSProperties, type SyntheticEvent } from "react";
 
 import { TOUCH_KEYS, keyBytes } from "./touchKeys.js";
+import { touchBarStyle, touchKeyStyle, touchRowStyle } from "../touchBarStyles.js";
 
 export interface TerminalTouchBarProps {
   /** Write `bytes` to the terminal, as typed. */
@@ -39,7 +40,7 @@ export function TerminalTouchBar({ send, applicationCursor, ctrl, onCtrl, onEsca
     close();
   };
   return (
-    <div data-testid="terminal-touch-bar" style={barStyle}>
+    <div data-testid="terminal-touch-bar" style={touchBarStyle}>
       {composing ? (
         <div style={composeStyle}>
           <textarea
@@ -60,17 +61,17 @@ export function TerminalTouchBar({ send, applicationCursor, ctrl, onCtrl, onEsca
             }}
             style={fieldStyle}
           />
-          <div style={rowStyle}>
-            <button type="button" data-testid="terminal-compose-insert" disabled={!text} onClick={insert} style={keyStyle(false)}>
+          <div style={touchRowStyle}>
+            <button type="button" data-testid="terminal-compose-insert" disabled={!text} onClick={insert} style={touchKeyStyle(false)}>
               Insert
             </button>
-            <button type="button" data-testid="terminal-compose-cancel" onClick={close} style={keyStyle(false)}>
+            <button type="button" data-testid="terminal-compose-cancel" onClick={close} style={touchKeyStyle(false)}>
               Cancel
             </button>
           </div>
         </div>
       ) : null}
-      <div style={rowStyle}>
+      <div style={touchRowStyle}>
         {TOUCH_KEYS.map((key) => (
           <button
             key={key.id}
@@ -88,7 +89,7 @@ export function TerminalTouchBar({ send, applicationCursor, ctrl, onCtrl, onEsca
               send(keyBytes(key.id, applicationCursor()));
               if (key.id === "esc") onEscape?.();
             }}
-            style={keyStyle(key.id === "ctrl" && ctrl)}
+            style={touchKeyStyle(key.id === "ctrl" && ctrl)}
           >
             {key.label}
           </button>
@@ -98,7 +99,7 @@ export function TerminalTouchBar({ send, applicationCursor, ctrl, onCtrl, onEsca
           data-testid="terminal-compose"
           aria-expanded={composing}
           onClick={() => (composing ? close() : setComposing(true))}
-          style={{ ...keyStyle(composing), marginLeft: "auto" }}
+          style={{ ...touchKeyStyle(composing), marginLeft: "auto" }}
         >
           Compose
         </button>
@@ -107,16 +108,6 @@ export function TerminalTouchBar({ send, applicationCursor, ctrl, onCtrl, onEsca
   );
 }
 
-const barStyle: CSSProperties = {
-  flex: "none",
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-2)",
-  padding: "var(--space-2)",
-  background: "var(--surface-chrome)",
-  borderTop: "1px solid var(--border-subtle)",
-};
-const rowStyle: CSSProperties = { display: "flex", flexWrap: "wrap", gap: "var(--space-1)" };
 const composeStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--space-2)" };
 const fieldStyle: CSSProperties = {
   width: "100%",
@@ -130,15 +121,3 @@ const fieldStyle: CSSProperties = {
   borderRadius: "var(--radius-md)",
   resize: "vertical",
 };
-const keyStyle = (on: boolean): CSSProperties => ({
-  minWidth: 44,
-  minHeight: 44,
-  padding: "0 var(--space-3)",
-  fontFamily: "var(--font-mono)",
-  fontSize: "var(--text-md)",
-  color: "var(--text-primary)",
-  background: on ? "var(--accent-soft-bg)" : "var(--surface-elevated)",
-  border: `1px solid ${on ? "var(--accent)" : "var(--border-strong)"}`,
-  borderRadius: "var(--radius-md)",
-  touchAction: "manipulation",
-});

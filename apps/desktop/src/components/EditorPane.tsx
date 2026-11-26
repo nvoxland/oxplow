@@ -1,5 +1,7 @@
 import type { CSSProperties, MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useCoarsePointer } from "../coarsePointer.js";
+import { EditorTouchBar } from "./EditorTouchBar.js";
 import type { BlameLine, Stream } from "../api.js";
 import { desktopBridge, installLspPackage, readAt } from "../api.js";
 import { computeDiffDecorations } from "../editor-diff.js";
@@ -131,6 +133,8 @@ export function EditorPane({
   // before the editor instance exists and the effect's early return makes
   // the pane stay blank until the next file change.
   const [monacoReady, setMonacoReady] = useState(false);
+  // A touch screen gets the selection keys Monaco lacks there.
+  const touch = useCoarsePointer();
 
   // Blame overlay (merged local+git attribution + gutter scroll sync +
   // refresh-on-save) lives in useBlame; the overlay is rendered below.
@@ -646,6 +650,7 @@ export function EditorPane({
           />
         ) : null}
       </div>
+      {touch && monacoReady ? <EditorTouchBar editor={editorRef.current} /> : null}
     </div>
   );
 }
