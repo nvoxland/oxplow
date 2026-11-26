@@ -20,11 +20,14 @@ path = "src/main.rs"
 [dependencies]
 oxplow-app = { workspace = true }
 oxplow-config = { workspace = true }
+oxplow-domain = { workspace = true }
 
 axum = { version = "0.8", features = ["json", "ws"] }
 bytes = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12", "aws_lc_rs"] }
 tokio-tungstenite = { workspace = true }
 fs2 = "0.4"
 hex = { workspace = true }

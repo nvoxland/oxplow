@@ -61,7 +61,8 @@ or nobody is connected:
   `--allow-host <name>` (repeatable), `--daemon <path>` (another daemon
   binary, as `BinaryDaemon`: the browser suite runs `oxplow-daemon-sim`) and
   `--for-app` (the app's host: needs `--token-stdin`; stdin after the token
-  line is its lifeline).
+  line is its lifeline), and `--public-bind <addr>` with `--tls-cert <pem>
+  --tls-key <pem>` (see "HTTPS").
 - **Logs:** stderr and `<global_config_dir>/logs/host.<date>.log`, daily, a
   week kept. Stdout carries only the `oxplow-host listening on <url>` line (and
   a generated token).
@@ -93,6 +94,19 @@ The app's host is a child of the app, as a daemon is a child of the host
   pairing: it has no token for it.
 
 
+## HTTPS
+
+`--public-bind <addr>` listens a second time, for other devices; `--bind`
+stays plain HTTP for this machine (the Mac app's windows reach their host on
+`127.0.0.1`, where a certificate for the tailnet name would not match). With
+`--tls-cert` and `--tls-key` (PEM; `tailscale cert <name>` writes both for
+the machine's tailnet name, `mkcert` for a LAN name) the public listener is
+HTTPS (`tls.rs`, rustls; each handshake in its own task, 10 s at most), and
+the second stdout line says `oxplow-host listening for other devices on
+https://…`. A page reached there gets an `https` base and its component
+frames an `https` CSP (`web::Scheme`). A browser needs HTTPS for a secure
+context: the microphone, the clipboard.
+
 ## The `Host` check
 
 Every request, whatever its route, must carry a `Host` the host allows: the
@@ -116,7 +130,10 @@ WebSocket tunnel to its `/events`.
   held, stopped or stopping is `404`, crashed is `502`, an id the registry
   lacks is `404`; each body is short JSON (`error`, `project`, `state`).
 - **Tokens.** `ipc/…` and `events` need the host token (bearer; `?token=` on
-  the socket). The host drops it and sends the daemon's own, which only the
+  the socket), except a CORS preflight (`OPTIONS` with
+  `Access-Control-Request-Method`): a Mac window is `tauri://localhost`, so
+  its calls are cross-origin, WebKit asks first and never sends a token
+  then, and the daemon's CORS layer answers it. The host drops it and sends the daemon's own, which only the
   host holds. `health`, `components/…` and `component-lib/…` need no client
   token, as the daemon's need none (a sandboxed frame cannot send one); the
   `Host` check is their guard. `Oxplow-Device`, `Oxplow-Connection` and the

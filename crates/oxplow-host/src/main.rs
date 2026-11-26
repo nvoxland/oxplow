@@ -1,5 +1,6 @@
 //! `oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]
-//!   [--allow-host <name>]… [--daemon <path>] [--for-app]`
+//!   [--allow-host <name>]… [--daemon <path>] [--for-app]
+//!   [--public-bind <addr> [--tls-cert <pem> --tls-key <pem>]]`
 //! `oxplow-host project <add <dir> | list | remove <id>>`
 //!
 //! A headless host (no `--for-app`) runs until it is stopped: a signal or
@@ -24,6 +25,7 @@ fn usage() -> ! {
         "usage: oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]\n\
          \x20                        [--allow-host <name>]... [--daemon <path>]\n\
          \x20                        [--for-app]\n\
+         \x20                        [--public-bind <addr> [--tls-cert <pem> --tls-key <pem>]]\n\
          \x20      oxplow-host project add <dir>\n\
          \x20      oxplow-host project list\n\
          \x20      oxplow-host project remove <id>\n\
@@ -35,7 +37,9 @@ fn usage() -> ! {
          loopback. --daemon runs another daemon binary (the browser suite's).\n\
          --for-app makes it the Mac app's host: stdin after the token is its\n\
          lifeline, and it ends with the app. Without it the host is headless\n\
-         and runs until it is stopped."
+         and runs until it is stopped. --public-bind listens a second time, for\n\
+         other devices (HTTPS with --tls-cert and --tls-key); --bind stays for\n\
+         this machine."
     );
     std::process::exit(2);
 }
@@ -78,12 +82,32 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     let mut allow_hosts: Vec<String> = Vec::new();
     let mut daemon: Option<PathBuf> = None;
     let mut for_app = false;
+    let mut public_bind: Option<String> = None;
+    let mut tls_cert: Option<PathBuf> = None;
+    let mut tls_key: Option<PathBuf> = None;
     let mut it = rest.iter();
     while let Some(arg) = it.next() {
         match *arg {
             "--bind" => bind = it.next().map(|s| s.to_string()).unwrap_or_else(|| usage()),
             "--token-stdin" => token_stdin = true,
             "--for-app" => for_app = true,
+            "--public-bind" => {
+                public_bind = Some(it.next().map(|s| s.to_string()).unwrap_or_else(|| usage()))
+            }
+            "--tls-cert" => {
+                tls_cert = Some(
+                    it.next()
+                        .map(|s| PathBuf::from(*s))
+                        .unwrap_or_else(|| usage()),
+                )
+            }
+            "--tls-key" => {
+                tls_key = Some(
+                    it.next()
+                        .map(|s| PathBuf::from(*s))
+                        .unwrap_or_else(|| usage()),
+                )
+            }
             "--ui" => {
                 ui = Some(
                     it.next()
@@ -108,6 +132,18 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         .parse()
         .unwrap_or_else(|e| fail(format!("invalid --bind address: {e}")));
 
+    let public_bind: Option<SocketAddr> = public_bind.map(|b| {
+        b.parse()
+            .unwrap_or_else(|e| fail(format!("invalid --public-bind address: {e}")))
+    });
+    let tls = match (tls_cert, tls_key) {
+        (None, None) => None,
+        (Some(cert), Some(key)) if public_bind.is_some() => {
+            Some(oxplow_host::tls::acceptor(&cert, &key).unwrap_or_else(|e| fail(e)))
+        }
+        (Some(_), Some(_)) => fail("--tls-cert and --tls-key are for --public-bind"),
+        _ => fail("--tls-cert and --tls-key go together"),
+    };
     if for_app && !token_stdin {
         fail("--for-app needs --token-stdin: the app's stdin is the host's lifeline");
     }
@@ -194,17 +230,56 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 Some(dir) => tracing::info!(ui = %dir.display(), "serving the UI"),
                 None => tracing::warn!("no UI folder found; pass --ui <dir>"),
             }
-            let app = oxplow_host::web::app(oxplow_host::web::ServeConfig {
+            let config = |scheme| oxplow_host::web::ServeConfig {
                 host: host.clone(),
-                token,
-                ui_dir,
-                allow_hosts,
+                token: token.clone(),
+                ui_dir: ui_dir.clone(),
+                allow_hosts: allow_hosts.clone(),
                 // A daemon that boots no faster than this is a crash.
                 boot_wait: DEFAULT_STARTUP_TIMEOUT,
                 stop: stop.clone(),
-            });
+                scheme,
+            };
+            let app = oxplow_host::web::app(config(oxplow_host::web::Scheme::Http));
+            // Other devices, on their own listener: HTTPS when a certificate
+            // was given.
+            let public = match public_bind {
+                None => None,
+                Some(addr) => {
+                    let tcp = tokio::net::TcpListener::bind(addr)
+                        .await
+                        .unwrap_or_else(|e| fail(format!("bind {addr} failed: {e}")));
+                    let at = tcp.local_addr().unwrap_or_else(|e| fail(e));
+                    let scheme = if tls.is_some() {
+                        oxplow_host::web::Scheme::Https
+                    } else {
+                        oxplow_host::web::Scheme::Http
+                    };
+                    println!(
+                        "oxplow-host listening for other devices on {}://{at}",
+                        scheme.as_str()
+                    );
+                    tracing::info!(%at, scheme = scheme.as_str(), "listening for other devices");
+                    let public_app = oxplow_host::web::app(config(scheme));
+                    Some(match tls.clone() {
+                        Some(acceptor) => {
+                            let listener = oxplow_host::tls::TlsListener::new(tcp, acceptor)
+                                .unwrap_or_else(|e| fail(e));
+                            tokio::spawn(async move { axum::serve(listener, public_app).await })
+                        }
+                        None => tokio::spawn(async move { axum::serve(tcp, public_app).await }),
+                    })
+                }
+            };
+            let public_ended = async {
+                match public {
+                    Some(task) => format!("the public listener stopped: {:?}", task.await),
+                    None => std::future::pending().await,
+                }
+            };
             let reason = tokio::select! {
                 served = axum::serve(listener, app) => format!("the server stopped: {served:?}"),
+                ended = public_ended => ended,
                 signal = terminated() => format!("received {signal}"),
                 _ = stop.notified() => "asked to stop".to_string(),
             };

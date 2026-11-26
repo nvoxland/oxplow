@@ -329,6 +329,7 @@ mod tests {
             allow_hosts: vec![],
             boot_wait: Duration::from_secs(5),
             stop: stop.clone(),
+            scheme: Default::default(),
         });
         tokio::spawn(async move {
             let _ = axum::serve(listener, app)

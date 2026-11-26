@@ -6,11 +6,13 @@
 
 pub mod api;
 pub mod client;
+pub mod devices;
 pub mod host;
 pub mod instance;
 pub mod logging;
 pub mod proxy;
 pub mod registry;
+pub mod tls;
 pub mod ui;
 pub mod web;
 

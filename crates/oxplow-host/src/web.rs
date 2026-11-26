@@ -35,6 +35,27 @@ pub struct ServeConfig {
     pub boot_wait: Duration,
     /// Told when a client asks the host to stop (`POST /host/shutdown`).
     pub stop: Arc<tokio::sync::Notify>,
+    /// How browsers reach this listener: `http`, or `https` for the TLS
+    /// listener for other devices. The page's base and a component's CSP
+    /// say it.
+    pub scheme: Scheme,
+}
+
+/// The scheme a listener serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Scheme {
+    #[default]
+    Http,
+    Https,
+}
+
+impl Scheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scheme::Http => "http",
+            Scheme::Https => "https",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -45,6 +66,7 @@ pub(crate) struct Web {
     pub allow_hosts: Arc<Vec<String>>,
     pub boot_wait: Duration,
     pub client: reqwest::Client,
+    pub scheme: Scheme,
 }
 
 pub fn app(cfg: ServeConfig) -> Router {
@@ -59,6 +81,7 @@ pub fn app(cfg: ServeConfig) -> Router {
                 .collect(),
         ),
         boot_wait: cfg.boot_wait,
+        scheme: cfg.scheme,
         // No redirect is followed and no body is read whole: the browser
         // gets the daemon's answer as it is.
         client: reqwest::Client::builder()
@@ -148,10 +171,24 @@ mod tests {
         let log_ipc = log.clone();
         let log_ws = log.clone();
         let log_lib = log.clone();
+        let log_preflight = log.clone();
         Router::new()
             .route(
                 "/ipc/{name}",
-                axum::routing::post(
+                axum::routing::options(move |Path(name): Path<String>| {
+                    let log = log_preflight.clone();
+                    async move {
+                        log.lock()
+                            .unwrap()
+                            .paths
+                            .push(format!("OPTIONS /ipc/{name}"));
+                        [
+                            ("access-control-allow-origin", "tauri://localhost"),
+                            ("access-control-allow-headers", "authorization"),
+                        ]
+                    }
+                })
+                .post(
                     move |Path(name): Path<String>,
                           uri: axum::http::Uri,
                           h: HeaderMap,
@@ -308,6 +345,7 @@ mod tests {
                 allow_hosts: allow.iter().map(|s| s.to_string()).collect(),
                 boot_wait,
                 stop: Default::default(),
+                scheme: Default::default(),
             });
             let addr = serve(app).await;
             Self {
@@ -419,6 +457,39 @@ mod tests {
             assert_eq!(req.send().await.unwrap().status(), 401);
         }
         assert!(rig.log.lock().unwrap().paths.is_empty());
+    }
+
+    /// A Mac window is `tauri://localhost`, so its calls are cross-origin and
+    /// WebKit asks first with no token: the preflight is the daemon's to
+    /// answer (its CORS layer), and the call itself still needs the token.
+    #[tokio::test]
+    async fn a_cors_preflight_reaches_the_daemon_without_a_token() {
+        let rig = Rig::running().await;
+        rig.wait_running().await;
+        let answer = http()
+            .request(reqwest::Method::OPTIONS, rig.p("ipc/x"))
+            .header("origin", "tauri://localhost")
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-headers", "authorization")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(answer.status(), 200);
+        assert_eq!(
+            answer.headers()["access-control-allow-origin"],
+            "tauri://localhost"
+        );
+        assert_eq!(rig.log.lock().unwrap().paths, vec!["OPTIONS /ipc/x"]);
+        let bare = http()
+            .request(reqwest::Method::OPTIONS, rig.p("ipc/x"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            bare.status(),
+            401,
+            "an OPTIONS that is no preflight needs the token"
+        );
     }
 
     #[tokio::test]
@@ -851,6 +922,7 @@ mod tests {
             allow_hosts: vec![],
             boot_wait: Duration::from_secs(1),
             stop: Default::default(),
+            scheme: Default::default(),
         }))
         .await;
         for path in [format!("/p/{id}/"), "/assets/app.js".to_string()] {

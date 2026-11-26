@@ -42,9 +42,10 @@ pub fn project_index(html: &str, origin: &str, project: &str, token: &str) -> St
     }
 }
 
-fn origin(headers: &HeaderMap) -> Option<String> {
+/// The origin a browser reached this request by.
+pub(crate) fn origin(scheme: crate::web::Scheme, headers: &HeaderMap) -> Option<String> {
     let host = headers.get(header::HOST)?.to_str().ok()?;
-    Some(format!("http://{host}"))
+    Some(format!("{}://{host}", scheme.as_str()))
 }
 
 pub(crate) async fn project_redirect(Path(id): Path<String>) -> Response {
@@ -63,7 +64,7 @@ pub(crate) async fn project_page(
     let Some(dir) = &web.ui_dir else {
         return refuse(StatusCode::NOT_FOUND, NO_UI);
     };
-    let Some(origin) = origin(&headers) else {
+    let Some(origin) = origin(web.scheme, &headers) else {
         return refuse(StatusCode::BAD_REQUEST, "no Host");
     };
     let Ok(index) = tokio::fs::read(dir.join("index.html")).await else {
@@ -214,6 +215,22 @@ pub(crate) async fn launcher(State(web): State<Web>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A page reached over the TLS listener says `https` in its base, so
+    /// its calls and socket stay secure.
+    #[test]
+    fn the_origin_carries_the_listeners_scheme() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "mac.tailnet.ts.net:7400".parse().unwrap());
+        assert_eq!(
+            origin(crate::web::Scheme::Https, &headers).as_deref(),
+            Some("https://mac.tailnet.ts.net:7400")
+        );
+        assert_eq!(
+            origin(crate::web::Scheme::Http, &headers).as_deref(),
+            Some("http://mac.tailnet.ts.net:7400")
+        );
+    }
 
     #[test]
     fn a_value_cannot_close_the_script() {

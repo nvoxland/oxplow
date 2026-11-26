@@ -73,7 +73,7 @@ pub(crate) async fn rest(
             refuse(StatusCode::NOT_FOUND, "no such route")
         };
     };
-    if needs_token && !host_token_ok(&web, req.headers(), None) {
+    if needs_token && !is_preflight(&req) && !host_token_ok(&web, req.headers(), None) {
         return refuse(StatusCode::UNAUTHORIZED, "missing or wrong host token");
     }
     let endpoint = match reach(&web, &id).await {
@@ -81,6 +81,16 @@ pub(crate) async fn rest(
         Err(refused) => return *refused,
     };
     forward(&web, &id, &rest, endpoint, req).await
+}
+
+/// A CORS preflight: a Mac window (`tauri://localhost`) asks before each
+/// cross-origin call, and a browser never sends a token with it. It reads
+/// nothing and changes nothing; the daemon's CORS layer answers it.
+fn is_preflight(req: &Request) -> bool {
+    req.method() == axum::http::Method::OPTIONS
+        && req
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
 }
 
 fn host_token_ok(web: &Web, headers: &HeaderMap, query: Option<&str>) -> bool {
@@ -136,9 +146,11 @@ fn down(status: StatusCode, id: &str, state: &str) -> Response {
 }
 
 /// The origin and prefix a browser reached this request by.
-fn public_base(headers: &HeaderMap, id: &str) -> Option<String> {
-    let host = headers.get(header::HOST)?.to_str().ok()?;
-    Some(format!("http://{host}/p/{id}"))
+fn public_base(web: &Web, headers: &HeaderMap, id: &str) -> Option<String> {
+    Some(format!(
+        "{}/p/{id}",
+        crate::ui::origin(web.scheme, headers)?
+    ))
 }
 
 async fn forward(
@@ -165,7 +177,8 @@ async fn forward(
     }
     let token = HeaderValue::from_str(&format!("Bearer {}", endpoint.token)).expect("a header");
     out.headers_mut().insert(header::AUTHORIZATION, token);
-    if let Some(base) = public_base(&parts.headers, id).and_then(|b| HeaderValue::from_str(&b).ok())
+    if let Some(base) =
+        public_base(web, &parts.headers, id).and_then(|b| HeaderValue::from_str(&b).ok())
     {
         out.headers_mut()
             .insert(HeaderName::from_static(PUBLIC_BASE), base);
