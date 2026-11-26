@@ -37,18 +37,14 @@ export function RailSelection({
   testPrefix: string;
 }) {
   if (params.length === 0) return null;
+  // What is picked shows; with nothing picked, the hint says once what to do.
+  const chosen = params.filter((p) => (values[p.name] ?? null) !== null);
   return (
     <RailGroup title="Selection" testId={`${testPrefix}-rail-selection`}>
-      {params.map((p) => {
+      {chosen.length === 0 ? <p className="ox-rail-line">Click a row to select it.</p> : null}
+      {chosen.map((p) => {
         const value = values[p.name] ?? null;
         const label = p.label ?? humanize(p.name);
-        if (value === null) {
-          return (
-            <p key={p.name} className="ox-rail-line">
-              Click a row to select it.
-            </p>
-          );
-        }
         const row = picked[p.name];
         const facts = row && String(row.value) === String(value) ? row.facts : [{ label, text: String(value) }];
         return (

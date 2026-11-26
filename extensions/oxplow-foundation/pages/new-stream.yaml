@@ -1,57 +1,171 @@
 title: New Stream
-description: "The form for a new stream, which is its own worktree and its own threads: on an existing branch, on a new branch forked from another, or on an adopted worktree."
+description: "The form for a new stream, which is its own worktree and its own threads: on a branch (local, or remote as a local branch that tracks it), on a new branch made from any revision, or on a worktree already on disk."
 icon: plus
 needs:
 - vcs
+params:
+- name: tab
+  label: Start from
+  default: branch
+  options:
+  - { value: branch, label: Branch }
+  - { value: new, label: New branch }
+  - { value: worktree, label: Worktree }
+- name: branch
+  label: Branch
+- name: worktree
+  label: Worktree
 answers:
-- {"question":"Which branches exist, and which is the default?","params":{},"skill":"oxplow-codebase"}
-- {"question":"Which worktrees of this repository could a new stream adopt?","params":{},"skill":"oxplow-codebase"}
+- {"question":"Which branches could a new stream start on?","params":{},"skill":"oxplow-codebase"}
+- {"question":"Which worktrees of this repository could a new stream adopt?","params":{"tab":"worktree"},"skill":"oxplow-codebase"}
 loaders:
-  new_stream:
+  # A new stream's branch: a local one no stream has out, or a remote one
+  # with no local copy (checked out as a local branch that tracks it). One
+  # in a working copy no stream uses is that copy, adopted.
+  branches:
     sql: |
-      SELECT 'Stream ' || (SELECT count(*) + 1 FROM v_stream WHERE archived_at IS NULL) AS title,
-             'existing' AS source,
-             (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS existing_branch,
-             (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS start_point
-  new_stream_branches:
-    sql: |
-      SELECT b.name AS value, b.name AS label, 'Branches' AS "group"
+      WITH loose AS (
+        SELECT path, branch FROM v_vcs_workspace WHERE is_main = 0 AND stream_id IS NULL
+      )
+      SELECT b.name AS value, b.name AS branch, 'Local' AS place, b.subject, b.committed_at,
+             CASE WHEN b.upstream IS NULL OR (b.ahead = 0 AND b.behind = 0) THEN NULL
+                  ELSE trim(CASE WHEN b.ahead > 0 THEN '↑' || b.ahead ELSE '' END || ' ' ||
+                            CASE WHEN b.behind > 0 THEN '↓' || b.behind ELSE '' END)
+             END AS sync,
+             (SELECT 'Adopts the worktree at ' || l.path FROM loose l WHERE l.branch = b.name) AS note,
+             b.is_default
       FROM v_branch b
-      WHERE b.kind = 'local'
-      ORDER BY b.is_default DESC, b.name
-  new_stream_worktrees:
+      WHERE b.kind = 'local' AND b.stream_id IS NULL
+      UNION ALL
+      SELECT r.remote || '/' || r.name, r.name, r.remote, r.subject, r.committed_at,
+             NULL, 'Makes a local branch that tracks it', 0
+      FROM v_branch r
+      WHERE r.kind = 'remote' AND r.name <> 'HEAD'
+        AND NOT EXISTS (SELECT 1 FROM v_branch l WHERE l.kind = 'local' AND l.name = r.name)
+      ORDER BY is_default DESC, committed_at DESC, value
+  # The picked branch, fixed; the stream is named for it (a remote's
+  # without its remote).
+  branch_form:
     sql: |
-      SELECT w.path AS value,
-             CASE WHEN w.branch IS NULL OR w.branch = '' THEN '[detached] ' ELSE '[' || w.branch || '] ' END || w.path AS label
+      SELECT 'existing' AS source,
+             :branch AS existing_branch,
+             CASE WHEN :branch IS NULL THEN NULL
+                  WHEN EXISTS (SELECT 1 FROM v_branch WHERE kind = 'local' AND name = :branch) THEN :branch
+                  ELSE coalesce((SELECT name FROM v_branch
+                                 WHERE kind = 'remote' AND remote || '/' || name = :branch), :branch)
+             END AS title
+  new_form:
+    sql: |
+      SELECT 'new' AS source, CAST(NULL AS TEXT) AS new_branch,
+             (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS start_point,
+             CAST(NULL AS TEXT) AS title
+  # What a new branch can start from: any revision; these are offered.
+  start_points:
+    sql: |
+      SELECT value, label, "group" FROM (
+        SELECT name AS value, name AS label, 'Branches' AS "group", 0 AS k, is_default AS d
+        FROM v_branch WHERE kind = 'local'
+        UNION ALL
+        SELECT remote || '/' || name, remote || '/' || name, 'Remote branches', 1, 0
+        FROM v_branch WHERE kind = 'remote' AND name <> 'HEAD'
+        UNION ALL
+        SELECT name, name, 'Tags', 2, 0 FROM v_tag
+      )
+      ORDER BY k, d DESC, value
+  # The repository's working copies no stream uses (made by oxplow or not).
+  worktrees:
+    sql: |
+      SELECT w.path AS value, w.path, coalesce(w.branch, 'detached') AS branch,
+             w.subject, w.committed_at,
+             CASE WHEN w.changes > 0 THEN w.changes END AS changes
       FROM v_vcs_workspace w
       WHERE w.is_main = 0 AND w.stream_id IS NULL
-      ORDER BY w.path
+      ORDER BY w.committed_at DESC, w.path
+  worktree_form:
+    sql: |
+      SELECT 'worktree' AS source,
+             :worktree AS worktree,
+             CASE WHEN :worktree IS NULL THEN NULL
+                  ELSE replace(:worktree, rtrim(:worktree, replace(:worktree, '/', '')), '')
+             END AS title
 view:
-  from: new_stream
-  viz: form
-  form:
-    command: oxplow.stream.create
-    then: replace
-    fields:
-    - title
-    - source
-    - name: existing_branch
-      visible_if:
-        source:
-        - existing
-    - name: new_branch
-      visible_if:
-        source:
-        - new
-    - name: start_point
-      visible_if:
-        source:
-        - new
-    - name: worktree
-      visible_if:
-        source:
-        - worktree
-    choices:
-      existing_branch: oxplow/new-stream#new_stream_branches
-      start_point: oxplow/new-stream#new_stream_branches
-      worktree: oxplow/new-stream#new_stream_worktrees
+  stack:
+  - id: start
+    title: Start from
+    hide_title: true
+    switch:
+      param: tab
+      children:
+      - id: branch
+        title: Branch
+        stack:
+        - id: branches
+          title: Branches
+          description: Local branches no stream works on, and remote branches with no local copy.
+          from: branches
+          viz: table
+          empty: Every branch already has a stream. Start a new branch instead.
+          columns:
+          - { key: branch, label: Branch, select: branch }
+          - { key: place, label: Where, width: 90 }
+          - { key: subject, label: Last commit }
+          - { key: committed_at, label: When, format: relative, width: 110 }
+          - { key: sync, label: Upstream, width: 90 }
+          - { key: note, label: Note }
+        - id: branch_form
+          title: Create Stream
+          from: branch_form
+          viz: form
+          form:
+            command: oxplow.stream.create
+            then: replace
+            defaults: { source: existing, existing_branch: '{{param.branch}}' }
+            fixed: [source, existing_branch]
+            fields:
+            - { name: existing_branch, label: Branch, help: Pick a branch above. }
+            - { name: title, label: Name, help: "Also the worktree's folder name." }
+      - id: new
+        title: New branch
+        stack:
+        - id: new_form
+          title: Create Stream
+          from: new_form
+          viz: form
+          form:
+            command: oxplow.stream.create
+            then: replace
+            defaults: { source: new }
+            fixed: [source]
+            fields:
+            - { name: new_branch, label: Branch name }
+            - { name: start_point, label: Start from, help: "A branch, a remote branch, a tag or a commit." }
+            - { name: title, label: Name, help: "Also the worktree's folder name." }
+            choices:
+              start_point: { from: oxplow/new-stream#start_points, open: true }
+      - id: worktree
+        title: Worktree
+        stack:
+        - id: worktrees
+          title: Worktrees
+          description: This repository's worktrees that no stream uses, whoever made them.
+          from: worktrees
+          viz: table
+          empty: Every worktree of this repository already has a stream.
+          columns:
+          - { key: path, label: Path, select: worktree }
+          - { key: branch, label: Branch, width: 160 }
+          - { key: subject, label: Last commit }
+          - { key: committed_at, label: When, format: relative, width: 110 }
+          - { key: changes, label: Changed files, format: integer, width: 110 }
+        - id: worktree_form
+          title: Create Stream
+          from: worktree_form
+          viz: form
+          form:
+            command: oxplow.stream.create
+            then: replace
+            defaults: { source: worktree, worktree: '{{param.worktree}}' }
+            fixed: [source, worktree]
+            fields:
+            - { name: worktree, label: Worktree, help: Pick a worktree above. }
+            - { name: title, label: Name }
