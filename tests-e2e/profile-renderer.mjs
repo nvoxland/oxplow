@@ -2,13 +2,15 @@
 //
 // Every performance measurement this project had taken was of the Rust backend;
 // the renderer had never been profiled at all. This drives the real React UI
-// against `oxplow-daemon` over the `VITE_OXPLOW_REMOTE` transport switch and
-// captures a V8 CPU profile via CDP.
+// against `oxplow-daemon` through the Vite dev server and captures a V8 CPU
+// profile via CDP.
 //
-//   APP_URL='http://localhost:5199/#oxplow-token=<token>' SECONDS=30 node tests-e2e/profile-renderer.mjs
+//   VITE_OXPLOW_REMOTE=<base> VITE_OXPLOW_REMOTE_TOKEN=<token> bun run --cwd apps/desktop dev
+//   APP_URL='http://localhost:5199/' SECONDS=30 node tests-e2e/profile-renderer.mjs
 //
-// The fragment carries the daemon's UI token (what it was given with
-// `--token-stdin`): without it every call is refused.
+// The dev server puts the daemon's base and UI token (what it was given with
+// `--token-stdin`) in the page, as the shell does: without the token every
+// call is refused.
 //
 // ⚠️ This is CHROMIUM, not the shipped WKWebView. It is a good proxy for
 // React/JS work — which is what the idle-timer hypotheses are — and a poor one

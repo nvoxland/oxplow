@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import {
-  disconnectRemote,
   isRemote,
   isTokenRefused,
   onRemoteConnectionState,
@@ -65,17 +64,9 @@ export function RemoteConnectionBanner() {
     return (
       <div data-testid="remote-banner-refused" style={{ ...stripStyle, ...downStyle }}>
         <span>
-          This window's token was refused by the daemon at {remoteBaseUrl()}. Reconnect from the
-          launcher with the token the daemon prints when it starts.
+          This window's token was refused at {remoteBaseUrl()}. Close it and open the project
+          again.
         </span>
-        <button
-          type="button"
-          data-testid="remote-banner-disconnect"
-          onClick={() => disconnectRemote()}
-          style={buttonStyle}
-        >
-          Disconnect
-        </button>
       </div>
     );
   }
@@ -95,17 +86,9 @@ export function RemoteConnectionBanner() {
     return (
       <div data-testid="remote-banner-down" style={{ ...stripStyle, ...downStyle }}>
         <span>
-          Connection to remote daemon lost ({remoteBaseUrl()}) — reconnecting… Agent work keeps
-          running on the remote box.
+          Connection lost ({remoteBaseUrl()}) — reconnecting… Agent work keeps running where Oxplow
+          runs.
         </span>
-        <button
-          type="button"
-          data-testid="remote-banner-disconnect"
-          onClick={() => disconnectRemote()}
-          style={buttonStyle}
-        >
-          Disconnect
-        </button>
       </div>
     );
   }

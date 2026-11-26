@@ -7,9 +7,9 @@ import { pairDevice, type DeviceKind } from "./hostApi.js";
 import {
   cardStyle,
   errorStyle,
-  remoteConnectButtonStyle,
-  remoteFormStyle,
-  remoteInputStyle,
+  primaryButtonStyle,
+  formStyle,
+  inputStyle,
   rootStyle,
   subtitleStyle,
   titleStyle,
@@ -67,7 +67,7 @@ export function PairScreen({
             e.preventDefault();
             void submit();
           }}
-          style={{ ...remoteFormStyle, flexDirection: "column", alignItems: "stretch" }}
+          style={{ ...formStyle, flexDirection: "column", alignItems: "stretch" }}
         >
           <input
             data-testid="pair-code"
@@ -80,7 +80,7 @@ export function PairScreen({
             autoCapitalize="characters"
             spellCheck={false}
             disabled={pairing}
-            style={remoteInputStyle}
+            style={inputStyle}
           />
           <input
             data-testid="pair-name"
@@ -89,13 +89,13 @@ export function PairScreen({
             onChange={(e) => setName(e.target.value)}
             placeholder="This device's name"
             disabled={pairing}
-            style={remoteInputStyle}
+            style={inputStyle}
           />
           <button
             type="submit"
             data-testid="pair-submit"
             disabled={pairing || code.trim().length === 0}
-            style={remoteConnectButtonStyle}
+            style={primaryButtonStyle}
           >
             {pairing ? "Pairing…" : "Pair"}
           </button>

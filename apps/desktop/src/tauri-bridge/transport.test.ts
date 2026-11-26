@@ -11,12 +11,10 @@ import {
   ipcRequest,
   listenRoute,
   onRemoteReconnect,
-  resolveBase,
-  resolveToken,
+  resolveEndpoint,
   filesLocalFrom,
   handleSocketOpen,
   scheduleResync,
-  parseRemoteInput,
   createLanes,
   BULK_IN_FLIGHT,
   PRIORITY_IN_FLIGHT,
@@ -52,36 +50,6 @@ test("the event socket says which device and page load it is, beside its token",
   const local = new URL(eventsUrl(DAEMON, null, TABLET, LOAD));
   expect(local.protocol).toBe("ws:");
   expect(local.searchParams.has("token")).toBe(false);
-});
-
-describe("resolveBase", () => {
-  test("no source at all means no daemon — talk to the shell", () => {
-    expect(resolveBase({})).toBeNull();
-    expect(resolveBase({ stored: null, injected: null, env: null })).toBeNull();
-  });
-
-  test("the shell's injected base is what a normal window uses", () => {
-    expect(resolveBase({ injected: DAEMON })).toBe(DAEMON);
-  });
-
-  test("a manual connect overrides the window's own daemon", () => {
-    // "Connect to remote daemon" in the launcher is an explicit user
-    // action; it outranks whatever the shell injected.
-    expect(resolveBase({ stored: "http://elsewhere:7420", injected: DAEMON })).toBe(
-      "http://elsewhere:7420",
-    );
-  });
-
-  test("the build-time override applies only when nothing else is set", () => {
-    expect(resolveBase({ env: DAEMON })).toBe(DAEMON);
-    expect(resolveBase({ injected: "http://injected:1", env: DAEMON })).toBe("http://injected:1");
-  });
-
-  test("blank values are ignored and trailing slashes trimmed", () => {
-    expect(resolveBase({ stored: "   ", injected: DAEMON })).toBe(DAEMON);
-    expect(resolveBase({ injected: `${DAEMON}///` })).toBe(DAEMON);
-    expect(resolveBase({ injected: `  ${DAEMON}  ` })).toBe(DAEMON);
-  });
 });
 
 describe("invokeRoute", () => {
@@ -193,46 +161,6 @@ test("an unsubscribed handler no longer fires", () => {
   expect(count).toBe(1);
 });
 
-describe("resolveToken", () => {
-  const DAEMON = "http://127.0.0.1:7420";
-  test("pairs with the source the base came from", () => {
-    expect(
-      resolveToken({
-        stored: { base: "http://manual:1", token: "m" },
-        injected: { base: DAEMON, token: "i" },
-      }),
-    ).toBe("m");
-    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, env: { base: DAEMON, token: "e" } })).toBe(
-      "i",
-    );
-    expect(resolveToken({ env: { base: DAEMON, token: "e" } })).toBe("e");
-    expect(resolveToken({})).toBeNull();
-  });
-
-  // A page the host served carries no token: a paired device uses the one
-  // it got at pairing, kept in the host origin's storage.
-  test("a host's page uses the device's own token", () => {
-    expect(resolveToken({ injected: { base: DAEMON, token: null }, paired: "dev-token" })).toBe("dev-token");
-    expect(resolveToken({ injected: { base: DAEMON, token: null }, paired: null })).toBeNull();
-    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, paired: "dev-token" })).toBe("i");
-  });
-
-  test("a token in the URL fragment wins (a person pasted it)", () => {
-    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, fragment: "#oxplow-token=f" })).toBe("f");
-    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, fragment: "#other=1" })).toBe("i");
-  });
-});
-
-describe("parseRemoteInput", () => {
-  test("splits a pasted URL into base and token", () => {
-    expect(parseRemoteInput("http://127.0.0.1:7420/#oxplow-token=abc ")).toEqual({
-      base: "http://127.0.0.1:7420",
-      token: "abc",
-    });
-    expect(parseRemoteInput("http://127.0.0.1:7420")).toEqual({ base: "http://127.0.0.1:7420", token: null });
-  });
-});
-
 describe("a window closing", () => {
   test("hands its client host back with a request that outlives the page", () => {
     expect(ipcRequest("unregister_client_host", { client: "c" }, null).keepalive).toBe(true);
@@ -336,18 +264,33 @@ describe("frames the window writes on the socket", () => {
 // Open In ▸ Reveal / Default App act on this machine's files: only when
 // the window drives the daemon its shell started (on this machine).
 describe("filesLocalFrom", () => {
-  const injected = "http://127.0.0.1:60331";
-  test("a project window on its shell's daemon has local files", () => {
-    expect(filesLocalFrom({ shell: true, kind: "project", stored: null, injected })).toBe(true);
+  // A window the shell opened on a project folder here has its files; the
+  // launcher's projects are here; a page a host served, or a window on
+  // another machine's host, has none.
+  test("only the shell's own project windows and the launcher", () => {
+    expect(filesLocalFrom({ shell: true, kind: "project", projectDir: "/Users/me/src/a" })).toBe(true);
+    expect(filesLocalFrom({ shell: true, kind: "project", projectDir: null })).toBe(false);
+    expect(filesLocalFrom({ shell: false, kind: "project", projectDir: "/x" })).toBe(false);
+    expect(filesLocalFrom({ shell: true, kind: "launcher", projectDir: null })).toBe(true);
   });
-  test("a manual connect to another daemon has not", () => {
-    expect(filesLocalFrom({ shell: true, kind: "project", stored: "http://box:7420", injected })).toBe(false);
+});
+
+describe("resolveEndpoint", () => {
+  const DAEMON = "http://127.0.0.1:7420";
+  // One read path: what started the page says where its daemon is.
+  test("the window's context is the base and the token", () => {
+    expect(resolveEndpoint({ base: `${DAEMON}///`, token: " t " }, null)).toEqual({ base: DAEMON, token: "t" });
+    expect(resolveEndpoint(null, "p")).toEqual({ base: null, token: null });
+    expect(resolveEndpoint({ base: "  ", token: "t" }, null)).toEqual({ base: null, token: null });
   });
-  test("a plain browser has not", () => {
-    expect(filesLocalFrom({ shell: false, kind: null, stored: null, injected: null })).toBe(false);
-  });
-  test("the launcher's projects are on this machine", () => {
-    expect(filesLocalFrom({ shell: true, kind: "launcher", stored: null, injected: null })).toBe(true);
+
+  // A page a host served carries no token: a paired device uses its own.
+  test("a host's page uses the device's own token", () => {
+    const page = { base: `${DAEMON}/p/prj-1`, token: null, host: DAEMON };
+    expect(resolveEndpoint(page, "dev-token").token).toBe("dev-token");
+    expect(resolveEndpoint(page, null).token).toBeNull();
+    expect(resolveEndpoint({ ...page, host: undefined }, "dev-token").token).toBeNull();
+    expect(resolveEndpoint({ ...page, token: "owner" }, "dev-token").token).toBe("owner");
   });
 });
 

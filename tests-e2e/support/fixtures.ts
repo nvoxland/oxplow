@@ -83,20 +83,23 @@ function guard(page: Page): () => void {
   };
 }
 
-/** A page's storage pointing its transport at `base` with `token`. */
-export function connectedTo(baseURL: string, base: string, token: string) {
-  return {
-    cookies: [],
-    origins: [
-      {
-        origin: new URL(baseURL).origin,
-        localStorage: [
-          { name: "oxplow.remoteBase", value: base },
-          { name: "oxplow.remoteToken", value: token },
-        ],
-      },
-    ],
-  };
+/** Make every page of `context` the window a shell gives `base` with
+ *  `token`: `window.__OXPLOW__`, set before any script runs, in the top frame
+ *  only (a component's frame never sees the token), as the shell injects it
+ *  (`windows.rs`). The transport's one read path (`resolveEndpoint`). */
+export async function connectContext(context: BrowserContext, base: string, token: string): Promise<void> {
+  await context.addInitScript(
+    ({ base, token }) => {
+      if (window.top !== window) return;
+      (window as unknown as { __OXPLOW__: unknown }).__OXPLOW__ = Object.freeze({
+        kind: "project",
+        base,
+        token,
+        projectDir: null,
+      });
+    },
+    { base, token },
+  );
 }
 
 /** One place a worker's tests run: the dir a test's workspace lives in, and
@@ -167,7 +170,8 @@ export async function client(
   viewport = { width: 1280, height: 800 },
   options: BrowserContextOptions = {},
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ ...options, storageState: connectedTo(baseURL, daemon.base, daemon.token), viewport });
+  const context = await browser.newContext({ ...options, baseURL, viewport });
+  await connectContext(context, daemon.base, daemon.token);
   return { context, page: await context.newPage() };
 }
 
@@ -203,9 +207,10 @@ export const test = base.extend<{ daemon: Workspace }, { daemons: Daemons }>({
     },
     { timeout: 180_000 },
   ],
-  // The transport reads its daemon from localStorage at load.
-  storageState: async ({ daemon, baseURL }, use) => {
-    await use(connectedTo(baseURL!, daemon.base, daemon.token));
+  // The window's context says where its daemon is, as the shell's does.
+  context: async ({ context, daemon }, use) => {
+    await connectContext(context, daemon.base, daemon.token);
+    await use(context);
   },
   page: async ({ page }, use) => {
     const check = guard(page);

@@ -104,22 +104,22 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
   `window.__OXPLOW__ = { base, kind, projectDir }` into every window it creates
   (`src-tauri/src/windows.rs`, `initialization_script` — built through
   `serde_json` so a URL can't break out of the literal), so two project
-  windows in one shell process can drive two different daemons.
-  `resolveBase` takes it from, in order: localStorage
-  `oxplow.remoteBase` (the launcher's manual connect — an explicit user
-  action outranks the default), the injected base, then
-  `VITE_OXPLOW_REMOTE` (dev override). All three are read once at module
-  load — switching is a window reload.
+  windows in one shell process can drive two different daemons. It is the
+  **one read path** (`resolveEndpoint`): the host injects the same into
+  each page it serves, the Vite dev server from `VITE_OXPLOW_REMOTE` and
+  `VITE_OXPLOW_REMOTE_TOKEN` (dev server only; a build never carries
+  them), and the e2e harness with `addInitScript` in the top frame only. A
+  remote daemon is a host on another machine (`.context/host.md`); there is
+  no manual connect and nothing in storage says where a daemon is. Read once
+  at module load — switching is a window reload.
 
   **Are the files on this machine?** `isRemote()` is true in every
   project window (the shell injects a loopback base), so it cannot say.
-  The shell starts its daemons on this machine, so `filesAreLocal()`
-  (`filesLocalFrom`, `transport.ts`) is true for a project window on its
-  injected base with no manual connect over it, and for the launcher. A
-  plain browser or a manual connect may drive a daemon elsewhere. It is
-  read once at load, as the base is: another window's connect or
-  disconnect changes the storage, not the daemon this one drives. Open In
-  ▸ Reveal and Default App show only when it is true.
+  The shell names the folder of a project it opened on this machine
+  (`projectDir`), so `filesAreLocal()` (`filesLocalFrom`, `transport.ts`)
+  is true for a shell window with a `projectDir`, and for the launcher; a
+  page a host served, or a window on another machine's host, has none. Read
+  once at load. Open In ▸ Reveal and Default App show only when it is true.
 
   **Routing is per command.** `invokeRoute(name, base, tauriAvailable)`
   sends shell commands (windowing, native menus, clipboard, project
@@ -271,23 +271,18 @@ token**; only the person's renderer holds it.
 - **Presenting it:** `Authorization: Bearer <token>` on `/ipc`, and
   `?token=` on the `/events` WebSocket (browsers can't set its headers).
   The comparison is constant-time.
-- **Where the renderer gets it** (`transport.ts` `resolveToken`), paired
-  with whichever source supplied the base:
-  - the launcher's manual connect: a token field, or
-    `http://host:port#oxplow-token=…`, saved as `oxplow.remoteToken`;
-  - the shell's injected `window.__OXPLOW__.token`;
-  - `VITE_OXPLOW_REMOTE_TOKEN` in dev.
-  A `#oxplow-token=` URL fragment wins (scripted and Playwright
-  sessions).
+- **Where the renderer gets it** (`transport.ts` `resolveEndpoint`): the
+  window's `window.__OXPLOW__.token`, with its base.
 - **Through the host** (`.context/host.md`): a browser loads
-  `http://<host>/p/<project>/`, whose page states `window.__OXPLOW__ = {
-  kind: "project", base: "<origin>/p/<project>", project, token }`. Its calls
-  (`/ipc`, `/events`, `/components`) go to the host, which checks its own
-  token, swaps in the daemon's and forwards with the prefix removed, so a
-  client never holds a daemon token. The page's own `base` and `token` come
-  from the injection with no manual connect.
-- **Headless dev:** start the daemon, read its `ui token:` line, and run
-  vite with `VITE_OXPLOW_REMOTE=… VITE_OXPLOW_REMOTE_TOKEN=…`.
+  `<host>/p/<project>/`, whose page states `window.__OXPLOW__ = { kind:
+  "project", base: "<origin>/p/<project>", host: "<origin>", project, token:
+  null }`. It uses the token it got at pairing (`oxplow.hostToken`). Its
+  calls (`/ipc`, `/events`, `/components`) go to the host, which checks the
+  caller's token, swaps in the daemon's and forwards with the prefix
+  removed, so a client never holds a daemon token.
+- **Headless dev:** run a headless host (DEV.md "Run headless"), or, for
+  the renderer alone, the Vite dev server with `VITE_OXPLOW_REMOTE=…
+  VITE_OXPLOW_REMOTE_TOKEN=…`.
 
 **Ungated: `/health` and custom component bundles** (P6b.D3,
 `oxplow-daemon/src/components.rs`). `GET

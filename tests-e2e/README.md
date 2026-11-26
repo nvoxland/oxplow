@@ -3,9 +3,11 @@
 `bun run e2e` drives the built React app in headless Chromium — and the
 custom-component specs in WebKit too — against a real daemon: Playwright
 (`@playwright/test`), no `tauri-driver`. The frontend
-reaches the daemon the way a remote window does: the transport reads its base
-and token from localStorage (`oxplow.remoteBase`, `oxplow.remoteToken`), and
-CORS is permissive for exactly this (`.context/remote-daemon.md`).
+reaches the daemon the way a window the shell opens does: `connectContext`
+(`support/fixtures.ts`) sets `window.__OXPLOW__` (base, token, kind) before
+any script, in the top frame only, and CORS is permissive for exactly this
+(`.context/remote-daemon.md`). The host specs go through a real
+`oxplow-host` instead: the page pairs at the host's home first.
 
 ## How a run is put together
 
@@ -209,10 +211,10 @@ sign-in.
 ## Scripts
 
 - **`profile-renderer.mjs`** — CDP V8 CPU profile of the renderer, against an
-  app you bring up by hand (a daemon plus `vite` with `VITE_OXPLOW_REMOTE`).
-  The daemon refuses a page without its UI token, so `APP_URL` carries it:
-  `APP_URL='http://localhost:5199/#oxplow-token=<token>'` (the token the
-  daemon was given with `--token-stdin`).
+  app you bring up by hand: a daemon, and the Vite dev server with
+  `VITE_OXPLOW_REMOTE=<base> VITE_OXPLOW_REMOTE_TOKEN=<token>` (the token the
+  daemon was given with `--token-stdin`), which puts both in the page:
+  `APP_URL='http://localhost:5199/'`.
   `CLICK_TESTID=rail-section-toggle-core:work` expands a collapsed section
   first, so you don't profile an unmounted list by accident.
 

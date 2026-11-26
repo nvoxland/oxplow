@@ -2,7 +2,7 @@
 // its own, and what they share. A test that fails on today's code is marked
 // `test.fail()`: the mark comes off in the change that makes it pass.
 import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
-import { client, connectedTo, expect, test } from "../../support/fixtures.js";
+import { client, connectContext, expect, test } from "../../support/fixtures.js";
 import { load, open, reload } from "../../support/ui.js";
 
 /** Where a browser keeps its device id (`device.ts`). */
@@ -199,9 +199,14 @@ test("a project's window never shows another project's tabs", async ({ page, bro
     const device = await page.evaluate((key) => localStorage.getItem(key), DEVICE_KEY);
     expect(device).toMatch(/^dev-/);
 
-    const state = connectedTo(baseURL!, second.base, second.token);
-    state.origins[0]!.localStorage.push({ name: DEVICE_KEY, value: device! });
-    const context = await browser.newContext({ storageState: state });
+    const context = await browser.newContext({
+      baseURL,
+      storageState: {
+        cookies: [],
+        origins: [{ origin: new URL(baseURL!).origin, localStorage: [{ name: DEVICE_KEY, value: device! }] }],
+      },
+    });
+    await connectContext(context, second.base, second.token);
     try {
       const other = await context.newPage();
       await load(other);

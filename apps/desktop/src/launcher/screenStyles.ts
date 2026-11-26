@@ -154,12 +154,12 @@ export const errorStyle: React.CSSProperties = {
   fontSize: "var(--text-xs)",
 };
 
-export const remoteFormStyle: React.CSSProperties = {
+export const formStyle: React.CSSProperties = {
   display: "flex",
   gap: 8,
 };
 
-export const remoteInputStyle: React.CSSProperties = {
+export const inputStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   padding: "8px 10px",
@@ -170,7 +170,7 @@ export const remoteInputStyle: React.CSSProperties = {
   fontSize: "var(--text-sm)",
 };
 
-export const remoteConnectButtonStyle: React.CSSProperties = {
+export const primaryButtonStyle: React.CSSProperties = {
   padding: "8px 14px",
   background: "var(--accent)",
   color: "var(--accent-on-accent)",
@@ -181,7 +181,7 @@ export const remoteConnectButtonStyle: React.CSSProperties = {
   fontWeight: "var(--weight-medium)" as unknown as number,
 };
 
-export const remoteHintStyle: React.CSSProperties = {
+export const hintStyle: React.CSSProperties = {
   margin: "8px 0 12px",
   color: "var(--text-muted)",
   fontSize: "var(--text-xs)",

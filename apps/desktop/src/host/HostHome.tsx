@@ -9,7 +9,7 @@ import {
   emptyStyle,
   errorStyle,
   listStyle,
-  remoteConnectButtonStyle,
+  primaryButtonStyle,
   rootStyle,
   rowStyle,
   rowTitleStyle,
@@ -122,7 +122,7 @@ export function HostHome({
                   type="button"
                   data-testid={`host-project-open-${p.id}`}
                   onClick={() => void hold(p, true)}
-                  style={remoteConnectButtonStyle}
+                  style={primaryButtonStyle}
                 >
                   Open
                 </button>

@@ -8,12 +8,12 @@
 // `@tauri-apps/api`. With one, `invoke` POSTs to the daemon's
 // `/ipc/:name` and `listen` reads the multiplexed `/events` WebSocket.
 //
-// **Which daemon is a per-window question.** The shell injects
-// `window.__OXPLOW__ = { base, kind }` into each window it creates
-// (`src-tauri/src/windows.rs`), so two project windows in one shell
-// process can drive two different daemons. localStorage and
-// VITE_OXPLOW_REMOTE remain as overrides — see `resolveBase`. All three
-// are read once at module load; switching is a reload-level decision.
+// **Which daemon is a per-window question**, with one answer:
+// `window.__OXPLOW__` (`resolveEndpoint`). The shell injects it into each
+// window it creates (`src-tauri/src/windows.rs`), so two project windows in
+// one shell process can drive two different daemons; the host injects it
+// into each page it serves; the Vite dev server (`VITE_OXPLOW_REMOTE`) and
+// the e2e harness inject it the same way. Read once at module load.
 //
 // **Routing is per command, not all-or-nothing.** Some commands only
 // exist in the shell (windowing, native menus, clipboard, project
@@ -68,106 +68,38 @@ function cleanBase(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/// The daemon base for this window, in precedence order:
-///
-/// 1. **localStorage** — a manual "connect to remote daemon" from the
-///    launcher. An explicit user action outranks the default.
-/// 2. **The shell's injected base** — the normal path once windows own
-///    daemons.
-/// 3. **VITE_OXPLOW_REMOTE** — build/dev-time developer override.
-///
-/// null means "no daemon": talk to the shell over Tauri IPC.
-/// Pure; exported for tests.
-export function resolveBase(sources: {
-  stored?: string | null;
-  injected?: string | null;
-  env?: string | null;
-}): string | null {
-  return cleanBase(sources.stored) ?? cleanBase(sources.injected) ?? cleanBase(sources.env) ?? null;
-}
-
-type Endpoint = { base?: string | null; token?: string | null };
-
-/// The daemon's UI token for this window: from the same source the base
-/// came from (the manual connect, the shell's injection, or the dev env
-/// override), unless a person put one in the URL fragment
-/// (`#oxplow-token=…`, e.g. a scripted or Playwright session). Every
-/// `/ipc` call and the `/events` socket carry it; the daemon refuses
-/// anything without it. Pure; exported for tests.
-export function resolveToken(sources: {
-  stored?: Endpoint;
-  injected?: Endpoint;
-  env?: Endpoint;
-  fragment?: string | null;
-  /// A paired device's own token (a page the host served carries none).
-  paired?: string | null;
-}): string | null {
-  const fromFragment = /(?:^#|&)oxplow-token=([^&]+)/.exec(sources.fragment ?? "")?.[1];
-  if (fromFragment) return decodeURIComponent(fromFragment);
-  for (const tier of [sources.stored, sources.injected, sources.env]) {
-    if (!cleanBase(tier?.base)) continue;
-    const token = tier?.token?.trim() || null;
-    if (tier === sources.injected && token === null) return sources.paired?.trim() || null;
-    return token;
-  }
-  return null;
-}
-
-/// A pasted daemon address, split into its base and an optional
-/// `#oxplow-token=` token. Pure; exported for tests.
-export function parseRemoteInput(input: string): { base: string; token: string | null } {
-  const trimmed = input.trim();
-  const hash = trimmed.indexOf("#");
-  const base = (hash >= 0 ? trimmed.slice(0, hash) : trimmed).replace(/\/+$/, "");
-  const token = hash >= 0 ? resolveToken({ fragment: trimmed.slice(hash) }) : null;
+/// The daemon base and token for this window. One read path: what started
+/// the page says where its daemon is, in `window.__OXPLOW__` (the Mac shell
+/// injects it into each window, the host into each page it serves, and the
+/// Vite dev server and the e2e harness the same way). A page the host served
+/// carries no token: a paired device uses its own (`paired`). No context, or
+/// no base: no daemon (the launcher; Tauri IPC only). Pure; exported for
+/// tests.
+export function resolveEndpoint(
+  ctx: Pick<WindowContext, "base" | "token" | "host"> | null,
+  paired: string | null,
+): { base: string | null; token: string | null } {
+  const base = cleanBase(ctx?.base);
+  if (base === null) return { base: null, token: null };
+  const injected = ctx?.token?.trim() || null;
+  const token = injected ?? (ctx?.host ? paired?.trim() || null : null);
   return { base, token };
 }
 
-function readRemoteEndpoint(): { base: string | null; token: string | null; storedBase: string | null } {
-  let stored: Endpoint = {};
-  let fragment: string | null = null;
-  try {
-    stored = {
-      base: shellStorage.getItem("oxplow.remoteBase"),
-      token: shellStorage.getItem("oxplow.remoteToken"),
-    };
-    fragment = window.location.hash;
-  } catch {
-    // No window/localStorage (tests) — leave them empty.
-  }
-  const env = (import.meta as { env?: Record<string, string> }).env;
-  const ctx = readWindowContext();
-  const sources = {
-    paired: ctx?.host ? shellStorage.getItem("oxplow.hostToken") : null,
-    stored,
-    injected: { base: ctx?.base ?? null, token: ctx?.token ?? null },
-    env: { base: env?.VITE_OXPLOW_REMOTE ?? null, token: env?.VITE_OXPLOW_REMOTE_TOKEN ?? null },
-    fragment,
-  };
-  return {
-    base: resolveBase({ stored: stored.base, injected: sources.injected.base, env: sources.env.base }),
-    token: resolveToken(sources),
-    storedBase: stored.base ?? null,
-  };
-}
-
-/// Whether this window's files are on this machine: the shell starts
-/// its daemons here, so a project window on the daemon its shell injected
-/// (no manual connect over it) has them, and so do the launcher's
-/// projects. A plain browser, or a manual connect, may drive a daemon
-/// elsewhere. Pure; exported for tests.
-export function filesLocalFrom(sources: {
-  shell: boolean;
-  kind: string | null;
-  stored: string | null;
-  injected: string | null;
-}): boolean {
+/// Whether this window's files are on this machine: the shell names the
+/// folder of a project it opened here (`projectDir`), and the launcher's
+/// projects are here. A page a host served, or a window on another
+/// machine's host, has none. Pure; exported for tests.
+export function filesLocalFrom(sources: { shell: boolean; kind: string | null; projectDir: string | null }): boolean {
   if (!sources.shell) return false;
   if (sources.kind === "launcher") return true;
-  return sources.kind === "project" && cleanBase(sources.stored) === null && cleanBase(sources.injected) !== null;
+  return sources.kind === "project" && sources.projectDir !== null;
 }
 
-const endpoint = readRemoteEndpoint();
+const endpoint = resolveEndpoint(
+  readWindowContext(),
+  readWindowContext()?.host ? shellStorage.getItem("oxplow.hostToken") : null,
+);
 const remoteBase: string | null = endpoint.base;
 const remoteToken: string | null = endpoint.token;
 
@@ -262,59 +194,6 @@ export function isRemote(): boolean {
 /// null in local mode.
 export function remoteBaseUrl(): string | null {
   return remoteBase;
-}
-
-/// Persist a remote daemon base and reload into remote mode. The
-/// transport reads the key once at module load, so a reload is the
-/// mode switch.
-export function connectRemote(base: string, token: string | null): void {
-  shellStorage.setItem("oxplow.remoteBase", base.trim().replace(/\/+$/, ""));
-  if (token) shellStorage.setItem("oxplow.remoteToken", token);
-  else shellStorage.removeItem("oxplow.remoteToken");
-  window.location.reload();
-}
-
-/// Drop the remote base and reload back into local mode.
-export function disconnectRemote(): void {
-  shellStorage.removeItem("oxplow.remoteBase");
-  shellStorage.removeItem("oxplow.remoteToken");
-  window.location.reload();
-}
-
-/// Probe a daemon base before committing to it: POST /ipc/ping and
-/// expect the ok envelope. Throws with a human-readable message on
-/// any failure (unreachable, non-JSON, wrong service).
-export async function probeRemoteDaemon(
-  base: string,
-  token: string | null,
-  timeoutMs = 4000,
-): Promise<void> {
-  const cleaned = base.trim().replace(/\/+$/, "");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(`${cleaned}/ipc/ping`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      body: "null",
-      signal: controller.signal,
-    });
-    if (resp.status === 401) {
-      throw new Error("the daemon needs its UI token (printed as \"ui token:\" when it starts)");
-    }
-    if (!resp.ok) throw new Error(`daemon replied HTTP ${resp.status}`);
-    const envelope = (await resp.json()) as { status?: string; data?: unknown };
-    if (envelope.status !== "ok" || envelope.data !== "pong") {
-      throw new Error("endpoint is not an oxplow daemon");
-    }
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") {
-      throw new Error(`no response within ${timeoutMs / 1000}s — is the tunnel up?`);
-    }
-    throw e instanceof Error ? e : new Error(String(e));
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /// Where an `invoke(name)` goes: the desktop shell's Tauri IPC
@@ -492,8 +371,7 @@ function markReplaced(): void {
 }
 
 /// What a call says when the daemon refused this window's token.
-export const TOKEN_REFUSED =
-  "the daemon refused this window's token; reconnect from the launcher with the token it prints";
+export const TOKEN_REFUSED = "this window's token was refused; open it again";
 
 let tokenRefused = false;
 
@@ -754,13 +632,15 @@ export function shellAvailable(): boolean {
 }
 
 /// Whether this window's files are on this machine (`filesLocalFrom`):
-/// Open In ▸ Reveal and Default App need them.
-/// Read once, as the base is (`endpoint`): another window's connect or
-/// disconnect changes the storage, not the daemon this one drives.
+/// Open In ▸ Reveal and Default App need them. Read once.
 export function filesAreLocal(): boolean {
   if (localFilesAtLoad === null) {
     const ctx = readWindowContext();
-    localFilesAtLoad = filesLocalFrom({ shell: shellAvailable(), kind: ctx?.kind ?? null, stored: endpoint.storedBase, injected: ctx?.base ?? null });
+    localFilesAtLoad = filesLocalFrom({
+      shell: shellAvailable(),
+      kind: ctx?.kind ?? null,
+      projectDir: ctx?.projectDir ?? null,
+    });
   }
   return localFilesAtLoad;
 }
