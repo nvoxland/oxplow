@@ -20,6 +20,9 @@ fn main() {
     if let Some(args) = extension_args() {
         std::process::exit(oxplow_sdk::cli::run(&args));
     }
+    if let Some(args) = host_args(std::env::args().skip(1)) {
+        run_host(&args);
+    }
 
     init_tracing();
 
@@ -166,6 +169,7 @@ fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
              Usage:\n  \
              oxplow [--init]                        open the app (--init: set up this dir as a project)\n  \
              oxplow extension <new|check|test> ...  the extension SDK\n  \
+             oxplow host <serve|project> ...        a headless host (a server): runs until stopped\n  \
              oxplow component-harness <url>         a component harness's page (extension test opens it)\n  \
              oxplow --version | --help"
                 .to_string(),
@@ -183,6 +187,36 @@ fn extension_args() -> Option<Vec<String>> {
         Some("extension") => Some(args.collect()),
         _ => None,
     }
+}
+
+/// `oxplow host <serve|project> …`: oxplow with no app, as on a server.
+/// Everything after `host` is the `oxplow-host` sidecar's argv. A host
+/// started so is headless: it runs until it is stopped (a signal, or
+/// `POST /host/shutdown`), and the app never uses or stops it.
+fn host_args(mut args: impl Iterator<Item = String>) -> Option<Vec<String>> {
+    match args.next().as_deref() {
+        Some("host") => Some(args.collect()),
+        _ => None,
+    }
+}
+
+/// Become the `oxplow-host` beside this binary with `args` (never returns).
+fn run_host(args: &[String]) -> ! {
+    let binary = oxplow_host::client::binary_beside_exe();
+    let mut cmd = std::process::Command::new(&binary);
+    cmd.args(args);
+    #[cfg(unix)]
+    let err = {
+        use std::os::unix::process::CommandExt;
+        cmd.exec()
+    };
+    #[cfg(not(unix))]
+    let err = match cmd.status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(e) => e,
+    };
+    eprintln!("oxplow: cannot run {}: {err}", binary.display());
+    std::process::exit(1);
 }
 
 /// `--init`: create `.oxplow/` for a fresh project dir and boot straight
@@ -315,8 +349,8 @@ fn run_shell(ctx: tauri::Context) {
                 icon_tint::install_bundle_icon();
                 icon_tint::apply(icon_tint.as_deref());
             }
-            // Last chance to take the daemons down with us.
-            tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().stop_all_daemons(),
+            // The app ends: so does its host, every project with it.
+            tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().end(),
             _ => {}
         });
 }
@@ -487,6 +521,19 @@ mod tests {
 
     fn info(args: &[&str]) -> Option<String> {
         info_arg(args.iter().map(|a| a.to_string()))
+    }
+
+    /// `oxplow host …` hands everything after `host` to the host sidecar.
+    #[test]
+    fn host_passes_its_arguments_to_the_sidecar() {
+        let host = |args: &[&str]| host_args(args.iter().map(|a| a.to_string()));
+        assert_eq!(
+            host(&["host", "serve", "--bind", "0.0.0.0:7400"]),
+            Some(vec!["serve".into(), "--bind".into(), "0.0.0.0:7400".into()])
+        );
+        assert_eq!(host(&["extension", "test"]), None);
+        assert_eq!(host(&["/some/project"]), None);
+        assert!(info(&["--help"]).unwrap().contains("oxplow host"));
     }
 
     /// `oxplow component-harness <url>` opens a harness's loopback page,

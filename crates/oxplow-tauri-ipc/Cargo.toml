@@ -11,6 +11,7 @@ oxplow-oauth-redirect = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-host = { workspace = true }
 oxplow-rpc = { workspace = true }
 oxplow-sdk = { workspace = true }
 oxplow-config = { workspace = true }

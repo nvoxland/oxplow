@@ -2,9 +2,11 @@
 //! daemon each held project runs.
 //!
 //! A hold is `(device, project)`. The first hold on a project starts its
-//! daemon; the last one released stops it. Holds are kept in
-//! `host-holds.json`, so a restarted host starts again what was held. Daemon
-//! states live in memory only.
+//! daemon; the last one released stops it. A headless host keeps its holds in
+//! `host-holds.json`, so a restarted host (a server's reboot) starts again
+//! what was held. The app's own host lives as long as the app, so its holds
+//! are the app's open windows, in memory ([`HoldsKept`]). Daemon states live
+//! in memory only.
 //!
 //! Starting and stopping run on one worker thread, so daemons boot one after
 //! another (a boot peaks at about 380 MB and a CPU for its first minutes). A
@@ -15,16 +17,21 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use oxplow_app::daemon_supervisor::{DaemonEndpoint, DaemonSupervisor};
 use serde::{Deserialize, Serialize};
 
 use crate::registry::{Project, Registry};
 
-/// A crashed daemon is started again by a new hold only after this long, so
-/// a daemon that dies at boot is not a restart loop.
-pub const DEFAULT_RESTART_AFTER: Duration = Duration::from_secs(60);
+/// Where a host keeps its holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoldsKept {
+    /// In `host-holds.json`: a headless host starts again what was held.
+    InFile,
+    /// In memory: the app's own host, whose holds are the app's windows.
+    InMemory,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct Hold {
@@ -84,7 +91,6 @@ pub enum HostError {
 struct Runtime {
     path: PathBuf,
     state: DaemonState,
-    crashed_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -95,9 +101,9 @@ struct Inner {
 
 pub struct Host {
     registry: Registry,
-    holds_path: PathBuf,
+    /// `None`: the holds are kept in memory only.
+    holds_path: Option<PathBuf>,
     supervisor: Arc<DaemonSupervisor>,
-    restart_after: Duration,
     inner: Mutex<Inner>,
     queue: Sender<String>,
 }
@@ -119,11 +125,12 @@ impl Host {
     pub fn open(
         config_dir: &Path,
         supervisor: Arc<DaemonSupervisor>,
-        restart_after: Duration,
+        kept: HoldsKept,
     ) -> Arc<Self> {
-        let holds_path = config_dir.join("host-holds.json");
-        let holds = std::fs::read(&holds_path)
-            .ok()
+        let holds_path = (kept == HoldsKept::InFile).then(|| config_dir.join("host-holds.json"));
+        let holds = holds_path
+            .as_ref()
+            .and_then(|path| std::fs::read(path).ok())
             .and_then(|b| serde_json::from_slice::<HoldsFile>(&b).ok())
             .map(|f| f.holds)
             .unwrap_or_default();
@@ -132,7 +139,6 @@ impl Host {
             registry: Registry::new(config_dir),
             holds_path,
             supervisor,
-            restart_after,
             inner: Mutex::new(Inner {
                 holds,
                 runtime: HashMap::new(),
@@ -207,15 +213,10 @@ impl Host {
         let rt = inner.runtime.entry(project.to_string()).or_insert(Runtime {
             path: known.path.clone(),
             state: DaemonState::Stopped,
-            crashed_at: None,
         });
-        let startable = match &rt.state {
-            DaemonState::Stopped => true,
-            DaemonState::Crashed { .. } => rt
-                .crashed_at
-                .is_none_or(|at| at.elapsed() >= self.restart_after),
-            _ => false,
-        };
+        // A crashed daemon starts again: a new hold is a person opening the
+        // project again (after quitting the other Oxplow, say).
+        let startable = matches!(rt.state, DaemonState::Stopped | DaemonState::Crashed { .. });
         if startable {
             rt.path = known.path.clone();
             rt.state = DaemonState::Starting;
@@ -273,7 +274,6 @@ impl Host {
                 code: status.code(),
                 message: None,
             };
-            rt.crashed_at = Some(Instant::now());
         }
     }
 
@@ -304,7 +304,6 @@ impl Host {
                 Runtime {
                     path: project.path,
                     state: DaemonState::Starting,
-                    crashed_at: None,
                 },
             );
             self.enqueue(&id);
@@ -349,7 +348,10 @@ impl Host {
             match step {
                 Step::Done => return,
                 Step::Start(path) => {
-                    let started = self.supervisor.start(&path);
+                    let started = match taken_elsewhere(&path) {
+                        Some(why) => Err(std::io::Error::other(why)),
+                        None => self.supervisor.start(&path),
+                    };
                     let mut inner = self.lock();
                     if let Some(rt) = inner.runtime.get_mut(id) {
                         match started {
@@ -363,7 +365,6 @@ impl Host {
                                     code: None,
                                     message: Some(e.to_string()),
                                 };
-                                rt.crashed_at = Some(Instant::now());
                             }
                         }
                     }
@@ -380,16 +381,37 @@ impl Host {
     }
 
     fn save_holds(&self, inner: &Inner) -> std::io::Result<()> {
+        let Some(path) = &self.holds_path else {
+            return Ok(());
+        };
         let bytes = serde_json::to_vec_pretty(&HoldsFile {
             holds: inner.holds.clone(),
         })
         .map_err(std::io::Error::other)?;
-        oxplow_config::write_atomic(&self.holds_path, &bytes)
+        oxplow_config::write_atomic(path, &bytes)
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// How long a daemon of an app that just quit gets to let go of its project.
+const OTHER_EXIT_WAIT: Duration = Duration::from_secs(5);
+
+/// Why `path` cannot be started here: another oxplow's daemon (an older app,
+/// one started by hand) has it. One on its way out is waited for.
+fn taken_elsewhere(path: &Path) -> Option<String> {
+    let running = oxplow_app::daemon_supervisor::live_daemon(path)?;
+    if oxplow_app::wait_for_project_unlock(path, OTHER_EXIT_WAIT) {
+        return None;
+    }
+    Some(format!(
+        "{} is already open in another Oxplow (its backend is process {}). \
+         Use that window, or quit it first.",
+        path.display(),
+        running.pid
+    ))
 }
 
 fn view(inner: &Inner, project: Project) -> ProjectView {
@@ -439,10 +461,10 @@ pub(crate) mod tests {
 
     impl Fixture {
         pub(crate) fn new(script: &str) -> Self {
-            Self::with(script, Duration::from_secs(60))
+            Self::with(script, HoldsKept::InFile)
         }
 
-        pub(crate) fn with(script: &str, restart_after: Duration) -> Self {
+        pub(crate) fn with(script: &str, kept: HoldsKept) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let supervisor = Arc::new(
                 DaemonSupervisor::with_launcher(Box::new(Fake {
@@ -451,8 +473,13 @@ pub(crate) mod tests {
                 .with_startup_timeout(Duration::from_secs(10))
                 .with_shutdown_grace(Duration::from_millis(500)),
             );
-            let host = Host::open(&dir.path().join("home"), supervisor, restart_after);
+            let host = Host::open(&dir.path().join("home"), supervisor, kept);
             Self { dir, host }
+        }
+
+        /// The host's `OXPLOW_HOME` config dir.
+        pub(crate) fn home(&self) -> PathBuf {
+            self.dir.path().join("home")
         }
 
         pub(crate) fn project(&self, name: &str) -> String {
@@ -490,6 +517,39 @@ pub(crate) mod tests {
 
     fn running(s: &DaemonState) -> bool {
         *s == DaemonState::Running
+    }
+
+    /// A project another oxplow runs (an older app, a daemon started by
+    /// hand) is not started a second time: it says which process has it.
+    #[test]
+    fn a_project_another_oxplow_runs_is_refused_with_its_process() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        oxplow_app::daemon_supervisor::write_daemon_info(
+            &fx.dir.path().join("alpha"),
+            &oxplow_app::daemon_supervisor::DaemonInfo {
+                base_url: "http://127.0.0.1:1".into(),
+                pid: std::process::id(),
+            },
+        )
+        .unwrap();
+        let layout = oxplow_app::AppLayout::for_project(fx.dir.path().join("alpha"));
+        let _held = oxplow_app::try_acquire_instance_lock(&layout).unwrap();
+        fx.host.add_hold("dev-a", &id).unwrap();
+        fx.wait_for(&id, |s| matches!(s, DaemonState::Crashed { .. }));
+        let DaemonState::Crashed { message, .. } = fx.state(&id) else {
+            unreachable!()
+        };
+        let message = message.unwrap();
+        assert!(
+            message.contains("already open in another Oxplow"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&std::process::id().to_string()),
+            "{message}"
+        );
+        assert_eq!(fx.host.supervisor.running_count(), 0);
     }
 
     #[test]
@@ -589,11 +649,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_new_hold_starts_a_crashed_daemon_again_once_the_wait_is_over() {
-        let fx = Fixture::with(
-            "echo 'oxplow-daemon listening on http://127.0.0.1:1'; sleep 0.2; exit 3",
-            Duration::ZERO,
-        );
+    /// Quit the other Oxplow, then open again: the open starts it at once.
+    fn a_new_hold_starts_a_crashed_daemon_again() {
+        let fx =
+            Fixture::new("echo 'oxplow-daemon listening on http://127.0.0.1:1'; sleep 0.2; exit 3");
         let id = fx.project("alpha");
         fx.host.add_hold("dev-a", &id).unwrap();
         fx.wait_for(&id, running);
@@ -655,16 +714,43 @@ pub(crate) mod tests {
             }))
             .with_startup_timeout(Duration::from_secs(10)),
         );
-        let again = Host::open(
-            &fx.dir.path().join("home"),
-            supervisor,
-            Duration::from_secs(60),
-        );
+        let again = Host::open(&fx.dir.path().join("home"), supervisor, HoldsKept::InFile);
         assert_eq!(again.holds().len(), 1);
         let reopened = Fixture {
             dir: tempfile::tempdir().unwrap(),
             host: again,
         };
         reopened.wait_for(&id, running);
+    }
+
+    /// The app's host lives as long as the app: its holds are the open
+    /// windows, kept in memory. A file a headless host left is not read, and
+    /// none is written.
+    #[test]
+    fn an_app_host_keeps_its_holds_in_memory() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        fx.host.add_hold("dev-tablet", &id).unwrap();
+        fx.wait_for(&id, running);
+        fx.host.shutdown();
+        let file = fx.home().join("host-holds.json");
+        let before = std::fs::read(&file).unwrap();
+
+        let app = Fixture {
+            host: Host::open(
+                &fx.home(),
+                Arc::new(DaemonSupervisor::with_launcher(Box::new(Fake {
+                    script: RUNS.into(),
+                }))),
+                HoldsKept::InMemory,
+            ),
+            dir: tempfile::tempdir().unwrap(),
+        };
+        assert!(app.host.holds().is_empty(), "the file is not read");
+        app.host.add_hold("dev-mac", &id).unwrap();
+        app.host.release_hold("dev-mac", &id).unwrap();
+        app.host.add_hold("dev-mac", &id).unwrap();
+        assert_eq!(app.host.holds().len(), 1);
+        assert_eq!(std::fs::read(&file).unwrap(), before, "nor written");
     }
 }

@@ -33,6 +33,8 @@ pub struct ServeConfig {
     pub allow_hosts: Vec<String>,
     /// How long a request for a `starting` project waits for its daemon.
     pub boot_wait: Duration,
+    /// Told when a client asks the host to stop (`POST /host/shutdown`).
+    pub stop: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Clone)]
@@ -73,7 +75,7 @@ pub fn app(cfg: ServeConfig) -> Router {
         .route("/p/{id}/{*rest}", any(proxy::rest))
         .fallback(ui::root_file)
         .with_state(web.clone());
-    api::router(cfg.host, cfg.token)
+    api::router(cfg.host, cfg.token, cfg.stop)
         .merge(project)
         .layer(axum::middleware::from_fn_with_state(web, check_host))
 }
@@ -305,6 +307,7 @@ mod tests {
                 ui_dir: Some(ui.path().to_path_buf()),
                 allow_hosts: allow.iter().map(|s| s.to_string()).collect(),
                 boot_wait,
+                stop: Default::default(),
             });
             let addr = serve(app).await;
             Self {
@@ -847,6 +850,7 @@ mod tests {
             ui_dir: None,
             allow_hosts: vec![],
             boot_wait: Duration::from_secs(1),
+            stop: Default::default(),
         }))
         .await;
         for path in [format!("/p/{id}/"), "/assets/app.js".to_string()] {

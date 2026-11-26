@@ -1,9 +1,12 @@
 //! `oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]
-//!   [--allow-host <name>]… [--daemon <path>]`
+//!   [--allow-host <name>]… [--daemon <path>] [--for-app]`
 //! `oxplow-host project <add <dir> | list | remove <id>>`
 //!
-//! The host has no stdin lifeline: it must outlive the app that started it.
-//! Its daemons have one, held by the host.
+//! A headless host (no `--for-app`) runs until it is stopped: a signal or
+//! `POST /host/shutdown`. The app's own host (`--for-app`) is a child of the
+//! app: stdin, after the token line, is its lifeline, and it ends when the
+//! app goes. No host ends because nothing is held. Its daemons each have a
+//! lifeline held by the host.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -12,7 +15,7 @@ use std::sync::Arc;
 use oxplow_app::daemon_supervisor::{
     BinaryDaemon, BundledDaemon, DaemonLauncher, DaemonSupervisor, DEFAULT_STARTUP_TIMEOUT,
 };
-use oxplow_host::host::{Host, DEFAULT_RESTART_AFTER};
+use oxplow_host::host::{HoldsKept, Host};
 use oxplow_host::instance::HostInstance;
 use oxplow_host::registry::Registry;
 
@@ -20,6 +23,7 @@ fn usage() -> ! {
     eprintln!(
         "usage: oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]\n\
          \x20                        [--allow-host <name>]... [--daemon <path>]\n\
+         \x20                        [--for-app]\n\
          \x20      oxplow-host project add <dir>\n\
          \x20      oxplow-host project list\n\
          \x20      oxplow-host project remove <id>\n\
@@ -28,7 +32,10 @@ fn usage() -> ! {
          the first line of stdin; otherwise a fresh one is generated and printed.\n\
          --ui is the built UI (default: beside the binary, or apps/desktop/dist in a\n\
          checkout). --allow-host names a host a request may reach this one by, besides\n\
-         loopback. --daemon runs another daemon binary (the browser suite's)."
+         loopback. --daemon runs another daemon binary (the browser suite's).\n\
+         --for-app makes it the Mac app's host: stdin after the token is its\n\
+         lifeline, and it ends with the app. Without it the host is headless\n\
+         and runs until it is stopped."
     );
     std::process::exit(2);
 }
@@ -70,11 +77,13 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     let mut ui: Option<PathBuf> = None;
     let mut allow_hosts: Vec<String> = Vec::new();
     let mut daemon: Option<PathBuf> = None;
+    let mut for_app = false;
     let mut it = rest.iter();
     while let Some(arg) = it.next() {
         match *arg {
             "--bind" => bind = it.next().map(|s| s.to_string()).unwrap_or_else(|| usage()),
             "--token-stdin" => token_stdin = true,
+            "--for-app" => for_app = true,
             "--ui" => {
                 ui = Some(
                     it.next()
@@ -99,7 +108,16 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         .parse()
         .unwrap_or_else(|e| fail(format!("invalid --bind address: {e}")));
 
-    let instance = HostInstance::acquire(config_dir).unwrap_or_else(|e| fail(e));
+    if for_app && !token_stdin {
+        fail("--for-app needs --token-stdin: the app's stdin is the host's lifeline");
+    }
+    // The app's previous host may still be stopping its daemons after a quit.
+    let instance = if for_app {
+        HostInstance::acquire_waiting(config_dir, APP_HOST_LOCK_WAIT)
+    } else {
+        HostInstance::acquire(config_dir)
+    }
+    .unwrap_or_else(|e| fail(e));
     let (token, generated) = if token_stdin {
         let mut line = String::new();
         if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
@@ -109,6 +127,21 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     } else {
         (generate_token(), true)
     };
+
+    let stop = Arc::new(tokio::sync::Notify::new());
+    if for_app {
+        let lifeline = stop.clone();
+        std::thread::Builder::new()
+            .name("oxplow-host-lifeline".into())
+            .spawn(move || {
+                // Whatever the app writes is ignored; the end of it is the
+                // app's end (quit, crash or kill).
+                let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+                tracing::info!("the app is gone");
+                lifeline.notify_one();
+            })
+            .unwrap_or_else(|e| fail(format!("cannot watch the app: {e}")));
+    }
 
     oxplow_host::logging::init(config_dir);
     tracing::info!(
@@ -127,13 +160,18 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 None => Box::new(BundledDaemon),
             };
             let supervisor = Arc::new(DaemonSupervisor::with_launcher(launcher));
-            let host = Host::open(config_dir, supervisor, DEFAULT_RESTART_AFTER);
+            let kept = if for_app {
+                HoldsKept::InMemory
+            } else {
+                HoldsKept::InFile
+            };
+            let host = Host::open(config_dir, supervisor, kept);
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
                 .unwrap_or_else(|e| fail(format!("bind {bind} failed: {e}")));
             let addr = listener.local_addr().unwrap_or_else(|e| fail(e));
             let base_url = format!("http://{addr}");
-            if let Err(e) = instance.publish(&base_url) {
+            if let Err(e) = instance.publish(&base_url, for_app) {
                 fail(format!("cannot write host.json: {e}"));
             }
             println!("oxplow-host listening on {base_url}");
@@ -163,10 +201,12 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 allow_hosts,
                 // A daemon that boots no faster than this is a crash.
                 boot_wait: DEFAULT_STARTUP_TIMEOUT,
+                stop: stop.clone(),
             });
             let reason = tokio::select! {
                 served = axum::serve(listener, app) => format!("the server stopped: {served:?}"),
                 signal = terminated() => format!("received {signal}"),
+                _ = stop.notified() => "asked to stop".to_string(),
             };
             tracing::info!("oxplow-host stopping: {reason}");
             let stopping = host.clone();
@@ -175,6 +215,10 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             std::process::exit(0);
         });
 }
+
+/// How long the app's host waits for the lock of the app's previous host,
+/// which stops its daemons (a few seconds each) before it lets go.
+const APP_HOST_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The built UI when `--ui` is not given: a `ui` folder beside the binary
 /// (packaged), else `apps/desktop/dist` of the checkout the binary was built

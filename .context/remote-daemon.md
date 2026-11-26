@@ -200,9 +200,11 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
 
 ## Lifecycle, logs and stalls
 
-- **A daemon doesn't outlive its app.** The supervising app keeps the
-  daemon's stdin open; end-of-file means the app is gone (quit, crashed,
-  killed) and the daemon stops (`stop_when_app_goes`).
+- **A daemon doesn't outlive its app.** The host keeps the daemon's
+  stdin open, and the app keeps its own host's stdin open; end-of-file
+  means the parent is gone (quit, crashed, killed) and the child stops
+  (`stop_when_app_goes`; the host's `serve --for-app`). A headless host
+  (`oxplow host serve`) has no parent: its daemons stop when it does.
 - **Nothing the daemon started outlives it.** A stop (a signal, the
   lifeline) runs `Services::shutdown`, then `process::exit`, which runs no
   destructors, so each kind of child is ended explicitly first:

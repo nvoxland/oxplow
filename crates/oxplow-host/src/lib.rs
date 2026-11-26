@@ -5,6 +5,7 @@
 //! See `.context/host.md`.
 
 pub mod api;
+pub mod client;
 pub mod host;
 pub mod instance;
 pub mod logging;

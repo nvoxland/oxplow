@@ -244,12 +244,15 @@ Boot flow (`apps/desktop/src-tauri/src/main.rs` — one path, no modes):
   project the session recorded, skipping any that is no longer a project
   on disk. If nothing opened, show the launcher.
 
-**Closing a project window stops its daemon, and therefore its
-agents.** A deliberate choice: closing the window is the user saying
-they're done with the project, and a backend still churning behind a
-window that no longer exists is worse than a clean stop. If that ever
-needs to change, the feature is reattaching to a surviving daemon — not
-leaving one running by accident.
+**Closing a project window releases its hold, which stops its daemon,
+and therefore its agents,** unless another device (a tablet) holds the
+project too. A deliberate choice: closing the window is the user saying
+they're done with the project here, and a backend still churning behind
+a window that no longer exists is worse than a clean stop. **Quitting
+the app ends its host,** every project and every other device's
+connection with it: the app is the whole of oxplow to the person. A
+host that outlives the app is a headless one (`oxplow host serve`),
+which the app does not use.
 
 **A background loop is a `Services::spawn_every`.** It holds the
 services weakly (only while a tick runs) and stops on
@@ -269,10 +272,12 @@ gone: a test's throwaway oxplow (`Host`, dropped after its example, runs
 (`a_dropped_fork_frees_its_database`).
 
 **Opening a project** (`ShellWindows::open_project`) is: focus the
-window that already has it, else sweep any orphaned daemon, start a
-daemon, wait for it to report its loopback endpoint, then create a
-window carrying that endpoint. The order is forced — the base URL is
-injected at window creation — which is why the call blocks. At startup
+window that already has it, else start the app's host if it isn't
+running (the app's child, `.context/host.md` "The Mac app"), register
+and hold the project there, wait for its daemon to run, then create a
+window carrying `<host>/p/<id>` and the host token. The order is forced —
+the base URL is injected at window creation — which is why the call
+blocks. At startup
 that happens on the main thread (nothing is on screen yet anyway);
 `open_project` / `create_project` from the UI run it on a blocking
 thread so open windows stay responsive.
@@ -293,14 +298,14 @@ loading flash — the context is set before any page script runs. A window
 the shell didn't create (a plain browser over a tunnel) has no context
 and gets the app shell.
 
-**Orphaned daemons.** A shell that dies without unwinding (crash,
-SIGKILL) leaves its daemons running, holding their projects' instance
-locks. Each daemon publishes `.oxplow/daemon.json` (`{base_url, pid}`),
-so the next open sweeps it: kill, wait for the project lock to come free
-(`oxplow_app::wait_for_project_unlock`), then start the replacement.
-Orphans are killed, not adopted — a backend outliving its window is a
-feature nobody has asked for, and adopting one on a guess is worse than
-a clean restart.
+**No orphans.** The host holds each daemon's stdin lifeline and the app
+holds the host's, so a shell that dies without unwinding (crash,
+SIGKILL) takes its host and daemons with it. A daemon of another oxplow
+(an older app, one started by hand) still holds its project: each daemon
+publishes `.oxplow/daemon.json` (`{base_url, pid}`), and the host refuses
+to start that project, naming the process, after waiting briefly for one
+that is ending (`oxplow_app::wait_for_project_unlock`). It is never
+killed or adopted.
 
 **One instance per project** is still enforced by the lock, but now by
 the *daemon*, which is the thing that would actually collide (two

@@ -3,46 +3,94 @@
 `oxplow-host` (`crates/oxplow-host`) is one headless process per
 `OXPLOW_HOME`. It holds no project state. It keeps a registry of projects and
 the holds devices have on them, and it runs one `oxplow-daemon` per held
-project. Built so far: the core, routing and the served UI. Not built yet: the
-Mac shell as a client, pairing.
+project. Built so far: the core, routing, the served UI and the Mac app's own
+host. Not built yet: pairing.
+
+There are two kinds of host, and no host ever stops because nothing is held
+or nobody is connected:
+
+- **The app's host** (`serve --for-app`): the Mac app's child. The app starts
+  it at its first open, and it ends with the app (quit, crash or kill), every
+  project and every other device's connection with it. See "The Mac app".
+- **A headless host** (`oxplow host serve …`, or `oxplow-host serve` itself):
+  for a server. It runs until it is stopped: a signal or `POST
+  /host/shutdown`.
 
 ## What is built
 
 - **One host per home.** `oxplow-host serve` takes an exclusive lock on
   `host.lock` in `global_config_dir()`. Once it listens it writes `host.json`
-  (`{ base_url, pid, version }`, atomically). A second `serve` for the same home
-  exits and names the running host. Dropping the instance removes `host.json`.
+  (`{ base_url, pid, version, for_app }`, atomically). A second `serve` for the
+  same home exits and names the running host and its kind; the app's host first
+  waits up to 15 s for a previous app host that is ending (it stops its daemons
+  after a quit). Dropping the instance removes `host.json`.
 - **Registry.** `host-projects.json` lists `{ id, path, name }`. The id is
   `prj-` and 8 hex digits of a hash of the canonical path; if another project
   has it, the next candidate is used. `oxplow-host project add <dir>` refuses a
   folder with no `.oxplow/`. `project list` and `project remove <id>` need no
   running host: the file is read on every use and changed under a lock.
-- **Holds.** `host-holds.json` lists `(device, project)`. The host starts
-  a project's daemon on the first hold and stops it when the last goes. A
-  restarted host starts again what the file holds. Sleep or a lost connection is
-  not a release.
+- **Holds** are `(device, project)`. The host starts a project's daemon on the
+  first hold and stops it when the last goes. Sleep or a lost connection is not
+  a release. A headless host keeps them in `host-holds.json` and starts again
+  what the file holds when it restarts. The app's host keeps them in memory
+  (`HoldsKept::InMemory`): they are the app's open windows, and a tablet holds
+  its projects again when it comes back.
 - **Daemons** are started through `DaemonSupervisor` with `BundledDaemon` (the
   `oxplow-daemon` beside the host's binary), so each gets its UI token and its
-  stdin lifeline from the host: the daemons stop when the host goes. The host
-  has no lifeline.
+  stdin lifeline from the host: the daemons stop when the host goes. A project
+  whose `.oxplow/daemon.json` names a live process of another oxplow (an older
+  app, a daemon started by hand) is not started: it is `crashed` with a message
+  that names the process, after a short wait for one that is ending.
 - **States**, in memory: `starting | running | stopping | stopped |
   crashed { code, message }`. One worker thread boots and stops daemons, so
   they boot one at a time. A request changes the hold and queues the work; it
   returns while the project is `starting`. A watcher calls
   `DaemonSupervisor::poll_exits` twice a second and marks an exited daemon
-  `crashed`. There is no restart loop: a new hold starts a crashed daemon again
-  only when the last crash was over 60 seconds ago.
+  `crashed`. There is no restart loop: only a new hold (a person opening the
+  project again) starts a crashed daemon.
 - **API**, all under `/host/` and all needing the host token (`Authorization:
   Bearer`): `GET /host/status` (version, pid, projects with state),
-  `GET /host/projects`, `POST /host/holds` and `DELETE /host/holds` (JSON
-  `{ device, project }`; each answers the project's view; 404 for an unknown
-  project, 400 for no device). The token comes from stdin (`--token-stdin`, as
+  `GET /host/projects`, `POST /host/projects` (JSON `{ path }`: register that
+  folder, or find it registered; 400 for a folder that is not a project),
+  `POST /host/holds` and `DELETE /host/holds` (JSON `{ device, project }`; each
+  answers the project's view; 404 for an unknown project, 400 for no device),
+  and `POST /host/shutdown` (202; the host stops, its daemons with it). The token comes from stdin (`--token-stdin`, as
   the daemon's does) or is generated and printed. Device tokens and pairing
   replace it in the pairing step.
 - **Flags** of `serve`: `--bind`, `--token-stdin`, `--ui <dir>` (the built UI),
-  `--allow-host <name>` (repeatable) and `--daemon <path>` (another daemon
-  binary, as `BinaryDaemon`: the browser suite runs `oxplow-daemon-sim`).
-- **Logs:** `<global_config_dir>/logs/host.<date>.log`, daily, a week kept.
+  `--allow-host <name>` (repeatable), `--daemon <path>` (another daemon
+  binary, as `BinaryDaemon`: the browser suite runs `oxplow-daemon-sim`) and
+  `--for-app` (the app's host: needs `--token-stdin`; stdin after the token
+  line is its lifeline).
+- **Logs:** stderr and `<global_config_dir>/logs/host.<date>.log`, daily, a
+  week kept. Stdout carries only the `oxplow-host listening on <url>` line (and
+  a generated token).
+
+## The Mac app
+
+The app's host is a child of the app, as a daemon is a child of the host
+(`oxplow_host::client`, `ShellWindows` in `oxplow-tauri-ipc/src/windows.rs`).
+
+- **Start.** At the first open the app runs the `oxplow-host` beside it (the
+  bundle's sidecar, `target/debug/oxplow-host` in a checkout) as `serve --bind
+  127.0.0.1:0 --token-stdin --for-app`, writes a token made for this run, keeps
+  stdin open and reads the `listening on` line (`start_own_host`). The token is
+  never kept anywhere. A host that cannot start (a headless host has the home)
+  ends, and its last stderr lines are the app's error. A host that has ended
+  (crashed) is started again at the next open; the windows it served stay on
+  their dead socket.
+- **Open** (`HostClient::open`): `POST /host/projects` with the folder, a hold
+  for the app's device, then a poll until the daemon runs. A daemon that does
+  not start is released again and its message is the open's error. The window
+  gets `<host>/p/<id>` as its base and the host token.
+- **Close** of a window releases its hold (in the background). A tablet that
+  holds the project keeps it running.
+- **Quit** drops the lifeline and waits for nothing: the host stops its daemons
+  and ends. Nothing is released first. The windows to reopen are the app's own
+  `session.json`, as before.
+- **Headless.** `oxplow host <args>` runs the sidecar with `<args>` (exec), as
+  on a server. The app does not use a headless host on its own home before
+  pairing: it has no token for it.
 
 
 ## The `Host` check
@@ -116,5 +164,7 @@ Tauri's asset protocol).
 
 ## Later steps
 
-`/host/events`, the Mac shell starting and using a host, and pairing with
-device tokens.
+`/host/events` (project states, and "the host is ending" so a tablet can say
+why), pairing with device tokens (the fixed port and allowed names of "Allow
+other devices" are given to the app's host at its start), a warning at quit
+when another device is connected, and the app using a headless host.

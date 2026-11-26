@@ -1,8 +1,11 @@
 //! The host's HTTP API under `/host/…`.
 //!
 //! `GET /host/status` (version, pid, projects with their state),
-//! `GET /host/projects`, `POST /host/holds` and `DELETE /host/holds`
-//! (a JSON `{ device, project }`; each answers the project's view).
+//! `GET /host/projects`, `POST /host/projects` (a JSON `{ path }`: register
+//! that folder, or find it registered; answers the project),
+//! `POST /host/holds` and `DELETE /host/holds` (a JSON `{ device, project }`;
+//! each answers the project's view), and `POST /host/shutdown` (the host
+//! stops, its daemons with it).
 //!
 //! Every route needs the host token (`Authorization: Bearer`). It is read from
 //! stdin at start, like the daemon's UI token. Device tokens and pairing
@@ -24,6 +27,8 @@ use crate::host::{Host, HostError, ProjectView};
 struct ApiState {
     host: Arc<Host>,
     token: Arc<str>,
+    /// Told when a client asks the host to stop; `serve` waits on it.
+    stop: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Serialize)]
@@ -34,20 +39,28 @@ struct Status {
 }
 
 #[derive(Deserialize)]
+struct AddProject {
+    path: std::path::PathBuf,
+}
+
+#[derive(Deserialize)]
 struct HoldRequest {
     device: String,
     project: String,
 }
 
-pub fn router(host: Arc<Host>, token: String) -> Router {
+/// `stop` is told when a client asks the host to stop (`POST /host/shutdown`).
+pub fn router(host: Arc<Host>, token: String, stop: Arc<tokio::sync::Notify>) -> Router {
     let state = ApiState {
         host,
         token: token.into(),
+        stop,
     };
     Router::new()
         .route("/host/status", get(status))
-        .route("/host/projects", get(projects))
+        .route("/host/projects", get(projects).post(add_project))
         .route("/host/holds", axum::routing::post(hold).delete(release))
+        .route("/host/shutdown", axum::routing::post(shutdown))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_token,
@@ -92,6 +105,23 @@ async fn projects(State(s): State<ApiState>) -> Json<Vec<ProjectView>> {
     Json(s.host.projects())
 }
 
+async fn add_project(State(s): State<ApiState>, Json(req): Json<AddProject>) -> Response {
+    match s.host.registry().add(&req.path) {
+        Ok(project) => Json(project).into_response(),
+        Err(
+            e @ (crate::registry::RegistryError::NotAProject(_)
+            | crate::registry::RegistryError::Unreadable(..)),
+        ) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn shutdown(State(s): State<ApiState>) -> StatusCode {
+    tracing::info!("a client asked the host to stop");
+    s.stop.notify_one();
+    StatusCode::ACCEPTED
+}
+
 async fn hold(State(s): State<ApiState>, Json(req): Json<HoldRequest>) -> Response {
     answer(s.host.add_hold(&req.device, &req.project))
 }
@@ -122,7 +152,7 @@ mod tests {
     async fn serve(fx: &Fixture) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let app = router(fx.host.clone(), TOKEN.to_string());
+        let app = router(fx.host.clone(), TOKEN.to_string(), Default::default());
         tokio::spawn(async move { axum::serve(listener, app).await });
         url
     }
@@ -137,6 +167,8 @@ mod tests {
             (reqwest::Method::GET, "/host/projects"),
             (reqwest::Method::POST, "/host/holds"),
             (reqwest::Method::DELETE, "/host/holds"),
+            (reqwest::Method::POST, "/host/projects"),
+            (reqwest::Method::POST, "/host/shutdown"),
         ] {
             let bare = http
                 .request(method.clone(), format!("{url}{path}"))
@@ -239,6 +271,75 @@ mod tests {
         assert_eq!(released.status(), 200);
         let released: serde_json::Value = released.json().await.unwrap();
         assert_eq!(released["holds"], 0);
+    }
+
+    /// The Mac app opens a folder by its path: the host registers it (or
+    /// finds it registered) and answers its id.
+    #[tokio::test]
+    async fn a_project_is_registered_by_its_path() {
+        let fx = Fixture::new(RUNS);
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        let dir = fx.dir.path().join("beta");
+        std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
+        let add = || {
+            http.post(format!("{url}/host/projects"))
+                .bearer_auth(TOKEN)
+                .json(&json!({ "path": dir }))
+                .send()
+        };
+        let first: serde_json::Value = add().await.unwrap().json().await.unwrap();
+        assert_eq!(first["name"], "beta");
+        assert!(first["id"].as_str().unwrap().starts_with("prj-"), "{first}");
+        let again: serde_json::Value = add().await.unwrap().json().await.unwrap();
+        assert_eq!(
+            again["id"], first["id"],
+            "the same folder is the same project"
+        );
+
+        let plain = fx.dir.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let refused = http
+            .post(format!("{url}/host/projects"))
+            .bearer_auth(TOKEN)
+            .json(&json!({ "path": plain }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 400);
+        assert!(refused
+            .text()
+            .await
+            .unwrap()
+            .contains("not an oxplow project"));
+    }
+
+    /// A client ends a headless host this way.
+    #[tokio::test]
+    async fn shutdown_asks_the_host_to_stop() {
+        let fx = Fixture::new(RUNS);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(tokio::sync::Notify::new());
+        let app = router(fx.host.clone(), TOKEN.to_string(), stop.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        let http = reqwest::Client::new();
+        let bare = http
+            .post(format!("{url}/host/shutdown"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bare.status(), 401);
+        let asked = http
+            .post(format!("{url}/host/shutdown"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(asked.status(), 202);
+        tokio::time::timeout(std::time::Duration::from_secs(1), stop.notified())
+            .await
+            .expect("the stop was asked for");
     }
 
     #[tokio::test]

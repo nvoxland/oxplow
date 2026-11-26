@@ -21,6 +21,7 @@ oxplow-config = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-tauri-ipc = { workspace = true }
+oxplow-host = { workspace = true }
 oxplow-mcp = { workspace = true }
 oxplow-control-plane = { workspace = true }
 tauri = { workspace = true, features = ["custom-protocol"] }

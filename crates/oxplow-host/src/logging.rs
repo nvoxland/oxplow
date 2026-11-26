@@ -19,7 +19,9 @@ pub fn init(config_dir: &Path) {
     let file_error = file.as_ref().err().map(ToString::to_string);
     tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer())
+        // Stderr, never stdout: stdout carries the `listening on` line the
+        // app reads.
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(file.ok().map(|f| {
             tracing_subscriber::fmt::layer()
                 .with_ansi(false)
