@@ -4,8 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MENU_MAX_HEIGHT,
   clampMenuPosition,
-  submenuLeft,
-  submenuTopOffset,
+  submenuPlace,
 } from "./contextMenuPosition.js";
 
 import type { MenuItem, MenuPosition } from "../menu.js";
@@ -194,8 +193,9 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
  * Nested submenu, placed on the window beside its item (`anchor`): the
  * list it opens from scrolls in place, and a submenu laid out inside it
  * would be clipped by it. It measures itself and shifts up when it would
- * run off the bottom (as the outer ContextMenu does), and opens to the
- * item's left when there's no room on its right.
+ * run off the bottom (as the outer ContextMenu does), opens to the
+ * item's left when there's no room on its right, and below (or above)
+ * the item when there's no room at either side.
  */
 function Submenu({
   anchor,
@@ -219,9 +219,7 @@ function Submenu({
     if (!node || !anchor) return;
     const at = anchor.getBoundingClientRect();
     const own = node.getBoundingClientRect();
-    const left = submenuLeft(at, own.width, window.innerWidth);
-    const top = at.top + submenuTopOffset({ top: at.top, height: own.height }, window.innerHeight);
-    setPlace({ left, top });
+    setPlace(submenuPlace(at, own, { width: window.innerWidth, height: window.innerHeight }));
   }, [anchor, items, minWidth]);
 
   return (

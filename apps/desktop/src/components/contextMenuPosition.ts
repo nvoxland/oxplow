@@ -76,3 +76,31 @@ export function submenuLeft(
   if (left >= 0) return left;
   return Math.max(margin, viewportWidth - width - margin);
 }
+
+/**
+ * Where a submenu goes. Beside its item when it fits on either side; else
+ * (a narrow screen) below the item, or above it when below has less room,
+ * so the item stays visible and tappable.
+ */
+export function submenuPlace(
+  anchor: { left: number; right: number; top: number; bottom: number },
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  margin = MENU_MARGIN,
+): { left: number; top: number } {
+  const fitsRight = anchor.right + SUBMENU_GAP + size.width <= viewport.width;
+  const fitsLeft = anchor.left - size.width - SUBMENU_GAP >= 0;
+  if (fitsRight || fitsLeft) {
+    return {
+      left: submenuLeft(anchor, size.width, viewport.width, margin),
+      top: anchor.top + submenuTopOffset({ top: anchor.top, height: size.height }, viewport.height, margin),
+    };
+  }
+  const left = Math.max(margin, Math.min(anchor.left, viewport.width - size.width - margin));
+  const below = viewport.height - margin - (anchor.bottom + SUBMENU_GAP);
+  const above = anchor.top - SUBMENU_GAP - margin;
+  if (size.height <= below || below >= above) {
+    return { left, top: anchor.bottom + SUBMENU_GAP };
+  }
+  return { left, top: Math.max(margin, anchor.top - SUBMENU_GAP - size.height) };
+}

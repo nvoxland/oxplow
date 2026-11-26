@@ -479,7 +479,9 @@ markdown itself, nor edits it in a `<textarea>`.
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
   same tail, the commands about that thread. A submenu opens on hover
-  and on click; a click never closes the one its hover opened. Each runs as any offer does (asking first
+  and on click; a click never closes the one its hover opened. A submenu opens
+  beside its item, else (a narrow screen) below it or above it, never over
+  the item (`submenuPlace`). Each runs as any offer does (asking first
   when the command asks). Testids: a row menu's group
   `menu-item-ref-commands-<group>`, the ☰'s submenu of an action's
   `submenu` `menu-item-page-submenu-<name>`, a command in the ☰ (top
