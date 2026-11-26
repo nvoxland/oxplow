@@ -9,7 +9,7 @@ import { useMemo } from "react";
 import { isDefault, OptionsSourceContext, ParamList } from "../kit/ParamControls.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageTree } from "./PageTree.js";
 import { pageOptionsSource, usePageReads } from "./pageReads.js";
 import { RailSelection, type PickedRow } from "./railGroups.js";
@@ -38,6 +38,17 @@ export function switchSections(run: PageRun): { param: string; sections: { id: s
   };
 }
 
+/** The params the page's switches pick their child by, wherever they are. */
+export function switchParams(node: Node): Set<string> {
+  const out = new Set<string>();
+  const walk = (n: Node) => {
+    if (n.kind === "switch") out.add(n.param);
+    if (n.kind === "stack" || n.kind === "grid" || n.kind === "switch") n.children.forEach(walk);
+  };
+  walk(node);
+  return out;
+}
+
 /** Whether the page's `rail:` tree draws at the rail's bottom: a form (a
  *  quick add) is something to do, not what the page is about, so it comes
  *  after the filters and the links; any other tree leads the rail. */
@@ -61,10 +72,12 @@ export function PageRailTree({ run, runId, onApply, streamId = null, onOpenPage 
 
 export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = null, onOpenPage }: PageRailProps) {
   // A resource param is what the page is, a selection what a row picked:
-  // neither is an input. A switch's param is its sections, drawn as links.
-  // No role is a resource, as the server reads it.
+  // neither is an input. A switch's param is never one either: the page's
+  // own switch is its sections, drawn as links here; one inside the body is
+  // tabs there. No role is a resource, as the server reads it.
   const sw = switchSections(run);
-  const filters = run.page.params.filter((p) => p.role === "filter" && p.name !== sw?.param);
+  const switched = switchParams(run.page.view);
+  const filters = run.page.params.filter((p) => p.role === "filter" && !switched.has(p.name));
   // A filter's `options_from` is resolved by the daemon for this page.
   const reads = usePageReads();
   const options = useMemo(() => pageOptionsSource(reads), [reads]);

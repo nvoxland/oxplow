@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageRail } from "./PageRail.js";
-import { fakePage, fakeRun, loader, node } from "./testing/fakeRun.js";
+import { fakePage, fakeRun, loader, node, tabsPage } from "./testing/fakeRun.js";
 import { PageReadsContext, type PageReads } from "./pageReads.js";
 import type { SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
@@ -40,6 +40,12 @@ test("a page whose only non-resource param is a view param has no Filters group"
   expect(queryByTestId("page-param-mode")).toBeNull();
   expect(queryByTestId("action-page-rail-reset")).toBeNull();
   expect(queryByText("Filters")).toBeNull();
+});
+
+test("a switch's param is never a filter: a nested switch's picker is its tabs", () => {
+  const { queryByTestId } = render(<PageRail run={tabsPage("list")} runId="run-t" onApply={() => {}} />);
+  expect(queryByTestId("page-param-mode")).toBeNull();
+  expect(queryByTestId("page-sections")).toBeNull();
 });
 
 test("changing a filter applies it", () => {

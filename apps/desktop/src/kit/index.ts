@@ -21,6 +21,7 @@ export { Loading, LoadingScreen } from "./Loading.js";
 export { useSearchFilter, type SearchFilterOptions } from "./SearchFilter.js";
 export { Section, type SectionProps } from "./Section.js";
 export { Stat } from "./Stat.js";
+export { Tabs, type TabsProps } from "./Tabs.js";
 export { Tile, TileGrid, TileSlot, type TileSize } from "./Tiles.js";
 export { Toolbar, type ToolbarFilter } from "./Toolbar.js";
 export { useListNav } from "./useListNav.js";

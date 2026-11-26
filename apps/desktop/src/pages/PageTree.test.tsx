@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 
 import { PageTree, NodeRegistryContext, createNodeRegistry, useNodeFocus, type NodeRegistry } from "./PageTree.js";
 import { PageActionContext, type RunPageAction } from "./useNodeActions.js";
-import { fakeAction, fakePage, fakeRun, gridPage, loader, node, stackPage, switchPage, tablePage } from "./testing/fakeRun.js";
+import { fakeAction, fakePage, fakeRun, gridPage, loader, node, stackPage, switchPage, tablePage, tabsPage } from "./testing/fakeRun.js";
 import type { PageRun } from "../tauri-bridge/generated/bindings.js";
 
 afterEach(cleanup);
@@ -52,6 +52,30 @@ test("a switch draws only the child the server put in view", () => {
   cleanup();
   const board = render(<PageTree run={switchPage("board")} runId="run-1" />);
   expect(nodeIds(board.container)).toEqual(["modes", "board"]);
+});
+
+test("a switch inside the page's body draws its children as tabs; a tab sets the switch's param", () => {
+  const set: [string, unknown][] = [];
+  const { getByRole, getAllByRole, container } = render(<PageTree run={tabsPage("board")} runId="run-1" onSetParam={(n, v) => set.push([n, v])} />);
+  const tabs = getAllByRole("tab");
+  expect(tabs.map((t) => t.textContent)).toEqual(["List", "Board"]);
+  expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["false", "true"]);
+  expect(getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(tabs[1]!.id);
+  expect(nodeIds(container)).toEqual(["body", "intro", "modes", "board"]);
+  fireEvent.click(tabs[0]!);
+  expect(set).toEqual([["mode", "list"]]);
+  // The arrows move to the next and previous tab, and wrap.
+  fireEvent.keyDown(tabs[1]!, { key: "ArrowRight" });
+  fireEvent.keyDown(tabs[1]!, { key: "ArrowLeft" });
+  expect(set).toEqual([["mode", "list"], ["mode", "list"], ["mode", "list"]]);
+  // The one in view is clicked again: nothing changes.
+  fireEvent.click(tabs[1]!);
+  expect(set.length).toBe(3);
+});
+
+test("a switch that is the page's view draws no tabs: the rail lists its sections", () => {
+  const { queryByRole } = render(<PageTree run={switchPage("list")} runId="run-1" onSetParam={() => {}} />);
+  expect(queryByRole("tablist")).toBeNull();
 });
 
 test("a grid's children are tiles at their size; a failed loader says why in its tile", () => {
