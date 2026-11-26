@@ -54,6 +54,11 @@ impl SocketLease {
         })
     }
 
+    /// The person used this page load now.
+    pub fn used(&self) {
+        self.services.client_devices.used(&self.device);
+    }
+
     /// Resolves once another page load of the device takes over: the socket
     /// then closes, saying it was replaced.
     pub async fn replaced(&self) {

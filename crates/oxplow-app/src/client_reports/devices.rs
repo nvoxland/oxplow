@@ -32,6 +32,9 @@ struct Inner {
     latest: HashMap<DeviceId, ConnectionId>,
     /// The last socket handed out; each socket gets the next.
     sockets: u64,
+    /// When each device was last used in this project (the page says so,
+    /// at most once a second, while the person works).
+    used: HashMap<DeviceId, std::time::Instant>,
 }
 
 struct Entry {
@@ -147,6 +150,24 @@ impl ClientDevices {
             _ => None,
         };
         Ok(Opened { socket, replaced })
+    }
+
+    /// The person used `device` now.
+    pub fn used(&self, device: &DeviceId) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.used.insert(device.clone(), std::time::Instant::now());
+    }
+
+    /// The connected page load the person used last in this project (its
+    /// device and connection): the device with the newest use, else, with
+    /// no use told yet (just after a start), the newest connection.
+    pub fn last_used(&self) -> Option<(DeviceId, ConnectionId)> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner
+            .devices
+            .iter()
+            .max_by_key(|(id, e)| (inner.used.get(*id).copied(), e.socket.id.0))
+            .map(|(id, e)| (id.clone(), e.connection.clone()))
     }
 
     /// Whether `connection` may still ask: a replaced page load may not.
@@ -285,6 +306,27 @@ mod tests {
         // The same page load reconnecting is still itself.
         assert!(devices.closed(&tab.id, &new, second.socket.id()));
         assert_eq!(devices.connected(tab, new).unwrap().replaced, None);
+    }
+
+    /// The page load used last is the device the person used last; before
+    /// any use is told, the newest connection.
+    #[test]
+    fn the_last_used_page_load_is_the_one_the_person_used_last() {
+        let devices = ClientDevices::default();
+        let (mac, tab) = (device("Mac"), device("Tab S9"));
+        let (on_mac, on_tab) = (ConnectionId::generate(), ConnectionId::generate());
+        devices.connected(mac.clone(), on_mac.clone()).unwrap();
+        devices.connected(tab.clone(), on_tab.clone()).unwrap();
+        assert_eq!(
+            devices.last_used(),
+            Some((tab.id.clone(), on_tab.clone())),
+            "the newest connection"
+        );
+        devices.used(&mac.id);
+        assert_eq!(devices.last_used(), Some((mac.id.clone(), on_mac)));
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        devices.used(&tab.id);
+        assert_eq!(devices.last_used(), Some((tab.id.clone(), on_tab)));
     }
 
     #[test]

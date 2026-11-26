@@ -308,6 +308,10 @@ async fn events_ws(
 /// hears nothing for longer than a few beats reconnects.
 const BEAT_FRAME: &str = r#"{"channel":"beat"}"#;
 
+/// The frame a page sends while the person uses it (at most once a second):
+/// its device is the one used last (`ClientDevices::last_used`).
+const USED_FRAME: &str = r#"{"channel":"used"}"#;
+
 /// The close frame that tells a page its page load was replaced.
 fn replaced_close() -> Message {
     Message::Close(Some(axum::extract::ws::CloseFrame {
@@ -465,6 +469,11 @@ async fn events_stream(
                 // Inbound traffic is terminal input, ping and close —
                 // commands go over /ipc. None/Close ends the stream.
                 Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(Message::Text(text))) if text.as_str() == USED_FRAME => {
+                    if let Some(owner) = &owner {
+                        owner.used();
+                    }
+                }
                 Some(Ok(Message::Text(text))) => terminal_frame(&services, &text),
                 Some(Ok(Message::Pong(_))) => last_pong = tokio::time::Instant::now(),
                 Some(Ok(_)) => continue,
@@ -1282,6 +1291,44 @@ mod tests {
         .expect("the disconnected window's runs are released");
         assert!(svc.page_runs.get(&second.run_id).is_some());
         two.close(None).await.unwrap();
+    }
+
+    /// A page that says it is in use makes its device the one used last.
+    #[tokio::test]
+    async fn a_page_in_use_is_the_device_used_last() {
+        use futures::SinkExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const MAC: &str = "con-11111111-1111-4111-8111-111111111111";
+        const TAB: &str = "con-22222222-2222-4222-8222-222222222222";
+        const TABLET: &str = "dev-2b4e28ba-2fa1-11d2-883f-0016d3cca427";
+        let url = |device, connection| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&device={device}&connection={connection}&name=x&kind=desktop",
+                daemon.bind_addr
+            )
+        };
+        let (mut mac, _) = tokio_tungstenite::connect_async(url(DEVICE, MAC))
+            .await
+            .unwrap();
+        let (_tab, _) = tokio_tungstenite::connect_async(url(TABLET, TAB))
+            .await
+            .unwrap();
+        mac.send(tokio_tungstenite::tungstenite::Message::Text(
+            USED_FRAME.into(),
+        ))
+        .await
+        .unwrap();
+        let mac_device = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while svc.client_devices.last_used().map(|(d, _)| d) != Some(mac_device.clone()) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the Mac, used, is the device used last");
     }
 
     /// A page that answers no ping is gone: its socket closes and its device

@@ -374,6 +374,16 @@ keeps a watchdog fed by every frame (`createWatchdog` in `transport.ts`,
 reconnects as a drop does. The 2-second `/ipc/ping` probe still drives the
 daemon-down dialog and the resync after an HTTP-level outage.
 
+### Last used
+
+While the person uses a window (a press or a key, terminal input included),
+it sends `{"channel":"used"}` on its event socket, at most once a second
+(`window/useReportUse.ts`, in `WindowProviders`). The daemon keeps each
+device's last use in memory (`ClientDevices::used`) and answers which
+connected page load was used last (`ClientDevices::last_used`; before any use
+is told, the newest connection): "last used in this project", where a call
+that no device asked for goes.
+
 ### One window per device
 
 A device keeps one page load per project: per-device state (its stream,

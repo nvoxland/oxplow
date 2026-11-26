@@ -614,6 +614,13 @@ export function sendSocketFrame(frame: string): void {
   writeFrame(socket, waitingFrames, frame);
 }
 
+/// The person used this window now (a press, a key): an agent's call with no
+/// device of its own goes to the device used last. Sent on the open socket
+/// only; one lost to a drop matters not, the next use tells it again.
+export function reportUse(): void {
+  if (socket?.readyState === 1) socket.send('{"channel":"used"}');
+}
+
 /// Where a `listen(channel)` subscription routes: the daemon
 /// WebSocket ("ws"), the local Tauri event bus ("tauri"), or nowhere
 /// ("none" — a shell-local channel in a plain-browser session, where

@@ -6,6 +6,7 @@ import { PanelRunsProvider } from "../components/Panels/PanelRunsContext.js";
 import { ReplacedScreen } from "../components/ReplacedScreen.js";
 import { LiveOriginResolver } from "../tabs/liveOrigin.js";
 import { current as currentEntry, type OriginItem, type Session } from "../tabs/session.js";
+import { useReportUse } from "./useReportUse.js";
 
 export interface WindowProvidersProps {
   streamId: string | null;
@@ -26,6 +27,8 @@ export interface WindowProvidersProps {
  *  a toast as each new thing needs the person, and the screen that says
  *  another page load of this device took over. */
 export function WindowProviders({ streamId, threadId, session, onLiveItems, onReviewAlerts, children }: WindowProvidersProps) {
+  // The daemon sends an agent's call to the device used last.
+  useReportUse();
   return (
     <PanelRunsProvider streamId={streamId} threadId={threadId}>
       <PanelLayoutProvider streamId={streamId} threadId={threadId}>
