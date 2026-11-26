@@ -5,7 +5,7 @@
 the holds devices have on them, and it runs one `oxplow-daemon` per held
 project. Built so far: the core, routing, the served UI, the Mac app's own
 host, HTTPS, pairing, the Mac app's Devices window, and the app using a host on
-another machine. Not built yet: `/host/events`.
+another machine.
 
 There are two kinds of host, and no host ever stops because nothing is held
 or nobody is connected:
@@ -60,7 +60,11 @@ or nobody is connected:
   404 for an unknown project, 400 for no device), `POST /host/shutdown` (202;
   the host stops, its daemons with it), `POST /host/pairing`, `POST
   /host/pair`, `GET /host/devices`, `PATCH|DELETE /host/devices/<id>`, `GET
-  /host/me` and `DELETE /host/me`. A body is read after the caller is known, so
+  /host/me`, `DELETE /host/me`, and the socket `GET /host/events` (`?token=`;
+  the projects, as `GET /host/projects` answers them for this caller, when it
+  opens and after each change of a hold or a daemon's state, `Host::watch`; a
+  ping every 20 s; a device's socket counts as connected and closes with
+  4003 or 4002 like a project's). A body is read after the caller is known, so
   a missing token is a 401 whatever the body.
 - **The owner token** comes from stdin (`--token-stdin`, as the daemon's does)
   or is generated and printed.
@@ -312,4 +316,5 @@ Tauri's asset protocol).
 
 ## Later steps
 
-`/host/events` (project states, for the tablet shell).
+The tablet shell's project switcher reads `/host/events` (built; nothing
+reads it yet, and HostHome still polls while a project starts).

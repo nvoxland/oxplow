@@ -106,6 +106,8 @@ pub struct Host {
     supervisor: Arc<DaemonSupervisor>,
     inner: Mutex<Inner>,
     queue: Sender<String>,
+    /// Moves at each change of a hold or a daemon's state (`watch`).
+    changes: tokio::sync::watch::Sender<u64>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -144,6 +146,7 @@ impl Host {
                 runtime: HashMap::new(),
             }),
             queue,
+            changes: tokio::sync::watch::channel(0).0,
         });
         // The worker owns no strong reference: the host drops when its owner
         // does, which closes the queue and ends the thread.
@@ -191,6 +194,16 @@ impl Host {
         }
     }
 
+    /// A count that moves at each change of a hold or of a daemon's state:
+    /// what `/host/events` sends a new list on.
+    pub fn watch(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    fn changed(&self) {
+        self.changes.send_modify(|n| *n += 1);
+    }
+
     pub fn holds(&self) -> Vec<Hold> {
         self.lock().holds.iter().cloned().collect()
     }
@@ -223,6 +236,7 @@ impl Host {
         }
         let out = view(&inner, known);
         drop(inner);
+        self.changed();
         self.enqueue(project);
         Ok(out)
     }
@@ -253,6 +267,7 @@ impl Host {
             (None, None) => unreachable!("checked above"),
         };
         drop(inner);
+        self.changed();
         self.enqueue(project);
         Ok(out)
     }
@@ -274,6 +289,8 @@ impl Host {
                 code: status.code(),
                 message: None,
             };
+            drop(inner);
+            self.changed();
         }
     }
 
@@ -284,6 +301,8 @@ impl Host {
         for rt in inner.runtime.values_mut() {
             rt.state = DaemonState::Stopped;
         }
+        drop(inner);
+        self.changed();
     }
 
     /// Start what the holds file says is held.
@@ -345,6 +364,8 @@ impl Host {
                     _ => Step::Done,
                 }
             };
+            // The step above may have moved the state (Starting, Stopping).
+            self.changed();
             match step {
                 Step::Done => return,
                 Step::Start(path) => {
@@ -368,6 +389,8 @@ impl Host {
                             }
                         }
                     }
+                    drop(inner);
+                    self.changed();
                 }
                 Step::Stop(path) => {
                     self.supervisor.stop(&path);
@@ -375,6 +398,7 @@ impl Host {
                     if let Some(rt) = self.lock().runtime.get_mut(id) {
                         rt.state = DaemonState::Stopped;
                     }
+                    self.changed();
                 }
             }
         }
@@ -550,6 +574,25 @@ pub(crate) mod tests {
             "{message}"
         );
         assert_eq!(fx.host.supervisor.running_count(), 0);
+    }
+
+    /// Each change of a hold or a daemon's state moves the host's change
+    /// count, which `/host/events` watches.
+    #[test]
+    fn a_hold_and_each_state_it_brings_are_changes() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let changes = fx.host.watch();
+        let seen = *changes.borrow();
+        fx.host.add_hold("dev-a", &id).unwrap();
+        let held = *changes.borrow();
+        assert!(held > seen, "the hold");
+        fx.wait_for(&id, running);
+        assert!(*changes.borrow() > held, "running");
+        let before = *changes.borrow();
+        fx.host.release_hold("dev-a", &id).unwrap();
+        fx.wait_for(&id, |s| *s == DaemonState::Stopped);
+        assert!(*changes.borrow() >= before + 2, "the release and the stop");
     }
 
     #[test]

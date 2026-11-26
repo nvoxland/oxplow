@@ -10,6 +10,8 @@
 //!   project }` (a device's hold is always its own), `GET /host/me` (who the
 //!   caller is, and the served UI's build), `DELETE /host/me` (a device
 //!   forgets itself);
+//! - owner or device, as a socket: `GET /host/events` (the projects, sent
+//!   again at each change);
 //! - anyone who reaches the host: `POST /host/pair` `{ code, name, kind }`
 //!   answers `{ device, token }`. It must be JSON (so a page elsewhere
 //!   cannot send it without a preflight, and no route here answers one) and
@@ -132,6 +134,7 @@ pub fn router(cfg: ApiConfig) -> Router {
             patch(rename_device).delete(remove_device),
         )
         .route("/host/me", get(me).delete(forget_me))
+        .route("/host/events", get(events))
         .with_state(state)
 }
 
@@ -216,23 +219,120 @@ struct ProjectForCaller {
 
 async fn projects(State(s): State<ApiState>, headers: HeaderMap) -> Response {
     let who = check!(caller(&s, &headers));
-    let holds = s.host.holds();
+    Json(projects_for(&s.host, &who)).into_response()
+}
+
+/// The projects as `who` sees them (`held_by_you` for a device).
+fn projects_for(host: &Host, who: &Caller) -> Vec<ProjectForCaller> {
+    let holds = host.holds();
     let mine = |project: &str| match &who {
         Caller::Owner => false,
         Caller::Device(d) => holds
             .iter()
             .any(|h| h.project == project && h.device == d.id.as_str()),
     };
-    let projects: Vec<ProjectForCaller> = s
-        .host
-        .projects()
+    host.projects()
         .into_iter()
         .map(|view| ProjectForCaller {
             held_by_you: mine(&view.id),
             view,
         })
-        .collect();
-    Json(projects).into_response()
+        .collect()
+}
+
+/// `GET /host/events`: a socket that sends `{ "type": "projects", "projects":
+/// […] }` (as `GET /host/projects` answers it, for this caller) when it opens
+/// and after each change of a hold or a daemon's state, and pings every 20
+/// s. The token rides the query (`?token=`), as a browser cannot set a
+/// socket's headers. A device's socket counts as connected and closes with
+/// its removal (4003) or the host's end (4002), as a project's socket does.
+async fn events(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> Response {
+    let token = query.as_deref().and_then(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .find(|(k, _)| k == "token")
+            .map(|(_, v)| v.into_owned())
+    });
+    let Some(who) = s
+        .access
+        .caller(s.listener, bearer(&headers).or(token.as_deref()))
+    else {
+        return unauthorized();
+    };
+    let lease = match &who {
+        Caller::Device(d) => Some(s.access.open_tunnel(Connected {
+            device: d.id.to_string(),
+            name: d.name.clone(),
+            kind: Some(d.kind),
+        })),
+        Caller::Owner => None,
+    };
+    ws.on_upgrade(move |socket| send_events(socket, s.host, who, lease))
+}
+
+async fn send_events(
+    mut socket: axum::extract::ws::WebSocket,
+    host: Arc<Host>,
+    who: Caller,
+    lease: Option<crate::access::TunnelLease>,
+) {
+    use axum::extract::ws::{CloseFrame, Message};
+    let mut changes = host.watch();
+    let mut closed = lease.as_ref().map(|l| l.closed.clone());
+    let mut ping = tokio::time::interval(std::time::Duration::from_secs(20));
+    ping.tick().await;
+    loop {
+        let list = serde_json::json!({ "type": "projects", "projects": projects_for(&host, &who) });
+        if socket
+            .send(Message::Text(list.to_string().into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        loop {
+            tokio::select! {
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    break;
+                }
+                code = async {
+                    match closed.as_mut() {
+                        Some(rx) => loop {
+                            if let Some(code) = *rx.borrow_and_update() {
+                                return code;
+                            }
+                            if rx.changed().await.is_err() {
+                                return std::future::pending::<u16>().await;
+                            }
+                        },
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let _ = socket
+                        .send(Message::Close(Some(CloseFrame { code, reason: "closed by the host".into() })))
+                        .await;
+                    return;
+                }
+                _ = ping.tick() => {
+                    if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        return;
+                    }
+                }
+                frame = socket.recv() => {
+                    if matches!(frame, None | Some(Err(_)) | Some(Ok(Message::Close(_)))) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
 }
 
 async fn add_project(
@@ -788,6 +888,63 @@ mod tests {
         assert!(
             took < std::time::Duration::from_millis(390),
             "two wrong codes wait side by side, not in turn: {took:?}"
+        );
+    }
+
+    /// The next text frame's JSON.
+    async fn next_text<S, E>(socket: &mut S) -> serde_json::Value
+    where
+        S: futures::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, E>> + Unpin,
+        E: std::fmt::Debug,
+    {
+        use futures::StreamExt;
+        loop {
+            if let tokio_tungstenite::tungstenite::Message::Text(t) =
+                socket.next().await.unwrap().unwrap()
+            {
+                return serde_json::from_str(&t).unwrap();
+            }
+        }
+    }
+
+    /// The events socket sends the projects when it opens and again at a
+    /// change; it needs a token like every other route.
+    #[tokio::test]
+    async fn the_events_socket_sends_the_projects_at_each_change() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let api = api(&fx).await;
+        let ws = |token: &str| {
+            format!(
+                "{}/host/events?token={token}",
+                api.url.replacen("http", "ws", 1)
+            )
+        };
+        assert!(tokio_tungstenite::connect_async(ws("nope")).await.is_err());
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws(TOKEN)).await.unwrap();
+        let first = next_text(&mut socket).await;
+        assert_eq!(first["type"], "projects");
+        assert_eq!(first["projects"][0]["id"], id);
+        assert_eq!(first["projects"][0]["state"], "stopped");
+        fx.host.add_hold("dev-a", &id).unwrap();
+        let mut states = Vec::new();
+        for _ in 0..5 {
+            let list = next_text(&mut socket).await;
+            let state = list["projects"][0]["state"].as_str().unwrap().to_string();
+            states.push(state.clone());
+            if state == "running" {
+                break;
+            }
+        }
+        assert_eq!(
+            states.first().map(String::as_str),
+            Some("starting"),
+            "{states:?}"
+        );
+        assert_eq!(
+            states.last().map(String::as_str),
+            Some("running"),
+            "{states:?}"
         );
     }
 
