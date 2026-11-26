@@ -56,6 +56,11 @@ impl SocketLease {
         })
     }
 
+    /// The page load this socket belongs to.
+    pub fn connection(&self) -> &oxplow_domain::ConnectionId {
+        &self.connection
+    }
+
     /// The person used this page load now.
     pub fn used(&self) {
         self.services.client_devices.used(&self.device);

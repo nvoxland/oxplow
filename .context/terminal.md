@@ -130,13 +130,23 @@ session (resuming its saved conversation). Leaving the tab never stops the
 process, and nothing is typed on restore. Shell terminals open at once.
 The deciding rule is `mayStartNow` in `terminalSession.ts`.
 
-**A reattach takes the pane's size.** `attach_or_create` resizes a live
-PTY to the cols/rows the attaching pane measured before it replays. The
-pane's first `ResizeObserver` callback fires before its session id is
-back, so it sends no resize; without this, an agent that outlived an app
-restart kept the old window's size and drew its input and status lines
-past the pane's bottom, on top of each other, until the window was
-resized. Locked by `reattaching_resizes_the_live_session_to_the_new_pane`.
+**The client that last typed owns the PTY's size.** A terminal is shared
+by every client, so its size is one thing, as tmux's `window-size latest`.
+Each `SessionEntry` keeps an `owner` (a page load, `ConnectionId`) and
+`asked`, the size each page load last asked for. An attach records the
+pane's size in `asked` and resizes the PTY only when there is no owner, the
+owner is the attacher, or the owner's page load is gone (the registry's
+liveness check, wired to `ClientDevices::is_live`); the attacher then
+owns it. A `resize` message is recorded, and applied under the same rule.
+Input from a page load that is not the owner makes it the owner and
+resizes the PTY to its `asked` size first. A `resize` with `"take": true`
+("Fit to this device") makes the sender the owner and applies at once. A
+request with no connection (a script, a test) always resizes. The socket
+frame's connection reaches the registry through `enqueue_input` and
+`send`. Every size change emits a `{"type":"size","cols","rows"}` bridge
+event, and `AttachResult` carries the PTY's `cols` and `rows`, so a pane
+that is not the owner can draw the owner's grid. Locked by the
+`TerminalSessionRegistry` ownership tests and the `two-clients` e2e spec.
 
 **A reattach replays a tail, not the whole ring.** The daemon keeps up to
 4 MB of a pane's output, but `open_terminal_session` answers with the last

@@ -1,7 +1,6 @@
 // One person on two clients of the same projects: what each client keeps of
 // its own, and what they share. A test that fails on today's code is marked
-// `test.fail()`: the mark comes off in the change that makes it pass
-// (the shared terminal's size rule).
+// `test.fail()`: the mark comes off in the change that makes it pass.
 import { ipc, run, settle, startDaemon } from "../../support/daemon.js";
 import { client, connectedTo, expect, test } from "../../support/fixtures.js";
 import { load, open, reload } from "../../support/ui.js";
@@ -60,7 +59,6 @@ test("the stream a client shows is that client's own", async ({ page, browser, b
 /// A shared terminal keeps the size of the client typing into it: another
 /// client opening it doesn't shrink it under the first one's feet.
 test("a terminal another client opens keeps the size of the client typing", async ({ page, browser, baseURL, daemon }) => {
-  test.fail(true, "every attach resizes the terminal to the attaching pane");
   await page.setViewportSize({ width: 1400, height: 900 });
   await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   const terminal = page.locator(".xterm");
@@ -77,6 +75,9 @@ test("a terminal another client opens keeps the size of the client typing", asyn
   // A narrow client opens the same terminal.
   const b = await client(browser, baseURL!, daemon, { width: 700, height: 600 });
   try {
+    // The command opens a page on the window used last: this one, now.
+    await load(b.page);
+    await b.page.mouse.click(5, 5);
     await open(b.page, daemon, "oxplow:oxplow/page?page=terminal");
     await expect(b.page.locator(".xterm")).toBeVisible();
 

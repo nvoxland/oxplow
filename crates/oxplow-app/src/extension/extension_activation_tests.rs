@@ -373,7 +373,7 @@ async fn shutdown_ends_the_terminals() {
     let (_dir, svc) = project().await;
     let session = svc
         .terminal_sessions
-        .attach_or_create("terminal|trm1".to_string(), 80, 24, |c, r| {
+        .attach_or_create("terminal|trm1".to_string(), None, 80, 24, |c, r| {
             oxplow_pty::SpawnRequest {
                 command: "sh".into(),
                 args: vec!["-c".into(), "trap '' HUP TERM; exec sleep 60".into()],

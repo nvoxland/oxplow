@@ -163,8 +163,12 @@ pub async fn open_terminal_session(
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
             return Ok(ctx
                 .terminal_sessions
-                .attach_or_create(terminal_key(id), cols.max(20), rows.max(5), |c, r| {
-                    SpawnRequest {
+                .attach_or_create(
+                    terminal_key(id),
+                    ctx.caller.map(|c| &c.connection),
+                    cols.max(20),
+                    rows.max(5),
+                    |c, r| SpawnRequest {
                         command: shell,
                         args: vec!["-l".into()],
                         cwd,
@@ -172,8 +176,8 @@ pub async fn open_terminal_session(
                         env_remove: oxplow_app::agent_path::not_inherited(&ctx.harnesses),
                         cols: c,
                         rows: r,
-                    }
-                })
+                    },
+                )
                 .await?);
         }
         // An agent session's pane. The session names its thread, the thread
@@ -181,7 +185,14 @@ pub async fn open_terminal_session(
         Target::AgentSession(id) => id,
     };
     let _launch = ctx.terminal_sessions.lock_agent_launch(session_id).await;
-    open_agent_terminal(ctx, session_id, cols, rows).await
+    open_agent_terminal(
+        ctx,
+        session_id,
+        ctx.caller.map(|c| &c.connection),
+        cols,
+        rows,
+    )
+    .await
 }
 
 /// Replace a terminal process without closing the agent session or
@@ -215,7 +226,7 @@ pub async fn restart_agent_terminal(ctx: &RpcRequest<'_>, uri: String) -> Result
         Ok(()) | Err(oxplow_app::terminal_sessions::TerminalSessionError::NotFound(_)) => {}
         Err(err) => return Err(err.into()),
     }
-    let result = open_agent_terminal(ctx, id, cols, rows).await;
+    let result = open_agent_terminal(ctx, id, None, cols, rows).await;
     terminals.report_restart(pty, result.as_ref().err().map(|err| err.message.as_str()));
     result.map(|_| ())
 }
@@ -223,6 +234,7 @@ pub async fn restart_agent_terminal(ctx: &RpcRequest<'_>, uri: String) -> Result
 async fn open_agent_terminal(
     ctx: &RpcContext,
     session_id: AgentSessionId,
+    connection: Option<&oxplow_domain::ConnectionId>,
     cols: u16,
     rows: u16,
 ) -> Result<AttachResult, IpcError> {
@@ -230,7 +242,7 @@ async fn open_agent_terminal(
     // back to its stream shouldn't wait on the database to work that out.
     if let Some(attached) = ctx
         .terminal_sessions
-        .reattach(&agent_pane_key(session_id), cols, rows)
+        .reattach(&agent_pane_key(session_id), connection, cols, rows)
         .await?
     {
         return Ok(attached);
@@ -346,6 +358,7 @@ async fn open_agent_terminal(
                     transcript_missing: launch.transcript_missing,
                 },
             }),
+            connection,
             cols.max(20),
             rows.max(5),
             |c, r| SpawnRequest {
@@ -436,8 +449,14 @@ pub(crate) async fn launch_session(
 /// in oxplow may synthesize `{type:"input"}` here to "type at" the agent.
 /// See the no-automation invariant in `.context/agent-model.md`. Message
 /// shapes live in `oxplow_app::terminal_sessions`.
-pub fn terminal_input(svc: &Services, uri: String, message: String) -> Result<(), IpcError> {
-    svc.terminal_sessions.enqueue_input(key_of(&uri)?, message);
+pub fn terminal_input(
+    svc: &Services,
+    connection: Option<oxplow_domain::ConnectionId>,
+    uri: String,
+    message: String,
+) -> Result<(), IpcError> {
+    svc.terminal_sessions
+        .enqueue_input(key_of(&uri)?, connection, message);
     Ok(())
 }
 
@@ -1091,6 +1110,7 @@ mod tests {
         let (ctx, _dir) = services().await;
         let err = super::terminal_input(
             &ctx.services,
+            None,
             "oxplow:oxplow/thread?id=thr1".into(),
             r#"{"type":"input","bytes":"eA=="}"#.into(),
         )

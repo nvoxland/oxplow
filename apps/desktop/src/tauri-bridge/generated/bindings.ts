@@ -1123,6 +1123,12 @@ export type Atomicity = "tx" | "external" | "dispatch";
 export type AttachResult = {
 	sessionId: string,
 	replayB64: string,
+	/**
+	 *  The PTY's size now: the owner's, which a pane that is not the
+	 *  owner can draw.
+	 */
+	cols: number,
+	rows: number,
 };
 
 export type BackgroundTask = {

@@ -496,7 +496,7 @@ async fn events_stream(
                         owner.used();
                     }
                 }
-                Some(Ok(Message::Text(text))) => terminal_frame(&services, &text),
+                Some(Ok(Message::Text(text))) => terminal_frame(&services, owner.as_ref(), &text),
                 Some(Ok(Message::Pong(_))) => last_pong = tokio::time::Instant::now(),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) => break,
@@ -511,7 +511,11 @@ async fn events_stream(
 /// One terminal-input frame from the window: its message queued for the
 /// terminal's PTY, before the next frame is read. A frame that isn't one,
 /// or names no terminal, is logged and dropped.
-fn terminal_frame(services: &oxplow_app::Services, text: &str) {
+fn terminal_frame(
+    services: &oxplow_app::Services,
+    owner: Option<&oxplow_app::client_reports::SocketLease>,
+    text: &str,
+) {
     #[derive(serde::Deserialize)]
     struct Frame {
         channel: String,
@@ -521,9 +525,13 @@ fn terminal_frame(services: &oxplow_app::Services, text: &str) {
     let [_, _, terminal] = ws_frame_keys();
     match serde_json::from_str::<Frame>(text) {
         Ok(f) if f.channel == terminal => {
-            if let Err(e) =
-                oxplow_rpc::commands::terminal::terminal_input(services, f.uri.clone(), f.message)
-            {
+            let connection = owner.map(|lease| lease.connection().clone());
+            if let Err(e) = oxplow_rpc::commands::terminal::terminal_input(
+                services,
+                connection,
+                f.uri.clone(),
+                f.message,
+            ) {
                 tracing::warn!(uri = %f.uri, error = %e, "terminal input refused");
             }
         }
@@ -1711,7 +1719,7 @@ mod tests {
         let capture = dir.path().join("typed.txt");
         let command = format!("cat > '{}'", capture.display());
         svc.terminal_sessions
-            .attach_or_create(uri.clone(), 80, 24, |cols, rows| {
+            .attach_or_create(uri.clone(), None, 80, 24, |cols, rows| {
                 oxplow_app::terminal_sessions::SpawnRequest {
                     command: "sh".into(),
                     args: vec!["-lc".into(), command],

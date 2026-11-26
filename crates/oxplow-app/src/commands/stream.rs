@@ -786,7 +786,7 @@ mod tests {
         let key = crate::terminal_sessions::terminal_key(id);
         fx.svc
             .terminal_sessions
-            .attach_or_create(key.clone(), 80, 24, |c, r| {
+            .attach_or_create(key.clone(), None, 80, 24, |c, r| {
                 crate::terminal_sessions::SpawnRequest {
                     command: "sh".into(),
                     args: vec!["-c".into(), "sleep 30".into()],

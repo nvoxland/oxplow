@@ -226,6 +226,13 @@ impl ClientDevices {
         }
     }
 
+    /// Whether `connection` is a device's current page load with its socket
+    /// open.
+    pub fn is_live(&self, connection: &ConnectionId) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.devices.values().any(|e| &e.connection == connection)
+    }
+
     /// The page load a connected device is on now.
     pub fn connection_of(&self, device: &DeviceId) -> Option<ConnectionId> {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());

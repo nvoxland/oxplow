@@ -8,11 +8,13 @@
 //! - Outgoing (renderer → daemon):
 //!   - `{type:"input", bytes:base64}` — user keystrokes
 //!   - `{type:"input-binary", bytes:base64}` — binary input (paste)
-//!   - `{type:"resize", cols, rows}` — viewport changed
+//!   - `{type:"resize", cols, rows, take?}` — viewport changed; `take`
+//!     makes the sender the size's owner at once
 //!
 //! - Incoming (daemon → renderer):
 //!   - `{type:"data", bytes:base64}` — bytes from the PTY
 //!   - `{type:"exit", exitCode}` — the process ended
+//!   - `{type:"size", cols, rows}` — the PTY's size changed
 //!
 //! Implementation: spawn the request via `oxplow_pty::PtyManager`; PTY
 //! bytes flow back as `data` events. Scrollback is xterm.js's own, plus
@@ -23,7 +25,7 @@ use std::sync::{Arc, Weak};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use bytes::Bytes;
-use oxplow_domain::{AgentSessionId, ThreadId, Timestamp};
+use oxplow_domain::{AgentSessionId, ConnectionId, ThreadId, Timestamp};
 pub use oxplow_pty::SpawnRequest;
 use oxplow_pty::{PaneEvent, PaneId, PtyManager};
 use serde::{Deserialize, Serialize};
@@ -77,6 +79,12 @@ pub type SessionKey = String;
 struct SessionEntry {
     pane_id: PaneId,
     size: (u16, u16),
+    /// The page load that last sent input (or attached first): its pane's
+    /// size is the PTY's (the "latest client" rule of window multiplexers).
+    owner: Option<ConnectionId>,
+    /// The size each page load last asked for; a page load that is not the
+    /// owner is applied when it takes the terminal over.
+    asked: HashMap<ConnectionId, (u16, u16)>,
     /// OS pid of the spawned child (the shell, for the `shell` pane).
     /// Used to read the live cwd for terminal file-link resolution.
     pid: Option<u32>,
@@ -257,7 +265,7 @@ pub struct TerminalSessionRegistry {
     exits: Arc<std::sync::OnceLock<crate::hook_ingest::HookIngestService>>,
     /// Each terminal's input queue, by key ([`Self::enqueue_input`]): its
     /// drain task is the only writer of input to the terminal's PTY.
-    input: Arc<std::sync::Mutex<HashMap<SessionKey, mpsc::UnboundedSender<String>>>>,
+    input: Arc<std::sync::Mutex<HashMap<SessionKey, mpsc::UnboundedSender<Queued>>>>,
     /// Signalled each time a session is registered, so a queue waiting
     /// for its terminal's PTY looks again.
     ready: Arc<tokio::sync::Notify>,
@@ -267,7 +275,16 @@ pub struct TerminalSessionRegistry {
     runtime: Option<tokio::runtime::Handle>,
     /// How long input waits for its terminal's PTY before it is dropped.
     input_wait: Duration,
+    /// Whether a page load is still connected: a terminal's owner that is
+    /// gone gives its size up. Unset, no page load is live.
+    liveness: Arc<std::sync::OnceLock<Liveness>>,
 }
+
+/// Whether a page load is connected (`ClientDevices::is_live`).
+pub type Liveness = Arc<dyn Fn(&ConnectionId) -> bool + Send + Sync>;
+
+/// One queued input message and the page load that sent it.
+type Queued = (Option<ConnectionId>, String);
 
 /// How long input written for a terminal waits for its PTY (typed while it
 /// spawns) before it is dropped: the launch failed.
@@ -288,7 +305,55 @@ impl TerminalSessionRegistry {
             ready: Arc::new(tokio::sync::Notify::new()),
             runtime: tokio::runtime::Handle::try_current().ok(),
             input_wait: INPUT_WAIT,
+            liveness: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// Say how to tell a connected page load; set once.
+    pub fn set_liveness(&self, liveness: Liveness) {
+        let _ = self.liveness.set(liveness);
+    }
+
+    fn is_live(&self, connection: &ConnectionId) -> bool {
+        self.liveness.get().is_some_and(|live| live(connection))
+    }
+
+    /// Whether the page load `connection` may set `entry`'s size now: it
+    /// owns the terminal, or the owner is gone (it then takes it), or it
+    /// names no page load (a script keeps the plain rule).
+    fn takes_size(&self, entry: &mut SessionEntry, connection: Option<&ConnectionId>) -> bool {
+        let Some(connection) = connection else {
+            return true;
+        };
+        match &entry.owner {
+            Some(owner) if owner == connection => true,
+            Some(owner) if self.is_live(owner) => false,
+            _ => {
+                entry.owner = Some(connection.clone());
+                true
+            }
+        }
+    }
+
+    /// Resize `entry`'s PTY to `size` and tell every client, when it
+    /// differs.
+    async fn set_size(
+        &self,
+        session_id: &str,
+        entry: &mut SessionEntry,
+        size: (u16, u16),
+    ) -> Result<(), TerminalSessionError> {
+        if entry.size == size {
+            return Ok(());
+        }
+        self.pty.resize(&entry.pane_id, size.0, size.1).await?;
+        entry.size = size;
+        let _ = self.events_tx.send(TerminalBridgeEvent {
+            session_id: session_id.to_string(),
+            message: serde_json::json!({"type": "size", "cols": size.0, "rows": size.1})
+                .to_string(),
+        });
+        Ok(())
     }
 
     /// Serialize starts and replacements of the same agent's PTY. An
@@ -344,12 +409,19 @@ impl TerminalSessionRegistry {
     }
 
     /// Queue one input message (`input`, `input-binary` or `resize`, as
-    /// [`Self::send`] reads it) for the terminal under `key`. Never blocks:
+    /// [`Self::send`] reads it) from page load `connection`, for the terminal
+    /// under `key`. Never blocks:
     /// the key's drain task writes its messages to the PTY in the order
     /// they were queued, holding them while the PTY is not there yet (up
     /// to the input wait, then dropping them). The person's keystrokes
     /// only: never an automation API (`.context/agent-model.md`).
-    pub fn enqueue_input(&self, key: SessionKey, message: String) {
+    pub fn enqueue_input(
+        &self,
+        key: SessionKey,
+        connection: Option<ConnectionId>,
+        message: String,
+    ) {
+        let message = (connection, message);
         let mut queues = self.input.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(tx) = queues.get(&key) {
             if tx.send(message.clone()).is_ok() {
@@ -371,8 +443,8 @@ impl TerminalSessionRegistry {
     }
 
     /// A terminal's input queue: each message, in order, to its live PTY.
-    async fn drain_input(self, key: SessionKey, mut rx: mpsc::UnboundedReceiver<String>) {
-        while let Some(message) = rx.recv().await {
+    async fn drain_input(self, key: SessionKey, mut rx: mpsc::UnboundedReceiver<Queued>) {
+        while let Some((connection, message)) = rx.recv().await {
             let mut written = false;
             // A session that ends under the write is waited for once more
             // (Start Again replaces it).
@@ -380,7 +452,7 @@ impl TerminalSessionRegistry {
                 let Some(id) = self.wait_for_session(&key).await else {
                     break;
                 };
-                match self.send(&id, &message).await {
+                match self.send(&id, connection.as_ref(), &message).await {
                     Err(TerminalSessionError::NotFound(_)) => continue,
                     Err(e) => warn!(%key, error = %e, "terminal input not written"),
                     Ok(()) => {}
@@ -435,10 +507,16 @@ impl TerminalSessionRegistry {
     /// plus a base64-encoded snapshot of the replay buffer that the
     /// renderer should write into a fresh xterm before it starts
     /// consuming live events.
-    pub fn build_attach_result(session_id: String, replay: Vec<u8>) -> AttachResult {
+    pub fn build_attach_result(
+        session_id: String,
+        replay: Vec<u8>,
+        size: (u16, u16),
+    ) -> AttachResult {
         AttachResult {
             session_id,
             replay_b64: B64.encode(&replay[..]),
+            cols: size.0,
+            rows: size.1,
         }
     }
 
@@ -450,11 +528,12 @@ impl TerminalSessionRegistry {
     pub async fn attach_or_create(
         &self,
         key: SessionKey,
+        connection: Option<&ConnectionId>,
         cols: u16,
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
-        self.attach_or_create_for_agent(key, None, cols, rows, make_request)
+        self.attach_or_create_for_agent(key, None, connection, cols, rows, make_request)
             .await
     }
 
@@ -465,25 +544,32 @@ impl TerminalSessionRegistry {
         &self,
         key: SessionKey,
         agent: Option<AgentPane>,
+        connection: Option<&ConnectionId>,
         cols: u16,
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
-        if let Some(attached) = self.reattach(&key, cols, rows).await? {
+        if let Some(attached) = self.reattach(&key, connection, cols, rows).await? {
             return Ok(attached);
         }
         let req = make_request(cols, rows);
-        let session_id = self.spawn_with(req, key.clone(), agent).await?;
-        Ok(Self::build_attach_result(session_id, Vec::new()))
+        let session_id = self.spawn_with(req, key.clone(), agent, connection).await?;
+        Ok(Self::build_attach_result(
+            session_id,
+            Vec::new(),
+            (cols, rows),
+        ))
     }
 
-    /// The live session under `key`, if there is one: it takes the attaching
-    /// pane's size (it may differ from the one the process last saw, e.g.
-    /// after an app restart) and replays its buffer. A stale `by_key` entry
-    /// (its session was killed) is none.
+    /// The live session under `key`, if there is one: the attaching page
+    /// load's size is recorded, and the PTY takes it only when that page
+    /// load may ([`Self::takes_size`]: no live owner, or itself); the
+    /// buffer is replayed. A stale `by_key` entry (its session was killed)
+    /// is none.
     pub async fn reattach(
         &self,
         key: &str,
+        connection: Option<&ConnectionId>,
         cols: u16,
         rows: u16,
     ) -> Result<Option<AttachResult>, TerminalSessionError> {
@@ -494,10 +580,22 @@ impl TerminalSessionRegistry {
         let Some(entry) = map.get_mut(&existing_id) else {
             return Ok(None);
         };
-        self.pty.resize(&entry.pane_id, cols, rows).await?;
-        entry.size = (cols, rows);
+        if let Some(connection) = connection {
+            // Page loads that are gone are forgotten as the next one asks.
+            entry
+                .asked
+                .retain(|other, _| other == connection || self.is_live(other));
+            entry.asked.insert(connection.clone(), (cols, rows));
+        }
+        if self.takes_size(entry, connection) {
+            self.set_size(&existing_id, entry, (cols, rows)).await?;
+        }
         let replay = entry.ring.lock().await.replay();
-        Ok(Some(Self::build_attach_result(existing_id, replay)))
+        Ok(Some(Self::build_attach_result(
+            existing_id,
+            replay,
+            entry.size,
+        )))
     }
 
     /// Read-only: the live session id indexed under external `key`, or
@@ -522,6 +620,7 @@ impl TerminalSessionRegistry {
         req: SpawnRequest,
         key: SessionKey,
         agent: Option<AgentPane>,
+        connection: Option<&ConnectionId>,
     ) -> Result<String, TerminalSessionError> {
         let size = (req.cols, req.rows);
         let mut handle = self.pty.spawn_pane(req).await?;
@@ -657,6 +756,8 @@ impl TerminalSessionRegistry {
             SessionEntry {
                 pane_id,
                 size,
+                owner: connection.cloned(),
+                asked: connection.map(|c| (c.clone(), size)).into_iter().collect(),
                 pid,
                 forwarder,
                 ring,
@@ -688,8 +789,14 @@ impl TerminalSessionRegistry {
 
     /// Write one input message to a live session's PTY. Only the input
     /// queue's drain task calls it ([`Self::enqueue_input`]), and the
-    /// paste-order tests.
-    pub async fn send(&self, session_id: &str, message: &str) -> Result<(), TerminalSessionError> {
+    /// paste-order tests. `connection` is the page load that sent it:
+    /// input makes it the terminal's owner, taking the size it asked for.
+    pub async fn send(
+        &self,
+        session_id: &str,
+        connection: Option<&ConnectionId>,
+        message: &str,
+    ) -> Result<(), TerminalSessionError> {
         let parsed: serde_json::Value = serde_json::from_str(message)
             .map_err(|e| TerminalSessionError::InvalidMessage(e.to_string()))?;
         let kind = parsed
@@ -699,10 +806,18 @@ impl TerminalSessionRegistry {
             .to_string();
 
         let pane_id = {
-            let map = self.inner.lock().await;
+            let mut map = self.inner.lock().await;
             let entry = map
-                .get(session_id)
+                .get_mut(session_id)
                 .ok_or_else(|| TerminalSessionError::NotFound(session_id.to_string()))?;
+            if let (Some(connection), "input" | "input-binary") = (connection, kind.as_str()) {
+                if entry.owner.as_ref() != Some(connection) {
+                    entry.owner = Some(connection.clone());
+                    if let Some(asked) = entry.asked.get(connection).copied() {
+                        self.set_size(session_id, entry, asked).await?;
+                    }
+                }
+            }
             entry.pane_id.clone()
         };
 
@@ -726,9 +841,18 @@ impl TerminalSessionRegistry {
                 if cols < 20 || rows < 5 {
                     return Ok(());
                 }
-                self.pty.resize(&pane_id, cols, rows).await?;
                 if let Some(entry) = self.inner.lock().await.get_mut(session_id) {
-                    entry.size = (cols, rows);
+                    if let Some(connection) = connection {
+                        entry.asked.insert(connection.clone(), (cols, rows));
+                    }
+                    // `take` is "Fit to this device": it wins over a live owner.
+                    let take = parsed.get("take").and_then(|v| v.as_bool()) == Some(true);
+                    if let (true, Some(connection)) = (take, connection) {
+                        entry.owner = Some(connection.clone());
+                    }
+                    if take || self.takes_size(entry, connection) {
+                        self.set_size(session_id, entry, (cols, rows)).await?;
+                    }
                 }
             }
             other => {
@@ -800,6 +924,10 @@ pub struct AttachResult {
     pub session_id: String,
     #[serde(rename = "replayB64")]
     pub replay_b64: String,
+    /// The PTY's size now: the owner's, which a pane that is not the
+    /// owner can draw.
+    pub cols: u16,
+    pub rows: u16,
 }
 
 /// Read a process's current working directory by pid. Linux reads the
@@ -975,7 +1103,7 @@ mod tests {
         // Register a session under the key via the normal attach path.
         let dir = std::env::temp_dir();
         let result = reg
-            .attach_or_create(key.clone(), 80, 24, |c, r| SpawnRequest {
+            .attach_or_create(key.clone(), None, 80, 24, |c, r| SpawnRequest {
                 command: "cat".into(),
                 args: vec![],
                 cwd: dir,
@@ -1025,11 +1153,11 @@ mod tests {
         };
         let key = "session|ses1".to_string();
         let first = reg
-            .attach_or_create(key.clone(), 80, 24, spawn)
+            .attach_or_create(key.clone(), None, 80, 24, spawn)
             .await
             .expect("spawn session");
         let again = reg
-            .attach_or_create(key, 132, 41, spawn)
+            .attach_or_create(key, None, 132, 41, spawn)
             .await
             .expect("reattach");
         assert_eq!(again.session_id, first.session_id);
@@ -1039,7 +1167,7 @@ mod tests {
             capture.display(),
             capture.display()
         );
-        reg.send(&first.session_id, &input_message(command.as_bytes()))
+        reg.send(&first.session_id, None, &input_message(command.as_bytes()))
             .await
             .unwrap();
         let size = read_capture_until(&capture, &["done"]).await;
@@ -1048,6 +1176,164 @@ mod tests {
             size.starts_with("41 132"),
             "the pty kept its old size: {size:?}"
         );
+    }
+
+    /// A registry whose live page loads are the ones in the returned set.
+    fn registry_with_live() -> (
+        TerminalSessionRegistry,
+        Arc<std::sync::Mutex<std::collections::HashSet<ConnectionId>>>,
+    ) {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        );
+        let live: Arc<std::sync::Mutex<std::collections::HashSet<ConnectionId>>> =
+            Default::default();
+        let set = live.clone();
+        reg.set_liveness(Arc::new(move |c| set.lock().unwrap().contains(c)));
+        (reg, live)
+    }
+
+    fn shell(c: u16, r: u16) -> SpawnRequest {
+        SpawnRequest {
+            command: "sh".into(),
+            args: vec![],
+            cwd: std::env::temp_dir(),
+            env: vec![],
+            env_remove: vec![],
+            cols: c,
+            rows: r,
+        }
+    }
+
+    fn resize_message(cols: u16, rows: u16, take: bool) -> String {
+        serde_json::json!({"type": "resize", "cols": cols, "rows": rows, "take": take}).to_string()
+    }
+
+    /// A first page load that attaches and a second that attaches while the
+    /// first is live: returns the registry, both, and the session id.
+    async fn two_page_loads() -> (TerminalSessionRegistry, ConnectionId, ConnectionId, String) {
+        let (reg, live) = registry_with_live();
+        let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
+        live.lock().unwrap().extend([a.clone(), b.clone()]);
+        let key = "terminal|two".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
+            .await
+            .expect("spawn");
+        let second = reg
+            .attach_or_create(key, Some(&b), 60, 30, shell)
+            .await
+            .expect("attach");
+        assert_eq!(second.session_id, first.session_id);
+        (reg, a, b, first.session_id)
+    }
+
+    #[tokio::test]
+    async fn another_page_loads_attach_leaves_the_live_owners_size() {
+        let (reg, _a, _b, id) = two_page_loads().await;
+        assert_eq!(reg.size(&id).await, Some((120, 40)));
+        let _ = reg.close(&id).await;
+    }
+
+    #[tokio::test]
+    async fn the_attach_result_carries_the_ptys_size() {
+        let (reg, live) = registry_with_live();
+        let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
+        live.lock().unwrap().extend([a.clone(), b.clone()]);
+        let key = "terminal|res".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
+            .await
+            .unwrap();
+        let second = reg
+            .attach_or_create(key, Some(&b), 60, 30, shell)
+            .await
+            .unwrap();
+        assert_eq!((first.cols, first.rows), (120, 40));
+        assert_eq!((second.cols, second.rows), (120, 40));
+        let _ = reg.close(&first.session_id).await;
+    }
+
+    #[tokio::test]
+    async fn input_from_another_page_load_takes_the_size_it_asked() {
+        let (reg, a, b, id) = two_page_loads().await;
+        reg.send(&id, Some(&b), &input_message(b"x")).await.unwrap();
+        assert_eq!(reg.size(&id).await, Some((60, 30)));
+        // The old owner is now the one that waits: its resize is only noted.
+        reg.send(&id, Some(&a), &resize_message(100, 50, false))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&id).await, Some((60, 30)));
+        // Its input takes the terminal back at the size it last asked.
+        reg.send(&id, Some(&a), &input_message(b"y")).await.unwrap();
+        assert_eq!(reg.size(&id).await, Some((100, 50)));
+        let _ = reg.close(&id).await;
+    }
+
+    #[tokio::test]
+    async fn the_owners_resize_applies_and_a_size_event_is_emitted() {
+        let (reg, a, _b, id) = two_page_loads().await;
+        let mut events = reg.subscribe();
+        reg.send(&id, Some(&a), &resize_message(90, 33, false))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&id).await, Some((90, 33)));
+        let mut seen = None;
+        while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_secs(2), events.recv()).await
+        {
+            let m: serde_json::Value = serde_json::from_str(&event.message).unwrap();
+            if m["type"] == "size" {
+                seen = Some((event.session_id, m["cols"].clone(), m["rows"].clone()));
+                break;
+            }
+        }
+        let _ = reg.close(&id).await;
+        assert_eq!(seen, Some((id, 90.into(), 33.into())));
+    }
+
+    #[tokio::test]
+    async fn a_resize_that_takes_wins_over_a_live_owner() {
+        let (reg, _a, b, id) = two_page_loads().await;
+        let mut events = reg.subscribe();
+        reg.send(&id, Some(&b), &resize_message(70, 35, true))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&id).await, Some((70, 35)));
+        let mut size_event = false;
+        while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_secs(2), events.recv()).await
+        {
+            if event.message.contains(r#""type":"size""#) {
+                size_event = true;
+                break;
+            }
+        }
+        // b owns it: its next plain resize applies.
+        reg.send(&id, Some(&b), &resize_message(71, 36, false))
+            .await
+            .unwrap();
+        let after = reg.size(&id).await;
+        let _ = reg.close(&id).await;
+        assert!(size_event);
+        assert_eq!(after, Some((71, 36)));
+    }
+
+    #[tokio::test]
+    async fn an_attach_after_the_owner_is_gone_takes_the_size() {
+        let (reg, live) = registry_with_live();
+        let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
+        live.lock().unwrap().extend([a.clone(), b.clone()]);
+        let key = "terminal|gone".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
+            .await
+            .unwrap();
+        live.lock().unwrap().remove(&a);
+        reg.attach_or_create(key, Some(&b), 60, 30, shell)
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&first.session_id).await, Some((60, 30)));
+        let _ = reg.close(&first.session_id).await;
     }
 
     /// An agent's process exiting ends its session: the registry records a
@@ -1083,6 +1369,7 @@ mod tests {
                     session: Some(session),
                     launch: Default::default(),
                 }),
+                None,
                 80,
                 24,
                 |c, r| SpawnRequest {
@@ -1138,6 +1425,7 @@ mod tests {
                     session: Some(session),
                     launch: Default::default(),
                 }),
+                None,
                 80,
                 24,
                 |c, r| SpawnRequest {
@@ -1194,7 +1482,7 @@ mod tests {
             rows: r,
         };
         let first = reg
-            .attach_or_create(key.clone(), 80, 24, exiting)
+            .attach_or_create(key.clone(), None, 80, 24, exiting)
             .await
             .expect("spawn session");
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -1215,7 +1503,7 @@ mod tests {
         .await
         .expect("an exited session is unregistered");
         let second = reg
-            .attach_or_create(key.clone(), 80, 24, exiting)
+            .attach_or_create(key.clone(), None, 80, 24, exiting)
             .await
             .expect("spawn again");
         assert_ne!(second.session_id, first.session_id);
@@ -1232,7 +1520,7 @@ mod tests {
         let (req, path) = capture_request(label);
         let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
         let session_id = reg
-            .spawn_with(req, key, None)
+            .spawn_with(req, key, None, None)
             .await
             .expect("spawn capture shell");
         (reg, session_id, path)
@@ -1271,10 +1559,10 @@ mod tests {
         );
         let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
         for marker in ["EARLY_ONE ", "EARLY_TWO ", "EARLY_THREE\r"] {
-            reg.enqueue_input(key.clone(), input_message(marker.as_bytes()));
+            reg.enqueue_input(key.clone(), None, input_message(marker.as_bytes()));
         }
         let (req, path) = capture_request("early");
-        let session_id = reg.spawn_with(req, key, None).await.expect("spawn");
+        let session_id = reg.spawn_with(req, key, None, None).await.expect("spawn");
         let captured = read_capture_until(&path, &["EARLY_ONE", "EARLY_TWO", "EARLY_THREE"]).await;
         assert_marker_order(&captured, &["EARLY_ONE", "EARLY_TWO", "EARLY_THREE"]);
         let _ = reg.close(&session_id).await;
@@ -1291,12 +1579,15 @@ mod tests {
         );
         let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
         let (req, path) = capture_request("many");
-        let session_id = reg.spawn_with(req, key.clone(), None).await.expect("spawn");
+        let session_id = reg
+            .spawn_with(req, key.clone(), None, None)
+            .await
+            .expect("spawn");
         let markers: Vec<String> = (0..200).map(|i| format!("K{i:03} ")).collect();
         for m in &markers {
-            reg.enqueue_input(key.clone(), input_message(m.as_bytes()));
+            reg.enqueue_input(key.clone(), None, input_message(m.as_bytes()));
         }
-        reg.enqueue_input(key.clone(), input_message(b"\r"));
+        reg.enqueue_input(key.clone(), None, input_message(b"\r"));
         let needles: Vec<&str> = markers.iter().map(|m| m.trim()).collect();
         let captured = read_capture_until(&path, &needles).await;
         assert_marker_order(&captured, &needles);
@@ -1314,11 +1605,14 @@ mod tests {
         )
         .with_input_wait(std::time::Duration::from_millis(100));
         let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
-        reg.enqueue_input(key.clone(), input_message(b"STALE "));
+        reg.enqueue_input(key.clone(), None, input_message(b"STALE "));
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         let (req, path) = capture_request("stale");
-        let session_id = reg.spawn_with(req, key.clone(), None).await.expect("spawn");
-        reg.enqueue_input(key.clone(), input_message(b"FRESH\r"));
+        let session_id = reg
+            .spawn_with(req, key.clone(), None, None)
+            .await
+            .expect("spawn");
+        reg.enqueue_input(key.clone(), None, input_message(b"FRESH\r"));
         let captured = read_capture_until(&path, &["FRESH"]).await;
         assert!(!captured.contains("STALE"), "{captured:?}");
         let _ = reg.close(&session_id).await;
@@ -1337,7 +1631,7 @@ mod tests {
         // The exact shape xterm.js produces for a 3-paragraph paste with
         // bracketed-paste mode on: ESC[200~ <text, \n→\r normalized> ESC[201~.
         let payload = b"\x1b[200~PARA_ALPHA\r\rPARA_BRAVO\r\rPARA_CHARLIE\r\x1b[201~";
-        reg.send(&session_id, &input_message(payload))
+        reg.send(&session_id, None, &input_message(payload))
             .await
             .expect("send paste");
 
@@ -1370,7 +1664,7 @@ mod tests {
             body.push_str(" lorem ipsum dolor sit amet consectetur adipiscing");
         }
         let payload = format!("\x1b[200~{body}\r\x1b[201~");
-        reg.send(&session_id, &input_message(payload.as_bytes()))
+        reg.send(&session_id, None, &input_message(payload.as_bytes()))
             .await
             .expect("send large paste");
 
@@ -1403,7 +1697,7 @@ mod tests {
         let mut pids = Vec::new();
         for key in ["session|ses1", "terminal|trm1"] {
             let s = reg
-                .attach_or_create(key.to_string(), 80, 24, deaf)
+                .attach_or_create(key.to_string(), None, 80, 24, deaf)
                 .await
                 .expect("spawn session");
             pids.push(reg.pid_of(&s.session_id).await.expect("a pid") as i32);
