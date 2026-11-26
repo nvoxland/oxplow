@@ -1,4 +1,4 @@
-import { useAppPreference } from "../prefs/remembered.js";
+import { useAppPreferenceValue } from "../prefs/remembered.js";
 import { getDevice, type Device } from "../device.js";
 import { readWindowContext } from "../windowContext.js";
 import { SHELL_CONTRIBUTIONS, SHELL_PLACES } from "./shellContract.js";
@@ -35,15 +35,15 @@ export function chooseShell(src: {
   return src.deviceKind !== "desktop" && (src.complete ?? shellComplete)("tablet") ? "tablet" : "desktop";
 }
 
-/** A test's override: the page's `?shell=` or the window context's `shell`
- *  (the e2e harness injects it). */
+/** A test's override: the page's `?shell=` or the window context's `shell`. */
 export function shellOverride(search: string, context: { shell?: unknown } | null): ShellKind | null {
   return asShell(new URLSearchParams(search).get("shell")) ?? asShell(context?.shell);
 }
 
-/** The window's shell, following the device's preference as it loads. */
+/** The window's shell, following the device's preference as it loads (a
+ *  narrow read: the window re-renders only when the choice changes). */
 export function useShellKind(): ShellKind {
-  const [preference] = useAppPreference<string | null>("shell", null);
+  const preference = useAppPreferenceValue("shell");
   const search = typeof location === "undefined" ? "" : location.search;
   return chooseShell({
     override: shellOverride(search, readWindowContext() as { shell?: unknown } | null),

@@ -10,6 +10,7 @@ import {
   pageMemoryScope,
   RememberedContext,
   useAppPreference,
+  useAppPreferenceValue,
   usePageMemory,
   usePanelMemory,
 } from "./remembered.js";
@@ -222,4 +223,27 @@ test("ready waits for a read that is applied, not the first one", async () => {
   answers[1]!([{ scope: "component:acme/x", key: "k", valueJson: "2" }]);
   await store.ready;
   expect(store.get("component:acme/x", "k")).toBe(2);
+});
+
+// A component high in the tree (the window choosing its shell) reads one
+// preference without re-rendering on every other write (a rail drag).
+test("useAppPreferenceValue re-renders only when its own value changes", async () => {
+  const store = createRememberedStore(backend(), 10);
+  await store.ready;
+  let renders = 0;
+  function Reader() {
+    renders++;
+    return <span data-testid="v">{String(useAppPreferenceValue("shell") ?? "none")}</span>;
+  }
+  const view = render(
+    <RememberedContext.Provider value={store}>
+      <Reader />
+    </RememberedContext.Provider>,
+  );
+  const first = renders;
+  act(() => store.set("app", "railWidth", 300));
+  act(() => store.set("app", "railWidth", 310));
+  expect(renders).toBe(first);
+  act(() => store.set("app", "shell", "tablet"));
+  expect(view.getByTestId("v").textContent).toBe("tablet");
 });

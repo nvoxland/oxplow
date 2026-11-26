@@ -264,6 +264,14 @@ export function useAppPreference<T>(key: string, initial: T): [T, (value: T) => 
   return useRemembered("app", key, initial);
 }
 
+/** One app preference's value, read only: re-renders when this value
+ *  changes, never on another write to the store (a rail drag writes on
+ *  each move). For a component high in the tree. */
+export function useAppPreferenceValue(key: string): unknown {
+  const store = useContext(RememberedContext) ?? appStore();
+  return useSyncExternalStore(store.subscribe, () => store.get("app", key));
+}
+
 /** A left-nav panel's memory: one value it remembers for the person. */
 export function usePanelMemory<T>(panel: string, key: string, initial: T): [T, (value: T) => void] {
   return useRemembered(panelScope(panel), key, initial);
