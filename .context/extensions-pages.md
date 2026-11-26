@@ -562,6 +562,9 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   child — `name`, `title`, `kind` (`enum`, `text`, `number`), `values`,
   `read_only` — and its value is the object of those children; the form
   reads again when what the page read changes (`viz_actions::subfields_from`).
+  `submit: <label>` names a create form's button when the node's title
+  is the wrong words for it (a tab named "New branch" whose button is
+  "Create Stream"); without it the button is the title.
   `again: { label, keep: [...] }` adds a second submit ("Save and
   Another"). `form_fields_problem` and `page_ref_problem` are the load
   checks.

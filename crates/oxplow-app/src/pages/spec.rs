@@ -459,6 +459,11 @@ pub struct FormSpec {
     /// again with the `keep` fields' values carried over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub again: Option<FormAgain>,
+    /// Its button, when the node's title is the wrong words for it (a tab
+    /// named for what it gathers, a button for what it does). None: the
+    /// node's title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submit: Option<String>,
 }
 
 /// A form's second submit (Save and Another).

@@ -69,6 +69,22 @@ test("a form node starts from page_form on the open run and submits with submit_
   expect(calls.find((c) => c[0] === "submit")).toEqual(["submit", "run-1", "edit", { uri: "u1", title: "New" }, false]);
 });
 
+// A tab named for what a form gathers ("New branch") has a button named for
+// what it does: the form's `submit`, else the node's title.
+test("a create form node's button is its submit label, else its title", async () => {
+  const { forms } = fakes();
+  const page = fakePage(node.viz("make", "item", { viz: "form", title: "New branch", form: { mode: "create", then: "stay", again: null, submit: "Create Stream" } as never }), {
+    loaders: [decl("item")],
+  });
+  const run = fakeRun(page, { loaders: { item: loader(["uri", "title"], [["u1", "Old"]]) } });
+  const { findByTestId } = render(
+    <PageFormsContext.Provider value={forms}>
+      <PageTree run={run} runId="run-1" />
+    </PageFormsContext.Provider>,
+  );
+  expect((await findByTestId("viz-form-fields-submit")).textContent).toBe("Create Stream");
+});
+
 test("a form node's draft survives the run being read again", async () => {
   const { forms, press } = fakes();
   const ui = (run: ReturnType<typeof formPage>) => (

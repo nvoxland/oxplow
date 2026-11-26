@@ -303,30 +303,7 @@ impl StreamService {
         wanted: &str,
     ) -> Result<Stream, SessionError> {
         let repo = &self.layout.project_dir;
-        let branches = self.vcs.branches(repo).await?;
-        let local = |name: &str| {
-            branches
-                .iter()
-                .any(|b| b.remote.is_none() && b.name == name)
-        };
-        let (branch, from) = if local(wanted) {
-            (wanted.to_string(), wanted.to_string())
-        } else if let Some(remote) = branches.iter().find(|b| {
-            b.remote
-                .as_deref()
-                .is_some_and(|r| format!("{r}/{}", b.name) == wanted)
-        }) {
-            (
-                remote.name.clone(),
-                if local(&remote.name) {
-                    remote.name.clone()
-                } else {
-                    wanted.to_string()
-                },
-            )
-        } else {
-            return Err(SessionError::NoSuchBranch(wanted.to_string()));
-        };
+        let (branch, from) = self.branch_to_check_out(wanted).await?;
 
         let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
         let holder = self
@@ -363,6 +340,39 @@ impl StreamService {
             };
         }
         self.create_worktree(slug, title, branch, from).await
+    }
+
+    /// The local branch a stream on `wanted` checks out, and what it is made
+    /// from when it doesn't exist yet: `wanted` itself when it is a local
+    /// branch; for a remote-tracking one (`origin/foo`), the local branch of
+    /// its name, made from it when there is none.
+    pub async fn branch_to_check_out(
+        &self,
+        wanted: &str,
+    ) -> Result<(String, String), SessionError> {
+        let branches = self.vcs.branches(&self.layout.project_dir).await?;
+        let local = |name: &str| {
+            branches
+                .iter()
+                .any(|b| b.remote.is_none() && b.name == name)
+        };
+        if local(wanted) {
+            return Ok((wanted.to_string(), wanted.to_string()));
+        }
+        let remote = branches
+            .iter()
+            .find(|b| {
+                b.remote
+                    .as_deref()
+                    .is_some_and(|r| format!("{r}/{}", b.name) == wanted)
+            })
+            .ok_or_else(|| SessionError::NoSuchBranch(wanted.to_string()))?;
+        let from = if local(&remote.name) {
+            remote.name.clone()
+        } else {
+            wanted.to_string()
+        };
+        Ok((remote.name.clone(), from))
     }
 
     /// A stream on a new branch `branch` made from `from`, any revision the

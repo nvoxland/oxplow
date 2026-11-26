@@ -1,6 +1,6 @@
-# A branch picked on New Stream's Branch tab starts a stream on it: the form
-# submits the picked branch (fixed) under the name given, and that branch
-# then has a stream, so the tab no longer offers it.
+# A click on a branch on New Stream's Branch tab opens Create Stream for it:
+# the branch is fixed, the name starts as the branch's and can be changed.
+# The stream made, the branch has one, so the tab no longer offers it.
 given:
   - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
   - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
@@ -12,21 +12,20 @@ given:
         branches:
           - { name: main, head: $base.rev, stream: 1, default: true }
           - { name: feat, head: $base.rev }
-when: { page: new-stream, params: { branch: feat } }
+when: { page: new-stream, params: { tab: branch } }
 expect:
   loaders:
-    branch_form: { rows: [{ source: existing, existing_branch: feat, title: feat }] }
+    branches: { rows: [{ value: feat, branch: feat }] }
 steps:
-  - submit: { node: branch_form, input: { title: Feat work } }
+  - press: { action: create, node: branch, row: { value: feat }, input: { title: Feat work } }
     expect: { ok: true }
-  # The indexer reads the refs again: `feat` now has the new stream.
   - given:
       - observe:
           refs:
             branches:
               - { name: main, head: $base.rev, stream: 1, default: true }
               - { name: feat, head: $base.rev, stream: 2 }
-  - when: { page: new-stream }
+  - when: { page: new-stream, params: { tab: branch } }
     expect:
       loaders:
         branches: { rows: [] }

@@ -1517,7 +1517,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
         serverErrors={form.serverErrors}
         schemaHelp={false}
         mode={mode}
-        submitLabel={mode === "edit" ? undefined : run.config.title}
+        submitLabel={mode === "edit" ? undefined : (run.config.form?.submit ?? run.config.title)}
         draft={draft}
         onDraft={setDraft}
         busy={form.busy}

@@ -40,8 +40,11 @@ pub enum StreamSource {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInput {
-    /// The stream's name; its worktree's folder is made from it.
-    pub title: String,
+    /// The stream's name; its worktree's folder is made from it. Left out,
+    /// it is named for what it starts from: its branch (a remote one without
+    /// its remote), its new branch, or its worktree's folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Where its worktree comes from: `existing` (a branch that exists),
     /// `new` (a new branch forked from a start point) or `worktree` (one
     /// already on disk, adopted as it is: a person's).
@@ -207,13 +210,25 @@ pub fn create_op(deps: StreamDeps) -> Op {
                             )
                         })
                 };
-                let title = input.title.trim().to_string();
-                if title.is_empty() {
-                    return Err(invalid("/title", "a stream needs a name"));
-                }
+                let given = input
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string);
                 let stream = match input.source {
                     StreamSource::Existing => {
                         let branch = need(&input.existing_branch, "existing_branch")?;
+                        let title = match given {
+                            Some(t) => t,
+                            None => {
+                                deps.streams
+                                    .branch_to_check_out(&branch)
+                                    .await
+                                    .map_err(session)?
+                                    .0
+                            }
+                        };
                         deps.streams
                             .create_on_branch(&slug_of(&title), title, &branch)
                             .await
@@ -221,15 +236,19 @@ pub fn create_op(deps: StreamDeps) -> Op {
                     StreamSource::New => {
                         let branch = need(&input.new_branch, "new_branch")?;
                         let from = need(&input.start_point, "start_point")?;
+                        let title = given.unwrap_or_else(|| branch.clone());
                         deps.streams
                             .create_on_new_branch(&slug_of(&title), title, &branch, &from)
                             .await
                     }
                     StreamSource::Worktree => {
-                        let path = need(&input.worktree, "worktree")?;
-                        deps.streams
-                            .adopt_worktree(std::path::PathBuf::from(path), title)
-                            .await
+                        let path = std::path::PathBuf::from(need(&input.worktree, "worktree")?);
+                        let title = given.unwrap_or_else(|| {
+                            path.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| path.to_string_lossy().into_owned())
+                        });
+                        deps.streams.adopt_worktree(path, title).await
                     }
                 }
                 .map_err(session)?;
@@ -966,6 +985,63 @@ mod tests {
         .await
         .ok()
         .flatten()));
+    }
+
+    /// A stream given no name is named for what it starts from: its branch
+    /// (a remote one without its remote), its new branch, or its worktree's
+    /// folder.
+    #[tokio::test]
+    async fn a_stream_with_no_name_is_named_for_what_it_starts_from() {
+        let fx = services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let main = main_branch(&fx).await;
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "-q", "--bare"]);
+        git(
+            &root,
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        git(&root, &["push", "-q", "origin", "HEAD:refs/heads/theirs"]);
+        git(&root, &["fetch", "-q", "origin"]);
+        let made = create(
+            &fx,
+            json!({ "source": "existing", "existing_branch": "origin/theirs" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (made.title.as_str(), made.branch.as_str()),
+            ("theirs", "theirs")
+        );
+        let made = create(
+            &fx,
+            json!({ "source": "new", "new_branch": "fresh", "start_point": main }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.title, "fresh");
+        let loose = root.join(format!(
+            "../{}-loose-one",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "loose-one",
+                loose.to_str().unwrap(),
+            ],
+        );
+        let made = create(
+            &fx,
+            json!({ "source": "worktree", "worktree": loose.to_str().unwrap(), "title": "  " }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.title, loose.file_name().unwrap().to_string_lossy());
     }
 
     /// Each source needs its own fields, named when they are missing.
