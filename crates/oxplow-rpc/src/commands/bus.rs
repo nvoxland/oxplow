@@ -166,8 +166,9 @@ pub async fn run_command_for_call(
     id: String,
     input: Json,
 ) -> Result<CommandOutcome, IpcError> {
-    let actor = req.client_host.caller(req.connection()?.as_str(), &call)?;
-    let outcome = req.commands.run(&actor, &id, input.0, false).await?;
+    // As the call's actor, and with the device its run was asked from.
+    let run = req.client_host.run_for(req.connection()?.as_str(), &call)?;
+    let outcome = req.commands.run_in(&run, &id, input.0, false).await?;
     Ok(outcome)
 }
 

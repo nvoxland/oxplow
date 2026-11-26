@@ -10,8 +10,10 @@
 //!
 //! An agent's call acts in its own thread's tabs (never another thread's
 //! or stream's); a person's in the thread the window shows. A call goes to
-//! one window — the last registered that hosts it — and only that window
-//! answers. With no window open, one that closed (`unregister`) or one
+//! one window that hosts it — the window of the device its run was asked
+//! from, else the one the person used last, else the last registered — and
+//! only that window answers. The command a window runs to answer it runs as
+//! the call's actor, with that device ([`ClientHost::run_for`]). With no window open, one that closed (`unregister`) or one
 //! that doesn't answer in time (then forgotten until it registers again),
 //! the run is refused. What the window runs on the daemon to answer a call
 //! (Save's `oxplow.file.save`) runs as the call's actor ([`ClientHost::caller`]).
@@ -42,10 +44,12 @@ struct Window {
     hosted: BTreeSet<String>,
 }
 
-/// A call waiting for its window: who ran it, and where the answer goes.
+/// A call waiting for its window: who ran it (and the device they asked
+/// from), and where the answer goes.
 struct Pending {
     client: String,
     actor: Actor,
+    caller: Option<oxplow_domain::Caller>,
     answer: Answer,
 }
 
@@ -57,19 +61,30 @@ pub struct ClientHost {
     windows: parking_lot::Mutex<Vec<Window>>,
     pending: parking_lot::Mutex<HashMap<String, Pending>>,
     timeout: Duration,
+    /// Which device the person used last: where a call no device asked for
+    /// goes.
+    devices: Arc<crate::client_reports::devices::ClientDevices>,
 }
 
 impl ClientHost {
-    pub fn new(events: EventBus) -> Self {
-        Self::with_timeout(events, ANSWER_TIMEOUT)
+    pub fn new(
+        events: EventBus,
+        devices: Arc<crate::client_reports::devices::ClientDevices>,
+    ) -> Self {
+        Self::with_timeout(events, devices, ANSWER_TIMEOUT)
     }
 
-    pub fn with_timeout(events: EventBus, timeout: Duration) -> Self {
+    pub fn with_timeout(
+        events: EventBus,
+        devices: Arc<crate::client_reports::devices::ClientDevices>,
+        timeout: Duration,
+    ) -> Self {
         Self {
             events,
             windows: parking_lot::Mutex::default(),
             pending: parking_lot::Mutex::default(),
             timeout,
+            devices,
         }
     }
 
@@ -123,14 +138,37 @@ impl ClientHost {
         }
     }
 
-    /// Have the window do `scope`'s `op` with `input` for `actor`.
+    /// The run a window runs a waiting call's command in: the call's actor,
+    /// and the device its run was asked from.
+    pub fn run_for(
+        &self,
+        client: &str,
+        id: &str,
+    ) -> Result<oxplow_domain::run::RunContext, CommandError> {
+        match self.pending.lock().get(id) {
+            Some(p) if p.client == client => Ok(oxplow_domain::run::RunContext::core(
+                p.actor.clone(),
+                oxplow_domain::run::Mode::External,
+            )
+            .with_caller(p.caller.clone())),
+            _ => Err(CommandError::Invalid {
+                field: Some("/call".into()),
+                message: format!("no call `{id}` is waiting for this window"),
+            }),
+        }
+    }
+
+    /// Have a window do `scope`'s `op` with `input` for `run`'s actor: the
+    /// window of the device the run was asked from, else the one the person
+    /// used last, else the last registered that hosts it.
     pub async fn call(
         &self,
-        actor: &Actor,
+        run: &oxplow_domain::run::RunContext,
         scope: &str,
         op: &str,
         input: Value,
     ) -> Result<Value, CommandError> {
+        let actor = run.actor();
         if scope == "agent_terminal.write" && !matches!(actor, Actor::Human) {
             return Err(CommandError::Denied {
                 reason: "only a person can restart an agent terminal".into(),
@@ -145,8 +183,23 @@ impl ClientHost {
             if windows.is_empty() {
                 return Err(refused("no window is open".into()));
             }
-            match windows.iter().rev().find(|w| w.hosted.contains(scope)) {
-                Some(w) => w.client.clone(),
+            let hosting: Vec<&Window> = windows
+                .iter()
+                .filter(|w| w.hosted.contains(scope))
+                .collect();
+            let at = |connection: &oxplow_domain::ConnectionId| {
+                hosting
+                    .iter()
+                    .find(|w| w.client == connection.as_str())
+                    .map(|w| w.client.clone())
+            };
+            let asked = run.caller().and_then(|c| at(&c.connection));
+            let used = || self.devices.last_used().and_then(|(_, c)| at(&c));
+            match asked
+                .or_else(used)
+                .or_else(|| hosting.last().map(|w| w.client.clone()))
+            {
+                Some(client) => client,
                 None => return Err(refused(format!("the window doesn't host `{scope}`"))),
             }
         };
@@ -169,6 +222,7 @@ impl ClientHost {
             Pending {
                 client: client.clone(),
                 actor: actor.clone(),
+                caller: run.caller().cloned(),
                 answer: tx,
             },
         );
@@ -214,7 +268,7 @@ impl ClientHost {
             Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
                 let host = host.clone();
                 Box::pin(async move {
-                    let result = host.call(invocation.actor(), scope, op, input).await?;
+                    let result = host.call(&invocation.run, scope, op, input).await?;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()
@@ -249,7 +303,7 @@ impl ClientHost {
                             ),
                         });
                     }
-                    let result = host.call(invocation.actor(), scope, op, input).await?;
+                    let result = host.call(&invocation.run, scope, op, input).await?;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()
@@ -444,6 +498,11 @@ mod tests {
     use oxplow_domain::ThreadId;
     use serde_json::json;
 
+    /// A run of `actor` with no device: an agent's, a job's.
+    fn run_of(actor: Actor) -> oxplow_domain::run::RunContext {
+        oxplow_domain::run::RunContext::core(actor, oxplow_domain::run::Mode::External)
+    }
+
     fn agent(thread: Option<i64>) -> Actor {
         Actor::Agent {
             session_id: None,
@@ -452,13 +511,81 @@ mod tests {
         }
     }
 
+    /// A person's run reaches that person's own window, though another
+    /// registered after it; an agent's reaches the window used last; the
+    /// command the window runs for a call carries the device of the run that
+    /// made it.
+    #[tokio::test]
+    async fn a_call_reaches_the_asking_device_else_the_one_used_last() {
+        use crate::client_reports::devices::ClientDevices;
+        use oxplow_domain::run::{Mode, RunContext};
+        use oxplow_domain::{Caller, ConnectionId, DeviceDescriptor, DeviceId, DeviceKind};
+        let events = EventBus::new();
+        let seen = events.subscribe_ui();
+        let devices = Arc::new(ClientDevices::default());
+        let host = Arc::new(ClientHost::new(events, devices.clone()));
+        let window = |name: &str| {
+            let device = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Desktop,
+            };
+            let connection = ConnectionId::generate();
+            devices
+                .connected(device.clone(), connection.clone())
+                .unwrap();
+            host.register(connection.as_str(), vec!["tabs.write".into()]);
+            Caller {
+                device: device.id,
+                connection,
+            }
+        };
+        let (mac, tablet) = (window("Mac"), window("Tab S9"));
+        let answer_as = |expected: String| {
+            let host = host.clone();
+            let mut seen = seen.resubscribe();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                let run = host.run_for(&client, &id).unwrap();
+                assert!(host.answer(&client, &id, Ok(json!(client))));
+                assert_eq!(client, expected);
+                run.caller().cloned()
+            })
+        };
+
+        let person = RunContext::core(Actor::Human, Mode::External).with_caller(Some(mac.clone()));
+        let answering = answer_as(mac.connection.to_string());
+        host.call(&person, "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            answering.await.unwrap(),
+            Some(mac.clone()),
+            "the call's run keeps the device"
+        );
+
+        devices.used(&tablet.device);
+        let agent_run = RunContext::core(agent(Some(3)), Mode::External);
+        let answering = answer_as(tablet.connection.to_string());
+        host.call(&agent_run, "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            answering.await.unwrap(),
+            None,
+            "an agent's call names no device"
+        );
+    }
+
     /// The window answers a call it got as an event; the call carries the
     /// agent's own thread.
     #[tokio::test]
     async fn a_call_goes_to_the_window_with_the_agents_thread() {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
-        let host = Arc::new(ClientHost::new(events));
+        let host = Arc::new(ClientHost::new(events, Arc::default()));
         host.register("w1", vec!["tabs.write".into()]);
         let window = {
             let host = host.clone();
@@ -485,7 +612,7 @@ mod tests {
         };
         let out = host
             .call(
-                &agent(Some(3)),
+                &run_of(agent(Some(3))),
                 "tabs.write",
                 "open",
                 json!({ "uri": "oxplow:oxplow/file?path=a.rs" }),
@@ -685,11 +812,11 @@ mod tests {
     #[tokio::test]
     async fn a_call_nothing_can_answer_is_refused() {
         let events = EventBus::new();
-        let host = ClientHost::with_timeout(events, Duration::from_millis(50));
+        let host = ClientHost::with_timeout(events, Arc::default(), Duration::from_millis(50));
         let call = |actor| {
             let host = &host;
             async move {
-                host.call(&actor, "tabs.write", "open", json!({}))
+                host.call(&run_of(actor), "tabs.write", "open", json!({}))
                     .await
                     .unwrap_err()
                     .to_string()
@@ -716,7 +843,7 @@ mod tests {
     async fn a_call_goes_to_one_window_and_only_it_answers() {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
-        let host = Arc::new(ClientHost::new(events));
+        let host = Arc::new(ClientHost::new(events, Arc::default()));
         host.register("w1", vec!["tabs.write".into()]);
         host.register("w2", vec!["tabs.write".into()]);
         let window = {
@@ -734,7 +861,7 @@ mod tests {
             })
         };
         let out = host
-            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .call(&run_of(agent(Some(3))), "tabs.write", "open", json!({}))
             .await
             .unwrap();
         assert_eq!(out, json!("w2"));
@@ -747,7 +874,7 @@ mod tests {
     async fn a_closed_windows_calls_are_refused_at_once() {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
-        let host = Arc::new(ClientHost::new(events));
+        let host = Arc::new(ClientHost::new(events, Arc::default()));
         host.register("w1", vec!["tabs.write".into()]);
         let closer = {
             let host = host.clone();
@@ -758,7 +885,7 @@ mod tests {
         };
         let started = std::time::Instant::now();
         let err = host
-            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .call(&run_of(agent(Some(3))), "tabs.write", "open", json!({}))
             .await
             .unwrap_err()
             .to_string();
@@ -766,7 +893,7 @@ mod tests {
         assert!(err.contains("closed before it answered"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(5));
         let err = host
-            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .call(&run_of(agent(Some(3))), "tabs.write", "open", json!({}))
             .await
             .unwrap_err()
             .to_string();

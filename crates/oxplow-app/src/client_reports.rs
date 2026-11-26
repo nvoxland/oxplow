@@ -209,14 +209,19 @@ pub struct OpenPage {
     pub origin: Option<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ClientReports {
     clients: Mutex<HashMap<String, Client>>,
+    /// Which window the person used last: it leads.
+    devices: std::sync::Arc<devices::ClientDevices>,
 }
 
 impl ClientReports {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(devices: std::sync::Arc<devices::ClientDevices>) -> Self {
+        Self {
+            clients: Mutex::default(),
+            devices,
+        }
     }
 
     /// Windows still reporting at `now`; expired reports are forgotten.
@@ -252,15 +257,21 @@ impl ClientReports {
         clients.remove(connection.as_str());
     }
 
-    /// The live clients at `now`, the one the person was in most recently
-    /// first; the gone ones are forgotten.
+    /// The live clients at `now`: the one the person used last first, then
+    /// the one focused last; the gone ones are forgotten.
     fn live(&self, now: Timestamp) -> Vec<Client> {
+        let used = self
+            .devices
+            .last_used()
+            .map(|(_, c)| c.as_str().to_string());
         let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
         clients.retain(|_, c| now.unix_ms() - c.reported_at.unix_ms() <= FORGET_AFTER_MS);
         let mut out: Vec<Client> = clients.values().cloned().collect();
+        let is_used = |c: &Client| used.as_deref() == Some(c.connection.as_str());
         out.sort_by(|a, b| {
-            b.focused_at
-                .cmp(&a.focused_at)
+            is_used(b)
+                .cmp(&is_used(a))
+                .then(b.focused_at.cmp(&a.focused_at))
                 .then(b.reported_at.cmp(&a.reported_at))
                 .then(a.connection.cmp(&b.connection))
         });
@@ -428,12 +439,49 @@ mod tests {
         }
     }
 
+    /// The window used last leads, ahead of the one focused last: an agent
+    /// reads the page the person is working on.
+    #[test]
+    fn the_window_used_last_leads() {
+        use oxplow_domain::{DeviceDescriptor, DeviceId, DeviceKind};
+        let devices = std::sync::Arc::new(devices::ClientDevices::default());
+        let r = ClientReports::new(devices.clone());
+        let window = |name: &str, focused: bool, page: &str, at_ms: i64| {
+            let device = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Desktop,
+            };
+            devices.connected(device.clone(), con(name)).unwrap();
+            let caller = oxplow_domain::Caller {
+                device: device.id.clone(),
+                connection: con(name),
+            };
+            r.report(
+                &caller,
+                report(
+                    name,
+                    focused,
+                    1,
+                    vec![thread(1, vec![tab(page, "page")], Some(page))],
+                ),
+                at(at_ms),
+            );
+            device.id
+        };
+        window("a", true, "oxplow:oxplow/page?page=focused", 1_000);
+        let tablet = window("b", false, "oxplow:oxplow/page?page=used", 2_000);
+        devices.used(&tablet);
+        let pages = r.open_pages(ThreadId::new(1), at(2_500));
+        assert_eq!(pages[0].page_id, "oxplow:oxplow/page?page=used");
+    }
+
     /// Two windows don't collapse into one "open page": each says what it
     /// has selected, the window the person was in last first, and only the
     /// window showing the thread carries its detail.
     #[test]
     fn two_windows_each_report_their_own_page() {
-        let r = ClientReports::new();
+        let r = ClientReports::new(std::sync::Arc::default());
         r.report(
             &caller("a"),
             report(
@@ -508,7 +556,7 @@ mod tests {
     /// tab, one entry per distinct pair.
     #[test]
     fn the_shown_threads_are_what_the_windows_look_at() {
-        let r = ClientReports::new();
+        let r = ClientReports::new(std::sync::Arc::default());
         r.report(
             &caller("a"),
             report(
@@ -541,7 +589,7 @@ mod tests {
 
     #[test]
     fn tabs_are_listed_per_thread_with_selection_visibility_and_staleness() {
-        let r = ClientReports::new();
+        let r = ClientReports::new(std::sync::Arc::default());
         r.report(
             &caller("a"),
             report(
@@ -594,7 +642,7 @@ mod tests {
 
     #[test]
     fn a_window_that_stops_reporting_is_forgotten() {
-        let r = ClientReports::new();
+        let r = ClientReports::new(std::sync::Arc::default());
         r.report(
             &caller("a"),
             report(

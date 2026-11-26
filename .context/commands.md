@@ -386,8 +386,10 @@ in `CommandSpec::op`.
 - **A run on the daemon** (an agent's through MCP, a script's) reaches
   the window through `client_host::ClientHost`: an
   `OxplowEvent::ClientCall { id, client, thread_id, actor, scope, op, input }`
-  addressed to one window — the last registered that hosts the
-  scope — which does it and answers `answer_client_call { id,
+  addressed to one window that hosts the scope — the window of the device
+  the run was asked from (its caller), else the window the person used last
+  (`ClientDevices::last_used`, `.context/remote-daemon.md` "Last used"),
+  else the last registered — which does it and answers `answer_client_call { id,
   result | error }` (another window's answer is ignored); the run
   waits (15 s), its answer the run's result. A window uses its own id for
   one page load (`uiClientId.ts`, the id its socket, tab reports and logs

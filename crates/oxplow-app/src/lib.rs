@@ -1046,8 +1046,8 @@ impl Services {
                 .with_content_hasher(Arc::new(move |oid: &str| content.object_content_hash(oid)))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
-        let client_reports = Arc::new(client_reports::ClientReports::new());
         let client_devices = Arc::new(client_reports::devices::ClientDevices::default());
+        let client_reports = Arc::new(client_reports::ClientReports::new(client_devices.clone()));
         let agent_status_store: Arc<dyn AgentStatusStore> = Arc::new(
             oxplow_db::SqliteAgentStatusStore::new(db.clone(), vocabulary.clone()),
         );
@@ -1696,7 +1696,10 @@ impl Services {
         {
             commands.add_op(command).expect("core ops register");
         }
-        let client_host = Arc::new(client_host::ClientHost::new(event_bus.clone()));
+        let client_host = Arc::new(client_host::ClientHost::new(
+            event_bus.clone(),
+            client_devices.clone(),
+        ));
         // oxplow's own commands are declared in its required extensions
         // over these operations (`commands/ops.rs`).
         for op in commands::bookmark::ops()

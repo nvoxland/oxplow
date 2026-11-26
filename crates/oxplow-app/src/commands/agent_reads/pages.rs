@@ -2,7 +2,7 @@
 //! agents see of the tabs"), read from `ClientReports`:
 //!
 //! - `pages.read/open { thread_id, tab? }`: the page a thread has open —
-//!   in the window the person was in last, with the other windows' beside
+//!   in the window the person used last, with the other windows' beside
 //!   it — or the named tab; for a page, the window's own open run of it
 //!   (`pageRun`), as text, with the node they are on.
 //! - `pages.read/list_tabs { scope?, thread? }`: the tabs of a thread, its

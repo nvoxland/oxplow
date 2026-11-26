@@ -1646,7 +1646,8 @@ forgotten, a report older than a minute is listed as stale.
   the window sends it again as soon as its socket is back
   (`tabs/useTabReportRepeats.ts`), as well as on its minute heartbeat.
 - `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
-  thread in the window the person was in last (most recently focused),
+  thread in the window the person used last (`ClientDevices::last_used`),
+  else the one focused last,
   with `others` (each other window's), or the listed `tab`: its
   `pageId`, its `page` (the identity, the id without its `#`) and `view`
   (the `#`, decoded — `uri::build::view_of`; an agent never parses an id), its tab's

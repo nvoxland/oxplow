@@ -604,12 +604,7 @@ fn show_op(services: ServicesSlot) -> Op {
                 // its window, if one is open.
                 let opened = svc
                     .client_host
-                    .call(
-                        invocation.actor(),
-                        "tabs.write",
-                        "open",
-                        json!({ "uri": uri }),
-                    )
+                    .call(&invocation.run, "tabs.write", "open", json!({ "uri": uri }))
                     .await;
                 let mut result = json!({ "uri": uri, "text": text, "opened": opened.is_ok() });
                 if let Err(e) = opened {
