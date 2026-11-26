@@ -39,8 +39,8 @@ function count(files: string[], base: string, re: RegExp, exempt: string[] = [])
 const srcFiles = sources(SRC);
 
 // a. A context menu opens through `useRowContextMenu`: the one place that
-// wires the event, so what a finger needs there (a long press where the
-// browser sends none, as on iPad) lands in one place. It has none yet.
+// wires the event. A finger's long press reaches every site already (it is a
+// `contextmenu`, `touchHints.ts`); the hook keeps the menus alike.
 const CONTEXT_MENU_EXEMPT = [
   "components/useRowContextMenu.tsx",
   // The page-wide backstop that cancels the OS's own menu.

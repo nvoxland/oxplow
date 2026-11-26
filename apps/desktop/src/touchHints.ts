@@ -1,14 +1,25 @@
-/// What a mouse shows on hover (a control's `title`), shown by a finger: press
-/// and hold an icon-only control (it has a `title` or `aria-label` and no
-/// text of its own) and its label shows in a bubble above it; the press then
-/// does nothing more (the click that follows is cancelled). Touch presses
-/// only, so a mouse never sees it. One listener for the whole page, mounted
-/// once (`main.tsx`): no control needs anything of its own.
+/// A finger's hold, for the whole page (one set of listeners, mounted once in
+/// `main.tsx`; touch presses only, so a mouse never sees it):
+///
+/// - What a mouse shows on hover (a control's `title`): hold an icon-only
+///   control and its label shows in a bubble above it.
+/// - A right-click: a long press is a `contextmenu` at the finger, so every
+///   menu of the page opens by touch. Android sends its own (then this sends
+///   none, and stops a late one of the browser's: one menu per press); iPad
+///   sends none. Text fields, rich text and the code editor keep the OS's
+///   own long press (select, paste).
+///
+/// Either way the press then does nothing more (its click is cancelled). No
+/// control needs anything of its own.
+
+import { describeChain, shouldSuppressContextMenu } from "./context-menu.js";
 
 /** How long a finger holds before the label shows. Android's own long press
  *  (its `contextmenu`) may come before or after, by the device's setting:
  *  nothing here depends on the order. */
 export const HOLD_MS = 400;
+/** How long a finger holds before it is a right-click. */
+export const MENU_MS = 550;
 /** How long after a hold its click is taken as the hold's own. */
 const SWALLOW_MS = 800;
 /** How far a finger may move and still be holding, not scrolling. */
@@ -36,7 +47,11 @@ export function hintFor(el: Element | null): string | null {
 
 export function installTouchHints(doc: Document = document): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let menuTimer: ReturnType<typeof setTimeout> | null = null;
   let start: { x: number; y: number } | null = null;
+  // This press has had its menu (the browser's or ours): no second one.
+  let menuSent = false;
+  let sending = false;
   let bubble: HTMLElement | null = null;
   let swallowClick = false;
   let swallowTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,8 +67,15 @@ export function installTouchHints(doc: Document = document): () => void {
   };
   const cancel = () => {
     if (timer !== null) clearTimeout(timer);
+    if (menuTimer !== null) clearTimeout(menuTimer);
     timer = null;
+    menuTimer = null;
     start = null;
+  };
+  const swallowNextClick = () => {
+    swallowClick = true;
+    if (swallowTimer !== null) clearTimeout(swallowTimer);
+    swallowTimer = setTimeout(endSwallow, SWALLOW_MS);
   };
   const show = (target: Element, text: string) => {
     hide();
@@ -93,22 +115,50 @@ export function installTouchHints(doc: Document = document): () => void {
     // (Chrome may send no click after a long press).
     endSwallow();
     hide();
+    cancel();
+    menuSent = false;
     if (e.pointerType !== "touch") return;
     const target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+    const at = { x: e.clientX, y: e.clientY };
+    start = at;
     const text = hintFor(target);
-    if (!target || text === null) return;
-    start = { x: e.clientX, y: e.clientY };
-    timer = setTimeout(() => {
-      timer = null;
-      show(target, text);
-      swallowClick = true;
-      swallowTimer = setTimeout(endSwallow, SWALLOW_MS);
-    }, HOLD_MS);
+    if (text !== null) {
+      timer = setTimeout(() => {
+        timer = null;
+        show(target, text);
+        swallowNextClick();
+      }, HOLD_MS);
+    }
+    // Where the OS's own long press is the right one (text), none of ours.
+    if (!shouldSuppressContextMenu(describeChain(target))) return;
+    menuTimer = setTimeout(() => {
+      menuTimer = null;
+      if (menuSent || !target.isConnected) return;
+      menuSent = true;
+      sending = true;
+      try {
+        target.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true, composed: true, button: 2, clientX: at.x, clientY: at.y }),
+        );
+      } finally {
+        sending = false;
+      }
+      swallowNextClick();
+      afterMenu();
+    }, MENU_MS);
   };
   const onMove = (e: PointerEvent) => {
     if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > SLOP_PX) cancel();
   };
-  const onUp = () => cancel();
+  // A lifted finger ends the hold; `start` stays until the next press so a
+  // browser menu sent at the lift is still this press's.
+  const onUp = () => {
+    if (timer !== null) clearTimeout(timer);
+    if (menuTimer !== null) clearTimeout(menuTimer);
+    timer = null;
+    menuTimer = null;
+  };
   // The hold showed the label: the press was a question, not a press.
   const onClick = (e: MouseEvent) => {
     if (!swallowClick) return;
@@ -116,11 +166,29 @@ export function installTouchHints(doc: Document = document): () => void {
     e.preventDefault();
     e.stopPropagation();
   };
-  // The long press opened a menu of the app's: the menu is the answer, so
-  // the bubble goes and a tap on its items is a tap.
-  const onContextMenu = () => {
-    hide();
-    endSwallow();
+  // When a menu of the app's opened (it draws `data-oxplow-menu`), it is the
+  // answer: the bubble goes. A press that opened none keeps its hint.
+  const afterMenu = () => {
+    setTimeout(() => {
+      if (doc.querySelector("[data-oxplow-menu]")) hide();
+    }, 0);
+  };
+  const onContextMenu = (e: Event) => {
+    if (sending) return;
+    if (start !== null) {
+      // A finger's press: the browser's own long press.
+      if (menuSent) {
+        // Ours went first: this press has its menu.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      menuSent = true;
+      // The browser's menu leaves the finger on the item it opened from; a
+      // tap on the menu is a tap.
+      endSwallow();
+    }
+    afterMenu();
   };
   const onDrag = () => {
     cancel();

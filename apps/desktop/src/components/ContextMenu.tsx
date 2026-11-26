@@ -78,6 +78,8 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
   return (
     <div
       ref={rootRef}
+      // A finger's hold reads it: a menu opened, so its hint bubble goes.
+      data-oxplow-menu=""
       style={{
         ...menuStyle,
         position: "fixed",

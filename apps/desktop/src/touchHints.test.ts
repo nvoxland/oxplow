@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { HOLD_MS, hintFor, installTouchHints } from "./touchHints.js";
+import { HOLD_MS, MENU_MS, hintFor, installTouchHints } from "./touchHints.js";
 
 let stop: (() => void) | null = null;
 afterEach(() => {
@@ -83,4 +83,91 @@ test("a cut label and a glyph button have hints", () => {
   Object.defineProperty(cut, "clientWidth", { value: 80 });
   expect(hintFor(cut)).toBe("A very long tab name");
   expect(hintFor(el(`<button aria-label="Close tab">×</button>`))).toBe("Close tab");
+});
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function menus(target: EventTarget) {
+  const seen: MouseEvent[] = [];
+  target.addEventListener("contextmenu", (e) => seen.push(e as MouseEvent));
+  return seen;
+}
+
+// iPad sends no contextmenu on a long press: a finger's long press is one,
+// so every menu of the page opens by touch, and its click is swallowed.
+test("a long press with no menu of the browser's sends one at the finger", async () => {
+  stop = installTouchHints();
+  const row = el(`<div id="row">A row</div>`);
+  const seen = menus(row);
+  let clicked = 0;
+  row.addEventListener("click", () => clicked++);
+  press(row, "pointerdown");
+  await wait(MENU_MS + 50);
+  expect(seen.length).toBe(1);
+  expect(seen[0]!.clientX).toBe(10);
+  press(row, "pointerup");
+  row.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  expect(clicked).toBe(0);
+});
+
+// Android sends its own, before or after: the page sees one.
+test("a long press where the browser sends its own menu is one menu", async () => {
+  stop = installTouchHints();
+  const row = el(`<div>A row</div>`);
+  const seen = menus(row);
+  press(row, "pointerdown");
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  await wait(MENU_MS + 50);
+  expect(seen.length).toBe(1);
+  press(row, "pointerup");
+
+  seen.length = 0;
+  press(row, "pointerdown");
+  await wait(MENU_MS + 50);
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  expect(seen.length).toBe(1);
+  press(row, "pointerup");
+});
+
+// Text fields and the code editor keep the OS's own long press (select,
+// paste); a mouse and a moving finger send nothing.
+test("no long press menu in a text field, by mouse, or while scrolling", async () => {
+  stop = installTouchHints();
+  document.body.innerHTML = `<input id="i" /><div id="d" contenteditable="true">x</div><div id="r">row</div>`;
+  const all = menus(document.body);
+  press(document.getElementById("i")!, "pointerdown");
+  await wait(MENU_MS + 50);
+  press(document.getElementById("i")!, "pointerup");
+  press(document.getElementById("d")!, "pointerdown");
+  await wait(MENU_MS + 50);
+  press(document.getElementById("d")!, "pointerup");
+  const r = document.getElementById("r")!;
+  press(r, "pointerdown", "mouse");
+  await wait(MENU_MS + 50);
+  press(r, "pointerup", "mouse");
+  press(r, "pointerdown");
+  const move = new Event("pointermove", { bubbles: true }) as Event & { clientX: number; clientY: number };
+  Object.assign(move, { clientX: 60, clientY: 10 });
+  r.dispatchEvent(move);
+  await wait(MENU_MS + 50);
+  expect(all.length).toBe(0);
+});
+
+// The hint stays when the long press opened no menu; a menu of the app's
+// takes its place.
+test("the hint goes only when a menu opened", async () => {
+  stop = installTouchHints();
+  const button = el(`<button title="Refresh"><svg></svg></button>`);
+  press(button, "pointerdown");
+  await wait(MENU_MS + 50);
+  expect(document.querySelector("[data-testid=touch-hint]")).not.toBeNull();
+  press(button, "pointerup");
+
+  button.addEventListener("contextmenu", () => {
+    const menu = document.createElement("div");
+    menu.setAttribute("data-oxplow-menu", "");
+    document.body.appendChild(menu);
+  });
+  press(button, "pointerdown");
+  await wait(MENU_MS + 50);
+  expect(document.querySelector("[data-testid=touch-hint]")).toBeNull();
 });

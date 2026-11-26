@@ -739,6 +739,15 @@ own long press may come before or after 400 ms. So an
 icon button's `title` is enough on a tablet too; never put a control's only
 explanation anywhere a finger cannot reach.
 
+**A long press is a right-click.** A finger held still for 550 ms is a
+`contextmenu` at the finger (`touchHints.ts`), so every menu of the page
+opens by touch with no code at the site; Android's own long press counts
+instead when it comes first, and one press opens one menu. Text fields,
+rich text and the code editor keep the OS's own long press (select, paste;
+the editor has its touch bar). A long press on a link opens it in a new tab,
+as its right-click does. A menu draws `data-oxplow-menu` on its root, so the
+hold's hint bubble gives way to it.
+
 **Nothing is only on hover.** Where there is no hover (`@media (hover:
 none)`), what a rule shows on hover is always shown: one block in
 `apps/desktop/index.html` next to the hover rules (the blame and link
