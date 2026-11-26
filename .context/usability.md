@@ -1291,8 +1291,9 @@ its right-click menu.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. **Every internal MIME
   lives in `apps/desktop/src/dragMimes.ts`** — `RAIL_SECTION_DRAG_MIME`
-  (RailHud section reorder) and `VIZ_ROW_DRAG_MIME` (a page's rows, to
-  where a drag action runs). **Nothing drags into an agent**: what the
+  (RailHud section reorder), `VIZ_ROW_DRAG_MIME` (a page's rows, to
+  where a drag action runs), `TAB_DRAG_MIME` (a center tab, to reorder the
+  strip) and `TILE_MIME` (a dashboard tile, to move it). **Nothing drags into an agent**: what the
   person wants an agent to read goes in the thread's context basket from a
   right-click or a ☰ ("Add to Context" below), never by a drop — the
   agent's terminal is a center tab, so a page's rows never share a screen

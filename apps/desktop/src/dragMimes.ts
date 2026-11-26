@@ -28,8 +28,16 @@ export const RAIL_SECTION_DRAG_MIME = "application/x-oxplow-rail-section";
  *  (`rowInteract.rowKey`). */
 export const VIZ_ROW_DRAG_MIME = "application/x-oxplow-viz-rows";
 
+/** A center tab, dragged to reorder the tab strip (the payload is the tab id). */
+export const TAB_DRAG_MIME = "application/x-oxplow-center-tab";
+
+/** A dashboard tile, dragged to move it (the payload is `{ page, id }`). */
+export const TILE_MIME = "application/x-oxplow-dashboard-tile";
+
 /** Every MIME above, for invariant checks. Extend when adding one. */
 export const ALL_DRAG_MIMES = [
   RAIL_SECTION_DRAG_MIME,
   VIZ_ROW_DRAG_MIME,
+  TAB_DRAG_MIME,
+  TILE_MIME,
 ] as const;

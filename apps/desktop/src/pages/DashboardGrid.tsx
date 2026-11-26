@@ -5,11 +5,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MoreButton } from "../components/MoreButton.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { TileGrid, TileSlot, type TileSize } from "../kit/Tiles.js";
+import { TILE_MIME } from "../dragMimes.js";
 import { moveTile, removeTile } from "./dashboardEdits.js";
 import { useDashboardAuthoring, useDashboardWritable } from "./dashboardAuthoring.js";
 
 export interface DashboardChild { id: string; size: TileSize; body: ReactNode }
-const TILE_MIME = "application/x-oxplow-dashboard-tile";
 
 export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardChild[] }) {
   const authoring = useDashboardAuthoring();

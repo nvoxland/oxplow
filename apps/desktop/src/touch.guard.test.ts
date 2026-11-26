@@ -77,8 +77,6 @@ test("no raw onContextMenu= outside the shared hook (ratchet)", () => {
 const MIME_EXEMPT = ["dragMimes.ts"];
 /** Drag MIME literals still to move into `dragMimes.ts` (file -> count). */
 const MIME_KEPT: Record<string, number> = {
-  "components/CenterTabs/CenterTabs.tsx": 1,
-  "pages/DashboardGrid.tsx": 1,
 };
 
 test("no drag MIME literal outside dragMimes.ts (ratchet)", () => {
