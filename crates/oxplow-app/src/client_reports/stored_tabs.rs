@@ -1,6 +1,6 @@
 //! A device's tabs as the daemon stores them (`tab_session`): the window's
 //! `Session` (`apps/desktop/src/tabs/session.ts`), read here for the little an
-//! agent needs of it — each tab's current page, its title, where its Back and
+//! agent needs of it — each tab's current page, its label, where its Back and
 //! Forward lead, where it was opened from, and which tab is selected.
 //! Read-only: only the window writes a session.
 
@@ -49,11 +49,12 @@ impl StoredThread {
 #[derive(Deserialize)]
 struct Session {
     #[serde(default)]
-    tabs: Vec<Tab>,
+    tabs: Vec<serde_json::Value>,
     #[serde(default)]
     active: Option<String>,
 }
 
+/// One tab; read on its own, so a bad one loses only itself.
 #[derive(Deserialize)]
 struct Tab {
     slot: String,
@@ -68,6 +69,10 @@ struct Entry {
     page: Ref,
     #[serde(default)]
     title: Option<String>,
+    /// The strip's label, stored beside the title (which stays what the page
+    /// registered).
+    #[serde(default)]
+    label: Option<String>,
     #[serde(default)]
     from: Option<Origin>,
 }
@@ -79,7 +84,8 @@ struct Ref {
 
 #[derive(Deserialize)]
 struct Origin {
-    title: String,
+    #[serde(default)]
+    title: Option<String>,
 }
 
 /// What a tab shows, as visits record it (`recordedPageKind` in
@@ -116,8 +122,8 @@ pub fn page_kind(id: &str) -> String {
 }
 
 /// `json` (the window's session) as `device`'s tabs of `thread`. A session
-/// that doesn't parse is an error: the caller skips it. A tab with no entry
-/// at its position is left out.
+/// that doesn't parse is an error: the caller skips it. A tab that doesn't
+/// read, or has no entry at its position, is left out.
 pub fn parse(
     device: DeviceId,
     thread: ThreadId,
@@ -128,14 +134,16 @@ pub fn parse(
         .tabs
         .into_iter()
         .filter_map(|tab| {
+            let tab: Tab = serde_json::from_value(tab).ok()?;
             let now = tab.entries.get(tab.at)?;
             let id = now.page.id.clone();
             let kind = page_kind(&id);
             Some(StoredTab {
                 title: now
-                    .title
+                    .label
                     .clone()
                     .filter(|t| !t.is_empty())
+                    .or_else(|| now.title.clone().filter(|t| !t.is_empty()))
                     .unwrap_or_else(|| kind.clone()),
                 back: tab.entries[..tab.at]
                     .iter()
@@ -145,7 +153,7 @@ pub fn parse(
                     .iter()
                     .map(|e| e.page.id.clone())
                     .collect(),
-                origin: now.from.as_ref().map(|f| f.title.clone()),
+                origin: now.from.as_ref().and_then(|f| f.title.clone()),
                 slot: tab.slot,
                 id,
                 kind,
@@ -217,6 +225,41 @@ mod tests {
         assert_eq!(t1.origin.as_deref(), Some("Pages"));
         assert_eq!(s.tabs[1].title, "oxplow/file", "no title: the kind");
         assert_eq!(s.selected().unwrap().slot, "t2");
+    }
+
+    /// The window drops one bad tab and keeps the others, and an origin
+    /// needs no title: Rust reads a session as loosely.
+    #[test]
+    fn a_bad_tab_or_an_origin_with_no_title_loses_only_itself() {
+        let s = parsed(json!({
+            "tabs": [
+                { "slot": "t1", "entries": [
+                    { "ref": { "id": "oxplow:oxplow/page?page=a" }, "from": { "items": [] } } ] },
+                { "entries": [ { "ref": { "id": "oxplow:oxplow/page?page=b" } } ] },
+                { "slot": "t3", "entries": [ { "ref": {} } ] },
+                { "slot": "t4", "at": -1, "entries": [ { "ref": { "id": "x" } } ] },
+                { "slot": "t5", "entries": [ { "ref": { "id": "oxplow:oxplow/page?page=e" } } ] }
+            ]
+        }));
+        let slots: Vec<_> = s.tabs.iter().map(|t| t.slot.as_str()).collect();
+        assert_eq!(slots, ["t1", "t5"]);
+        assert_eq!(s.tabs[0].origin, None);
+    }
+
+    /// The strip's label is its own field, which the strip never reads
+    /// back: it wins over the page's registered title.
+    #[test]
+    fn the_strip_label_wins_over_the_registered_title() {
+        let s = parsed(json!({
+            "tabs": [
+                { "slot": "t1", "entries": [
+                    { "ref": { "id": "oxplow:oxplow/page?page=a" }, "title": "Page title", "label": "Strip label" } ] },
+                { "slot": "t2", "entries": [
+                    { "ref": { "id": "oxplow:oxplow/page?page=b" }, "title": "Page title", "label": "" } ] }
+            ]
+        }));
+        assert_eq!(s.tabs[0].title, "Strip label");
+        assert_eq!(s.tabs[1].title, "Page title");
     }
 
     #[test]

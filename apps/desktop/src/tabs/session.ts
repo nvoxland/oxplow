@@ -54,6 +54,10 @@ export interface Entry {
   /** The title its page last registered, so the strip names the tab before
    *  the page is mounted again (a tab mounts when first shown). */
   title?: string;
+  /** The label the strip drew for it last, for agents that read the stored
+   *  tabs. Never read back by the strip: it would feed the label it came
+   *  from. */
+  label?: string;
 }
 
 export interface Tab {
@@ -212,6 +216,18 @@ export function setTitle(s: Session, slot: string, title: string): Session {
     if (now.title === title) return t;
     const entries = [...t.entries];
     entries[t.at] = { ...now, title };
+    return { ...t, entries };
+  });
+}
+
+/** Keep `label` as the strip label of `slot`'s current entry, apart from
+ *  its title. The same label returns `s` itself. */
+export function setLabel(s: Session, slot: string, label: string): Session {
+  return withTab(s, slot, (t) => {
+    const now = current(t);
+    if (now.label === label) return t;
+    const entries = [...t.entries];
+    entries[t.at] = { ...now, label };
     return { ...t, entries };
   });
 }

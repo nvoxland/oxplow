@@ -26,7 +26,7 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "../tabs/bookmarks.js";
 import { liveItemsOf, resolvedOrigin } from "../tabs/liveOrigin.js";
 import { fileRef, pagePayload, viewParamsOf } from "../tabs/pageRefs.js";
-import { bodies, current as currentEntry, identityOf as pageIdentityOf, patchHistoryState as sessionPatchHistoryState, setTitle as sessionSetTitle, type Entry, type Origin, type Tab } from "../tabs/session.js";
+import { bodies, current as currentEntry, identityOf as pageIdentityOf, patchHistoryState as sessionPatchHistoryState, setLabel as sessionSetLabel, setTitle as sessionSetTitle, type Entry, type Origin, type Tab } from "../tabs/session.js";
 import { type TabRef } from "../tabs/tabState.js";
 import { type Page as PageFile } from "../tauri-bridge/generated/bindings.js";
 import { identityOf, paramOf, parseUri, typeOf } from "../uri/uri.js";
@@ -409,23 +409,33 @@ export function useWindowPages({
     renderersOf,
   ]);
 
-  // Each tab's label is kept as its current entry's title: agents read the
-  // stored tabs (`tab_session`), and the label's rule stays here, in one place.
+  // Each tab's strip label is kept as its current entry's `label`, for
+  // agents that read the stored tabs (`tab_session`): the label's rule stays
+  // here, in one place. It is a field of its own, never the entry's `title`
+  // (what the page registered, which the strip prefers), so a label never
+  // feeds the label it came from. Nothing is kept while the extensions load:
+  // the labels then are placeholders. Only the shown thread's tabs are
+  // labelled; another thread's keep the label they had.
   useEffect(() => {
-    if (!selectedThreadId) return;
+    if (!selectedThreadId || extensions === null) return;
     const session = sessions[selectedThreadId];
     if (!session) return;
     const labels = tabLabelByIdRef.current;
-    const stale = session.tabs.filter((t) => {
+    const stale = session.tabs.some((t) => {
       const entry = currentEntry(t);
       const label = labels[entry.ref.id];
-      return !!label && label !== entry.title;
+      return !!label && label !== entry.label;
     });
-    if (stale.length === 0) return;
+    if (!stale) return;
+    // Applied to the session as it is when the update runs: a tab that
+    // navigated since takes the label of the page it shows now.
     updateSession(selectedThreadId, (s) =>
-      stale.reduce((acc, t) => sessionSetTitle(acc, t.slot, labels[currentEntry(t).ref.id]!), s),
+      s.tabs.reduce((acc, t) => {
+        const label = labels[currentEntry(t).ref.id];
+        return label ? sessionSetLabel(acc, t.slot, label) : acc;
+      }, s),
     );
-  }, [windowTabs, sessions, selectedThreadId, updateSession, tabLabelByIdRef]);
+  }, [windowTabs, sessions, selectedThreadId, extensions, updateSession, tabLabelByIdRef]);
 
   return { windowTabs, renderersOf };
 }

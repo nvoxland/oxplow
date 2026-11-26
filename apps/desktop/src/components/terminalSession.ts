@@ -15,8 +15,9 @@ export type SessionMessage =
   | { kind: "data"; bytes: Uint8Array }
   | { kind: "restart" }
   | { kind: "exit"; exitCode: number | null; outcome: ExitOutcome }
-  /** The terminal's grid, as the client typing into it set it. */
-  | { kind: "size"; cols: number; rows: number };
+  /** The terminal's grid, as the client typing into it set it, and which
+   *  page load that is (null: none). */
+  | { kind: "size"; cols: number; rows: number; owner: string | null };
 
 /** A terminal's grid, in cells. */
 export interface Grid {
@@ -28,6 +29,39 @@ export interface Grid {
  *  whole: down to fit, never up. */
 export function gridScale(pane: Grid, grid: Grid): number {
   return Math.min(1, pane.cols / grid.cols, pane.rows / grid.rows);
+}
+
+/** The smallest font a pane draws a larger grid in, px: below it the text
+ *  is not readable, so the pane clips what does not fit (Fit to this device
+ *  is the way out). */
+export const MIN_GRID_FONT = 7;
+
+/** The font size that draws a grid scaled by `scale` in cells of its own:
+ *  the base size times the scale (with 3% to spare for the scroll bar and
+ *  for cell widths that round), in half pixels, never below
+ *  [`MIN_GRID_FONT`] (or the base, when that is smaller). Smaller cells,
+ *  not a scaled picture: xterm finds the cell under the pointer from its
+ *  own measure, which a CSS transform would make wrong. */
+export function gridFontSize(base: number, scale: number): number {
+  if (scale >= 1) return base;
+  const floor = Math.min(base, MIN_GRID_FONT);
+  return Math.max(floor, Math.floor(base * scale * 0.97 * 2) / 2);
+}
+
+/** The least the daemon sets a terminal to (`resize` below it is ignored):
+ *  a pane with less room cannot take the size. */
+export const MIN_TERMINAL: Grid = { cols: 20, rows: 5 };
+
+/** Whether a pane of `pane` cells is big enough to take a terminal's size. */
+export function canTakeSize(pane: Grid): boolean {
+  return pane.cols >= MIN_TERMINAL.cols && pane.rows >= MIN_TERMINAL.rows;
+}
+
+/** Whether a terminal's size is set by another page load than this one:
+ *  its owner is known and is not `you`. A pane that owns it, or whose
+ *  terminal has no owner, says nothing about another device. */
+export function ownedElsewhere(owner: string | null, you: string | null): boolean {
+  return owner !== null && owner !== you;
 }
 
 function readOutcome(value: unknown): ExitOutcome {
@@ -71,8 +105,10 @@ export function readSessionMessage(message: string): SessionMessage | null {
   }
   if (m.type === "restart") return { kind: "restart" };
   if (m.type === "size") {
-    const { cols, rows } = m as { cols?: unknown; rows?: unknown };
-    if (typeof cols === "number" && typeof rows === "number") return { kind: "size", cols, rows };
+    const { cols, rows, owner } = m as { cols?: unknown; rows?: unknown; owner?: unknown };
+    if (typeof cols === "number" && typeof rows === "number") {
+      return { kind: "size", cols, rows, owner: typeof owner === "string" ? owner : null };
+    }
     return null;
   }
   return null;

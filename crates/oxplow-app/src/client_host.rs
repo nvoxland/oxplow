@@ -102,6 +102,18 @@ fn queueable(
 /// How long a call waits for the window's answer.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long a call that waits on a person (a folder picker) waits for the
+/// window: the person may look for a while. A window that is gone ends the
+/// wait sooner (its socket closing drops its calls).
+pub const PERSON_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Whether the window answers `scope`'s `op` only after a person did: the
+/// folder pickers of `projects.write` (an `open` with no path, `create`).
+fn waits_on_person(scope: &str, op: &str, input: &Value) -> bool {
+    scope == "projects.write"
+        && (op == "create" || (op == "open" && !input.get("path").is_some_and(Value::is_string)))
+}
+
 type Answer = tokio::sync::oneshot::Sender<Result<Value, String>>;
 
 /// An open window: its id (the window's id for one page load, the one its
@@ -128,6 +140,8 @@ pub struct ClientHost {
     windows: parking_lot::Mutex<Vec<Window>>,
     pending: parking_lot::Mutex<HashMap<String, Pending>>,
     timeout: Duration,
+    /// The wait for a call that waits on a person (a folder picker).
+    person_timeout: Duration,
     /// Which device the person used last: where a call no device asked for
     /// goes.
     devices: Arc<crate::client_reports::devices::ClientDevices>,
@@ -151,8 +165,15 @@ impl ClientHost {
             windows: parking_lot::Mutex::default(),
             pending: parking_lot::Mutex::default(),
             timeout,
+            person_timeout: PERSON_TIMEOUT,
             devices,
         }
+    }
+
+    /// The wait for a call that waits on a person (tests).
+    pub fn with_person_timeout(mut self, wait: Duration) -> Self {
+        self.person_timeout = wait;
+        self
     }
 
     /// Window `client` is open and hosts `scopes` (it says so when
@@ -325,6 +346,11 @@ impl ClientHost {
             Some(thread) => thread,
             None => None,
         };
+        let wait = if waits_on_person(scope, op, &input) {
+            self.person_timeout
+        } else {
+            self.timeout
+        };
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.pending.lock().insert(
@@ -345,7 +371,7 @@ impl ClientHost {
             op: op.into(),
             input: oxplow_domain::Json(input),
         });
-        let answered = tokio::time::timeout(self.timeout, rx).await;
+        let answered = tokio::time::timeout(wait, rx).await;
         self.pending.lock().remove(&id);
         match answered {
             Ok(Ok(Ok(result))) => Ok(result),
@@ -1385,6 +1411,43 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("no window is open"), "{err}");
+    }
+
+    /// A call that waits on a person (a folder picker) is not a window that
+    /// stopped answering: it gets the long wait, and the window's socket
+    /// stays open while the picker is on screen.
+    #[tokio::test]
+    async fn a_call_that_waits_on_a_person_outlives_the_answer_timeout() {
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let host = Arc::new(
+            ClientHost::with_timeout(events, Arc::default(), Duration::from_millis(50))
+                .with_person_timeout(Duration::from_secs(5)),
+        );
+        host.register("w1", vec!["projects.write".into()]);
+        let window = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                // The person is still choosing a folder.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                assert!(host.answer("w1", &id, Ok(json!(null))));
+            })
+        };
+        // No path: the window opens a picker.
+        let run = run_of(Actor::Human);
+        host.call(&run, "projects.write", "open", json!({}))
+            .await
+            .expect("the window answered after its picker closed");
+        window.await.unwrap();
+        // With a path nothing waits on a person: the short wait applies.
+        let err = host
+            .call(&run, "projects.write", "open", json!({ "path": "/x" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("didn't answer"), "{err}");
     }
 
     /// A window that misses an answer is forgotten and its socket is asked

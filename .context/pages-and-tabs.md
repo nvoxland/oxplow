@@ -1620,15 +1620,21 @@ window (`editor/buffers.ts`).
 
 A device's tabs are its stored ones (`tab_session`, "Persistence"): the
 daemon reads them directly, so an agent sees a device's tabs while the
-device is away. The strip's label of each tab is kept in its current
-entry's `title` (`useWindowPages`), so the stored tab carries the title an
-agent reads; a tab with no title reads as its kind. A tab's `kind` is
+device is away. The strip's label of each tab of the **shown thread** is
+kept in its current entry's `label` (`useWindowPages`), a field of its own:
+`title` stays what the page registered, which the strip prefers, so the label
+never feeds the label it came from. Nothing is stored while the extensions
+load (the labels are placeholders), and an agent session's tab follows the
+session's name. A tab of another thread keeps the label it had until that
+thread is shown. Rust reads `label`, then `title`, then the kind. A tab's `kind` is
 `recordedPageKind` ported to Rust (`client_reports/stored_tabs.rs`): a
 page's route, else the resource, else `http`/`https`, else `link`. `back`
 and `forward` are the ids of the entries before and after the current one,
 oldest first, and `origin` is the title of the collection the entry was
-opened from. A stored session that does not parse is skipped with a
-warning.
+opened from. A session is read as loosely as the window reads it: a tab
+that does not read (no `slot`, an entry with no `ref.id`, an `at` that is not
+a position) is left out and the others stay; an origin needs no title. A
+stored session that is not JSON of tabs is skipped with a warning.
 
 Each window also reports what is live (`report_tabs`, debounced 300 ms from
 `window/useWindowHost.ts`, built by the pure `tabs/tabReport.ts`): the
@@ -1644,7 +1650,7 @@ listed as stale.
 - `oxplow_list_tabs { scope?, thread? }` lists the tabs of a thread
   (default the caller's), its stream's threads or every thread, on every
   device that has tabs stored for them, connected or not, the device used
-  last first: id (a ref), kind, title, thread, stream, agent session for a
+  last first: `tab` (a ref), kind, title, thread, stream, agent session for a
   session tab, `selected` (the device's active tab in that thread),
   `visible` (selected, and the device's window shows that thread and is
   visible), `device`, `deviceName` (null when the device is away) and
@@ -1659,7 +1665,7 @@ listed as stale.
   thread on the device the person used last (`ClientDevices::last_used`),
   else on the next device with one, with `others` (each other device's), or
   the listed `tab`: its `pageId`, its `page` (the identity, the id without
-  its `#`) and `view` (the `#`, decoded — `uri::build::view_of`; an agent
+  its `#`) and `view` (the `#`, decoded — `OxplowUri::view`; an agent
   never parses an id), its tab's `back`, `forward` and `origin`, its device
   facts as in the list, and, for a page file, its tree and run as text
   (`pages/text.rs`). `detail` comes from the device's live report, only for

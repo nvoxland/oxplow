@@ -111,8 +111,17 @@ test("a watching client draws the owner's grid, and Fit takes it", async ({ page
     await open(b.page, daemon, "oxplow:oxplow/page?page=terminal");
     const sized = b.page.getByTestId("terminal-sized-elsewhere");
     await expect(sized).toBeVisible();
-    // The owner's grid, shrunk to the narrow pane.
-    await expect(b.page.locator(".xterm")).toHaveCSS("transform", /matrix\(0\./);
+    // The owner's grid, drawn in a smaller font to fit the narrow pane. A
+    // CSS transform would put the pointer in the wrong cell, so there is none.
+    await expect(b.page.locator(".xterm")).toHaveCSS("transform", "none");
+    const fontPx = async () => parseFloat(await b.page.locator(".xterm-rows").evaluate((el) => getComputedStyle(el).fontSize));
+    expect(await fontPx()).toBeLessThan(13);
+    // The grid fits the pane: not wider than its mount.
+    const [screen, mount] = await Promise.all([
+      b.page.locator(".xterm-screen").boundingBox(),
+      b.page.getByTestId("terminal-mount").boundingBox(),
+    ]);
+    expect(screen!.width).toBeLessThanOrEqual(mount!.width + 1);
 
     await b.page.getByTestId("terminal-fit").click();
     await expect(sized).toBeHidden();
@@ -122,6 +131,49 @@ test("a watching client draws the owner's grid, and Fit takes it", async ({ page
     await b.page.keyboard.type("echo fit-$((6*7))=$(stty size | tr ' ' x)");
     await b.page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText(/fit-42=\d+x\d+/);
+  } finally {
+    await b.context.close();
+  }
+});
+
+/// The client watching a terminal takes its size by typing, with no Fit:
+/// its keys are what takes it, and the daemon tells who owns it. A reply
+/// xterm sends to a program's query takes nothing (the watching client's
+/// replay holds one).
+test("a watching client that types takes the terminal's size", async ({ page, browser, baseURL, daemon }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  // A device-attributes query in the terminal's replay: the watching client's
+  // xterm answers it when it opens, which must not take the size.
+  await page.keyboard.type("printf '\\033[c'; echo owner-$((6*7))");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".xterm-rows")).toContainText("owner-42");
+
+  const b = await client(browser, baseURL!, daemon, { width: 700, height: 600 });
+  try {
+    await load(b.page);
+    await b.page.mouse.click(5, 5);
+    await open(b.page, daemon, "oxplow:oxplow/page?page=terminal");
+    const sized = b.page.getByTestId("terminal-sized-elsewhere");
+    await expect(sized).toBeVisible();
+    // Opening and its replies took nothing: once the replay is drawn (the
+    // query in it answered), the wide client still owns it.
+    await expect(b.page.locator(".xterm-rows")).toContainText("owner-42");
+    await expect(sized).toBeVisible();
+    await expect(page.getByTestId("terminal-sized-elsewhere")).toBeHidden();
+
+    await b.page.locator(".xterm").click();
+    // The replies to the query went to the shell's line as text: clear it.
+    await b.page.keyboard.press("Control+u");
+    await b.page.keyboard.type("echo typed-$((6*7))=$(stty size | tr ' ' x)");
+    await b.page.keyboard.press("Enter");
+    // Its keys took the size: it owns the terminal, the wide client watches.
+    await expect(sized).toBeHidden();
+    await expect(page.getByTestId("terminal-sized-elsewhere")).toBeVisible();
+    await expect(b.page.locator(".xterm-rows")).toContainText(/typed-42=\d+x\d+/);
   } finally {
     await b.context.close();
   }

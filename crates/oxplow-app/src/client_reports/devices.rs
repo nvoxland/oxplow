@@ -20,6 +20,9 @@ pub struct ClientDevices {
     inner: Mutex<Inner>,
 }
 
+/// How long a closed socket's time is kept.
+const ABSENCE_KEPT: std::time::Duration = std::time::Duration::from_secs(3600);
+
 #[derive(Default)]
 struct Inner {
     devices: HashMap<DeviceId, Entry>,
@@ -35,6 +38,9 @@ struct Inner {
     /// When each device was last used in this project (the page says so,
     /// at most once a second, while the person works).
     used: HashMap<DeviceId, std::time::Instant>,
+    /// When each page load's current socket closed; cleared when it
+    /// connects again, and forgotten after an hour.
+    closed_at: HashMap<ConnectionId, std::time::Instant>,
 }
 
 struct Entry {
@@ -145,6 +151,7 @@ impl ClientDevices {
         }
         inner.sockets += 1;
         let socket = SocketHandle::new(Socket(inner.sockets));
+        inner.closed_at.remove(&connection);
         let device = descriptor.id.clone();
         let previous = inner.devices.insert(
             device.clone(),
@@ -207,6 +214,11 @@ impl ClientDevices {
             .is_some_and(|e| &e.connection == connection && e.socket.id == socket);
         if current {
             inner.devices.remove(device);
+            let now = std::time::Instant::now();
+            inner
+                .closed_at
+                .retain(|_, at| now.duration_since(*at) < ABSENCE_KEPT);
+            inner.closed_at.insert(connection.clone(), now);
         }
         current
     }
@@ -231,6 +243,25 @@ impl ClientDevices {
     pub fn is_live(&self, connection: &ConnectionId) -> bool {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         inner.devices.values().any(|e| &e.connection == connection)
+    }
+
+    /// How long page load `connection` has been away: `None` while it is
+    /// connected, `Duration::MAX` when it was replaced or never seen (or
+    /// has been away longer than an hour).
+    pub fn away_for(&self, connection: &ConnectionId) -> Option<std::time::Duration> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if inner.devices.values().any(|e| &e.connection == connection) {
+            return None;
+        }
+        if inner.replaced.contains(connection) {
+            return Some(std::time::Duration::MAX);
+        }
+        Some(
+            inner
+                .closed_at
+                .get(connection)
+                .map_or(std::time::Duration::MAX, |at| at.elapsed()),
+        )
     }
 
     /// The page load a connected device is on now.
@@ -281,6 +312,33 @@ mod tests {
         assert!(devices.closed(&tab.id, &connection, opened.socket.id()));
         assert_eq!(devices.get(&tab.id), None);
         assert!(devices.list().is_empty());
+    }
+
+    /// How long a page load has been away: none while connected, the time
+    /// since its socket closed, and for good once replaced or never seen.
+    #[test]
+    fn a_page_load_says_how_long_it_has_been_away() {
+        let devices = ClientDevices::default();
+        let tab = device("Tab S9");
+        let connection = ConnectionId::generate();
+        assert_eq!(
+            devices.away_for(&connection),
+            Some(std::time::Duration::MAX),
+            "never seen"
+        );
+        let opened = devices.connected(tab.clone(), connection.clone()).unwrap();
+        assert_eq!(devices.away_for(&connection), None);
+        assert!(devices.closed(&tab.id, &connection, opened.socket.id()));
+        let away = devices.away_for(&connection).expect("away");
+        assert!(away < std::time::Duration::from_secs(5), "{away:?}");
+        devices.connected(tab.clone(), connection.clone()).unwrap();
+        assert_eq!(devices.away_for(&connection), None, "back");
+        // A newer page load of the device replaces it for good.
+        devices.connected(tab, ConnectionId::generate()).unwrap();
+        assert_eq!(
+            devices.away_for(&connection),
+            Some(std::time::Duration::MAX)
+        );
     }
 
     #[test]

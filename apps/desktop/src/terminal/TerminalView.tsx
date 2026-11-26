@@ -7,7 +7,7 @@ import { useRef, useState, type CSSProperties } from "react";
 import type { Terminal } from "@xterm/xterm";
 
 import { useCoarsePointer } from "../coarsePointer.js";
-import { exitBanner } from "../components/terminalSession.js";
+import { canTakeSize, exitBanner, MIN_TERMINAL } from "../components/terminalSession.js";
 import { TerminalSurface } from "./TerminalSurface.js";
 import { TerminalTouchBar } from "./TerminalTouchBar.js";
 import { ctrlOf } from "./touchKeys.js";
@@ -49,31 +49,32 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
   const ctrlOn = useRef(false);
   ctrlOn.current = ctrl;
   const banner = session.ended ? exitBanner(session.ended) : null;
-  // The cells this pane has room for: when the terminal's grid differs
-  // (another client typed into it last), Fit to this device takes it.
+  // The cells this pane has room for. The daemon says whether another
+  // client owns the terminal's size (it typed into it last); then, when the
+  // grid differs, Fit to this device takes it.
   const [pane, setPane] = useState<{ cols: number; rows: number } | null>(null);
   const grid = session.grid;
-  const elsewhere = !!grid && !!pane && (grid.cols !== pane.cols || grid.rows !== pane.rows);
+  const elsewhere = session.ownedElsewhere && !!grid && !!pane && (grid.cols !== pane.cols || grid.rows !== pane.rows);
   return (
     <div ref={boxRef} data-testid="terminal-view" data-uri={uri} style={boxStyle}>
       <TerminalSurface
         shown={shown}
         uri={uri}
         grid={grid}
-        onOpened={(opened) => {
+        onOpened={(opened, room) => {
           term.current = opened;
-          setPane({ cols: opened.cols, rows: opened.rows });
+          setPane(room);
           detach.current?.();
-          detach.current = session.attach(opened);
+          detach.current = session.attach(opened, room);
         }}
-        onData={(data) => {
-          if (ctrlOn.current) {
+        onData={(data, typed) => {
+          if (ctrlOn.current && typed) {
             setCtrl(false);
             ctrlOn.current = false;
-            session.input(ctrlOf(data) ?? data);
+            session.input(ctrlOf(data) ?? data, true);
             return;
           }
-          session.input(data);
+          session.input(data, typed);
         }}
         onBinary={session.binary}
         onResize={(cols, rows) => {
@@ -87,18 +88,35 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
         isLinkablePath={isLinkablePath}
       />
       {elsewhere ? (
-        <div data-testid="terminal-sized-elsewhere" style={bannerStyle}>
+        // A chip in the corner: in the flow it would change the pane's size,
+        // and over the bottom it would cover the keys and the input box.
+        <div data-testid="terminal-sized-elsewhere" style={chipStyle}>
           <span>
             Sized for another device ({grid!.cols}×{grid!.rows}).
           </span>
-          <button type="button" data-testid="terminal-fit" onClick={() => session.fit(pane!.cols, pane!.rows)}>
+          <button
+            type="button"
+            data-testid="terminal-fit"
+            disabled={!canTakeSize(pane!)}
+            title={
+              canTakeSize(pane!)
+                ? undefined
+                : `This pane is too small to take the size: it needs ${MIN_TERMINAL.cols}×${MIN_TERMINAL.rows} cells, it has ${pane!.cols}×${pane!.rows}.`
+            }
+            onClick={() => session.fit(pane!.cols, pane!.rows)}
+          >
             Fit to this device
           </button>
+          {canTakeSize(pane!) ? null : (
+            <span data-testid="terminal-fit-refused">
+              Too small to fit ({MIN_TERMINAL.cols}×{MIN_TERMINAL.rows} at least).
+            </span>
+          )}
         </div>
       ) : null}
       {touch ? (
         <TerminalTouchBar
-          send={session.input}
+          send={(bytes) => session.input(bytes, true)}
           applicationCursor={() => term.current?.modes.applicationCursorKeysMode ?? false}
           ctrl={ctrl}
           onCtrl={setCtrl}
@@ -151,6 +169,21 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
 }
 
 const boxStyle: CSSProperties = { position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" };
+const chipStyle: CSSProperties = {
+  position: "absolute",
+  top: 4,
+  right: 12,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "3px 8px",
+  background: "var(--surface-card)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 6,
+  color: "var(--text-primary)",
+  fontSize: 12,
+  zIndex: 4,
+};
 const bannerStyle: CSSProperties = {
   position: "absolute",
   left: 0,

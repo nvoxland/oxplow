@@ -222,11 +222,16 @@ pub async fn restart_agent_terminal(ctx: &RpcRequest<'_>, uri: String) -> Result
         ));
     };
     let (cols, rows) = terminals.size(&pty).await.unwrap_or((80, 24));
+    // The replacement keeps who owns the size: no pane has to win it again.
+    let held = terminals.ownership(&pty).await;
     match terminals.close(&pty).await {
         Ok(()) | Err(oxplow_app::terminal_sessions::TerminalSessionError::NotFound(_)) => {}
         Err(err) => return Err(err.into()),
     }
     let result = open_agent_terminal(ctx, id, None, cols, rows).await;
+    if let (Ok(opened), Some(held)) = (&result, held) {
+        terminals.inherit(&opened.session_id, held).await;
+    }
     terminals.report_restart(pty, result.as_ref().err().map(|err| err.message.as_str()));
     result.map(|_| ())
 }

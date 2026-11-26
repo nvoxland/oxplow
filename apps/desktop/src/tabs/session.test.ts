@@ -23,6 +23,7 @@ import {
   serializeSession,
   patchHistoryState,
   setHistoryState,
+  setLabel,
   setTitle,
   slotShowing,
   stepOrigin,
@@ -267,6 +268,18 @@ test("setTitle keeps a page's title with its entry, through storage; the same ti
   // Another page in the tab is not titled by the old one.
   s = navigate(titled, slot, e(b));
   expect(current(s.tabs[0]!).title).toBeUndefined();
+});
+
+// The strip's label is its own field: the page's registered title stays what
+// the page said, and the label never feeds back into it.
+test("setLabel keeps the strip's label beside the title; the same label is no change", () => {
+  const s = open(emptySession(), e(a));
+  const slot = s.active!;
+  const titled = setTitle(s, slot, "Git Status");
+  const labelled = setLabel(titled, slot, "Status (main)");
+  expect(current(labelled.tabs[0]!)).toMatchObject({ title: "Git Status", label: "Status (main)" });
+  expect(setLabel(labelled, slot, "Status (main)")).toBe(labelled);
+  expect(current(parseSession(serializeSession(labelled))!.tabs[0]!).label).toBe("Status (main)");
 });
 
 describe("origin: the collection a page was opened from", () => {

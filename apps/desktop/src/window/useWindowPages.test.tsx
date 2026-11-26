@@ -1,6 +1,6 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, renderHook } from "@testing-library/react";
-import { emptySession, navigate, open } from "../tabs/session.js";
+import { current, emptySession, navigate, open, setTitle } from "../tabs/session.js";
 import { agentSessionRef } from "../tabs/pageRefs.js";
 import type { Session } from "../tabs/session.js";
 
@@ -25,22 +25,31 @@ function thread(): Session {
 let updates: Array<[string, Session]> = [];
 const thread1 = thread();
 
-function setup(over: { pageTitles?: Record<string, string>; dirtyTabs?: Record<string, boolean> } = {}) {
+function setup(
+  over: {
+    pageTitles?: Record<string, string>;
+    dirtyTabs?: Record<string, boolean>;
+    extensions?: unknown;
+    sessions?: () => Record<string, Session>;
+    update?: (thread: string, f: (s: Session) => Session) => void;
+  } = {},
+) {
   const noop = () => {};
-  return renderHook(() =>
+  return renderHook(({ name }: { name: string }) =>
     useWindowPages({
       stream: null,
       selectedThread: { id: "thr1" } as never,
-      selectedThreadSessions: [{ id: "ses1", threadId: "thr1", harness: "claude", displayName: "Fixing", title: "", nativeTitle: "" }] as never,
-      extensions: null,
+      selectedThreadSessions: [{ id: "ses1", threadId: "thr1", harness: "claude", displayName: name, title: "", nativeTitle: "" }] as never,
+      extensions: (over.extensions ?? null) as never,
       sessionStatuses: { ses1: { status: "working" } } as never,
       harnesses: [],
       liveTerminals: new Set<string>(),
       offerDeps: { run: async () => null } as never,
       bookmarks: [],
       tabs: {
-        sessions: { thr1: thread() },
-        updateSession: (thread: string, f: (s: Session) => Session) => updates.push([thread, f(thread === "thr1" ? thread1 : thread1)]),
+        sessions: over.sessions ? over.sessions() : { thr1: thread() },
+        updateSession:
+          over.update ?? ((thread: string, f: (s: Session) => Session) => void updates.push([thread, f(thread1)])),
         openTab: noop,
         closePageTab: noop,
         handleGoBack: noop,
@@ -57,6 +66,7 @@ function setup(over: { pageTitles?: Record<string, string>; dirtyTabs?: Record<s
       openers: { handleOpenPage: noop, handleNavigateInTab: noop, handleOpenDiffInTab: noop, openRefRef: { current: noop } },
       tabLabelByIdRef: { current: {} },
     }),
+    { initialProps: { name: "Fixing" } },
   );
 }
 
@@ -80,9 +90,52 @@ test("a page's own title and unsaved edits show on its tab", () => {
   expect(tab.dirty).toBe(true);
 });
 
-test("each tab's strip label is kept as its current entry's title, for agents", () => {
-  updates = [];
-  setup({ pageTitles: { [second.id]: "Item two" } });
-  const titled = updates.find(([, s]) => s.tabs.some((t) => t.entries[t.at]!.title === "Item two"));
-  expect(titled?.[0]).toBe("thr1");
+// Agents read the stored tabs: the strip's label is kept in its own field of
+// the entry, never in the page's registered title (which the strip prefers).
+describe("the strip's label, kept for agents", () => {
+  /** The thread's session held as the window holds it: each update applies
+   *  to the latest, and a render reads what was stored. */
+  function held(over: Parameters<typeof setup>[0] = {}) {
+    let stored = thread();
+    let writes = 0;
+    const hook = setup({
+      ...over,
+      sessions: () => ({ thr1: stored }),
+      update: (_t, f) => {
+        const next = f(stored);
+        if (next !== stored) writes++;
+        stored = next;
+      },
+    });
+    return { hook, stored: () => stored, writes: () => writes };
+  }
+  const labelOf = (s: Session, id: string) => s.tabs.map((t) => current(t)).find((e) => e.ref.id === id)?.label;
+
+  test("each tab's strip label is stored once, as the entry's label", () => {
+    const h = held({ pageTitles: { [second.id]: "Item two" }, extensions: [] });
+    expect(labelOf(h.stored(), second.id)).toBe("Item two");
+    expect(current(h.stored().tabs.find((t) => current(t).ref.id === second.id)!).title).toBeUndefined();
+    const before = h.writes();
+    h.hook.rerender({ name: "Fixing" });
+    h.hook.rerender({ name: "Fixing" });
+    expect(h.writes()).toBe(before);
+  });
+
+  test("nothing is stored while the extensions are not loaded: labels are placeholders", () => {
+    const h = held({ extensions: null });
+    expect(h.writes()).toBe(0);
+  });
+
+  test("an agent session's tab follows the session's name, not a stored label", () => {
+    const h = held({ extensions: [] });
+    expect(labelOf(h.stored(), agent.id)).toBe("Fixing");
+    h.hook.rerender({ name: "Renamed" });
+    expect(labelOf(h.stored(), agent.id)).toBe("Renamed");
+  });
+
+  test("the page's registered title stays the page's: the label never replaces it", () => {
+    const h = held({ extensions: [] });
+    const withTitle = setTitle(h.stored(), h.stored().tabs[0]!.slot, "Registered");
+    expect(current(withTitle.tabs[0]!).title).toBe("Registered");
+  });
 });

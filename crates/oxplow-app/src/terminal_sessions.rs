@@ -280,8 +280,35 @@ pub struct TerminalSessionRegistry {
     liveness: Arc<std::sync::OnceLock<Liveness>>,
 }
 
-/// Whether a page load is connected (`ClientDevices::is_live`).
-pub type Liveness = Arc<dyn Fn(&ConnectionId) -> bool + Send + Sync>;
+/// How long a page load has been away: `None` while it is connected,
+/// `Duration::MAX` for one that is gone for good (`ClientDevices::away_for`).
+pub type Liveness = Arc<dyn Fn(&ConnectionId) -> Option<Duration> + Send + Sync>;
+
+/// How long a terminal's owner may be away and keep the size: longer than
+/// a reconnect takes (the page's backoff tops out at 10 s). Within it
+/// another page load's attach or resize changes nothing; typed input and
+/// Fit always may.
+const OWNER_GRACE: Duration = Duration::from_secs(30);
+
+/// How long a page load's asked size is kept while it is away.
+const ASKED_KEPT: Duration = Duration::from_secs(600);
+
+/// What a page load may do to a terminal's size by attaching or resizing.
+enum SizeRule {
+    /// It owns the terminal, or names no page load (a script): it applies.
+    Applies,
+    /// There is no owner, or the owner is gone: it becomes the owner.
+    Takes,
+    /// Another page load owns it: the size is only noted.
+    Waits,
+}
+
+/// What a terminal's owner and the sizes asked for, carried to the terminal
+/// that replaces it (a restart).
+pub struct Ownership {
+    owner: Option<ConnectionId>,
+    asked: HashMap<ConnectionId, (u16, u16)>,
+}
 
 /// One queued input message and the page load that sent it.
 type Queued = (Option<ConnectionId>, String);
@@ -314,46 +341,92 @@ impl TerminalSessionRegistry {
         let _ = self.liveness.set(liveness);
     }
 
-    fn is_live(&self, connection: &ConnectionId) -> bool {
-        self.liveness.get().is_some_and(|live| live(connection))
+    /// How long `connection` has been away; `None` while connected. With no
+    /// liveness set, every page load is gone for good.
+    fn away(&self, connection: &ConnectionId) -> Option<Duration> {
+        self.liveness
+            .get()
+            .map_or(Some(Duration::MAX), |away| away(connection))
     }
 
-    /// Whether the page load `connection` may set `entry`'s size now: it
-    /// owns the terminal, or the owner is gone (it then takes it), or it
-    /// names no page load (a script keeps the plain rule).
-    fn takes_size(&self, entry: &mut SessionEntry, connection: Option<&ConnectionId>) -> bool {
+    /// What `connection` may do to `entry`'s size by attaching or resizing.
+    fn size_rule(&self, entry: &SessionEntry, connection: Option<&ConnectionId>) -> SizeRule {
         let Some(connection) = connection else {
-            return true;
+            return SizeRule::Applies;
         };
         match &entry.owner {
-            Some(owner) if owner == connection => true,
-            Some(owner) if self.is_live(owner) => false,
-            _ => {
-                entry.owner = Some(connection.clone());
-                true
+            Some(owner) if owner == connection => SizeRule::Applies,
+            Some(owner) if self.away(owner).is_none_or(|gone| gone < OWNER_GRACE) => {
+                SizeRule::Waits
             }
+            _ => SizeRule::Takes,
         }
     }
 
-    /// Resize `entry`'s PTY to `size` and tell every client, when it
-    /// differs.
-    async fn set_size(
+    /// Make `owner` (when given) the terminal's owner and resize its PTY to
+    /// `size`, and tell every client when either changed.
+    async fn apply(
         &self,
         session_id: &str,
         entry: &mut SessionEntry,
+        owner: Option<&ConnectionId>,
         size: (u16, u16),
     ) -> Result<(), TerminalSessionError> {
-        if entry.size == size {
-            return Ok(());
+        let owner_changed = owner.is_some() && entry.owner.as_ref() != owner;
+        if let Some(owner) = owner {
+            entry.owner = Some(owner.clone());
         }
-        self.pty.resize(&entry.pane_id, size.0, size.1).await?;
-        entry.size = size;
-        let _ = self.events_tx.send(TerminalBridgeEvent {
-            session_id: session_id.to_string(),
-            message: serde_json::json!({"type": "size", "cols": size.0, "rows": size.1})
+        let resized = if entry.size == size {
+            Ok(false)
+        } else {
+            self.pty
+                .resize(&entry.pane_id, size.0, size.1)
+                .await
+                .map(|()| {
+                    entry.size = size;
+                    true
+                })
+        };
+        if owner_changed || matches!(resized, Ok(true)) {
+            // The size, and who set it: a pane draws the grid, and says
+            // another device owns it only when the daemon says so.
+            let _ = self.events_tx.send(TerminalBridgeEvent {
+                session_id: session_id.to_string(),
+                message: serde_json::json!({
+                    "type": "size",
+                    "cols": entry.size.0,
+                    "rows": entry.size.1,
+                    "owner": entry.owner.as_ref().map(|c| c.as_str()),
+                })
                 .to_string(),
-        });
-        Ok(())
+            });
+        }
+        resized.map(|_| ()).map_err(Into::into)
+    }
+
+    /// The page load that owns `session_id`'s size.
+    pub async fn owner(&self, session_id: &str) -> Option<ConnectionId> {
+        self.inner.lock().await.get(session_id)?.owner.clone()
+    }
+
+    /// The owner and asked sizes of `session_id`, for the terminal that
+    /// replaces it ([`Self::inherit`]).
+    pub async fn ownership(&self, session_id: &str) -> Option<Ownership> {
+        let map = self.inner.lock().await;
+        let entry = map.get(session_id)?;
+        Some(Ownership {
+            owner: entry.owner.clone(),
+            asked: entry.asked.clone(),
+        })
+    }
+
+    /// `session_id` takes the owner and asked sizes of the terminal it
+    /// replaces, so no pane has to win the size again.
+    pub async fn inherit(&self, session_id: &str, from: Ownership) {
+        if let Some(entry) = self.inner.lock().await.get_mut(session_id) {
+            entry.owner = from.owner;
+            entry.asked = from.asked;
+        }
     }
 
     /// Serialize starts and replacements of the same agent's PTY. An
@@ -511,12 +584,16 @@ impl TerminalSessionRegistry {
         session_id: String,
         replay: Vec<u8>,
         size: (u16, u16),
+        owner: Option<&ConnectionId>,
+        you: Option<&ConnectionId>,
     ) -> AttachResult {
         AttachResult {
             session_id,
             replay_b64: B64.encode(&replay[..]),
             cols: size.0,
             rows: size.1,
+            owner: owner.map(|c| c.as_str().to_string()),
+            you: you.map(|c| c.as_str().to_string()),
         }
     }
 
@@ -558,12 +635,14 @@ impl TerminalSessionRegistry {
             session_id,
             Vec::new(),
             (cols, rows),
+            connection,
+            connection,
         ))
     }
 
     /// The live session under `key`, if there is one: the attaching page
     /// load's size is recorded, and the PTY takes it only when that page
-    /// load may ([`Self::takes_size`]: no live owner, or itself); the
+    /// load may ([`Self::size_rule`]); the
     /// buffer is replayed. A stale `by_key` entry (its session was killed)
     /// is none.
     pub async fn reattach(
@@ -581,20 +660,27 @@ impl TerminalSessionRegistry {
             return Ok(None);
         };
         if let Some(connection) = connection {
-            // Page loads that are gone are forgotten as the next one asks.
-            entry
-                .asked
-                .retain(|other, _| other == connection || self.is_live(other));
+            // Page loads gone for a long time are forgotten as the next one asks.
+            entry.asked.retain(|other, _| {
+                other == connection || self.away(other).is_none_or(|d| d < ASKED_KEPT)
+            });
             entry.asked.insert(connection.clone(), (cols, rows));
         }
-        if self.takes_size(entry, connection) {
-            self.set_size(&existing_id, entry, (cols, rows)).await?;
+        match self.size_rule(entry, connection) {
+            SizeRule::Applies => self.apply(&existing_id, entry, None, (cols, rows)).await?,
+            SizeRule::Takes => {
+                self.apply(&existing_id, entry, connection, (cols, rows))
+                    .await?
+            }
+            SizeRule::Waits => {}
         }
         let replay = entry.ring.lock().await.replay();
         Ok(Some(Self::build_attach_result(
             existing_id,
             replay,
             entry.size,
+            entry.owner.as_ref(),
+            connection,
         )))
     }
 
@@ -810,11 +896,19 @@ impl TerminalSessionRegistry {
             let entry = map
                 .get_mut(session_id)
                 .ok_or_else(|| TerminalSessionError::NotFound(session_id.to_string()))?;
-            if let (Some(connection), "input" | "input-binary") = (connection, kind.as_str()) {
+            // Only what a person typed (a key, a paste, the touch bar) takes
+            // the terminal: xterm's answers to a program's queries and its
+            // focus reports arrive as input too, and take nothing.
+            let typed = parsed.get("typed").and_then(|v| v.as_bool()) == Some(true);
+            if let (Some(connection), "input" | "input-binary", true) =
+                (connection, kind.as_str(), typed)
+            {
                 if entry.owner.as_ref() != Some(connection) {
-                    entry.owner = Some(connection.clone());
-                    if let Some(asked) = entry.asked.get(connection).copied() {
-                        self.set_size(session_id, entry, asked).await?;
+                    let asked = entry.asked.get(connection).copied().unwrap_or(entry.size);
+                    // The keys are written even when the resize fails.
+                    if let Err(error) = self.apply(session_id, entry, Some(connection), asked).await
+                    {
+                        warn!(%error, "resizing a terminal for its typist failed");
                     }
                 }
             }
@@ -847,11 +941,15 @@ impl TerminalSessionRegistry {
                     }
                     // `take` is "Fit to this device": it wins over a live owner.
                     let take = parsed.get("take").and_then(|v| v.as_bool()) == Some(true);
-                    if let (true, Some(connection)) = (take, connection) {
-                        entry.owner = Some(connection.clone());
-                    }
-                    if take || self.takes_size(entry, connection) {
-                        self.set_size(session_id, entry, (cols, rows)).await?;
+                    match (take, self.size_rule(entry, connection)) {
+                        (true, _) | (_, SizeRule::Takes) => {
+                            self.apply(session_id, entry, connection, (cols, rows))
+                                .await?
+                        }
+                        (false, SizeRule::Applies) => {
+                            self.apply(session_id, entry, None, (cols, rows)).await?
+                        }
+                        (false, SizeRule::Waits) => {}
                     }
                 }
             }
@@ -928,6 +1026,11 @@ pub struct AttachResult {
     /// owner can draw.
     pub cols: u16,
     pub rows: u16,
+    /// The page load that owns the size (`oxplow-app::terminal_sessions`:
+    /// the one that last typed), and the caller's own: a pane is the owner
+    /// when they are equal. Null for a caller with no page load.
+    pub owner: Option<String>,
+    pub you: Option<String>,
 }
 
 /// Read a process's current working directory by pid. Linux reads the
@@ -1044,6 +1147,12 @@ mod tests {
     fn input_message(raw: &[u8]) -> String {
         let b64 = B64.encode(raw);
         serde_json::json!({ "type": "input", "bytes": b64 }).to_string()
+    }
+
+    /// As [`input_message`], from a key, a paste or the touch bar.
+    fn typed_message(raw: &[u8]) -> String {
+        let b64 = B64.encode(raw);
+        serde_json::json!({ "type": "input", "bytes": b64, "typed": true }).to_string()
     }
 
     /// Poll `path` until every `needle` is present in its bytes (lossy
@@ -1178,20 +1287,55 @@ mod tests {
         );
     }
 
-    /// A registry whose live page loads are the ones in the returned set.
-    fn registry_with_live() -> (
-        TerminalSessionRegistry,
-        Arc<std::sync::Mutex<std::collections::HashSet<ConnectionId>>>,
-    ) {
+    /// Which page loads are connected, and for how long the others have
+    /// been away (one never named is gone for good).
+    #[derive(Default)]
+    struct Presence {
+        live: std::sync::Mutex<std::collections::HashSet<ConnectionId>>,
+        away: std::sync::Mutex<HashMap<ConnectionId, Duration>>,
+    }
+
+    impl Presence {
+        fn connect<const N: usize>(&self, connections: [ConnectionId; N]) {
+            self.live.lock().unwrap().extend(connections);
+        }
+        /// Its socket closed `secs` seconds ago.
+        fn drop_for(&self, connection: &ConnectionId, secs: u64) {
+            self.live.lock().unwrap().remove(connection);
+            self.away
+                .lock()
+                .unwrap()
+                .insert(connection.clone(), Duration::from_secs(secs));
+        }
+        /// Gone for good.
+        fn leave(&self, connection: &ConnectionId) {
+            self.live.lock().unwrap().remove(connection);
+        }
+    }
+
+    /// A registry whose page loads' presence is the returned one's.
+    fn registry_with_live() -> (TerminalSessionRegistry, Arc<Presence>) {
         let reg = TerminalSessionRegistry::new(
             PtyManager::spawn(),
             crate::output_activity::OutputActivity::new(),
         );
-        let live: Arc<std::sync::Mutex<std::collections::HashSet<ConnectionId>>> =
-            Default::default();
-        let set = live.clone();
-        reg.set_liveness(Arc::new(move |c| set.lock().unwrap().contains(c)));
-        (reg, live)
+        let presence: Arc<Presence> = Default::default();
+        let seen = presence.clone();
+        reg.set_liveness(Arc::new(move |c| {
+            if seen.live.lock().unwrap().contains(c) {
+                None
+            } else {
+                Some(
+                    seen.away
+                        .lock()
+                        .unwrap()
+                        .get(c)
+                        .copied()
+                        .unwrap_or(Duration::MAX),
+                )
+            }
+        }));
+        (reg, presence)
     }
 
     fn shell(c: u16, r: u16) -> SpawnRequest {
@@ -1215,7 +1359,7 @@ mod tests {
     async fn two_page_loads() -> (TerminalSessionRegistry, ConnectionId, ConnectionId, String) {
         let (reg, live) = registry_with_live();
         let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
-        live.lock().unwrap().extend([a.clone(), b.clone()]);
+        live.connect([a.clone(), b.clone()]);
         let key = "terminal|two".to_string();
         let first = reg
             .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
@@ -1240,7 +1384,7 @@ mod tests {
     async fn the_attach_result_carries_the_ptys_size() {
         let (reg, live) = registry_with_live();
         let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
-        live.lock().unwrap().extend([a.clone(), b.clone()]);
+        live.connect([a.clone(), b.clone()]);
         let key = "terminal|res".to_string();
         let first = reg
             .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
@@ -1258,7 +1402,7 @@ mod tests {
     #[tokio::test]
     async fn input_from_another_page_load_takes_the_size_it_asked() {
         let (reg, a, b, id) = two_page_loads().await;
-        reg.send(&id, Some(&b), &input_message(b"x")).await.unwrap();
+        reg.send(&id, Some(&b), &typed_message(b"x")).await.unwrap();
         assert_eq!(reg.size(&id).await, Some((60, 30)));
         // The old owner is now the one that waits: its resize is only noted.
         reg.send(&id, Some(&a), &resize_message(100, 50, false))
@@ -1266,7 +1410,7 @@ mod tests {
             .unwrap();
         assert_eq!(reg.size(&id).await, Some((60, 30)));
         // Its input takes the terminal back at the size it last asked.
-        reg.send(&id, Some(&a), &input_message(b"y")).await.unwrap();
+        reg.send(&id, Some(&a), &typed_message(b"y")).await.unwrap();
         assert_eq!(reg.size(&id).await, Some((100, 50)));
         let _ = reg.close(&id).await;
     }
@@ -1318,17 +1462,154 @@ mod tests {
         assert_eq!(after, Some((71, 36)));
     }
 
+    /// What xterm answers to a program's query (device attributes, a
+    /// cursor report, a focus report) reaches `onData` too, but is not
+    /// something a person typed: it takes nothing.
+    #[tokio::test]
+    async fn input_that_was_not_typed_does_not_take_the_size() {
+        let (reg, a, b, id) = two_page_loads().await;
+        reg.send(&id, Some(&b), &input_message(b"\x1b[?62c"))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&id).await, Some((120, 40)));
+        assert_eq!(reg.owner(&id).await, Some(a));
+        // The same page load's typed key does take it.
+        reg.send(&id, Some(&b), &typed_message(b"k")).await.unwrap();
+        assert_eq!(reg.size(&id).await, Some((60, 30)));
+        assert_eq!(reg.owner(&id).await, Some(b));
+        let _ = reg.close(&id).await;
+    }
+
+    #[tokio::test]
+    async fn the_attach_result_and_the_size_event_say_who_owns_the_size() {
+        let (reg, live) = registry_with_live();
+        let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
+        live.connect([a.clone(), b.clone()]);
+        let key = "terminal|who".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
+            .await
+            .unwrap();
+        let second = reg
+            .attach_or_create(key, Some(&b), 60, 30, shell)
+            .await
+            .unwrap();
+        assert_eq!(first.owner.as_deref(), Some(a.as_str()));
+        assert_eq!(first.you.as_deref(), Some(a.as_str()));
+        assert_eq!(second.owner.as_deref(), Some(a.as_str()));
+        assert_eq!(second.you.as_deref(), Some(b.as_str()));
+        let mut events = reg.subscribe();
+        reg.send(&first.session_id, Some(&b), &typed_message(b"x"))
+            .await
+            .unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let m: serde_json::Value = serde_json::from_str(&event.message).unwrap();
+        let _ = reg.close(&first.session_id).await;
+        assert_eq!(m["type"], "size");
+        assert_eq!(m["owner"], b.as_str());
+    }
+
+    /// The owner's socket drops for a moment (a network blip, the daemon's
+    /// own close of a window that missed an answer): until it has been away
+    /// longer than a reconnect takes, another page load's resize or attach
+    /// changes nothing.
+    #[tokio::test]
+    async fn the_owner_keeps_the_size_through_a_short_drop() {
+        let (reg, live) = registry_with_live();
+        let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
+        live.connect([a.clone(), b.clone()]);
+        let key = "terminal|blip".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
+            .await
+            .unwrap();
+        live.drop_for(&a, 2);
+        reg.attach_or_create(key.clone(), Some(&b), 60, 30, shell)
+            .await
+            .unwrap();
+        reg.send(&first.session_id, Some(&b), &resize_message(61, 31, false))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&first.session_id).await, Some((120, 40)));
+        assert_eq!(reg.owner(&first.session_id).await, Some(a.clone()));
+        // Away for good: the next attach takes it.
+        live.drop_for(&a, 600);
+        reg.attach_or_create(key, Some(&b), 62, 32, shell)
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&first.session_id).await, Some((62, 32)));
+        let _ = reg.close(&first.session_id).await;
+    }
+
+    /// A page load that is away a while still has the size it asked for
+    /// when it comes back and types.
+    #[tokio::test]
+    async fn a_page_load_away_a_while_keeps_its_asked_size() {
+        let (reg, live) = registry_with_live();
+        let (a, b, c) = (
+            ConnectionId::generate(),
+            ConnectionId::generate(),
+            ConnectionId::generate(),
+        );
+        live.connect([a.clone(), b.clone(), c.clone()]);
+        let key = "terminal|asked".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
+            .await
+            .unwrap();
+        reg.attach_or_create(key.clone(), Some(&b), 60, 30, shell)
+            .await
+            .unwrap();
+        live.drop_for(&b, 20);
+        // Another page load attaches while b is away.
+        reg.attach_or_create(key, Some(&c), 50, 20, shell)
+            .await
+            .unwrap();
+        live.connect([b.clone()]);
+        reg.send(&first.session_id, Some(&b), &typed_message(b"x"))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&first.session_id).await, Some((60, 30)));
+        let _ = reg.close(&first.session_id).await;
+    }
+
+    /// Start Again and a restart hand the old terminal's owner and asked
+    /// sizes to the new one: no pane has to win it again.
+    #[tokio::test]
+    async fn a_replacement_terminal_inherits_the_owner() {
+        let (reg, a, b, id) = two_page_loads().await;
+        reg.send(&id, Some(&b), &typed_message(b"x")).await.unwrap();
+        let held = reg.ownership(&id).await.expect("held");
+        let _ = reg.close(&id).await;
+        let again = reg
+            .attach_or_create("terminal|again".into(), None, 60, 30, shell)
+            .await
+            .unwrap();
+        assert_eq!(reg.owner(&again.session_id).await, None);
+        reg.inherit(&again.session_id, held).await;
+        assert_eq!(reg.owner(&again.session_id).await, Some(b));
+        // a's typing takes it back at the size a asked.
+        reg.send(&again.session_id, Some(&a), &typed_message(b"y"))
+            .await
+            .unwrap();
+        assert_eq!(reg.size(&again.session_id).await, Some((120, 40)));
+        let _ = reg.close(&again.session_id).await;
+    }
+
     #[tokio::test]
     async fn an_attach_after_the_owner_is_gone_takes_the_size() {
         let (reg, live) = registry_with_live();
         let (a, b) = (ConnectionId::generate(), ConnectionId::generate());
-        live.lock().unwrap().extend([a.clone(), b.clone()]);
+        live.connect([a.clone(), b.clone()]);
         let key = "terminal|gone".to_string();
         let first = reg
             .attach_or_create(key.clone(), Some(&a), 120, 40, shell)
             .await
             .unwrap();
-        live.lock().unwrap().remove(&a);
+        live.leave(&a);
         reg.attach_or_create(key, Some(&b), 60, 30, shell)
             .await
             .unwrap();

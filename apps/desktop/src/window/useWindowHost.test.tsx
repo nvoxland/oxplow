@@ -19,13 +19,21 @@ const reports: Array<{ shown_thread: string | null }> = [];
 let queued: Array<{ id: number; threadId: string; uri: string }> = [];
 const forgotten: number[] = [];
 const saved: string[] = [];
+let listGate: Promise<void> = Promise.resolve();
+let listsAsked = 0;
 const eventListeners = new Set<(event: unknown) => void>();
 const reconnects = new Set<() => void>();
 mock.module("../api.js", () => ({
   ...realApi,
   listTabSessions: async () => [],
   // A read keeps the rows until they are forgotten.
-  listQueuedTabs: async () => queued.filter((tab) => !forgotten.includes(tab.id)),
+  // The rows as they are when asked; the answer may be held (a slow link).
+  listQueuedTabs: async () => {
+    const rows = queued.filter((tab) => !forgotten.includes(tab.id));
+    listsAsked += 1;
+    await listGate;
+    return rows;
+  },
   forgetQueuedTabs: async (ids: number[]) => void forgotten.push(...ids),
   subscribeOxplowEvents: (fn: (event: unknown) => void) => {
     eventListeners.add(fn);
@@ -85,6 +93,8 @@ beforeEach(() => {
   queued = [];
   forgotten.length = 0;
   saved.length = 0;
+  listGate = Promise.resolve();
+  listsAsked = 0;
 });
 afterEach(() => cleanup());
 
@@ -147,4 +157,25 @@ test("a tab queued just after the window connected is taken when the daemon says
   });
   await waitFor(() => expect(hook.result.current.tabs.threadPageTabs.thr2?.map((t) => t.id)).toEqual([page(4).id]));
   await waitFor(() => expect(forgotten).toEqual([7]));
+});
+
+// The daemon tells of a tab queued just after the window asked for its queue:
+// the answer on its way was read before the row was written, so the wake-up
+// must not be dropped because a take was running.
+test("a tab queued while the window's queue is being read is taken after it", async () => {
+  let release: () => void = () => {};
+  listGate = new Promise<void>((r) => {
+    release = r;
+  });
+  const hook = setup({ extensions: [] });
+  act(() => hook.result.current.tabs.openTab(page(1)));
+  await waitFor(() => expect(listsAsked).toBe(1));
+  queued = [{ id: 9, threadId: "thr2", uri: page(5).id }];
+  await act(async () => {
+    for (const fn of eventListeners) fn({ kind: "tabsQueued", client: getUiClientId() });
+  });
+  listGate = Promise.resolve();
+  release();
+  await waitFor(() => expect(hook.result.current.tabs.threadPageTabs.thr2?.map((t) => t.id)).toEqual([page(5).id]));
+  await waitFor(() => expect(forgotten).toEqual([9]));
 });

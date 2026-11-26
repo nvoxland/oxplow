@@ -134,29 +134,53 @@ The deciding rule is `mayStartNow` in `terminalSession.ts`.
 by every client, so its size is one thing, as tmux's `window-size latest`.
 Each `SessionEntry` keeps an `owner` (a page load, `ConnectionId`) and
 `asked`, the size each page load last asked for. An attach records the
-pane's size in `asked` and resizes the PTY only when there is no owner, the
-owner is the attacher, or the owner's page load is gone (the registry's
-liveness check, wired to `ClientDevices::is_live`); the attacher then
-owns it. A `resize` message is recorded, and applied under the same rule.
-Input from a page load that is not the owner makes it the owner and
-resizes the PTY to its `asked` size first. A `resize` with `"take": true`
-("Fit to this device") makes the sender the owner and applies at once. A
-request with no connection (a script, a test) always resizes. The socket
-frame's connection reaches the registry through `enqueue_input` and
-`send`. Every size change emits a `{"type":"size","cols","rows"}` bridge
-event, and `AttachResult` carries the PTY's `cols` and `rows`, so a pane
-that is not the owner can draw the owner's grid. Locked by the
-`TerminalSessionRegistry` ownership tests and the `two-clients` e2e spec.
+pane's size in `asked` and resizes the PTY only by the registry's size rule
+(`size_rule`): the owner applies; with no owner, or an owner away for 30 s or
+more (`OWNER_GRACE`, longer than the page's reconnect backoff), the attacher
+takes it; otherwise the size is only noted. So an owner whose socket drops
+for a moment (a network blip, the daemon's close of a window that missed an
+answer) keeps the terminal. A `resize` message is recorded and applied under
+the same rule. A page load's `asked` is kept while it is away up to ten
+minutes. Input takes the terminal only when it is **typed**: the frame
+carries `"typed": true` when it came from a key, a paste, an IME commit or
+the touch bar (`TerminalSurface` marks them; `useTerminalSession.input`
+sends the mark). xterm's own replies to a program's queries (device
+attributes, cursor reports) and its focus reports reach `onData` too: they
+are written to the PTY but take nothing, so a pane that only watches
+never takes the size. Typed input from a page load that is not the owner
+makes it the owner and resizes the PTY to its `asked` size first (a failed
+resize is logged; the keys are still written). A `resize` with
+`"take": true` ("Fit to this device") makes the sender the owner and applies
+at once. A request with no connection (a script, a test) always resizes.
+Start Again and a restart hand the old terminal's owner and `asked` sizes to
+the new one (`ownership` / `inherit`), so no pane has to win the size again.
+Every change of size or owner emits a `{"type":"size","cols","rows","owner"}`
+bridge event, and `AttachResult` carries the PTY's `cols` and `rows`, its
+`owner`, and `you` (the caller's own page load): a pane is the owner when
+they are equal. A size under 20 columns or 5 rows is ignored (`canTakeSize`
+in `terminalSession.ts`; the pane's Fit button is disabled and says why).
+Locked by the `TerminalSessionRegistry` ownership tests and the `two-clients`
+e2e spec.
 
 **A pane draws the terminal's grid.** `useTerminalSession` keeps the PTY's
-`grid` (from the open's `cols`/`rows` and each `size` message), and
-`TerminalSurface` keeps its xterm at that grid: it measures the pane
-(`FitAddon.proposeDimensions`) and reports that size as the pane's asked
-size, but never resizes xterm to it unless no other client owns the size. A
-pane with less room scales the grid down (`gridScale`, a CSS transform on the
-xterm element); one with more room draws it as it is. While the grid differs
-from the pane, the view says "Sized for another device" with **Fit to this
-device** (`terminal-fit`), which sends a `resize` with `take`.
+`grid` and `ownedElsewhere` (from the open's answer, and again from a
+same-session reopen after a reconnect, and from each `size` message), and
+`TerminalSurface` keeps its xterm at that grid. The pane measures its room
+at the base font (`FitAddon.proposeDimensions`, with the font set back to
+13 px for the measure) and reports that as its asked size, never `term.cols`
+(the owner's grid): the open and each reopen send it. A pane with less room
+than the grid draws it in a smaller font (`gridFontSize`, the base times the
+scale, down to 7 px), not a CSS transform: xterm finds the cell under the
+pointer from its own measure, and a transform makes selection, links and
+mouse reports land in the wrong cell. At the 7 px floor the rest of the grid
+is **clipped** (the mount has `overflow: hidden`); Fit to this device is the
+way out. One with more room draws the grid as it is. When another page load
+owns the size (the daemon says so, not a guess from two sizes) and the grid
+differs from the pane, the view shows a chip in its top-right corner,
+"Sized for another device", with **Fit to this device** (`terminal-fit`),
+which sends a `resize` with `take`; the chip is out of the flow, so it does
+not change the pane's size and does not cover the touch bar or the bottom
+rows.
 
 **A reattach replays a tail, not the whole ring.** The daemon keeps up to
 4 MB of a pane's output, but `open_terminal_session` answers with the last

@@ -16,14 +16,22 @@ let running: string | null = null;
 let listener: (e: { sessionId: string; message: string }) => void = () => {};
 let next = 1;
 let answer: Promise<void> = Promise.resolve();
+// What the open answers about the size: its grid, and who owns it.
+let sized: { cols: number; rows: number; owner: string | null; you: string | null } = { cols: 120, rows: 40, owner: null, you: "con-me" };
+// The session id the next open answers; null: a new one each time.
+let sameSession: string | null = null;
+let reconnect: () => void = () => {};
 mock.module("../api.js", () => ({
   ...realApi,
-  onRemoteReconnect: () => () => {},
+  onRemoteReconnect: (cb: () => void) => {
+    reconnect = cb;
+    return () => {};
+  },
   desktopBridge: () => ({
     openTerminalSession: async (uri: string, cols: number, rows: number) => {
       calls.push(`open ${uri} ${cols}x${rows}`);
       await answer;
-      return { sessionId: `term-${next++}`, replayB64: btoa("hello"), cols: 120, rows: 40 };
+      return { sessionId: sameSession ?? `term-${next++}`, replayB64: btoa("hello"), ...sized };
     },
     lookupTerminalSession: async (uri: string) => {
       calls.push(`lookup ${uri}`);
@@ -46,6 +54,8 @@ afterEach(() => {
   running = null;
   next = 1;
   answer = Promise.resolve();
+  sized = { cols: 120, rows: 40, owner: null, you: "con-me" };
+  sameSession = null;
 });
 
 function fakeTerm() {
@@ -175,11 +185,11 @@ test("keys go to the terminal's URI at once, encoded, before its open answers to
   });
   const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
   act(() => void result.current.attach(fakeTerm().term));
-  act(() => result.current.input("é"));
+  act(() => result.current.input("é", true));
   act(() => result.current.binary("\x01"));
   act(() => result.current.resize(100, 30));
   expect(calls.filter((c) => c.startsWith("input"))).toEqual([
-    `input ${SHELL} {"type":"input","bytes":"w6k="}`,
+    `input ${SHELL} {"type":"input","bytes":"w6k=","typed":true}`,
     `input ${SHELL} {"type":"input-binary","bytes":"AQ=="}`,
     `input ${SHELL} {"type":"resize","cols":100,"rows":30}`,
   ]);
@@ -213,4 +223,60 @@ test("a pane follows the terminal's grid, and Fit takes it", async () => {
   act(() => result.current.fit(80, 24));
   const sent = calls.filter((c) => c.startsWith("input "));
   expect(JSON.parse(sent.at(-1)!.slice(`input ${SHELL} `.length))).toEqual({ type: "resize", cols: 80, rows: 24, take: true });
+});
+
+// The open answers who owns the size, and a size message says it again: a pane
+// says "another device" only when the daemon does.
+test("a pane is owned elsewhere only when the daemon says another page load owns it", async () => {
+  sized = { cols: 120, rows: 40, owner: "con-other", you: "con-me" };
+  const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+  act(() => void result.current.attach(fakeTerm().term));
+  await waitFor(() => expect(result.current.ownedElsewhere).toBe(true));
+  // It types: the daemon's size event names it the owner.
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "size", cols: 80, rows: 24, owner: "con-me" }) }));
+  expect(result.current.ownedElsewhere).toBe(false);
+  expect(result.current.grid).toEqual({ cols: 80, rows: 24 });
+  act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "size", cols: 90, rows: 30, owner: "con-other" }) }));
+  expect(result.current.ownedElsewhere).toBe(true);
+});
+
+// Only what the person typed takes the size: xterm's replies to queries are
+// input too, and are sent without the mark.
+test("input is marked typed only when the pane says so", async () => {
+  const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+  act(() => void result.current.attach(fakeTerm().term));
+  act(() => result.current.input("k", true));
+  act(() => result.current.input("\x1b[?62c", false));
+  act(() => result.current.binary("\x01"));
+  const sent = calls.filter((c) => c.startsWith("input ")).map((c) => JSON.parse(c.slice(`input ${SHELL} `.length)));
+  expect(sent.map((m) => m.typed === true)).toEqual([true, false, false]);
+});
+
+// After a reconnect the pane asks again; the answer's grid is the terminal's
+// now, and the size it asks for is its room, not the grid it draws.
+test("a reopen of the same session takes the answer's grid", async () => {
+  sameSession = "term-7";
+  const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+  act(() => void result.current.attach(fakeTerm().term));
+  await waitFor(() => expect(result.current.grid).toEqual({ cols: 120, rows: 40 }));
+  // It missed a size event while the socket was down.
+  sized = { cols: 100, rows: 30, owner: "con-other", you: "con-me" };
+  act(() => reconnect());
+  await waitFor(() => expect(result.current.grid).toEqual({ cols: 100, rows: 30 }));
+  expect(result.current.ownedElsewhere).toBe(true);
+});
+
+test("a reopen asks for the pane's size, not the grid the terminal draws", async () => {
+  const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+  const { term } = fakeTerm();
+  act(() => void result.current.attach(term, { cols: 90, rows: 30 }));
+  await waitFor(() => expect(calls).toContain(`open ${SHELL} 90x30`));
+  // The surface now draws the owner's grid, and the pane is measured again.
+  Object.assign(term, { cols: 120, rows: 40 });
+  act(() => result.current.resize(100, 31));
+  sized = { ...sized, owner: "con-other" };
+  await waitFor(() => expect(result.current.grid).not.toBeNull());
+  act(() => reconnect());
+  await waitFor(() => expect(calls.filter((c) => c.startsWith("open"))).toHaveLength(2));
+  expect(calls.filter((c) => c.startsWith("open")).at(-1)).toBe(`open ${SHELL} 100x31`);
 });

@@ -1141,7 +1141,7 @@ impl Services {
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), output_activity.clone());
         terminal_sessions.set_liveness({
             let devices = client_devices.clone();
-            Arc::new(move |connection| devices.is_live(connection))
+            Arc::new(move |connection| devices.away_for(connection))
         });
         let worktrees = Arc::new(worktrees::WorktreeRouter::new(
             layout.project_dir.clone(),

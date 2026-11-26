@@ -84,11 +84,12 @@ export function useWindowHost({
   // Read when a call comes, so the handlers needn't be made again for it.
   const openQuickOpenRef = useRef(openQuickOpen);
   openQuickOpenRef.current = openQuickOpen;
-  // Report what this window shows — every thread's tabs and the one
-  // selected in each, the thread it shows, its focus and visibility, and
-  // the shown page's published detail (a page's params) — so an agent's
-  // `list_tabs` / `get_open_page` see what the person sees. Best-effort
-  // and debounced; see tabs/tabReport.ts and tabs/openPageDetail.ts.
+  // Report what this window shows — the thread it shows, its focus and
+  // visibility, the shown page's published detail (a page's params) and
+  // its page runs — so an agent's `list_tabs` / `get_open_page` see what
+  // the person sees. The tabs themselves are not reported: they are the
+  // stored sessions (`tab_session`, saved at once by `useTabSessions`). Best-effort and debounced; see tabs/tabReport.ts and
+  // tabs/openPageDetail.ts.
   const [pageDetailTick, setPageDetailTick] = useState(0);
   useEffect(() => getPageDetailStore().subscribe(() => setPageDetailTick((t) => t + 1)), []);
   const [pageRunsTick, setPageRunsTick] = useState(0);
@@ -359,11 +360,23 @@ export function useWindowHost({
       await forgetQueuedTabs(queued.map((tab) => tab.id));
     };
     // One at a time: a second take while one runs would open the same rows.
+    // A wake-up that comes while one runs is not lost: the take in flight
+    // may have read the queue before the row was written, so it runs once
+    // more when it ends.
+    let again = false;
     const take = () => {
-      taking ??= takeOnce()
+      if (taking) {
+        again = true;
+        return;
+      }
+      taking = takeOnce()
         .catch(() => {})
         .finally(() => {
           taking = null;
+          if (again) {
+            again = false;
+            take();
+          }
         });
     };
     take();

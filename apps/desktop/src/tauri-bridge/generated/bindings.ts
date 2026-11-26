@@ -1129,6 +1129,13 @@ export type AttachResult = {
 	 */
 	cols: number,
 	rows: number,
+	/**
+	 *  The page load that owns the size (`oxplow-app::terminal_sessions`:
+	 *  the one that last typed), and the caller's own: a pane is the owner
+	 *  when they are equal. Null for a caller with no page load.
+	 */
+	owner: string | null,
+	you: string | null,
 };
 
 export type BackgroundTask = {
