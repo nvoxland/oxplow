@@ -392,7 +392,8 @@ in `CommandSpec::op`.
   (`ClientDevices::last_used`, `.context/remote-daemon.md` "Last used"),
   else the last registered — which does it and answers `answer_client_call { id,
   result | error }` (another window's answer is ignored); the run
-  waits (15 s), its answer the run's result. A window that misses the answer
+  waits (15 s; 10 min for a call that waits on a person, such as a folder
+  pick, `client_host::PERSON_TIMEOUT`), its answer the run's result. A window that misses the answer
   stops hosting and its event socket is closed (a normal close): a live page
   reconnects and registers again; a frozen one is away until it does. A
   person's run goes only to its own device's window, never another's. A window uses its own id for
