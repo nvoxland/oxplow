@@ -16,7 +16,7 @@ import { panelOpenRef } from "../Panels/panelLayout.js";
 import { ContextDockBody, useContextBadge } from "../Context/ContextDockPanel.js";
 import { AlertsDockBody, useAlertsBadge } from "../Alerts/AlertsDockPanel.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
-import { PageTree } from "../../pages/PageTree.js";
+import { PanelBody, PanelChoiceToggle, PanelCollapsed } from "../Panels/PanelParts.js";
 
 export interface DockBodyProps {
   /** Open a page (or focus it) in the active thread's tab area. */
@@ -39,6 +39,12 @@ export interface DockPanelDef {
   useBadge(): DockBadge | null;
   /** The body; mounted only while the panel is open. */
   Body: ComponentType<DockBodyProps>;
+  /** Controls for the open panel's header (an extension panel's choice
+   *  toggles). Mounted only while the panel is open. */
+  Header?: ComponentType<DockBodyProps>;
+  /** The panel's collapsed form: a summary the bar draws beside the icon
+   *  while the panel is closed. It renders nothing when it has none. */
+  Collapsed?: ComponentType<DockBodyProps>;
   /** The page the panel's things are on (the Alerts page, the Context
    *  page, an extension panel's `open` or body page): the open arrow in
    *  the panel's header, as a section heading's (`OpenPageLink`). */
@@ -87,13 +93,24 @@ export function extensionDockPanel(panel: ExtensionPanel, extensions: Extension[
       const count = runs?.count;
       return count && count > 0 ? { count } : null;
     },
+    Header() {
+      const { runs, choose } = usePanelRuns();
+      return (
+        <>
+          {(runs[panel.id]?.choices ?? []).map((c) => (
+            <PanelChoiceToggle key={c.name} choice={c} testIdPrefix="dock-panel" onPick={(v) => choose(panel.id, c.name, v)} />
+          ))}
+        </>
+      );
+    },
+    Collapsed({ onOpenPage, streamId }) {
+      const collapsed = usePanelRuns().runs[panel.id]?.collapsed;
+      return collapsed ? <PanelCollapsed collapsed={collapsed} testIdPrefix="dock-panel" streamId={streamId} onOpenPage={onOpenPage} /> : null;
+    },
     Body({ onOpenPage, streamId }) {
-      const runs = usePanelRuns().runs[panel.id];
-      const page = runs?.body;
+      const page = usePanelRuns().runs[panel.id]?.body;
       return page ? (
-        <div style={{ padding: "8px 12px", fontSize: "var(--text-xs)" }}>
-          <PageTree run={page.run} runId={page.runId} streamId={streamId} onOpenPage={onOpenPage} />
-        </div>
+        <PanelBody body={page} testIdPrefix="dock-panel" streamId={streamId} onOpenPage={onOpenPage} onMore={() => onOpenPage(panelOpenRef(panel, extensions))} />
       ) : (
         <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Loading…</div>
       );

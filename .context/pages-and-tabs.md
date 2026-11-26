@@ -1357,7 +1357,7 @@ is the Alerts panel's icon.
   (`useDockHeight`, key `dockHeight`), so each device has its own. It is
   clamped to 160px or more. The panel also keeps it within the column height
   minus 80px.
-- **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, page? }`.
+- **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, Header?, Collapsed?, page? }`.
   `icon` is a name from `ICONS`. `useBadge` is a hook that returns a count
   and an optional `danger` tone, or null; the bar draws it as a count pill
   on the icon's top-right corner, overlapping it and ringed in the bar's
@@ -1369,6 +1369,15 @@ is the Alerts panel's icon.
   `CORE_ORDER` (alerts, the leftmost icon, then context). Extension panels with
   `dock: true` follow, sorted by title. Their body is the panel's `body`
   page and their badge is its `badge` or `count` page. `useDockPanels()` returns the whole list.
+  An extension panel draws its parts as a rail panel does, from the one
+  `Panels/PanelParts.tsx` (`PanelBody`, `PanelCollapsed`, `PanelChoiceToggle`;
+  the rail and the dock pass a `testIdPrefix`, `rail-panel` or `dock-panel`).
+  Its `Header` holds the body's choice toggles (`dock-panel-choice-<name>-<value>`
+  in the open panel's header). Its `Collapsed` is the collapsed page, drawn in
+  the bar beside the icon while the panel is closed (`dock-panel-collapsed`)
+  and gone while it is open. The badge on the icon is the count: a firing
+  badge page's alert count, else the count page's number. A body's "+N more"
+  opens the panel's page.
 - **Layout:** the panel is absolute and anchored above the bar, inside the
   center column. The page does not reflow. Undo toasts sit above an open
   panel. It is a popover, so it wears the elevated tier

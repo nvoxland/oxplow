@@ -2,17 +2,23 @@
 /// panel, the open one highlighted, a count pill on the icon's top-right
 /// corner when the panel has a badge.
 
+import { Fragment } from "react";
+
+import type { TabRef } from "../../tabs/tabState.js";
 import { ICONS, iconFor } from "../../icons.js";
 import { dockStore, useDockState } from "./dockStore.js";
 import { useDockPanels, type DockPanelDef } from "./dockPanels.js";
 
-export function DockBar() {
+export function DockBar({ streamId = null, onOpenPage = () => {} }: { streamId?: string | null; onOpenPage?(ref: TabRef): void } = {}) {
   const panels = useDockPanels();
   const { open } = useDockState();
   return (
     <div data-testid="dock-bar" role="toolbar" aria-label="Dock" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       {panels.map((p) => (
-        <DockButton key={p.id} panel={p} active={open === p.id} />
+        <Fragment key={p.id}>
+          {p.Collapsed && open !== p.id ? <p.Collapsed streamId={streamId} onOpenPage={onOpenPage} /> : null}
+          <DockButton panel={p} active={open === p.id} />
+        </Fragment>
       ))}
     </div>
   );

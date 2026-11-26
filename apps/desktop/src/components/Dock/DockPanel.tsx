@@ -80,6 +80,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
   };
   const Body = panel.Body;
+  const Header = panel.Header;
   const Icon = iconFor(panel.icon) ?? ICONS.box;
   return (
     <div
@@ -142,6 +143,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
           </span>
         ) : null}
         <span style={{ flex: 1 }} />
+        {Header ? <span style={{ display: "inline-flex", gap: 4, marginRight: 8 }}><Header streamId={streamId} onOpenPage={onOpenPage} /></span> : null}
         <button
           type="button"
           data-testid="dock-panel-close"
