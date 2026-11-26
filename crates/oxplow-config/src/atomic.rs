@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Replace `path`'s contents with `bytes`, atomically.
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
 
@@ -66,7 +66,7 @@ fn temp_sibling(path: &Path, parent: &Path) -> PathBuf {
 }
 
 /// Path of the advisory-lock sidecar guarding `path`'s read-modify-write.
-pub(crate) fn lock_path(path: &Path) -> PathBuf {
+pub fn lock_path(path: &Path) -> PathBuf {
     let mut p = path.as_os_str().to_os_string();
     p.push(".lock");
     PathBuf::from(p)

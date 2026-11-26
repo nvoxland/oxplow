@@ -5139,6 +5139,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-host"
+version = "0.9.0"
+dependencies = [
+ "axum",
+ "fs2",
+ "hex",
+ "oxplow-app",
+ "oxplow-config",
+ "oxplow-unified-deps",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "oxplow-lsp"
 version = "0.9.0"
 dependencies = [

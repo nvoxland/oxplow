@@ -24,6 +24,7 @@ pub mod recent;
 pub use recent::{RecentProject, RecentProjects};
 
 mod atomic;
+pub use atomic::{lock_path, write_atomic};
 pub mod session;
 pub use session::SessionProjects;
 

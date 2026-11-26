@@ -130,5 +130,6 @@ update it in the same commit when behavior changes. The
 | Tab store, page chrome, rail HUD, renderers (which page draws a URI) + tab id format | `.context/pages-and-tabs.md` |
 | External URL tabs, sandboxed webview, allowlist, partition policy | `.context/external-url-tabs.md` |
 | Remote daemon mode (oxplow-rpc dispatch, oxplow-daemon, transport switch, connect flow, reconnect banner) | `.context/remote-daemon.md` |
+| The host (`oxplow-host`: one per `OXPLOW_HOME`, project registry, holds, a daemon per held project, `/host/…` API) | `.context/host.md` |
 | Blog posts, user docs, release notes, README copy — anything reader-facing | `.context/writing-tone.md` |
 | Repo layout, test/lint policy, full task-filing discipline | `.context/working-in-this-repo.md` |
