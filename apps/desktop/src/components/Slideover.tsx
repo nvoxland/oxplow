@@ -13,6 +13,9 @@ export function backdropShouldClose<T>({ target, currentTarget }: { target: T; c
   return target === currentTarget;
 }
 
+/** About 38vw, at least 360px, capped at 560px and the screen's width. */
+export const DEFAULT_PANEL_WIDTH = "min(max(38vw, 360px), 560px, 100vw)";
+
 /**
  * Right-edge slideover panel — replaces centered modals for form-shaped
  * flows that warrant a focused workspace but don't justify a full page.
@@ -35,7 +38,7 @@ export function Slideover({
   open,
   onClose,
   title,
-  width = "min(38vw, 560px)",
+  width = DEFAULT_PANEL_WIDTH,
   testId,
   actions,
   footer,
@@ -44,7 +47,7 @@ export function Slideover({
   open: boolean;
   onClose(): void;
   title: ReactNode;
-  /** CSS width value. Defaults to ~38vw capped at 560px. */
+  /** CSS width value. Defaults to `DEFAULT_PANEL_WIDTH`. */
   width?: string;
   testId?: string;
   /** Header right-side actions (close button is rendered automatically). */

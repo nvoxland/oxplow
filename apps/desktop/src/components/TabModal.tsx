@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { DEFAULT_PANEL_WIDTH } from "./Slideover.js";
+
 /** Where a tab's dialogs dock: the page's area under its nav bar (`Page`
  *  provides it), so a dialog sits at its top right and never scrolls with
  *  the body. With none (a dialog outside a page), it draws in place. */
@@ -32,7 +34,7 @@ export function TabModal({
   onClose,
   children,
   testId = "tab-modal",
-  width = "min(38vw, 560px)",
+  width = DEFAULT_PANEL_WIDTH,
 }: {
   title: ReactNode;
   /** What it is about, under the title, in words (never an id). */

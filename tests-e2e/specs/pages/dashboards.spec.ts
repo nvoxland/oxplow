@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown, reload } from "../../support/ui.js";
+import { expectNoHorizontalOverflow, open, shown, reload } from "../../support/ui.js";
 
 type Daemon = Parameters<typeof ipc>[0];
 interface DashboardPage {
@@ -93,4 +93,18 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
   await expect(activeGrid(page)).toContainText("Dunnart coverage evidence");
   await expect(activeGrid(page)).not.toContainText("Dunnart test evidence");
   await expect(activeGrid(page).locator(':scope > [data-testid^="dashboard-tile-"]')).toHaveCount(1);
+});
+
+test("a wide tile takes the whole row in a narrow window, with no horizontal overflow", async ({ page, daemon }) => {
+  await run(daemon, "oxplow.extension.write_page", {
+    extension: "e2e-dashboard-pages", page: "wide-board",
+    spec: "title: Wide board\ncategory: Dashboards\nview:\n  grid:\n    - { id: a, size: wide, title: Alpha, markdown: Alpha body }\n    - { id: b, title: Beta, markdown: Beta body }\n",
+    deploy: true,
+  });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_dashboard_pages/wide-board");
+  await expect(activeGrid(page)).toContainText("Alpha body");
+  const viewport = page.viewportSize()!;
+  const wide = await activeGrid(page).locator(".ox-tile-wide").boundingBox();
+  expect(wide!.width).toBeLessThanOrEqual(viewport.width);
+  await expectNoHorizontalOverflow(page);
 });

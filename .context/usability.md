@@ -1472,7 +1472,7 @@ rules extension authors follow are in the `oxplow-extension` skill
 Under 800 px the rail leaves its place so the page keeps its width. A small
 "Show the rail" button (`rail-show`, tooltip and aria-label) at the page's left
 edge shows the rail as an overlay (`rail-overlay`). Escape, a click outside it,
-or opening a page from it hides it; widening the window resets it (`NarrowRail`).
+or opening a page from it hides it; widening the window resets it (`NarrowRail`). A dashboard's tiles are at least 400px wide or the container's width, and a wide tile takes the whole row when the container is under two columns wide; a Slideover or dialog is 38vw, at least 360px, never wider than the screen.
 
 ## Page spacing
 
