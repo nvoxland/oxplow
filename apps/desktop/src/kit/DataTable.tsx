@@ -68,18 +68,23 @@ function showWhole(e: React.MouseEvent<HTMLTableCellElement>) {
 }
 
 /** A finger has no hover: a tap on a cut cell shows its whole text, and
- *  another tap cuts it again. A tap on a control in the cell is that
- *  control's, not the cell's. */
+ *  another tap cuts it again; that tap is the cell's, not the row's (so a
+ *  row that opens a page can still be read whole: tap outside the cut text,
+ *  or its ☰, to open it). A tap on a control in the cell is that control's. */
 function toggleWhole(e: React.MouseEvent<HTMLTableCellElement>) {
   if ((e.target as HTMLElement).closest("a, button, input, select, textarea, [role=button]")) return;
   const td = e.currentTarget;
   if (td.hasAttribute("data-expanded")) {
     td.removeAttribute("data-expanded");
+    e.stopPropagation();
     return;
   }
   const text = td.querySelector<HTMLElement>(".ox-cell-text");
   const cut = (el: HTMLElement) => el.scrollWidth > el.clientWidth;
-  if (cut(td) || (text !== null && cut(text))) td.setAttribute("data-expanded", "true");
+  if (cut(td) || (text !== null && cut(text))) {
+    td.setAttribute("data-expanded", "true");
+    e.stopPropagation();
+  }
 }
 
 /** The one table: core pages and viz nodes draw rows through it. */

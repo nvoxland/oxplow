@@ -180,7 +180,7 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
 - **List rows** (tasks, file tree, notes, code-quality findings,
   snapshots, commits) use `padding: 8–10px 12px` and target ~36–40px
   height — up from the prior ~24–28px.
-- **Section headers** use `padding: 10px 12px` and 11px uppercase
+- **Section headers** use `padding: 10px 12px` and `--text-xs` (12px) uppercase
   labels, against `--surface-app` so they read as a divider band
   rather than a card surface.
 - **Tab strips** (`CenterTabs`) use `min-height: 36px` with
@@ -189,6 +189,10 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
   `padding: 14px 20px`); page titles are 17px / `font-weight: 600`.
 - **Selection / marked rows** use a 3px left stripe (was 2px) plus
   `--accent-soft-bg` rather than a generic semi-transparent yellow.
+
+No text in the page layer is smaller than `--text-xs` (12px): the touch
+guard (`touch.guard.test.ts`) keeps it so, but for SVG text a chart places
+by its own coordinates.
 
 When adding a new list surface, match these numbers — the
 "Metabase-clean" feel relies on them being consistent across panels.

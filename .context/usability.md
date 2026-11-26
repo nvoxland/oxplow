@@ -729,9 +729,13 @@ not a pick and isn't in the address.
 ## Hover reveals, click rearranges
 
 **A finger holds where a mouse hovers.** A press and hold (400 ms) on an
-icon-only control (a `title`, or an `aria-label` with no text of its own)
-shows its label in a bubble above it, and the press then does nothing more
-(`touchHints.ts`, one listener for the page, touch presses only). So an
+icon-only control (a `title`, an `aria-label` with no text of its own or
+only a glyph like ×, or a label cut short) shows its label in a bubble
+above it (below it near the top of the screen), and the press then does
+nothing more (`touchHints.ts`, one listener for the page, touch presses
+only). The click after a hold is swallowed only until the next press, a
+drag, or a menu the long press opened (which hides the bubble): Android's
+own long press may come before or after 400 ms. So an
 icon button's `title` is enough on a tablet too; never put a control's only
 explanation anywhere a finger cannot reach.
 

@@ -101,3 +101,16 @@ describe("submenuPlace", () => {
     expect(at.top + 400).toBeLessThanOrEqual(low.top);
   });
 });
+
+// A tall submenu below or above its item takes only the room on that side
+// (it scrolls), so it never runs off the screen or covers the item.
+test("a tall submenu below or above its item keeps to the room there", () => {
+  const viewport = { width: 390, height: 600 };
+  const size = { width: 380, height: 900 };
+  const low = submenuPlace({ left: 10, right: 380, top: 100, bottom: 130 }, size, viewport);
+  expect(low.top).toBeGreaterThanOrEqual(130);
+  expect(low.top + (low.maxHeight ?? size.height)).toBeLessThanOrEqual(600);
+  const high = submenuPlace({ left: 10, right: 380, top: 500, bottom: 530 }, size, viewport);
+  expect(high.top + (high.maxHeight ?? size.height)).toBeLessThanOrEqual(500);
+  expect(high.top).toBeGreaterThanOrEqual(0);
+});

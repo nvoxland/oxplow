@@ -267,3 +267,26 @@ test("with a mouse a row's menu has no Select", async () => {
   await view.findByTestId("menu-item-add-row-to-context");
   expect(view.queryByTestId("menu-item-viz.select")).toBeNull();
 });
+
+// After a bulk action the marked rows change (their cells are their key),
+// the bar goes, and a tap is a tap again, not a mark.
+test("on a touch screen marks that are no longer shown leave taps alone", async () => {
+  const real = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
+  try {
+    const run = runOf({ actions: [finish] });
+    const view = render(<VizView run={run} onOpenPage={() => {}} />);
+    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.click(await view.findByTestId("menu-item-viz.select"));
+    expect(view.getByTestId("viz-marks-count").textContent).toBe("1 selected");
+    // The row it marked is done now: its cells, so its key, changed.
+    const after: VizRun = { ...run, result: { ...run.result, rows: [["u1", "One", "done"], rows[1]!, rows[2]!] } } as VizRun;
+    view.rerender(<VizView run={after} onOpenPage={() => {}} />);
+    expect(view.queryByTestId("viz-marks")).toBeNull();
+    fireEvent.click(view.getByTestId("viz-row-1"));
+    expect(view.getByTestId("viz-row-1").getAttribute("data-marked")).toBeNull();
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});

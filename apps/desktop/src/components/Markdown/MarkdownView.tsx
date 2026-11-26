@@ -295,7 +295,7 @@ export function MarkdownView({ body, base = null, maxHeight, style, className, i
         if (pre && pre.tagName === "PRE") {
           const err = document.createElement("div");
           err.style.color = "var(--severity-critical)";
-          err.style.fontSize = "12px";
+          err.style.fontSize = "var(--text-xs)";
           err.textContent = `Mermaid parse error: ${String(error)}`;
           pre.after(err);
           // Same reason as the success-path cleanup: this div is a

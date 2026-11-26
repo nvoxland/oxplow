@@ -212,7 +212,7 @@ function Submenu({
   minWidth: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; maxHeight?: number } | null>(null);
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -235,6 +235,7 @@ function Submenu({
         visibility: place ? "visible" : "hidden",
         zIndex: 2,
         maxWidth: SUBMENU_MAX_WIDTH,
+        ...(place?.maxHeight !== undefined ? { maxHeight: place.maxHeight, overflowY: "auto" as const } : {}),
       }}
     >
       <MenuList items={items} header={header} onAction={onAction} minWidth={minWidth} />

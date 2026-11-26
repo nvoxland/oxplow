@@ -38,9 +38,16 @@ function count(files: string[], base: string, re: RegExp, exempt: string[] = [])
 
 const srcFiles = sources(SRC);
 
-// a. A context menu opens through `useRowContextMenu`, which also gives a
-// finger's long press. The hook is the one place that wires the event.
-const CONTEXT_MENU_EXEMPT = ["components/useRowContextMenu.tsx"];
+// a. A context menu opens through `useRowContextMenu`: the one place that
+// wires the event, so what a finger needs there (a long press where the
+// browser sends none, as on iPad) lands in one place. It has none yet.
+const CONTEXT_MENU_EXEMPT = [
+  "components/useRowContextMenu.tsx",
+  // The page-wide backstop that cancels the OS's own menu.
+  "context-menu.ts",
+  // Listens only: a menu of the app's hides the touch hint's bubble.
+  "touchHints.ts",
+];
 /** Raw `onContextMenu=` sites still to move onto the hook (file -> count). */
 const CONTEXT_MENU_KEPT: Record<string, number> = {
   "components/CenterTabs/CenterTabs.tsx": 1,
@@ -53,14 +60,17 @@ const CONTEXT_MENU_KEPT: Record<string, number> = {
   "components/TitleBar.tsx": 2,
   "launcher/Launcher.tsx": 1,
   "pages/DashboardGrid.tsx": 1,
-  "tabs/BacklinksList.tsx": 2,
-  "tabs/RouteLink.tsx": 1,
+  "tabs/BacklinksList.tsx": 3,
+  "tabs/RouteLink.tsx": 2,
   "terminal/TerminalSurface.tsx": 1,
   "terminal/TerminalTabStrip.tsx": 1,
 };
 
 test("no raw onContextMenu= outside the shared hook (ratchet)", () => {
-  expect(count(srcFiles, SRC, /\bonContextMenu=/, CONTEXT_MENU_EXEMPT)).toEqual(CONTEXT_MENU_KEPT);
+  // `onContextMenu=` in JSX, `onContextMenu:` in a props object, or a
+  // listener added by hand.
+  const raw = /\bonContextMenu\s*[=:]|addEventListener\(\s*["'`]contextmenu/;
+  expect(count(srcFiles, SRC, raw, CONTEXT_MENU_EXEMPT)).toEqual(CONTEXT_MENU_KEPT);
 });
 
 // b. A drag MIME is declared once, in `dragMimes.ts`.
@@ -80,10 +90,15 @@ test("no drag MIME literal outside dragMimes.ts (ratchet)", () => {
 // does not follow.
 const LAYER = ["viz", "kit", "pages", "tabs", "components"].map((d) => join(SRC, d));
 const KIT_SHEET = join(ROOT, "..", "..", "crates/oxplow-app/assets/component/oxplow-kit.css");
-const SMALL_FONT = /font-?[sS]ize: *["']?([0-9]|1[0-2])(\.[0-9]+)?(px)?["']?[,; }]/;
-/** Small pixel font sizes still to move onto tokens (file -> count). Empty:
- *  add nothing here, use a `var(--text-*)` token. */
-const FONT_KEPT: Record<string, number> = {};
+// `fontSize: 11`, `font-size: 11px`, `fontSize={11}`, `style.fontSize = "11px"`.
+const SMALL_FONT = /font-?[sS]ize(?: *: *| *= *\{? *)["']?([0-9]|1[0-2])(\.[0-9]+)?(px)?["']?[,; })]/;
+/** Small pixel font sizes kept (file -> count): only SVG text a chart places
+ *  by its own coordinates, where a bigger size would overlap. Add nothing
+ *  else here: use a `var(--text-*)` token. */
+const FONT_KEPT: Record<string, number> = {
+  "components/charts/TrendChart.tsx": 4,
+  "viz/VizView.tsx": 1,
+};
 
 test("no font size of 12px or less in the page layer (ratchet)", () => {
   const files = LAYER.flatMap((d) => sources(d));

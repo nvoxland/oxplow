@@ -319,7 +319,7 @@ function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizA
       {bulkOffers(run.config.actions, marked).map(({ action, rows }) => (
         <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} options={options[action.id] ?? null} />
       ))}
-      <button type="button" data-testid="viz-marks-clear" onClick={() => marks.set([], null)}>
+      <button type="button" data-testid="viz-marks-clear" style={{ minHeight: "var(--hit-min)" }} onClick={() => marks.set([], null)}>
         Clear
       </button>
     </div>
@@ -515,7 +515,7 @@ function BulkButton({ run, action, rows, actions, options }: { run: VizRun; acti
           ))}
         </select>
       ) : (
-        <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionHelp(action)} onClick={() => actions.runMany(action, rows)}>
+        <button type="button" data-testid={`viz-bulk-${action.id}`} style={{ minHeight: "var(--hit-min)" }} disabled={actions.busy !== null} title={actionHelp(action)} onClick={() => actions.runMany(action, rows)}>
           {actions.busy === action.id ? `${action.label}…` : action.label}
         </button>
       )}
@@ -799,10 +799,11 @@ function RowsBody({
       ? [
           {
             id: "viz.select",
-            label: marks.keys.includes(rowKey(row)) ? "Unselect" : "Select",
+            label: shownMarks(marks.keys, drawnKeys).includes(rowKey(row)) ? "Unselect" : "Select",
             enabled: true,
             run: () => {
-              const next = marksAfterClick(marks.keys, drawnKeys, drawnKeys.indexOf(rowKey(row)), null, { toggle: true, range: false });
+              const shownNow = shownMarks(marks.keys, drawnKeys);
+              const next = marksAfterClick(shownNow, drawnKeys, drawnKeys.indexOf(rowKey(row)), null, { toggle: true, range: false });
               marks.set(next.marks, next.anchor);
             },
           },
@@ -851,8 +852,11 @@ function RowsBody({
     onClick: (e: React.MouseEvent) => {
       const index = drawnKeys.indexOf(rowKey(row));
       const onControl = (e.target as Element).closest("a, button, input, select, textarea") !== null;
-      if (marks && touchMarks && marks.keys.length > 0 && !onControl) {
-        const next = marksAfterClick(marks.keys, drawnKeys, index, null, { toggle: true, range: false });
+      // The marks still shown: a row whose cells changed (a bulk action ran
+      // on it) is gone from them, and with none left a tap is a tap.
+      const shownNow = marks ? shownMarks(marks.keys, drawnKeys) : [];
+      if (marks && touchMarks && shownNow.length > 0 && !onControl) {
+        const next = marksAfterClick(shownNow, drawnKeys, index, null, { toggle: true, range: false });
         marks.set(next.marks, next.anchor);
         return;
       }
@@ -2470,7 +2474,8 @@ function TableViz({ rows, cols, cell, rowMenu, view, header, revealed, singleLin
     el?.scrollIntoView?.({ block: "nearest" });
   }, [revealedAt]);
   // Every row ends in its menu's button.
-  columns.push({ key: "__row-menu", label: "", width: 36, truncate: false, wrap: "nowrap", render: ([row]) => rowMenu.button(row) });
+  // The ☰'s box plus room: 36px with a mouse, a finger's size on touch.
+  columns.push({ key: "__row-menu", label: "", width: "calc(var(--hit-min) + 12px)", truncate: false, wrap: "nowrap", render: ([row]) => rowMenu.button(row) });
   const parts = sections(rows, view);
   return (
     <div ref={tableRef} style={{ display: "contents" }}>

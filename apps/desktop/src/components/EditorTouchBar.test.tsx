@@ -18,7 +18,7 @@ function fakeEditor(text = "hello world") {
     },
     getModel: () => ({ getValueInRange: (r) => text.slice(r.startColumn - 1, r.endColumn - 1) }),
     getAction: (id) => ({ run: () => calls.push(`action ${id}`) }),
-    executeEdits: (_s, edits) => calls.push(`edit ${edits[0]!.text}`),
+    trigger: (_s, id, payload) => calls.push(`${id} ${(payload as { text: string }).text}`),
     onDidChangeCursorPosition: (l) => {
       listener = l;
       return { dispose: () => (listener = null) };
@@ -79,5 +79,5 @@ test("copy takes the selected text and paste puts the clipboard over it", async 
   fireEvent.click(screen.getByTestId("editor-touch-copy"));
   expect(copied).toEqual(["hello"]);
   fireEvent.click(screen.getByTestId("editor-touch-paste"));
-  await waitFor(() => expect(calls).toContain("edit pasted"));
+  await waitFor(() => expect(calls).toContain("paste pasted"));
 });

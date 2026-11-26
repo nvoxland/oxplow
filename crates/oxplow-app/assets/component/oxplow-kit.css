@@ -222,6 +222,9 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .ox-truncate .ox-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A tap on a cut cell shows its whole text (a finger has no hover). */
 .ox-truncate[data-expanded], .ox-truncate[data-expanded] .ox-cell-text { overflow: visible; text-overflow: clip; white-space: normal; }
+/* As specific as `.ox-table td.ox-nowrap`, so a tapped cut cell wraps there
+   too instead of running over the next columns. */
+.ox-table td.ox-truncate[data-expanded], .ox-table td.ox-truncate[data-expanded] .ox-cell-text { white-space: normal; overflow-wrap: anywhere; }
 
 /* Document pages: a title, an intro, then sections. A section is a
    heading over a rule, no box (document style); sections stack apart. */

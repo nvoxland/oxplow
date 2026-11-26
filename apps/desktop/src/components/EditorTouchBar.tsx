@@ -7,7 +7,8 @@
 /// keyboard stays where it is.
 import { useEffect, useState, type SyntheticEvent } from "react";
 
-import { copyText, readText } from "../clipboard.js";
+import { copyText, PASTE_WITH_KEYBOARD, readText } from "../clipboard.js";
+import { showToast } from "./toastStore.js";
 import { touchBarStyle, touchKeyStyle, touchRowStyle } from "../touchBarStyles.js";
 
 type Position = { lineNumber: number; column: number };
@@ -27,7 +28,9 @@ export interface EditorLike {
   setSelection(range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }): void;
   getModel(): { getValueInRange(range: Selection): string } | null;
   getAction(id: string): { run(): unknown } | null;
-  executeEdits(source: string, edits: Array<{ range: Selection; text: string; forceMoveMarkers?: boolean }>): unknown;
+  /** Run an editor command (`paste`: as a paste, one undo step, the
+   *  cursor after the text). */
+  trigger(source: string, handlerId: string, payload: unknown): void;
   onDidChangeCursorPosition(listener: (event: { position: Position; source: string }) => void): { dispose(): void };
   focus(): void;
 }
@@ -114,9 +117,13 @@ export function EditorTouchBar({
         })}
         {key("paste", "Paste", () => {
           void read().then((text) => {
-            const selection = editor.getSelection();
-            if (text === null || !selection) return;
-            editor.executeEdits("touch-paste", [{ range: selection, text, forceMoveMarkers: true }]);
+            // No clipboard to read (no secure context): say how to paste.
+            if (text === null) {
+              showToast({ message: PASTE_WITH_KEYBOARD });
+              return;
+            }
+            if (!text) return;
+            editor.trigger("touch", "paste", { text, pasteOnNewLine: false, multicursorText: null, mode: null });
             editor.focus();
           });
         })}

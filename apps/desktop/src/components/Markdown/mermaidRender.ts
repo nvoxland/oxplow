@@ -179,7 +179,7 @@ export async function renderMermaidInto(
     host.innerHTML = "";
     const err = document.createElement("div");
     err.style.color = "var(--severity-critical)";
-    err.style.fontSize = "12px";
+    err.style.fontSize = "var(--text-xs)";
     err.style.padding = "8px";
     err.textContent = `Mermaid parse error: ${String(error)}`;
     host.appendChild(err);

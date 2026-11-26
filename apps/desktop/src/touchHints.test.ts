@@ -55,3 +55,32 @@ test("a quick tap and a mouse are left alone", async () => {
   expect(document.querySelector("[data-testid=touch-hint]")).toBeNull();
   expect(clicked).toBe(1);
 });
+
+// Chrome may send no click after a long press: the hold must not swallow
+// the next tap somewhere else.
+test("after a hold with no click, the next tap still works", async () => {
+  stop = installTouchHints();
+  document.body.innerHTML = `<button id="a" title="Refresh"><svg></svg></button><button id="b">Go</button>`;
+  const a = document.getElementById("a")!;
+  const b = document.getElementById("b")!;
+  let went = 0;
+  b.addEventListener("click", () => went++);
+  press(a, "pointerdown");
+  await new Promise((r) => setTimeout(r, HOLD_MS + 50));
+  press(a, "pointerup");
+  // No click follows the hold. The person taps another button.
+  press(b, "pointerdown");
+  press(b, "pointerup");
+  b.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  expect(went).toBe(1);
+});
+
+// A label cut short (its title is its own text) shows whole on a hold; a
+// glyph button (×, ☰) shows its aria-label.
+test("a cut label and a glyph button have hints", () => {
+  const cut = el(`<button title="A very long tab name">A very long tab name</button>`) as HTMLElement;
+  Object.defineProperty(cut, "scrollWidth", { value: 300 });
+  Object.defineProperty(cut, "clientWidth", { value: 80 });
+  expect(hintFor(cut)).toBe("A very long tab name");
+  expect(hintFor(el(`<button aria-label="Close tab">×</button>`))).toBe("Close tab");
+});

@@ -5,9 +5,12 @@
 /// only, so a mouse never sees it. One listener for the whole page, mounted
 /// once (`main.tsx`): no control needs anything of its own.
 
-/** How long a finger holds before the label shows. Chrome on Android sends
- *  its long-press `contextmenu` at about 500 ms, so this comes first. */
+/** How long a finger holds before the label shows. Android's own long press
+ *  (its `contextmenu`) may come before or after, by the device's setting:
+ *  nothing here depends on the order. */
 export const HOLD_MS = 400;
+/** How long after a hold its click is taken as the hold's own. */
+const SWALLOW_MS = 800;
 /** How far a finger may move and still be holding, not scrolling. */
 const SLOP_PX = 10;
 
@@ -18,9 +21,14 @@ const SLOP_PX = 10;
 export function hintFor(el: Element | null): string | null {
   const control = el?.closest("button, a, [role=button], [title]");
   if (!control) return null;
-  const text = (control.textContent ?? "").trim();
+  const raw = (control.textContent ?? "").trim();
+  // A glyph (×, ☰, ▾) is no word: it says nothing a finger can read.
+  const text = /[\p{L}\p{N}]/u.test(raw) ? raw : "";
   const title = control.getAttribute("title")?.trim();
   if (title && title !== text) return title;
+  // Its own text, cut short (a tab's name, a nav title): shown whole.
+  const box = control as HTMLElement;
+  if (title && box.scrollWidth > box.clientWidth) return title;
   const label = control.getAttribute("aria-label")?.trim();
   if (label && text === "") return label;
   return null;
@@ -31,6 +39,12 @@ export function installTouchHints(doc: Document = document): () => void {
   let start: { x: number; y: number } | null = null;
   let bubble: HTMLElement | null = null;
   let swallowClick = false;
+  let swallowTimer: ReturnType<typeof setTimeout> | null = null;
+  const endSwallow = () => {
+    swallowClick = false;
+    if (swallowTimer !== null) clearTimeout(swallowTimer);
+    swallowTimer = null;
+  };
 
   const hide = () => {
     bubble?.remove();
@@ -44,15 +58,18 @@ export function installTouchHints(doc: Document = document): () => void {
   const show = (target: Element, text: string) => {
     hide();
     const rect = target.getBoundingClientRect();
+    const view = doc.defaultView;
     bubble = doc.createElement("div");
     bubble.setAttribute("role", "tooltip");
     bubble.setAttribute("data-testid", "touch-hint");
     bubble.textContent = text;
+    // Above the control, or below it near the top of the screen.
+    const below = rect.top < 48;
     Object.assign(bubble.style, {
       position: "fixed",
-      left: `${Math.max(8, rect.left + rect.width / 2)}px`,
-      top: `${Math.max(8, rect.top - 8)}px`,
-      transform: "translate(-50%, -100%)",
+      left: "0px",
+      top: below ? `${rect.bottom + 8}px` : `${rect.top - 8}px`,
+      transform: below ? "none" : "translateY(-100%)",
       maxWidth: "70vw",
       padding: "6px 10px",
       borderRadius: "var(--radius-md)",
@@ -64,9 +81,17 @@ export function installTouchHints(doc: Document = document): () => void {
       pointerEvents: "none",
     });
     doc.body.appendChild(bubble);
+    // Centred on the control, kept inside the screen's sides.
+    const width = bubble.getBoundingClientRect().width;
+    const screen = view?.innerWidth ?? width + 16;
+    const left = Math.min(Math.max(rect.left + rect.width / 2 - width / 2, 8), Math.max(8, screen - width - 8));
+    bubble.style.left = `${left}px`;
   };
 
   const onDown = (e: PointerEvent) => {
+    // A new press: whatever a hold before it waited to swallow is over
+    // (Chrome may send no click after a long press).
+    endSwallow();
     hide();
     if (e.pointerType !== "touch") return;
     const target = e.target instanceof Element ? e.target : null;
@@ -77,6 +102,7 @@ export function installTouchHints(doc: Document = document): () => void {
       timer = null;
       show(target, text);
       swallowClick = true;
+      swallowTimer = setTimeout(endSwallow, SWALLOW_MS);
     }, HOLD_MS);
   };
   const onMove = (e: PointerEvent) => {
@@ -86,12 +112,20 @@ export function installTouchHints(doc: Document = document): () => void {
   // The hold showed the label: the press was a question, not a press.
   const onClick = (e: MouseEvent) => {
     if (!swallowClick) return;
-    swallowClick = false;
+    endSwallow();
     e.preventDefault();
     e.stopPropagation();
   };
-  const onContextMenu = (e: Event) => {
-    if (bubble) e.preventDefault();
+  // The long press opened a menu of the app's: the menu is the answer, so
+  // the bubble goes and a tap on its items is a tap.
+  const onContextMenu = () => {
+    hide();
+    endSwallow();
+  };
+  const onDrag = () => {
+    cancel();
+    hide();
+    endSwallow();
   };
   const onScroll = () => {
     cancel();
@@ -105,9 +139,12 @@ export function installTouchHints(doc: Document = document): () => void {
   doc.addEventListener("click", onClick, true);
   doc.addEventListener("contextmenu", onContextMenu, true);
   doc.addEventListener("scroll", onScroll, true);
+  doc.addEventListener("dragstart", onDrag, true);
   return () => {
     cancel();
     hide();
+    endSwallow();
+    doc.removeEventListener("dragstart", onDrag, true);
     doc.removeEventListener("pointerdown", onDown, true);
     doc.removeEventListener("pointermove", onMove, true);
     doc.removeEventListener("pointerup", onUp, true);
