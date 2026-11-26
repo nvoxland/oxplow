@@ -498,7 +498,13 @@ function ensureSocket(): void {
   const wsUrl = eventsUrl(remoteBase, remoteToken, getDevice(), getUiClientId());
   const ws = new WebSocket(wsUrl);
   socket = ws;
+  // The daemon beats every 20 s; a socket that hears nothing for longer is
+  // gone (a tablet that slept, a tunnel that dropped): close it, and the
+  // close reconnects.
+  const watchdog = createWatchdog(SOCKET_SILENCE_MS, () => ws.close());
+  watchdog.feed();
   ws.onmessage = (msg) => {
+    watchdog.feed();
     let frame: { channel?: string; payload?: unknown };
     try {
       frame = JSON.parse(String(msg.data));
@@ -509,6 +515,7 @@ function ensureSocket(): void {
       scheduleResync();
       return;
     }
+    if (frame.channel === "beat") return;
     const local = frame.channel ? REMOTE_CHANNELS[frame.channel] : undefined;
     if (!local) return;
     const handlers = channelHandlers.get(local);
@@ -520,6 +527,7 @@ function ensureSocket(): void {
     handleSocketOpen();
   };
   ws.onclose = (event) => {
+    watchdog.stop();
     socket = null;
     waitingFrames.length = 0;
     // A refused token or a replaced page load isn't a drop: nothing to
@@ -540,6 +548,38 @@ function ensureSocket(): void {
   };
   ws.onerror = () => {
     ws.close();
+  };
+}
+
+/// How long the socket may hear nothing before the page takes it for gone
+/// and reconnects: a little over two of the daemon's 20-second beats
+/// (`oxplow-daemon` `Liveness`).
+export const SOCKET_SILENCE_MS = 50_000;
+
+/// A watchdog: `feed` it on every frame; `silent` runs once nothing came for
+/// `ms`. `stop` ends it. Exported for tests (`timers` is theirs).
+export function createWatchdog(
+  ms: number,
+  silent: () => void,
+  timers: { set: (f: () => void, ms: number) => unknown; clear: (t: unknown) => void } = {
+    set: (f, delay) => setTimeout(f, delay),
+    clear: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+  },
+) {
+  let timer: unknown = null;
+  const arm = () => {
+    if (timer !== null) timers.clear(timer);
+    timer = timers.set(() => {
+      timer = null;
+      silent();
+    }, ms);
+  };
+  return {
+    feed: arm,
+    stop() {
+      if (timer !== null) timers.clear(timer);
+      timer = null;
+    },
   };
 }
 

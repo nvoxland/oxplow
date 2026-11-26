@@ -69,6 +69,10 @@ impl Drop for SocketLease {
             .closed(&self.device, &self.connection, self.socket.id())
         {
             self.services.client_reports.forget(&self.connection);
+            // It hosts no call until it is back (it registers again).
+            self.services
+                .client_host
+                .unregister(self.connection.as_str());
         }
     }
 }

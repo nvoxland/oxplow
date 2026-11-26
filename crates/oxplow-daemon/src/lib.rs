@@ -54,6 +54,28 @@ pub struct DaemonState {
     /// `/events` socket (`?token=`) must carry.
     pub token: String,
     pub ctx: oxplow_rpc::RpcContext,
+    /// How the daemon tells a live event socket from a gone one.
+    pub liveness: Liveness,
+}
+
+/// How the daemon knows a page is still there (`.context/remote-daemon.md`
+/// "Liveness"): every `interval` it sends a WebSocket ping (a browser
+/// answers it without script, so a throttled hidden page stays alive) and a
+/// `beat` frame (the page's watchdog); a socket that answers no ping for
+/// `missed` intervals, or whose send does not finish within one, is closed.
+#[derive(Debug, Clone, Copy)]
+pub struct Liveness {
+    pub interval: std::time::Duration,
+    pub missed: u32,
+}
+
+impl Default for Liveness {
+    fn default() -> Self {
+        Self {
+            interval: std::time::Duration::from_secs(20),
+            missed: 2,
+        }
+    }
 }
 
 /// Equal without an early exit, so response timing can't reveal a prefix.
@@ -264,6 +286,7 @@ async fn events_ws(
     let services = state.ctx.services.clone();
     // The page load takes over its device once the upgrade is done: a
     // failed upgrade replaces nothing.
+    let liveness = state.liveness;
     ws.on_upgrade(move |mut socket| async move {
         let owner = match named
             .map(|(descriptor, connection)| {
@@ -277,9 +300,13 @@ async fn events_ws(
                 return;
             }
         };
-        events_stream(socket, forwarders, services, owner).await
+        events_stream(socket, forwarders, services, owner, liveness).await
     })
 }
+
+/// The frame that feeds a page's watchdog (`transport.ts`): a page that
+/// hears nothing for longer than a few beats reconnects.
+const BEAT_FRAME: &str = r#"{"channel":"beat"}"#;
 
 /// The close frame that tells a page its page load was replaced.
 fn replaced_close() -> Message {
@@ -390,8 +417,23 @@ async fn events_stream(
     subscriptions: [Forwarder; 3],
     services: std::sync::Arc<oxplow_app::Services>,
     owner: Option<oxplow_app::client_reports::SocketLease>,
+    liveness: Liveness,
 ) {
     let (mut sink, mut inbound) = socket.split();
+    let mut beat = tokio::time::interval(liveness.interval);
+    beat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    beat.tick().await; // the first tick is now
+    let mut last_pong = tokio::time::Instant::now();
+    let gone_after = liveness.interval * liveness.missed;
+    // A send that does not finish within an interval: the peer is gone.
+    macro_rules! send {
+        ($msg:expr) => {
+            match tokio::time::timeout(liveness.interval, sink.send($msg)).await {
+                Ok(Ok(())) => true,
+                _ => false,
+            }
+        };
+    }
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
     let forwarders = subscriptions.map(|start| start(tx.clone()));
     drop(tx);
@@ -400,21 +442,31 @@ async fn events_stream(
         tokio::select! {
             frame = rx.recv() => match frame {
                 Some(text) => {
-                    if sink.send(Message::Text(text.into())).await.is_err() {
+                    if !send!(Message::Text(text.into())) {
                         break;
                     }
                 }
                 None => break,
             },
             () = replaced(&owner) => {
-                let _ = sink.send(replaced_close()).await;
+                let _ = send!(replaced_close());
                 break;
+            }
+            _ = beat.tick() => {
+                if last_pong.elapsed() > gone_after {
+                    tracing::info!("event socket: no pong; the page is gone");
+                    break;
+                }
+                if !send!(Message::Ping(Vec::new().into())) || !send!(Message::Text(BEAT_FRAME.into())) {
+                    break;
+                }
             }
             msg = inbound.next() => match msg {
                 // Inbound traffic is terminal input, ping and close —
                 // commands go over /ipc. None/Close ends the stream.
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(Message::Text(text))) => terminal_frame(&services, &text),
+                Some(Ok(Message::Pong(_))) => last_pong = tokio::time::Instant::now(),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) => break,
             },
@@ -545,6 +597,7 @@ mod tests {
 
     fn daemon_state(services: Arc<Services>) -> DaemonState {
         DaemonState {
+            liveness: Liveness::default(),
             token: UI_TOKEN.into(),
             ctx: oxplow_rpc::RpcContext {
                 services,
@@ -1229,6 +1282,65 @@ mod tests {
         .expect("the disconnected window's runs are released");
         assert!(svc.page_runs.get(&second.run_id).is_some());
         two.close(None).await.unwrap();
+    }
+
+    /// A page that answers no ping is gone: its socket closes and its device
+    /// leaves. One that answers stays, and hears the watchdog's beat.
+    #[tokio::test]
+    async fn a_socket_whose_page_answers_no_ping_is_closed() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services().await;
+        let state = DaemonState {
+            // Short, so the test sees a gone peer in moments.
+            liveness: Liveness {
+                interval: std::time::Duration::from_millis(100),
+                missed: 2,
+            },
+            ..daemon_state(svc.clone())
+        };
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), state)
+            .await
+            .unwrap();
+        const LIVE: &str = "con-11111111-1111-4111-8111-111111111111";
+        const GONE: &str = "con-22222222-2222-4222-8222-222222222222";
+        const OTHER: &str = "dev-2b4e28ba-2fa1-11d2-883f-0016d3cca427";
+        let url = |device, connection| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&device={device}&connection={connection}&name=Mac&kind=desktop",
+                daemon.bind_addr
+            )
+        };
+        let (mut live, _) = tokio_tungstenite::connect_async(url(DEVICE, LIVE))
+            .await
+            .unwrap();
+        // Never read: tungstenite answers a ping only while it reads.
+        let (_gone, _) = tokio_tungstenite::connect_async(url(OTHER, GONE))
+            .await
+            .unwrap();
+        svc.client_host.register(GONE, vec!["tabs.write".into()]);
+        let other = oxplow_domain::DeviceId::parse(OTHER).unwrap();
+        let mine = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        let mut beats = 0;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        while svc.client_devices.get(&other).is_some() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the silent page is let go"
+            );
+            if let Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), live.next()).await
+            {
+                if text.contains("\"beat\"") {
+                    beats += 1;
+                }
+            }
+        }
+        assert!(beats > 0, "the live page hears the beat");
+        assert!(!svc.client_host.hosts(GONE), "the gone page hosts no call");
+        assert!(
+            svc.client_devices.get(&mine).is_some(),
+            "the page that answers stays"
+        );
     }
 
     /// A device keeps one page load: a new one takes over, the older one's

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createWatchdog,
   isReplacedError,
   REPLACED_CLOSE_CODE,
   socketCloseMeaning,
@@ -352,4 +353,38 @@ test("a REPLACED answer is the replaced page load's", () => {
   expect(isReplacedError({ code: "REPLACED", message: "replaced" })).toBe(true);
   expect(isReplacedError({ code: "INVALID", message: "no" })).toBe(false);
   expect(isReplacedError(null)).toBe(false);
+});
+
+// The page's watchdog: every frame feeds it; silence for its time runs
+// `silent` once, and a fed watchdog waits again.
+test("a watchdog runs once nothing came for its time, and every frame puts it off", () => {
+  const timers: Array<{ f: () => void; ms: number; live: boolean }> = [];
+  const fake = {
+    set: (f: () => void, ms: number) => {
+      const t = {
+        f: () => {
+          t.live = false;
+          f();
+        },
+        ms,
+        live: true,
+      };
+      timers.push(t);
+      return t;
+    },
+    clear: (t: unknown) => {
+      (t as { live: boolean }).live = false;
+    },
+  };
+  let silent = 0;
+  const dog = createWatchdog(50, () => (silent += 1), fake);
+  dog.feed();
+  dog.feed();
+  const live = () => timers.filter((t) => t.live);
+  expect(live()).toHaveLength(1);
+  live()[0]!.f();
+  expect(silent).toBe(1);
+  dog.feed();
+  dog.stop();
+  expect(live()).toHaveLength(0);
 });

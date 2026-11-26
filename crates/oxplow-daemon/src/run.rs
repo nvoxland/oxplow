@@ -184,6 +184,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         });
 
     let daemon_state = DaemonState {
+        liveness: crate::Liveness::default(),
         token: token.clone(),
         ctx: oxplow_rpc::RpcContext {
             services: state,

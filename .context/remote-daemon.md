@@ -361,6 +361,19 @@ While a socket is open its device is in `Services::client_devices`
 (`crates/oxplow-app/src/client_reports/devices.rs`, memory only), with the newest
 name and kind it gave; it leaves when its connection's socket closes.
 
+### Liveness
+
+The daemon knows a page is still there (`Liveness` in
+`crates/oxplow-daemon/src/lib.rs`): every 20 s it sends each event socket a
+WebSocket ping (a browser answers it without script, so a throttled hidden
+page stays alive) and a `{"channel":"beat"}` frame. A socket that answers no
+ping for two intervals, or whose send does not finish within one, is closed:
+its page runs, tab report and client-host registration go with it. The page
+keeps a watchdog fed by every frame (`createWatchdog` in `transport.ts`,
+`SOCKET_SILENCE_MS`): 50 s with nothing, and it closes the socket, which
+reconnects as a drop does. The 2-second `/ipc/ping` probe still drives the
+daemon-down dialog and the resync after an HTTP-level outage.
+
 ### One window per device
 
 A device keeps one page load per project: per-device state (its stream,
