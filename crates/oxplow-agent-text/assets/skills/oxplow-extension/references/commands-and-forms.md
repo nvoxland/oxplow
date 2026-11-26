@@ -1,7 +1,7 @@
 # Commands, custom components and forms
 
 - **A command on a URI's menus** (its page's Commands, a row's
-  right-click) says so in its own `ui`: `ui: { label, group?, about:
+  ☰) says so in its own `ui`: `ui: { label, group?, about:
   oxplow/task, input?: { uri: "{{uri}}" } }` (`about` is a resource
   name, `<namespace>/<name>`; `"{{uri.id}}"` binds the URI's key param, such as
   the id, alone). In a page's ☰ it sits at the top level among the page's

@@ -3,7 +3,9 @@
 # conversation are one row that reopens it; one closed in another thread, or
 # by its thread's close, or begun outside oxplow, has a conversation to
 # resume; one open here is a tab to show; one open in another thread is
-# nothing to take, so it comes last.
+# nothing to take, so it comes last. Each row links to its conversation's page,
+# marks one oxplow ran with oxplow's icon, and says a status only when there is
+# one to say (none for a conversation begun outside oxplow).
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: elsewhere } }
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude, resume: c1 }, bind: c1 }
@@ -26,9 +28,9 @@ expect:
   loaders:
     earlier:
       rows:
-        - { conversation: c1, can_reopen: 1, can_resume: 0, note: closed here, session: "oxplow:oxplow/agent_session?id=ses1" }
+        - { conversation: c1, can_reopen: 1, can_resume: 0, note: closed here, session: "oxplow:oxplow/agent_session?id=ses1", ran: oxplow, opens: "oxplow:oxplow/agent_conversation?harness=claude&id=c1" }
         - { conversation: c2, can_reopen: 0, can_resume: 1, note: from elsewhere }
         - { conversation: c3, can_reopen: 0, can_resume: 1 }
-        - { conversation: x1, can_resume: 1, session: null, label: about x1, note: not started in oxplow }
+        - { conversation: x1, can_resume: 1, session: null, label: about x1, note: null, ran: null, opens: "oxplow:oxplow/agent_conversation?harness=claude&id=x1" }
         - { conversation: here, can_reopen: 0, can_resume: 0, session_uri: $any, note: open in this thread }
         - { conversation: there, can_reopen: 0, can_resume: 0, session_uri: null, tone: muted }

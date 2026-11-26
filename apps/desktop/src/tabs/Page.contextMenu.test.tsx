@@ -1,12 +1,11 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
 
-// A right-click on a page's body that no row, editor or selection takes
-// opens the page's own ☰ menu where the pointer is, so Add to Context (the
-// whole page) and the rest are one click from anywhere on it. A child
-// that owns its menu stops the event; selected text is the selection's.
+// A right-click on a page's body opens no menu of the page's: its ☰ in the
+// nav bar and each row's ☰ hold everything (usability.md "Per-row actions"),
+// which a touch screen can reach and a right-click can't.
 
 const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({ ...realApi, refCommands: async () => [] }));
@@ -30,36 +29,11 @@ function shown(children = <div data-testid="plain">body</div>) {
   );
 }
 
-test("a right-click on the body opens the page's ☰ menu with Add to Context", async () => {
+test("a right-click on the body opens no page menu", async () => {
   const view = shown();
-  fireEvent.contextMenu(view.getByTestId("plain"), { clientX: 40, clientY: 50 });
-  const item = await waitFor(() => view.getByTestId("menu-item-page-add-to-context"));
-  expect(item.textContent).toContain("Add to Context");
-  expect(item.querySelector("[data-testid=menu-item-icon]")).not.toBeNull();
-});
-
-test("a child that owns its menu keeps the page's closed", async () => {
-  const view = shown(
-    <div data-testid="row" onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-      row
-    </div>,
-  );
-  fireEvent.contextMenu(view.getByTestId("row"), { clientX: 40, clientY: 50 });
-  await new Promise((r) => setTimeout(r, 20));
-  expect(view.queryByTestId("menu-item-page-add-to-context")).toBeNull();
-});
-
-test("a right-click on selected text is the selection's, not the page's", async () => {
-  const view = shown();
-  const text = view.getByTestId("plain").firstChild!;
-  const range = document.createRange();
-  range.selectNodeContents(text);
-  window.getSelection()?.removeAllRanges();
-  window.getSelection()?.addRange(range);
   fireEvent.contextMenu(view.getByTestId("plain"), { clientX: 40, clientY: 50 });
   await new Promise((r) => setTimeout(r, 20));
   expect(view.queryByTestId("menu-item-page-add-to-context")).toBeNull();
-  window.getSelection()?.removeAllRanges();
 });
 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.

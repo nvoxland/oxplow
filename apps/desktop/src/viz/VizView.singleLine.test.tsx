@@ -58,12 +58,14 @@ test("a column's badges are pills at the end of its cell, each in its tone, and 
   expect(pills[0]!.style.color).toBe("var(--accent)");
   expect(pills[1]!.style.color).toBe("var(--status-waiting)");
   expect(view.getByTestId("viz-row-1").querySelectorAll("[data-testid=viz-cell-badge]").length).toBe(0);
-  expect(view.container.querySelectorAll("thead th").length).toBe(2);
+  // Its two columns' and the ☰'s; no badges column.
+  expect(view.container.querySelectorAll("thead th").length).toBe(3);
 });
 
 test("single_line cuts every cell to one line; without it, text wraps", () => {
   const cut = render(<VizView run={runOf({ singleLine: true })} />);
-  const cells = [...cut.getByTestId("viz-row-0").querySelectorAll("td")];
+  // Every cell but the row's ☰ at its end.
+  const cells = [...cut.getByTestId("viz-row-0").querySelectorAll("td")].filter((td) => !td.querySelector('[aria-label="Actions"]'));
   expect(cells.every((td) => td.classList.contains("ox-truncate") && td.classList.contains("ox-nowrap"))).toBe(true);
   // The text cuts, the pills after it stay whole.
   expect(cut.getByTestId("viz-row-0").querySelector(".ox-cell-text")).not.toBeNull();

@@ -106,7 +106,7 @@ const run: VizRun = {
 // the toolbar is shown.
 test("a row action's confirmation shows wherever the row is", async () => {
   const { getByTestId, queryByTestId } = render(<VizView run={run} onOpenPage={() => {}} />);
-  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("viz-row-menu-0"));
   fireEvent.click(getByTestId("menu-item-viz-action-finish"));
   await waitFor(() => expect(calls).toEqual([false]));
   await waitFor(() => expect(queryByTestId("viz-action-confirm")).not.toBeNull());
@@ -118,10 +118,11 @@ test("a row action's confirmation shows wherever the row is", async () => {
   await waitFor(() => expect(queryByTestId("viz-action-confirm") === null).toBe(true));
 });
 
-// Every row of every row component has the row menu (Ask About This and
-// the viz's row actions), from the mouse and from the keyboard — Menu
-// key or Shift+F10 on the focused row.
-test("rows are focusable and open their menu from the keyboard, in every row component", () => {
+// Every row of every row component has the row menu (Add to Context and
+// the viz's row actions): from the ☰ button at its end, and from the
+// keyboard — Menu key or Shift+F10 on the focused row. A right-click on a
+// row opens nothing: the button is where its actions are.
+test("rows are focusable and open their menu from their button and the keyboard, in every row component", () => {
   const { getByTestId, queryByTestId, unmount } = render(<VizView run={run} onOpenPage={() => {}} />);
   const row = getByTestId("viz-row-0");
   expect(row.tabIndex).toBe(0);
@@ -130,14 +131,25 @@ test("rows are focusable and open their menu from the keyboard, in every row com
   expect(queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
   unmount();
 
-  const steps: VizRun = {
-    config: { ...viz, viz: "steps", steps: { label: "uri", status: null } },
-    params: {},
-    result: run.result,
-  };
-  const view = render(<VizView run={steps} onOpenPage={() => {}} />);
-  fireEvent.contextMenu(view.getByTestId("viz-step-0"));
-  expect(view.queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
+  const table = render(<VizView run={run} onOpenPage={() => {}} />);
+  fireEvent.contextMenu(table.getByTestId("viz-row-0"));
+  expect(table.queryByTestId("menu-item-viz-action-finish")).toBeNull();
+  const button = table.getByTestId("viz-row-menu-0");
+  expect(button.getAttribute("aria-label")).toBe("Actions");
+  fireEvent.click(button);
+  expect(table.queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
+  table.unmount();
+
+  for (const config of [
+    { ...viz, viz: "list" },
+    { ...viz, viz: "steps", steps: { label: "uri", status: null } },
+    { ...viz, viz: "timeline", timeline: { at: "uri", label: "uri", uri: null } },
+  ] as VizConfig[]) {
+    const view = render(<VizView run={{ ...run, config }} onOpenPage={() => {}} />);
+    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    expect(view.queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
+    view.unmount();
+  }
 });
 
 // A row that links to a ref offers the commands about that kind of ref
@@ -152,7 +164,7 @@ test("a row's linked ref gets its kind's commands", async () => {
   };
   const view = render(<VizView run={linked} onOpenPage={() => {}} />);
   await new Promise((r) => setTimeout(r, 20));
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.flag"));
   await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }]]));
@@ -169,14 +181,14 @@ test("a row's menu leaves out a command whose about_when fails on its ref", asyn
   };
   const view = render(<VizView run={linked} onOpenPage={() => {}} />);
   await new Promise((r) => setTimeout(r, 20));
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
   expect(view.queryByTestId("menu-item-ref-command-tracker.item.reopen")).not.toBeNull();
   cleanup();
   notNow.add("tracker.item.reopen");
   const again = render(<VizView run={linked} onOpenPage={() => {}} />);
   await new Promise((r) => setTimeout(r, 20));
-  fireEvent.contextMenu(again.getByTestId("viz-row-0"));
+  fireEvent.click(again.getByTestId("viz-row-menu-0"));
   fireEvent.click(await waitFor(() => again.getByTestId("menu-item-ref-commands-Tracker")));
   expect(again.queryByTestId("menu-item-ref-command-tracker.item.flag")).not.toBeNull();
   expect(again.queryByTestId("menu-item-ref-command-tracker.item.reopen")).toBeNull();
@@ -228,7 +240,7 @@ test("an action with options offers each option, the row's own checked", async (
       <VizView run={marked} onOpenPage={() => {}} actionOptions={actionOptions} />
     </VizActionRunnerContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("viz-row-menu-0"));
   fireEvent.click(getByTestId("menu-item-viz-action-mark"));
   const own = getByTestId("menu-item-viz-action-mark-ready") as HTMLButtonElement;
   expect(own.textContent).toContain("✓");

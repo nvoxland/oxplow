@@ -126,7 +126,8 @@ test("a tree row shows its `value` and `count` beside its label: one line, the w
 
 test("a table with `hide_header` draws its rows and no header row", () => {
   const shown = render(<VizView run={run({ viz: "table" }, ["id"], [[1]])} onOpenPage={() => {}} />);
-  expect(shown.queryAllByRole("columnheader")).toHaveLength(1);
+  // Its one column, and the column of its rows' ☰.
+  expect(shown.queryAllByRole("columnheader")).toHaveLength(2);
   cleanup();
   const hidden = render(<VizView run={run({ viz: "table", hideHeader: true }, ["id"], [[1]])} onOpenPage={() => {}} />);
   expect(hidden.queryAllByRole("columnheader")).toHaveLength(0);

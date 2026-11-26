@@ -103,7 +103,7 @@ test("a node's form action opens from page_action_form and submits through run_p
       </PageFormsContext.Provider>
     </PageActionContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("viz-row-menu-0"));
   fireEvent.click(getByTestId("menu-item-viz-action-retitle"));
   const field = (await findByTestId("viz-action-form-fields-title")) as HTMLInputElement;
   expect(calls[0]).toEqual(["actionStart", "run-1", "items", "retitle", { id: "a", title: "Alpha" }]);

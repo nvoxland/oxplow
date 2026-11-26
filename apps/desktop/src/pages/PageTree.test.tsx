@@ -88,7 +88,7 @@ test("a row action runs on the open run, naming the node and the row", async () 
       <PageTree run={run} runId="run-1" />
     </PageActionContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("viz-row-1"));
+  fireEvent.click(getByTestId("viz-row-menu-1"));
   fireEvent.click(getByTestId("menu-item-viz-action-finish"));
   await waitFor(() => expect(calls).toEqual([["run-1", "items", "finish", { id: "b", title: "Beta" }, null, null, null, false]]));
 });
@@ -105,7 +105,7 @@ test("an embedded node's action names it by its path", async () => {
       <PageTree run={run} runId="run-1" />
     </PageActionContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("viz-row-menu-0"));
   fireEvent.click(getByTestId("menu-item-viz-action-drop"));
   await waitFor(() => expect(calls).toEqual([["run-1", "side/notes", "drop", { note: "n1" }, null, null, null, false]]));
 });

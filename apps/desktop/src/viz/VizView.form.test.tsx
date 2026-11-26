@@ -161,7 +161,7 @@ const run: VizRun = {
 test("a form action opens its form in a slideover and runs what the person filled in", async () => {
   actionCommand = UPDATE_WIDE;
   const view = render(<VizView run={run} onOpenPage={() => {}} />);
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
   // It opened a form instead of running: a slideover, its form being two fields.
   const slideover = await waitFor(() => view.getByTestId("viz-action-form"));
@@ -185,7 +185,7 @@ test("an invalid field's message shows under it, and the form stays open", async
   invalidField = "/title";
   actionCommand = UPDATE_WIDE;
   const view = render(<VizView run={run} onOpenPage={() => {}} />);
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
   await waitFor(() => view.getByTestId("viz-action-form-fields-title"));
   fireEvent.change(view.getByTestId("viz-action-form-fields-title"), { target: { value: "" } });
@@ -197,7 +197,7 @@ test("an invalid field's message shows under it, and the form stays open", async
 
 /** Press the row's Retitle… and wait for whatever form shape opens. */
 async function pressRetitle(view: ReturnType<typeof render>) {
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
   return waitFor(() => view.getByTestId("viz-action-form"));
 }
@@ -234,7 +234,7 @@ test("a form action whose form is one text field opens a prompt strip, not a sli
 test("a form action's `submit` labels its button", async () => {
   const saved = { ...run, config: { ...viz, actions: [{ ...viz.actions[0], label: "Edit…", submit: "Save" }] } } as unknown as VizRun;
   const view = render(<VizView run={saved} onOpenPage={() => {}} />);
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
   await waitFor(() => view.getByTestId("viz-action-form"));
   expect(view.getByTestId("viz-action-form-fields-submit").textContent).toBe("Save");
@@ -613,7 +613,7 @@ const withAlso = (when: string | null): VizRun =>
 
 test("an action `also` names is a button in the form, run on its row, and not in the row's menu", async () => {
   const view = render(<VizView run={withAlso(null)} onOpenPage={() => {}} />);
-  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   expect(view.queryByTestId("menu-item-viz-action-remove")).toBeNull();
   fireEvent.click(view.getByTestId("menu-item-viz-action-retitle"));
   // One editable field, yet a slideover: the strip has no room for Remove.

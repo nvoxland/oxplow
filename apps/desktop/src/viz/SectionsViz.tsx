@@ -12,7 +12,7 @@
  * stays the same as the rows change, and the viz's row actions in the
  * row's right-click menu (and its primary action on click), as for a list.
  */
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 import { Markdown } from "../components/Markdown/Markdown.js";
 import { Facts, type Fact } from "../kit/Facts.js";
@@ -28,8 +28,8 @@ export interface SectionsVizProps {
   sections: readonly SectionRow[];
   /** A row's facts: its displayed `columns`, drawn. */
   facts(row: SqlCell[]): Fact[];
-  /** A row's right-click menu (its actions) and keys. */
-  rowMenu(row: SqlCell[]): HTMLAttributes<HTMLElement>;
+  /** A row's focus and keys, and (`button`) the ☰ that opens its menu. */
+  rowMenu: ((row: SqlCell[]) => HTMLAttributes<HTMLElement>) & { button(row: SqlCell[]): ReactNode };
   /** What opens a heading's page, when the row names one. */
   navigate(link: LinkTarget): ((ref: TabRef, opts?: { newTab?: boolean }) => void) | undefined;
 }
@@ -42,7 +42,7 @@ export function SectionsViz({ node, sections, facts, rowMenu, navigate }: Sectio
     const id = `${node}/${s.key}`;
     return (
       <div key={s.key} data-node={id} data-testid={`node-${id}`} {...rowMenu(s.row)}>
-        <Section id={id} title={s.title} opens={opens(s.title, s.link)} keepEmpty testId={`viz-section-${s.key}`}>
+        <Section id={id} title={s.title} opens={opens(s.title, s.link)} menu={rowMenu.button(s.row)} keepEmpty testId={`viz-section-${s.key}`}>
           {rows.length > 0 ? <Facts testId={`viz-section-facts-${s.key}`} facts={rows} /> : null}
           {s.body ? <Markdown value={s.body} testId={`viz-section-body-${s.key}`} /> : null}
         </Section>

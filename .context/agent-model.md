@@ -654,6 +654,20 @@ page, "Earlier sessions"), which adds the stream's closed sessions and says per 
 reopens, resumes (`agent_session.open { resume }`), switches to a tab or
 does nothing. Nothing is adopted until a person picks a row.
 
+Every saved conversation is a resource, `oxplow/agent_conversation?harness=<h>&id=<native id>`
+(foundation's manifest; no `resolve`, since `v_agent_conversation` is a
+live dataset), and foundation's **Agent Conversation** page
+(`agent-conversation`, its default) shows one, begun in oxplow or outside
+it: what the harness lists about it (name, first prompt, started, last
+active, size, the conversation it was forked from) and, when an oxplow
+session ran it, that session, its Session transcript and the prompts
+oxplow recorded. It reads nothing from the harness's transcript: a
+conversation begun outside oxplow shows only what the list has. New
+Session's rows link to it (an open-here row to its tab, a row with no
+conversation to its session), mark the ones oxplow ran with oxplow's icon
+(`icon: oxplow`), and say a status only when there is one ("closed here",
+"open in …"); Saved conversations' rows link to it too.
+
 ### The observer machinery (`agent_observer/`)
 
 oxplow once opened ACP agents as chat sessions with their own view, and

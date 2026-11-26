@@ -179,7 +179,7 @@ Everything a person reaches a command by comes from the offers:
   Sidebar Panels lists the rail's panels, checked when shown — pages-and-tabs.md
   "Left-nav panels");
 - **shortcuts** are the offers' `ui.shortcut`s;
-- **a ref's menus** — a page's ☰, a row's right-click menu (a table or
+- **a ref's menus** — a page's ☰, a page row's ☰ (a table or
   card row, the Board's card) and the Navigator's thread menu — offer the
   commands about its kind (`ui.about`) that apply to it. The **daemon**
   says which: RPC `ref_commands { uri }` (`oxplow_app::commands::ref_commands`)

@@ -4,5 +4,17 @@ answers:
 - {"question":"Which saved agent conversations could be resumed here, and which harness keeps each?","params":{},"skill":"oxplow-extension"}
 loaders:
   conversations:
-    sql: "SELECT harness, native_id, title, updated_at FROM v_agent_conversation WHERE native_id IS NOT NULL ORDER BY updated_at DESC"
-view: { viz: table, from: conversations }
+    sql: |
+      SELECT harness, native_id, title, updated_at,
+             uri('oxplow/agent_conversation', 'harness', harness, 'id', native_id) AS uri
+      FROM v_agent_conversation WHERE native_id IS NOT NULL ORDER BY updated_at DESC
+view:
+  viz: table
+  from: conversations
+  columns:
+  - key: native_id
+    label: Conversation
+    link: { kind: page, from: uri }
+  - { key: title, label: Name }
+  - { key: harness, label: Agent }
+  - { key: updated_at, label: Last active, format: relative }

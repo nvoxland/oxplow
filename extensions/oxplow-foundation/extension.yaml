@@ -707,6 +707,11 @@ resources:
     title: display_name
     searchable: search_agent_session
     icon: terminal
+  - name: agent_conversation
+    description: "A coding agent's saved conversation, kept by its harness: started in oxplow or outside it."
+    label: Agent conversation
+    params: { harness: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true, pattern: '^[!-~]+$' } }
+    icon: message-square
   - name: terminal
     description: "A terminal running in a stream's checkout."
     label: Terminal
