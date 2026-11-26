@@ -122,7 +122,11 @@ fn config_dir() -> Result<std::path::PathBuf, IpcError> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn host_devices(app: tauri::AppHandle) -> Result<DevicesView, IpcError> {
+pub async fn host_devices(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+) -> Result<DevicesView, IpcError> {
+    super::local_window_only(&window)?;
     let this_device = shell(&app)
         .device()
         .map(|d| d.name.clone())
@@ -173,7 +177,11 @@ pub async fn host_devices(app: tauri::AppHandle) -> Result<DevicesView, IpcError
 
 #[tauri::command]
 #[specta::specta]
-pub async fn host_pairing_code(app: tauri::AppHandle) -> Result<PairingCodeView, IpcError> {
+pub async fn host_pairing_code(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+) -> Result<PairingCodeView, IpcError> {
+    super::local_window_only(&window)?;
     let (code, expires) = with_host(app, |host| async move { host.pairing_code().await }).await?;
     Ok(PairingCodeView {
         code,
@@ -184,9 +192,11 @@ pub async fn host_pairing_code(app: tauri::AppHandle) -> Result<PairingCodeView,
 #[tauri::command]
 #[specta::specta]
 pub async fn host_rename_device(
+    window: tauri::Window,
     app: tauri::AppHandle,
     rename: RenameDevice,
 ) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     with_host(app, |host| async move {
         host.rename_device(&rename.id, &rename.name)
             .await
@@ -197,7 +207,12 @@ pub async fn host_rename_device(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn host_remove_device(app: tauri::AppHandle, id: String) -> Result<(), IpcError> {
+pub async fn host_remove_device(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     with_host(app, |host| async move { host.remove_device(&id).await }).await
 }
 
@@ -205,8 +220,10 @@ pub async fn host_remove_device(app: tauri::AppHandle, id: String) -> Result<(),
 #[tauri::command]
 #[specta::specta]
 pub async fn set_host_settings(
+    window: tauri::Window,
     settings: oxplow_host::settings::HostSettings,
 ) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     settings.save(&config_dir()?).map_err(IpcError::invalid)
 }
 

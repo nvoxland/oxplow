@@ -463,7 +463,9 @@ fn open_startup_windows(app: &tauri::AppHandle, startup: Startup) {
                 {
                     Ok(_) => opened += 1,
                     Err(e) => {
-                        tracing::warn!(error = %e, origin, project, "a window on another machine was not restored")
+                        tracing::warn!(error = %e, origin, project, "a window on another machine was not restored");
+                        app.state::<windows::ShellWindows>()
+                            .keep_unrestored(&origin, &project);
                     }
                 }
             }

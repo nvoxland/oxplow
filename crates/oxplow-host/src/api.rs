@@ -342,9 +342,9 @@ async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::
             "pairing needs { code, name, kind }",
         );
     };
-    // Held while a wrong code waits: one attempt at a time. The codes have
-    // their own lock, so the owner making one never waits here.
-    let turn = s.access.attempts.lock().await;
+    // Each wrong code costs its own wait; nothing is held meanwhile, so a
+    // flood of them delays nobody else (600 tries a code's ten minutes per
+    // connection, against 31^8 codes).
     let good = s
         .access
         .pairing
@@ -353,13 +353,11 @@ async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::
         .take(&req.code, Instant::now());
     if !good {
         tokio::time::sleep(s.access.wrong_code_wait).await;
-        drop(turn);
         return refuse(
             StatusCode::UNAUTHORIZED,
             "that code is wrong or has expired; ask for a new one",
         );
     }
-    drop(turn);
     match s.access.devices.pair(&req.name, req.kind) {
         Ok((device, token)) => {
             tracing::info!(device = %device.id, name = %device.name, "a device paired");
@@ -754,8 +752,8 @@ mod tests {
         assert_eq!(own.status(), 200, "the code was still good");
     }
 
-    /// A wrong code costs a wait, and attempts take turns; the owner making
-    /// a code meanwhile does not wait.
+    /// A wrong code costs a wait, each its own: a flood of wrong codes holds
+    /// up neither another device's attempt nor the owner making a code.
     #[tokio::test]
     async fn a_wrong_code_costs_a_wait() {
         let fx = Fixture::new(RUNS);
@@ -782,10 +780,14 @@ mod tests {
                 reqwest::StatusCode::UNAUTHORIZED
             )
         );
+        let took = started.elapsed();
         assert!(
-            started.elapsed() >= std::time::Duration::from_millis(400),
-            "two wrong codes, one after the other: {:?}",
-            started.elapsed()
+            took >= std::time::Duration::from_millis(200),
+            "a wrong code waits: {took:?}"
+        );
+        assert!(
+            took < std::time::Duration::from_millis(390),
+            "two wrong codes wait side by side, not in turn: {took:?}"
         );
     }
 

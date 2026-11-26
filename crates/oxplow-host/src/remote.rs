@@ -42,7 +42,9 @@ fn account(origin: &str) -> String {
 }
 
 /// An address as typed (`server.ts.net:7400`, a trailing slash): its
-/// origin, `https` unless it says `http`. Pure.
+/// origin, `https` unless it says `http`. Plain `http` only to this machine
+/// (an SSH tunnel to `127.0.0.1`): elsewhere the code and the token would
+/// pass in clear, and the app's CSP lets a window call no other. Pure.
 pub fn origin_of(address: &str) -> Result<String, String> {
     let trimmed = address.trim().trim_end_matches('/');
     if trimmed.is_empty() {
@@ -57,6 +59,12 @@ pub fn origin_of(address: &str) -> Result<String, String> {
         .map_err(|e| format!("\"{address}\" is no address: {e}"))?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err(format!("\"{address}\" is no web address"));
+    }
+    let loopback = matches!(url.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback());
+    if url.scheme() == "http" && !loopback {
+        return Err(format!(
+            "{address} is plain HTTP: give its https:// address (plain HTTP only through a tunnel to 127.0.0.1)"
+        ));
     }
     Ok(url.origin().ascii_serialization())
 }
@@ -86,7 +94,11 @@ pub async fn pair(
     name: &str,
 ) -> Result<RemoteHost, String> {
     let origin = origin_of(address)?;
-    let answer = reqwest::Client::new()
+    let answer = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?
         .post(format!("{origin}/host/pair"))
         .json(&serde_json::json!({ "code": code.trim(), "name": name, "kind": "desktop" }))
         .send()
@@ -174,6 +186,14 @@ mod tests {
         assert_eq!(
             origin_of(" http://127.0.0.1:7400 ").unwrap(),
             "http://127.0.0.1:7400"
+        );
+        assert!(
+            origin_of("http://server.ts.net:7400").is_err(),
+            "no plain HTTP off this machine"
+        );
+        assert!(
+            origin_of("http://localhost:7400").is_err(),
+            "the CSP allows 127.0.0.1 only"
         );
         assert!(origin_of("").is_err());
         assert!(origin_of("ftp://x").is_err());

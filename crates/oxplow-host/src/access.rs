@@ -48,8 +48,7 @@ pub struct Access {
     /// The codes the owner made; never held across a wait, so making one
     /// never waits behind someone guessing.
     pub pairing: Mutex<Pairing>,
-    /// One pairing attempt at a time: a wrong code costs a wait.
-    pub attempts: tokio::sync::Mutex<()>,
+
     pub tunnels: Tunnels,
     /// What a wrong code costs, one attempt at a time: a code's 10 minutes
     /// then allow 600 guesses of 31^8.
@@ -88,7 +87,6 @@ impl Access {
             owner_token,
             devices,
             pairing: Mutex::new(Pairing::default()),
-            attempts: tokio::sync::Mutex::new(()),
             tunnels: Tunnels::default(),
             wrong_code_wait,
             public: Mutex::new(PublicListener::Off),

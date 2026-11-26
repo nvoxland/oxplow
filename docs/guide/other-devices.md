@@ -56,7 +56,9 @@ headless".
 
 From a browser, open `https://<server>…:7400/` and type the code. From
 the Mac app, the launcher's **Other computers** takes the server's
-address and a code, then lists its projects to open. A project there
+address and a code, then lists its projects to open. Over an SSH tunnel
+instead (`ssh -L 7400:127.0.0.1:7400 server`, the host on
+`--bind 127.0.0.1:7400`), the address is `http://127.0.0.1:7400`. A project there
 runs there: quitting the Mac app leaves it running, and its window comes
 back at the next start.
 
@@ -66,6 +68,8 @@ back at the next start.
 - **Native menus and the clipboard** are the device's own.
 - Latency is your network's. Terminal echo over a slow link feels like
   SSH because it effectively is.
+- A window on another computer's project shows no custom component
+  frames yet.
 - The Mac app and a host on the same Mac can't both run one home's
   projects: use another `OXPLOW_HOME`, or connect to it as another
   computer.

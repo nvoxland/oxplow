@@ -179,3 +179,20 @@ test("a tab queued while the window's queue is being read is taken after it", as
   await waitFor(() => expect(hook.result.current.tabs.threadPageTabs.thr2?.map((t) => t.id)).toEqual([page(5).id]));
   await waitFor(() => expect(forgotten).toEqual([9]));
 });
+
+// A Mac window on another machine's host takes no call that acts on this
+// Mac: no project opened here, no browser opened, no clipboard written.
+test("a remote shell window hosts nothing that acts on this Mac", async () => {
+  const { hostedHere } = await import("./useWindowHost.js");
+  const noop = async () => null;
+  const handlers = {
+    "projects.write": { open: noop, create: noop },
+    "window.show": { open_url: noop, copy_text: noop, find: noop },
+    "tabs.write": { open: noop },
+  };
+  const remote = hostedHere(handlers, { shell: true, local: false });
+  expect(Object.keys(remote).sort()).toEqual(["tabs.write", "window.show"]);
+  expect(Object.keys(remote["window.show"]!)).toEqual(["find"]);
+  expect(hostedHere(handlers, { shell: true, local: true })).toBe(handlers);
+  expect(hostedHere(handlers, { shell: false, local: false })).toBe(handlers);
+});

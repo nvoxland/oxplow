@@ -135,6 +135,13 @@ impl WindowRegistry {
         Some(open.remove(idx))
     }
 
+    /// Whether the window `label` is on a host on another machine.
+    pub fn is_remote(&self, label: &str) -> bool {
+        self.lock()
+            .iter()
+            .any(|w| w.label == label && w.remote.is_some())
+    }
+
     /// Every open window, in the order they were opened.
     pub fn windows(&self) -> Vec<OpenWindow> {
         self.lock().clone()
@@ -284,6 +291,8 @@ pub struct ShellWindows {
     quit_confirmed: std::sync::atomic::AtomicBool,
     /// A quit is being asked about now: a second Quit asks nothing more.
     asking_quit: std::sync::atomic::AtomicBool,
+    /// Restore entries of windows on another machine that did not open.
+    unrestored: Mutex<Vec<String>>,
 }
 
 /// The name a person gave this Mac (System Settings › General › About),
@@ -321,6 +330,7 @@ impl Default for ShellWindows {
             quitting: std::sync::atomic::AtomicBool::new(false),
             quit_confirmed: std::sync::atomic::AtomicBool::new(false),
             asking_quit: std::sync::atomic::AtomicBool::new(false),
+            unrestored: Mutex::new(Vec::new()),
         }
     }
 }
@@ -556,12 +566,7 @@ impl ShellWindows {
 
     /// Let go of `project` on the host, in the background.
     fn release(&self, project: String) {
-        let host = self
-            .host
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|own| own.client.clone());
+        let host = self.running_host();
         let (Some(host), Some(device)) = (host, self.device.clone()) else {
             return;
         };
@@ -694,20 +699,53 @@ impl ShellWindows {
     /// The app is ending: so is its host. Dropping it closes the host's
     /// lifeline; the host stops every daemon on its own. Nothing waits.
     pub fn end(&self) {
-        if self
-            .host
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-            .is_some()
-        {
+        // A host starting now holds the lock: never waited on. It ends with
+        // the app anyway (its lifeline is this process's).
+        let mut slot = match self.host.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        if slot.take().is_some() {
             tracing::info!("the app is ending; so is its host");
         }
     }
 
+    /// A window on another machine that did not open at the start (its host
+    /// was away): kept in the restore set, so the next start tries again.
+    pub fn keep_unrestored(&self, origin: &str, project: &str) {
+        let entry = remote_entry(origin, project);
+        let mut kept = self.unrestored.lock().unwrap_or_else(|e| e.into_inner());
+        if !kept.contains(&entry) {
+            kept.push(entry);
+        }
+    }
+
+    /// Forget the windows of `origin` that did not open (the host was
+    /// forgotten).
+    pub fn forget_unrestored(&self, origin: &str) {
+        self.unrestored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|e| parse_remote_entry(e).is_none_or(|(o, _)| o != origin));
+        self.write_session();
+    }
+
     fn write_session(&self) {
         if let Some(session) = &self.session {
-            session.replace(&self.registry.project_dirs());
+            let mut entries = self.registry.project_dirs();
+            let opened: Vec<String> = entries.iter().map(|d| d.display().to_string()).collect();
+            for kept in self
+                .unrestored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+            {
+                if !opened.contains(kept) {
+                    entries.push(PathBuf::from(kept));
+                }
+            }
+            session.replace(&entries);
         }
     }
 }
@@ -757,6 +795,10 @@ mod remote_tests {
 
         let reg = WindowRegistry::default();
         reg.insert_remote("project-9", "https://server.ts.net:7400", "prj-1");
+        reg.insert("project-1", Path::new("/a"), "prj-2");
+        // What may act on this Mac asks this (`local_window_only`).
+        assert!(reg.is_remote("project-9"));
+        assert!(!reg.is_remote("project-1"));
         let w = reg.remove("project-9").unwrap();
         assert_eq!(w.remote.as_deref(), Some("https://server.ts.net:7400"));
     }

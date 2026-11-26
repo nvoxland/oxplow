@@ -524,6 +524,8 @@ mod tests {
             "components/%2e%2e/ipc/x",
             "component-lib/./../ipc/x",
             "components//../ipc/x",
+            "components/.%09./ipc/x",
+            "components/%252e%252e/ipc/x",
         ] {
             let mut tcp = tokio::net::TcpStream::connect(&addr).await.unwrap();
             let req = format!(

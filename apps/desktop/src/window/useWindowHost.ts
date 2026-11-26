@@ -17,6 +17,22 @@ import { streamOfThread } from "../tabs/threadTabOps.js";
 import { useTabReportRepeats } from "../tabs/useTabReportRepeats.js";
 import { typeOf } from "../uri/uri.js";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { filesAreLocal, shellAvailable } from "../tauri-bridge/transport.js";
+
+/** The calls a window takes from its daemon, less what acts on this Mac when
+ *  the daemon is on another machine: a Mac window on a remote host would
+ *  otherwise open a folder here, open the Mac's browser or write its
+ *  clipboard because that host asked (the "a person's, not an agent's"
+ *  check is the daemon's, which is that host's). A browser page keeps them:
+ *  its browser bounds them. Pure; exported for tests. */
+export function hostedHere(handlers: ClientHandlers, where: { shell: boolean; local: boolean }): ClientHandlers {
+  if (!where.shell || where.local) return handlers;
+  const { "projects.write": _projects, ...rest } = handlers;
+  const show = rest["window.show"];
+  if (!show) return rest;
+  const { open_url: _url, copy_text: _copy, ...shown } = show;
+  return { ...rest, "window.show": shown };
+}
 import { pickAndCreateProject, pickAndOpenProject } from "./projectPickers.js";
 import type { useWindowOpeners } from "./useWindowOpeners.js";
 import type { useWindowTabs } from "./useWindowTabs.js";
@@ -306,7 +322,7 @@ export function useWindowHost({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, effectiveCenterActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);
-  windowHandlersRef.current = windowHandlers;
+  windowHandlersRef.current = hostedHere(windowHandlers, { shell: shellAvailable(), local: filesAreLocal() });
 
   // The window takes the daemon's calls (an agent's or a link's navigate,
   // `clientHost.ts`) once it can do them as asked: its stream and thread

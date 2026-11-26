@@ -117,6 +117,7 @@ fn plain_path(rest: &str) -> bool {
     [rest, decoded.as_str()].iter().all(|path| {
         let inner = path.strip_suffix('/').unwrap_or(path);
         !path.contains('\\')
+            && !path.chars().any(char::is_control)
             && inner
                 .split('/')
                 .all(|seg| !seg.is_empty() && seg != "." && seg != "..")

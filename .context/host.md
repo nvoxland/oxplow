@@ -135,7 +135,15 @@ The app's host is a child of the app, as a daemon is a child of the host
   are there). Closing the window lets go there; quitting the app does not
   (the work goes on), and the window comes back at the next start
   (`session.json` keeps it as `<origin>/p/<id>`). Forget tells the host and
-  drops the token. The app's CSP allows `https:`/`wss:` for these windows.
+  drops the token. The app's CSP lets every window connect to `https:`/`wss:`
+  for these; its frame bound stays this machine (a frame that may navigate
+  anywhere could carry its data off), so such a window has no custom
+  component frames yet. Such a window acts on nothing of this Mac: the page
+  hosts no `projects.write` and no `open_url`/`copy_text` for it
+  (`hostedHere`, `useWindowHost.ts`), and the shell commands that do
+  (`open_project`, `open_path`, `install_cli`, the Devices and remote-host
+  commands) refuse its label (`local_window_only`). A window that did not
+  open at the start (its host was away) stays in the restore set.
 
 
 ## HTTPS
@@ -185,8 +193,9 @@ Anyone who reaches the host: `POST /host/pair`.
   `Content-Type: application/json`, and an `Origin` that is the host's own
   when it names one: a page on another site cannot send it without a
   preflight, and no `/host/*` route answers one. A wrong code costs a second,
-  one attempt at a time (`WRONG_CODE_WAIT`), so a code's 10 minutes allow 600
-  guesses of 31^8, and nobody can keep pairing closed for others.
+  each its own (`WRONG_CODE_WAIT`), nothing held meanwhile: a connection
+  gets 600 tries in a code's 10 minutes against 31^8 codes, and a flood of
+  wrong codes delays no other device and never the owner making one.
 - **Who a device is** comes from its record: on `ipc/…` the host replaces
   `Oxplow-Device`; the socket's query is rebuilt from its parsed pairs, with
   only `connection` (the page load) as sent and `device`, `name`, `kind`
