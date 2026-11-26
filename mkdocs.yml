@@ -69,7 +69,7 @@ nav:
       - Agents: guide/agents.md
       - Terminal: guide/terminal.md
       - Agent control: guide/agent-control.md
-      - Remote daemon: guide/remote-daemon.md
+      - Other devices and computers: guide/other-devices.md
   - Reference:
       - Keybindings: reference/keybindings.md
       - Settings: reference/settings.md

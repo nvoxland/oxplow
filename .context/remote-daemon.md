@@ -176,14 +176,14 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
   drop unsaved editor drafts). To make a new surface live-again after a drop,
   register an `onRemoteReconnect` re-fetch alongside its event
   subscription.
-- **Launcher connect flow** — `launcher/Launcher.tsx`
-  `RemoteConnectSection` + `launcher/remoteRecents.ts`. Probes
-  `/ipc/ping` before committing. `Root.tsx` renders the full app
-  shell for any window without a shell-assigned `kind` — which is what a
-  plain browser over a tunnel is.
+- **No connect flow of its own.** A daemon on another machine is reached
+  through its host: the launcher's "Other computers"
+  (`launcher/RemoteHostsSection.tsx`, `.context/host.md` "The Mac app"), or
+  a browser that pairs at the host's home. `Root.tsx` renders the full app
+  shell for a window without a `kind` the shell or host assigned.
 - **`components/RemoteConnectionBanner.tsx`** — fixed top strip in
-  remote mode: red "reconnecting…" while the WS is down (with
-  Disconnect). Once it recovers, state auto-resyncs (see above), so the
+  remote mode: red "reconnecting…" while the WS is down, and "Oxplow was
+  quit on the computer that runs it" after a host's 4002. Once it recovers, state auto-resyncs (see above), so the
   banner shows only a brief, non-blocking "Connection restored — state
   resynced" confirmation that auto-dismisses (`RESTORED_AUTO_DISMISS_MS`)
   — no reload prompt. Agents on the daemon box run through the gap.
@@ -193,8 +193,9 @@ Logs, tab reports, the client host and the socket use the same `uiClientId.ts` i
   `/ipc` 401 marks the transport refused (`isTokenRefused`), each call
   fails `UNAUTHORIZED` with what to do, the socket is closed and never
   retried, and the banner shows `remote-banner-refused` — "this window's
-  token was refused… reconnect from the launcher" — sticky, since no
-  retry fixes it. The health probe counts a refusal as the daemon
+  token was refused… open the project again" — sticky, since no retry
+  fixes it. On a page a host served, a refused token is the device's own
+  and it pairs again instead (`.context/host.md` "Pairing"). The health probe counts a refusal as the daemon
   answering, so the "Backend daemon disconnected" overlay doesn't show;
   background reads fail through `readFailed` (logged), never uncaught.
 

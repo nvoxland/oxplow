@@ -200,13 +200,15 @@ Both kinds can switch branches — either via the `BranchPicker` in the `TitleBa
 
 ## The shell and its daemons
 
-Oxplow is **one shell process owning every window**, with **one
-`oxplow-daemon` child per open project**. The shell holds no project
-state at all: no `Services`, no database, no watchers, no control plane.
-Each project window talks to its own daemon over loopback HTTP/WS (see
-[remote-daemon.md](./remote-daemon.md)); the only things the shell
-serves itself are the shell surface — windowing, native menus, the OS
-clipboard, external URLs, and the project lifecycle below.
+Oxplow is **one shell process owning every window**, with **one host**
+(`oxplow-host`, the shell's child) that runs **one `oxplow-daemon` per
+held project** ([host.md](./host.md)). The shell holds no project state at
+all: no `Services`, no database, no watchers, no control plane. Each
+project window talks to its daemon through the host over loopback HTTP/WS
+(see [remote-daemon.md](./remote-daemon.md)); other devices (a tablet's
+browser) reach the same host and daemons once paired. The only things the
+shell serves itself are the shell surface — windowing, native menus, the
+OS clipboard, external URLs, and the project lifecycle below.
 
 This replaced process-per-window (one OS process per project, each
 booting its own `Services`). That model gave every project a separate
@@ -216,8 +218,9 @@ a per-project instance lock plus a loopback focus channel, and the
 session set had to be *inferred* from "recent projects whose lock is
 held". The shell now simply knows — see `WindowRegistry` in
 `crates/oxplow-tauri-ipc/src/windows.rs`. Local and remote also stopped
-being different code paths: a local project window is a remote client
-that happens to be talking to a daemon on 127.0.0.1.
+being different code paths: a local project window is a client of a host
+that happens to be on 127.0.0.1, and a window on another machine's host
+(the launcher's "Other computers") is the same client elsewhere.
 
 The trade is a process hop on every command (~3–4 ms round trip,
 measured — see [performance.md](./performance.md)) and a daemon boot
@@ -294,9 +297,9 @@ from. The two guards are the pure `resolve_open_target` /
 **Which screen a window is** comes from the shell, not a command: the
 injected `window.__OXPLOW__.kind` (`project` / `launcher` / `setup`)
 that `<Root>` switches on. There is no launch-mode round trip and no
-loading flash — the context is set before any page script runs. A window
-the shell didn't create (a plain browser over a tunnel) has no context
-and gets the app shell.
+loading flash — the context is set before any page script runs. A page
+a host served says `hostHome` (pairing, then the projects) or `project`
+with the host's origin, and pairs first when it has no token.
 
 **No orphans.** The host holds each daemon's stdin lifeline and the app
 holds the host's, so a shell that dies without unwinding (crash,

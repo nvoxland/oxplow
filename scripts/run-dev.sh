@@ -6,8 +6,9 @@
 #   bun run run:dev ~/src/other     # another project
 #   bun run run:dev --no-deploy     # build and run; deploy nothing
 #
-# 1. Refuses while oxplow holds the project (its instance lock), before
-#    the build: the deploy needs oxplow quit, and so does a clean start.
+# 1. Refuses while oxplow holds the project (its instance lock), or a
+#    headless host runs for this home, before the build: the deploy needs
+#    oxplow quit, and so does a clean start.
 # 2. `bun run build:dev` — stages the sidecars, builds the frontend and
 #    the shell (`DEV.md` "Run from source").
 # 3. `oxplow-dev extension deploy` — deploys every extension that is on
@@ -45,6 +46,17 @@ lock="$project/.oxplow/instance.lock"
 if [ -e "$lock" ] && holder="$(lsof -t "$lock" 2>/dev/null)" && [ -n "$holder" ]; then
   echo "run-dev: oxplow is running on $project (pid $(echo $holder)); quit it first." >&2
   exit 1
+fi
+
+# A headless host on this home (`oxplow host serve`) keeps the app's own host
+# from starting: say so before the build.
+home="${OXPLOW_HOME:-$HOME/Library/Application Support/net.voxland.oxplow}"
+if [ -f "$home/host.json" ] && grep -q '"for_app": false' "$home/host.json" 2>/dev/null; then
+  pid="$(sed -n 's/.*"pid": *\([0-9]*\).*/\1/p' "$home/host.json")"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "run-dev: a headless host (pid $pid) runs for $home; stop it (oxplow-host stop) or set another OXPLOW_HOME." >&2
+    exit 1
+  fi
 fi
 
 cd "$repo"

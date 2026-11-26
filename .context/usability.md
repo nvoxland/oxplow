@@ -654,8 +654,9 @@ surface calls it and adds nothing of its own.
 | A web URL | Browser, Oxplow (the web tab, when the allowlist takes it) |
 
 - **Only what applies shows.** Reveal and Default App need the files on
-  this machine (`filesAreLocal()`; not over a manual connect or in a
-  plain browser). A file at another revision or on another filesystem is
+  this machine (`filesAreLocal()`: a shell window on a project folder
+  here, never a page a host served or a window on another machine's
+  host). A file at another revision or on another filesystem is
   not on disk. Terminal opens in this window's stream, so another
   stream's row and the launcher have none. With no item left there is no
   submenu.
