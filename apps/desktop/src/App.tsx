@@ -1,4 +1,7 @@
 import { useResourcesLoader } from "./resources.js";
+import { useShellKind } from "./shells/shellChoice.js";
+import type { ShellWindow } from "./shells/shellWindow.js";
+import { TabletShell } from "./shells/TabletShell.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -605,6 +608,91 @@ export function App() {
     tabLabelByIdRef,
   });
 
+  // A tab's close, for every shell: a file's tab closes its file, a diff's
+    // its diff, an agent session's the session (its toast offers Undo), any
+    // other page its tab.
+    const closeTab = (id) => {
+    const path = diskFilePath(id);
+    if (path !== null) handleCloseOpenFile(id, path);
+    else if (id.startsWith("diff:")) closeDiffTab(id);
+    else if (typeOf(id) === "oxplow/agent_session") {
+      // Closing a session's tab closes the session at once, its
+      // toast offering Undo (it reopens on the saved
+      // conversation); its tab goes when its row closes.
+      const ref = refFromTabId(id);
+      const sessionId = ref ? paramOf(ref.id, "id") : null;
+      if (sessionId) {
+        const session = selectedThreadSessions?.find((c) => c.id === sessionId);
+        const name = session ? session.displayName || sessionLabel(harnesses, session) : "session";
+        void personCommands.run(`Close ${name}`, "oxplow.agent_session.close", {
+          session: sessionId,
+        });
+      }
+    }
+    else closePageTab(id);
+  };
+  
+  const shell = useShellKind();
+  // The window as a shell draws it (`shells/shellWindow.ts`).
+  const shellWindow: ShellWindow = {
+    streams,
+    stream,
+    threadStates,
+    selectedThread,
+    streamStatuses,
+    agentStatuses,
+    agentQuestions,
+    switchStream: handleSwitch,
+    selectThread: handleSelectThread,
+    createThread: async (streamId, title) => {
+      if (streamId !== stream?.id) await handleSwitch(streamId);
+      return handleCreateThread(title);
+    },
+    renameStream: handleRenameStreamById,
+    renameThread: handleRenameThreadById,
+    markThread: handleMarkThread,
+    closeThread: handleCloseThread,
+    openStreamSettings: (streamId) => handleOpenPage(streamSettingsRef(streamId)),
+    openThreadSettings: (threadId) => handleOpenPage(threadSettingsRef(threadId)),
+    openNewStream: () => handleOpenPage(newStreamRef()),
+    tabs: centerTabs,
+    activeTabId: effectiveCenterActive,
+    activateTab: (id) => setCenterActive(id),
+    closeTab,
+    openPage: handleOpenPage,
+    openSearch: () => setQuickOpenVisible(true),
+    tray: <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+  };
+  // The window's errors, a line above the page in every shell.
+  const errorBar = (
+    <div style={{ borderBottom: error ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
+      {error ? (
+        <div
+          onClick={() => setError(null)}
+          title="Click to dismiss"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "2px 12px",
+            background: "var(--bg-2)",
+            color: "#ff6b6b",
+            fontSize: 11,
+            minHeight: 22,
+            borderBottom: "1px solid var(--border)",
+            cursor: "pointer",
+          }}
+        >
+          <span>{error}</span>
+          <span aria-hidden style={{ opacity: 0.7, paddingLeft: 8 }}>
+            ✕
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <WindowProviders
       streamId={stream?.id ?? null}
@@ -616,6 +704,14 @@ export function App() {
     <GoMenuFeed onRows={setGoRows} />
     <RailMenuFeed onChange={setRailMenu} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+      {shell === "tablet" ? (
+        <>
+          {errorBar}
+          <DevicesSlideover open={devicesOpen} onClose={() => setDevicesOpen(false)} />
+          <TabletShell win={shellWindow} />
+        </>
+      ) : (
+        <>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
           webview reaches the top edge: the title bar is the window's top,
           its empty space drags it and its start leaves room for the
@@ -628,32 +724,7 @@ export function App() {
         leftInset={isMac ? 78 : 10}
         onOpenSearch={() => setQuickOpenVisible(true)}
       />
-      <div style={{ borderBottom: error ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
-        {error ? (
-          <div
-            onClick={() => setError(null)}
-            title="Click to dismiss"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "2px 12px",
-              background: "var(--bg-2)",
-              color: "#ff6b6b",
-              fontSize: 11,
-              minHeight: 22,
-              borderBottom: "1px solid var(--border)",
-              cursor: "pointer",
-            }}
-          >
-            <span>{error}</span>
-            <span aria-hidden style={{ opacity: 0.7, paddingLeft: 8 }}>
-              ✕
-            </span>
-          </div>
-        ) : null}
-      </div>
+      {errorBar}
       <DevicesSlideover open={devicesOpen} onClose={() => setDevicesOpen(false)} />
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <Navigator
@@ -716,26 +787,7 @@ export function App() {
               tabs={centerTabs}
               activeId={effectiveCenterActive}
               onActivate={(id) => setCenterActive(id)}
-              onClose={(id) => {
-                const path = diskFilePath(id);
-                if (path !== null) handleCloseOpenFile(id, path);
-                else if (id.startsWith("diff:")) closeDiffTab(id);
-                else if (typeOf(id) === "oxplow/agent_session") {
-                  // Closing a session's tab closes the session at once, its
-                  // toast offering Undo (it reopens on the saved
-                  // conversation); its tab goes when its row closes.
-                  const ref = refFromTabId(id);
-                  const sessionId = ref ? paramOf(ref.id, "id") : null;
-                  if (sessionId) {
-                    const session = selectedThreadSessions?.find((c) => c.id === sessionId);
-                    const name = session ? session.displayName || sessionLabel(harnesses, session) : "session";
-                    void personCommands.run(`Close ${name}`, "oxplow.agent_session.close", {
-                      session: sessionId,
-                    });
-                  }
-                }
-                else closePageTab(id);
-              }}
+              onClose={closeTab}
               onReorder={handleReorderCenterTabs}
             />
           ) : <TabLoading />}
@@ -755,6 +807,8 @@ export function App() {
         </Dock>
         </div>
       </div>
+        </>
+      )}
       <QuickOpenOverlay
         open={quickOpenVisible}
         initialQuery={quickOpenQuery}

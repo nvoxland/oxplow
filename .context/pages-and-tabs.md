@@ -99,12 +99,44 @@ what they return.
 | `useWindowHost` | The window as the daemon's host (`clientHost.ts`), taken once the window is ready, the live tab report agents read (focus, visibility, the shown thread, page detail, runs), and the tabs agents queued while the device was away (`list_queued_tabs`, `forget_queued_tabs`). |
 | `useWindowCommands` | The context keys a command's `when` reads, the person's offers, the commands the window runs itself, the keyboard shortcuts. |
 | `useWindowPages` | The shown thread's tabs as `WindowTab[]` (`window/windowTab.ts`): what draws each page, each body in its navigation context. |
+| `useStreamThreadMenus` | Each stream's and thread's menu and the flows they start (rename, add a thread, remove a stream), New Thread requests (`new-thread-bus`) and menus asked for from outside (`navigator-bus`); the shell draws the flows where it lists streams (`reveal`). |
 | `<WindowProviders>` | What every shell's window sits in: the panels' runs and layout, the live origins of the shown thread's tabs, the alert toasts, and `useReportUse` (tells the daemon, at most once a second, that the person uses this window: the device used last). |
 
 Each hook has its own test (`window/*.test.tsx`), and
 `tests-e2e/specs/shell/window.spec.ts` pins the window's behavior across
 them. What stays in `App.tsx` is the desktop's: the menu bar and native
 menu, the rail, the dock, the strip, the page-visit recorder, the layout.
+
+### Shells
+
+A window is drawn by one shell (`apps/desktop/src/shells/`), chosen once
+per load by `useShellKind` (`chooseShell`): a test's override first (the
+page's `?shell=desktop|tablet` or the window context's `shell`), then the
+device's own choice (the `shell` app preference, per device), then its
+kind (a desktop gets `desktop`; a tablet, and a phone until it has its own
+shell, get `tablet`).
+
+- **`desktop`** is `App.tsx`'s own layout: menu bar, title bar, Navigator,
+  rail, `CenterTabs`, dock.
+- **`tablet`** is `TabletShell`: one line at the top (the context: stream
+  and thread, then the thread's tabs, then search), the page at full width,
+  the panels' tray at the bottom (the dock, until the tray is built). A tab's
+  long press opens the window's tab menu (`buildTabMenu`).
+
+App builds one `ShellWindow` (`shells/shellWindow.ts`): the streams and
+threads and their operations, the shown thread's tabs, `closeTab` (a file's
+tab closes its file, a diff's its diff, a session's the session), opening a
+page and search, and the tray. Both shells draw tab bodies through
+`TabBodies` (`components/CenterTabs/TabBodies.tsx`: mounted when first
+shown, then kept; `center-tab-body-<id>`). Toasts, confirmations, Quick
+Open, the daemon-down dialogs and the connection banner are drawn outside
+the shell, for both.
+
+**The contract** (`shells/shellContract.ts`): every shell draws every
+contribution the window has (tabs, tab menus, streams and threads, panels,
+dock panels, panel alerts, menu commands, search). `SHELL_PLACES` names
+where; a `null` is a gap still to build, and `TabletShell.test.tsx` holds
+the list of gaps so it only shrinks.
 
 ## Renderers
 

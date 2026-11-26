@@ -1,4 +1,3 @@
-import { TabVisibleContext } from "../../tabs/TabVisible.js";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { kindForTabId, PageKindIcon } from "../../pageKinds.js";
 import { AgentIcon } from "../AgentIcon.js";
@@ -6,7 +5,7 @@ import { AgentStatusDot } from "../AgentStatusDot.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import type { WindowTab } from "../../window/windowTab.js";
-import { ErrorBoundary } from "../ErrorBoundary.js";
+import { TabBodies } from "./TabBodies.js";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
 import { buildTabMenu } from "./tabMenu.js";
 import { TAB_DRAG_MIME } from "../../dragMimes.js";
@@ -27,8 +26,6 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   // The bodies shown so far: a tab not yet shown mounts nothing, so a
   // window arriving on a stream (or opening with many tabs) draws only the
   // selected one.
-  const shownKeys = useRef(new Set<string>());
-  if (active) shownKeys.current.add(byKey(active));
   const stripTabs = tabs.filter((t) => !t.hidden);
   const cm = useContextMenu();
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -368,41 +365,13 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             Loading…
           </div>
         ) : null}
-        {[...tabs].sort((a, b) => byKey(a).localeCompare(byKey(b))).map((tab) => {
-          const isActive = tab.id === active?.id;
-          // A body is mounted when its tab is first shown, and then kept.
-          if (!isActive && !shownKeys.current.has(byKey(tab))) return null;
-          return (
-            <div
-              key={byKey(tab)}
-              style={{
-                display: isActive ? "flex" : "none",
-                flex: 1,
-                minHeight: 0,
-                minWidth: 0,
-                flexDirection: "column",
-                // A tab's own dialogs (`TabModal`) cover this body only.
-                position: "relative",
-              }}
-              data-testid={`center-tab-body-${tab.id}`}
-              aria-hidden={!isActive}
-            >
-              <ErrorBoundary label={tab.label}>
-                <TabVisibleContext.Provider value={isActive}>{tab.render()}</TabVisibleContext.Provider>
-              </ErrorBoundary>
-            </div>
-          );
-        })}
+        <TabBodies tabs={tabs} activeId={active?.id ?? null} />
       </div>
       {cm.menu}
     </div>
   );
 }
 
-/** A tab body's React key. */
-function byKey(tab: WindowTab): string {
-  return tab.key ?? tab.id;
-}
 
 interface OverflowPanelProps {
   tabs: WindowTab[];
