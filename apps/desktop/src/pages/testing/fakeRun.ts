@@ -263,6 +263,21 @@ export function switchPage(mode: "list" | "board" = "list"): PageRun {
   return fakeRun(page, { params: { mode }, loaders: { items: loader(["id"], [["a"]]) }, pick: { modes: mode } });
 }
 
+/** A switch inside a stack (not the page's view): its children are tabs. */
+export function tabsPage(mode: "list" | "board" = "list"): PageRun {
+  const page = fakePage(
+    node.stack("body", [
+      node.markdown("intro", "Pick one."),
+      node.switch("modes", "mode", [
+        node.viz("list", "items", { columns: [{ key: "id" }] }, { title: "List" }),
+        node.viz("board", "items", { columns: [{ key: "id" }] }, { title: "Board" }),
+      ]),
+    ]),
+    { params: [{ name: "mode", role: "filter", default: "list", type: "choice", options: [] }] },
+  );
+  return fakeRun(page, { params: { mode }, loaders: { items: loader(["id"], [["a"]]) }, pick: { modes: mode } });
+}
+
 /** A grid of two tiles, one whose loader failed. */
 export function gridPage(): PageRun {
   const page = fakePage(

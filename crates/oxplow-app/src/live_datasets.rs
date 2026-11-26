@@ -149,7 +149,16 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "parent",
             "problem",
         ],
-        "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
+        "vcs_workspace" => &[
+            "path",
+            "branch",
+            "head",
+            "is_main",
+            "stream_id",
+            "subject",
+            "committed_at",
+            "changes",
+        ],
         "vcs_remote" => &["name", "url"],
         "agent_harness" => &["id", "title", "enabled", "position", "settings"],
         "file" => &[
@@ -1033,20 +1042,52 @@ impl LiveSources {
             .collect();
         let mut workspaces = self.vcs.list_workspaces(project_dir).await?;
         workspaces.sort_by_key(|w| !w.is_main);
-        Ok(workspaces
-            .into_iter()
-            .map(|w| {
-                let at = canon(std::path::Path::new(&w.path));
-                let stream = streams.iter().find(|(p, _)| *p == at).map(|(_, id)| *id);
-                vec![
-                    text(w.path),
-                    opt(w.branch),
-                    opt(w.head),
-                    flag(w.is_main),
-                    stream.map_or(SqlCell::Null(()), SqlCell::Int),
-                ]
-            })
-            .collect())
+        let mut out = Vec::with_capacity(workspaces.len());
+        for w in workspaces {
+            let path = std::path::PathBuf::from(&w.path);
+            // One whose folder is gone is git's stale record, not a working
+            // copy: nothing can be adopted there.
+            if !path.exists() {
+                continue;
+            }
+            let at = canon(&path);
+            let stream = streams.iter().find(|(p, _)| *p == at).map(|(_, id)| *id);
+            // Its head commit and its changed files, for one no stream uses
+            // (what a new stream can adopt): a stream's own pages say them
+            // for its copy, and a status per copy is a full walk.
+            let loose = stream.is_none() && !w.is_main;
+            let head = if loose {
+                self.vcs
+                    .log(
+                        &path,
+                        oxplow_domain::vcs::LogQuery {
+                            limit: Some(1),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .ok()
+                    .and_then(|log| log.into_iter().next())
+            } else {
+                None
+            };
+            let changes = if loose {
+                self.vcs.status(&path).await.ok().map(|s| s.entries.len())
+            } else {
+                None
+            };
+            out.push(vec![
+                text(w.path),
+                opt(w.branch),
+                opt(w.head),
+                flag(w.is_main),
+                stream.map_or(SqlCell::Null(()), SqlCell::Int),
+                opt(head.as_ref().map(|h| h.subject.clone())),
+                opt(head.map(|h| oxplow_domain::Timestamp::from_unix_ms(h.time * 1000).to_text())),
+                changes.map_or(SqlCell::Null(()), |n| SqlCell::Int(n as i64)),
+            ]);
+        }
+        Ok(out)
     }
 
     /// The pairs of revisions `v_branch_divergence` and `v_commit_between`

@@ -3,6 +3,7 @@
 /// rail"): the "Details" card exists only when something is in it.
 import { CONTENTS_FROM } from "../viz/Contents.js";
 import { nodeById } from "../viz/nodeRun.js";
+import { switchParams } from "./pageFiles.js";
 import type { Node, PageRun, RunNode } from "../tauri-bridge/generated/bindings.js";
 
 /** The titled sections a page draws that Contents would list: a stack's
@@ -107,9 +108,12 @@ export function contentsHas(run: PageRun, fills: boolean): boolean {
  *  terminal's tabs do), a `rail:` node, a see-also link or another view of the tab's item (`views`; not on a page that fills: its ☰ lists them), the save-a-view form (`saveOpen`), or Contents. */
 export function railHas(run: PageRun, opts: { fills: boolean; saveOpen: boolean; views?: boolean }): boolean {
   const { params, view } = run.page;
+  // A switch's param is never a filter: the page's own switch lists its
+  // sections in the rail, one inside the body is tabs there.
+  const switched = switchParams(run.page);
   return (
     view.kind === "switch" ||
-    params.some((p) => p.role === "filter" || (p.role === "selection" && !opts.fills)) ||
+    params.some((p) => (p.role === "filter" && !switched.has(p.name)) || (p.role === "selection" && !opts.fills)) ||
     run.rail !== null ||
     ((run.seeAlso.length > 0 || !!opts.views) && !opts.fills) ||
     opts.saveOpen ||

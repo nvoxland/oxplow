@@ -1,0 +1,65 @@
+# New Stream is three tabs, one per way to start. Branch lists the branches
+# a new stream can be on: local ones no stream has out, and remote ones with
+# no local copy (as `origin/<name>`), each with its last commit. Picking one
+# fills the form under it, with the branch fixed and the name from it.
+given:
+  - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base }, bind: base }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: feat, create: true } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: main, create: false } }
+  - observe:
+      refs:
+        branches:
+          - { name: main, head: $base.rev, stream: 1, default: true, subject: base, committed_at: "2026-11-20T10:00:00Z" }
+          - { name: feat, head: $base.rev, upstream: origin/feat, ahead: 2, behind: 1, subject: base, committed_at: "2026-11-21T10:00:00Z" }
+          - { name: feat, kind: remote, remote: origin, head: $base.rev, subject: base }
+          - { name: HEAD, kind: remote, remote: origin, head: $base.rev }
+          - { name: theirs, kind: remote, remote: origin, head: $base.rev, subject: their work, committed_at: "2026-11-22T10:00:00Z" }
+when: { page: new-stream }
+expect:
+  nodes:
+    - { id: start, kind: switch }
+  loaders:
+    branches:
+      rows:
+        - { value: origin/theirs, branch: theirs, place: origin, subject: their work, note: Makes a local branch that tracks it }
+        - { value: feat, branch: feat, place: Local, subject: base, sync: ↑2 ↓1, note: null }
+    branch_form:
+      rows:
+        - { source: existing, existing_branch: null, title: null }
+  text:
+    contains: "Tabs, picked by `tab`: **Branch** (`branch`, shown), New branch (`new`), Worktree (`worktree`)"
+steps:
+  # A picked branch fills the form: the branch is fixed, the name is the
+  # branch's own (a remote's without its remote).
+  - when: { page: new-stream, params: { branch: origin/theirs } }
+    expect:
+      loaders:
+        branch_form: { rows: [{ source: existing, existing_branch: origin/theirs, title: theirs }] }
+  - when: { page: new-stream, params: { branch: feat } }
+    expect:
+      loaders:
+        branch_form: { rows: [{ source: existing, existing_branch: feat, title: feat }] }
+  # With no branch picked the form is refused at its branch.
+  - submit: { node: branch_form, input: { title: Nothing picked } }
+    expect: { ok: false, refused: needs `existing_branch` }
+  # New branch: a name and any revision to start from, offered from the
+  # branches and tags; the default branch to start.
+  - when: { page: new-stream, params: { tab: new } }
+    expect:
+      loaders:
+        new_form: { rows: [{ source: new, start_point: main, new_branch: null }] }
+  - when: { query: "oxplow/new-stream#start_points" }
+    expect:
+      rows:
+        - { value: main, group: Branches }
+        - { value: feat, group: Branches }
+        - { value: origin/feat, group: Remote branches }
+        - { value: origin/theirs, group: Remote branches }
+  # Worktree: the working copies no stream uses; here every one has a stream.
+  - when: { page: new-stream, params: { tab: worktree } }
+    expect:
+      loaders:
+        worktrees: { rows: [] }
+        worktree_form: { rows: [{ source: worktree, worktree: null, title: null }] }

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageRail } from "./PageRail.js";
-import { fakePage, fakeRun, loader, node } from "./testing/fakeRun.js";
+import { fakePage, fakeRun, loader, node, tabsPage } from "./testing/fakeRun.js";
 import { PageReadsContext, type PageReads } from "./pageReads.js";
 import type { SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
@@ -40,6 +40,12 @@ test("a page whose only non-resource param is a view param has no Filters group"
   expect(queryByTestId("page-param-mode")).toBeNull();
   expect(queryByTestId("action-page-rail-reset")).toBeNull();
   expect(queryByText("Filters")).toBeNull();
+});
+
+test("a switch's param is never a filter: a nested switch's picker is its tabs", () => {
+  const { queryByTestId } = render(<PageRail run={tabsPage("list")} runId="run-t" onApply={() => {}} />);
+  expect(queryByTestId("page-param-mode")).toBeNull();
+  expect(queryByTestId("page-sections")).toBeNull();
 });
 
 test("changing a filter applies it", () => {
@@ -87,6 +93,24 @@ test("the Selection group's Clear is a button that drops the pick", () => {
   expect(clear.className).toContain("ox-button");
   fireEvent.click(clear);
   expect(applied).toEqual([["picked", null]]);
+});
+
+// Two selection params, neither picked: one hint, not one per param; a
+// picked one shows its row and the other says nothing.
+test("the Selection group says once to click a row, and shows only what is picked", () => {
+  const two = fakePage(node.viz("items", "items"), {
+    params: [
+      { name: "branch", role: "selection", type: "text" },
+      { name: "worktree", role: "selection", type: "text" },
+    ],
+  });
+  const none = render(<PageRail run={fakeRun(two, { params: { branch: null, worktree: null }, loaders: { items: loader([], []) } })} runId="r" onApply={() => {}} />);
+  expect(none.getAllByText("Click a row to select it.")).toHaveLength(1);
+  cleanup();
+  const one = render(<PageRail run={fakeRun(two, { params: { branch: "feat", worktree: null }, loaders: { items: loader([], []) } })} runId="r" onApply={() => {}} />);
+  expect(one.queryByText("Click a row to select it.")).toBeNull();
+  expect(one.getByTestId("page-selection-branch").textContent).toContain("feat");
+  expect(one.queryByTestId("page-selection-worktree")).toBeNull();
 });
 
 // A filter whose options a query (or the page's own loader) lists: the

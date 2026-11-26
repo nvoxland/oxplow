@@ -365,7 +365,17 @@ while nothing filters, the table of matches while something does. An embedded pa
 - `stack: [nodes]`; `grid: [nodes]` (a child's `size`: `small`, `wide`,
   `tall`, `full`).
 - `switch: { param, children }` shows the one child whose id is the
-  param's value (else the first).
+  param's value (else the first). Its picker is never a filter: the
+  page's own view (`view: switch`) lists its children in the rail as links
+  (`PageRail` `switchSections`, Settings and Management); a switch inside
+  the body draws as tabs over the child in view (`kit/Tabs.tsx`, each tab
+  its child's `title`, Left/Right move between them, the strip labelled by
+  the switch's `title`, else the param's `label`). Either way the choice is
+  the param, so it rides the tab's `#` and Back steps through it. The
+  rail's Filters leave out every switch's param (`switchParams`). An
+  agent's text names the children under the switch: `Tabs, picked by
+  `area`: One (`one`), **Two** (`two`, shown)` (`pages/text.rs`
+  `switch_line`).
 - `embed: { page, params }` shows another page inline. Its params flow by
   name: the embed's `params`, else the host's param of that name, else
   that column of the host loaders' first rows, in order. Its page actions

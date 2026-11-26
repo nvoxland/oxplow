@@ -430,6 +430,10 @@ fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db:
                 upstream: b.upstream.clone(),
                 ahead: b.ahead,
                 behind: b.behind,
+                subject: b.subject.clone(),
+                committed_at: b
+                    .time
+                    .map(|s| oxplow_domain::Timestamp::from_unix_ms(s * 1000).to_text()),
             }
         })
         .collect()
@@ -651,6 +655,12 @@ mod tests {
         assert_eq!(
             q("SELECT name, is_default FROM v_branch WHERE kind = 'local' ORDER BY name").await,
             serde_json::json!([["b5-side", 0], [main, 1]])
+        );
+        // Each branch carries its head commit's subject and when it was made.
+        assert_eq!(
+            q("SELECT subject, committed_at LIKE '20%T%' FROM v_branch WHERE name = 'b5-side'")
+                .await,
+            serde_json::json!([["only on the side branch", 1]])
         );
         assert_eq!(
             q("SELECT name, sha FROM v_tag").await,
@@ -935,6 +945,8 @@ mod tests {
             upstream: None,
             ahead: 0,
             behind: 0,
+            subject: None,
+            time: None,
         };
         let rows = branch_rows(
             &[

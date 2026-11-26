@@ -1,0 +1,32 @@
+# A branch picked on New Stream's Branch tab starts a stream on it: the form
+# submits the picked branch (fixed) under the name given, and that branch
+# then has a stream, so the tab no longer offers it.
+given:
+  - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base }, bind: base }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: feat, create: true } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: main, create: false } }
+  - observe:
+      refs:
+        branches:
+          - { name: main, head: $base.rev, stream: 1, default: true }
+          - { name: feat, head: $base.rev }
+when: { page: new-stream, params: { branch: feat } }
+expect:
+  loaders:
+    branch_form: { rows: [{ source: existing, existing_branch: feat, title: feat }] }
+steps:
+  - submit: { node: branch_form, input: { title: Feat work } }
+    expect: { ok: true }
+  # The indexer reads the refs again: `feat` now has the new stream.
+  - given:
+      - observe:
+          refs:
+            branches:
+              - { name: main, head: $base.rev, stream: 1, default: true }
+              - { name: feat, head: $base.rev, stream: 2 }
+  - when: { page: new-stream }
+    expect:
+      loaders:
+        branches: { rows: [] }

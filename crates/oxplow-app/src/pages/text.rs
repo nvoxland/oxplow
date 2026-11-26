@@ -79,6 +79,24 @@ fn root_viz(run: &PageRun) -> Option<&Node> {
     node(&run.page, &run.tree.id).filter(|n| matches!(n.kind, NodeKind::Viz { .. }))
 }
 
+/// A switch's children, each by its title and id, the one in view bold:
+/// the person picks a tab (or a rail link), an agent sets `param`.
+fn switch_line(param: &str, children: &[Node], at: &RunNode) -> String {
+    let shown = at.children.first().map(|c| c.id.as_str());
+    let tabs: Vec<String> = children
+        .iter()
+        .map(|c| {
+            let title = c.title.as_deref().unwrap_or(&c.id);
+            if Some(c.id.as_str()) == shown {
+                format!("**{title}** (`{}`, shown)", c.id)
+            } else {
+                format!("{title} (`{}`)", c.id)
+            }
+        })
+        .collect();
+    format!("\nTabs, picked by `{param}`: {}\n", tabs.join(", "))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_tree<'r>(
     svc: &'r crate::Services,
@@ -130,6 +148,9 @@ fn write_tree<'r>(
                 if let Some(t) = &def.title {
                     out.push_str(&heading(t));
                     describe(def, out);
+                }
+                if let NodeKind::Switch { param, children } = &def.kind {
+                    out.push_str(&switch_line(param, children, at));
                 }
                 let deeper = if def.title.is_some() {
                     level + 1

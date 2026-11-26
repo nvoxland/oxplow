@@ -99,3 +99,18 @@ async fn a_lead_is_a_paragraph_under_the_heading_and_an_empty_one_is_nothing() {
     assert!(text.contains("## Without [node without]\n\n"), "{text}");
     assert_eq!(text.matches("This is what it is.").count(), 1, "{text}");
 }
+
+/// A switch names every child it can show and the param that picks one,
+/// so an agent knows the other tabs exist and how to open one.
+#[tokio::test]
+async fn a_switch_names_its_children_and_the_param_that_picks_one() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/areas", &[("area", SqlCell::Text("two".into()))]).await;
+    let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
+    assert!(
+        text.contains("Tabs, picked by `area`: One (`one`), **Two** (`two`, shown)\n"),
+        "{text}"
+    );
+    assert!(text.contains("[node two]"), "{text}");
+    assert!(!text.contains("[node one]"), "{text}");
+}

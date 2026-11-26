@@ -141,7 +141,7 @@ view:
       param: group_by
       children:
       - id: none
-        title: Facts
+        title: All
         viz: table
         chartable: true
         from: facts
@@ -154,7 +154,7 @@ view:
         - { key: dims, label: Dimensions }
         empty: No facts in this range.
       - id: subject
-        title: Facts by subject
+        title: By subject
         viz: table
         chartable: true
         from: grouped
@@ -165,7 +165,7 @@ view:
         - { key: latest, label: Latest, format: datetime }
         empty: No facts in this range.
       - id: day
-        title: Facts by day
+        title: By day
         viz: table
         chartable: true
         from: grouped

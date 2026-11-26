@@ -51,6 +51,10 @@ pub struct GitBranchRow {
     pub ahead: u32,
     /// Commits its upstream has that it lacks; 0 without one.
     pub behind: u32,
+    /// Its head commit's subject.
+    pub subject: Option<String>,
+    /// When its head commit was made (RFC 3339).
+    pub committed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -173,8 +177,8 @@ impl SqliteGitStore {
                     tx.execute(
                         "INSERT OR REPLACE INTO git_branch
                            (name, kind, remote, head_sha, stream_id, updated_at, is_default,
-                            upstream, ahead, behind)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                            upstream, ahead, behind, subject, committed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                         rusqlite::params![
                             b.name,
                             b.kind,
@@ -185,7 +189,9 @@ impl SqliteGitStore {
                             b.is_default,
                             b.upstream,
                             b.ahead,
-                            b.behind
+                            b.behind,
+                            b.subject,
+                            b.committed_at
                         ],
                     )
                     .map_err(map_sql_err)?;
@@ -308,6 +314,7 @@ mod tests {
                     upstream: Some("origin/main".into()),
                     ahead: 2,
                     behind: 1,
+                    ..GitBranchRow::default()
                 },
                 GitBranchRow {
                     name: "main".into(),
@@ -319,6 +326,7 @@ mod tests {
                     upstream: None,
                     ahead: 0,
                     behind: 0,
+                    ..GitBranchRow::default()
                 },
             ])
             .await

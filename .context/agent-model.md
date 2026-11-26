@@ -1813,7 +1813,7 @@ available from outside.
   or a `.gitignore`) names it: then the scans and the claims leave it out,
   as for any ignored path. Another stream's agent can't edit it. A person
   can adopt it as a stream like any git worktree
-  (New Stream's worktree choice lists it). Adopted, it belongs to that
+  (New Stream's Worktree tab lists it). Adopted, it belongs to that
   stream alone: the write guard gives a path to the deepest stream tree
   that holds it (`foreign_worktree_reason`), so the enclosing checkout's
   agent can't edit it. Pinned by

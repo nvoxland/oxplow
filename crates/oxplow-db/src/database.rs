@@ -2639,13 +2639,13 @@ mod tests {
         assert_eq!(queued, ("acme-models".into(), "1.0".into(), None));
     }
 
-    /// V84 keeps a component's memory (copied to `component_memory`) and drops
+    /// V85 keeps a component's memory (copied to `component_memory`) and drops
     /// the other preferences: each device starts from the defaults.
     #[test]
-    fn v84_keeps_component_memory_and_drops_the_other_preferences() {
+    fn v85_keeps_component_memory_and_drops_the_other_preferences() {
         let mut conn = Connection::open_in_memory().unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(83))
+            .set_target(refinery::Target::Version(84))
             .run(&mut conn)
             .unwrap();
         conn.execute_batch(
@@ -2677,13 +2677,13 @@ mod tests {
         .unwrap();
     }
 
-    /// V85 drops the shared panel layout rows and keys the new table by
+    /// V86 drops the shared panel layout rows and keys the new table by
     /// device: the same panel in the same place may be placed by two devices.
     #[test]
-    fn v85_drops_the_shared_layout_and_keys_it_by_device() {
+    fn v86_drops_the_shared_layout_and_keys_it_by_device() {
         let mut conn = Connection::open_in_memory().unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(84))
+            .set_target(refinery::Target::Version(85))
             .run(&mut conn)
             .unwrap();
         conn.execute_batch(
@@ -2707,13 +2707,13 @@ mod tests {
         insert("a").unwrap_err();
     }
 
-    /// V88 makes a queued tab unique for its device and thread and keeps the
+    /// V89 makes a queued tab unique for its device and thread and keeps the
     /// oldest row of a repeat.
     #[test]
-    fn v88_keeps_the_oldest_of_a_repeated_queued_tab() {
+    fn v89_keeps_the_oldest_of_a_repeated_queued_tab() {
         let mut conn = Connection::open_in_memory().unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(87))
+            .set_target(refinery::Target::Version(88))
             .run(&mut conn)
             .unwrap();
         conn.execute_batch(

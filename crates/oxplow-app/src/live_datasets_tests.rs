@@ -677,6 +677,17 @@ async fn vcs_workspaces_say_which_stream_uses_each() {
         .await,
         vec![vec![json!(stream)]]
     );
+    // Each says what its head commit is and how many files it has changed,
+    // so a list can say what a worktree no stream uses holds.
+    std::fs::write(loose.join("new.txt"), "n\n").unwrap();
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT subject, committed_at LIKE '20%T%', changes FROM v_vcs_workspace WHERE branch = 'loose'"
+        )
+        .await,
+        vec![vec![json!("seed"), json!(1), json!(1)]]
+    );
 }
 
 /// How far one branch has moved from another, and the commits between

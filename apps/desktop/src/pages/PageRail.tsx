@@ -10,6 +10,7 @@ import { isDefault, OptionsSourceContext, ParamList } from "../kit/ParamControls
 import { RailGroup } from "../kit/RailGroup.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { switchParams } from "./pageFiles.js";
 import { PageTree } from "./PageTree.js";
 import { pageOptionsSource, usePageReads } from "./pageReads.js";
 import { RailSelection, type PickedRow } from "./railGroups.js";
@@ -61,10 +62,12 @@ export function PageRailTree({ run, runId, onApply, streamId = null, onOpenPage 
 
 export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = null, onOpenPage }: PageRailProps) {
   // A resource param is what the page is, a selection what a row picked:
-  // neither is an input. A switch's param is its sections, drawn as links.
-  // No role is a resource, as the server reads it.
+  // neither is an input. A switch's param is never one either: the page's
+  // own switch is its sections, drawn as links here; one inside the body is
+  // tabs there. No role is a resource, as the server reads it.
   const sw = switchSections(run);
-  const filters = run.page.params.filter((p) => p.role === "filter" && p.name !== sw?.param);
+  const switched = switchParams(run.page);
+  const filters = run.page.params.filter((p) => p.role === "filter" && !switched.has(p.name));
   // A filter's `options_from` is resolved by the daemon for this page.
   const reads = usePageReads();
   const options = useMemo(() => pageOptionsSource(reads), [reads]);

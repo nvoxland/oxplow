@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Markdown } from "../components/Markdown/Markdown.js";
 import { Replaced } from "../components/Replaced.js";
 import { Section } from "../kit/Section.js";
+import { Tabs } from "../kit/Tabs.js";
 import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
 import type { PickedRow } from "./railGroups.js";
 import { FormSourceContext } from "../viz/formSource.js";
@@ -268,9 +269,25 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
           ))}
         </TileGrid>
       );
-    case "switch":
-      // The server resolved it: its one child in view.
-      return <>{kids("bare")}</>;
+    case "switch": {
+      // The server resolved it: its one child in view. The page's own view
+      // lists its children in the rail (`PageRail` `switchSections`); a
+      // switch inside the body is tabs over the child in view.
+      if (props.run.page.view.id === def.id) return <>{kids("bare")}</>;
+      const setParam = props.onSetParam;
+      return (
+        <Tabs
+          label={def.title ?? props.run.page.params.find((p) => p.name === def.param)?.label ?? def.param}
+          tabs={def.children.map((c) => ({ id: c.id, title: c.title ?? c.id }))}
+          current={at.children[0]?.id ?? null}
+          onPick={setParam ? (child) => setParam(def.param, child) : undefined}
+          testId={`switch-${id}`}
+          fill={at.children.some((child) => fillsNode(props.run, child))}
+        >
+          {kids("bare")}
+        </Tabs>
+      );
+    }
     case "slot":
       // What other extensions mounted here; none is nothing. A mounted page
       // with nothing to show keeps its section, as the host's own do.

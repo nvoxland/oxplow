@@ -27,6 +27,10 @@ pub struct BranchRef {
     pub ahead: u32,
     /// Commits its upstream has that the branch lacks; 0 without one.
     pub behind: u32,
+    /// The head commit's subject (its message's first line).
+    pub subject: Option<String>,
+    /// When the head commit was made, in seconds since the Unix epoch.
+    pub time: Option<i64>,
 }
 
 /// List local + remote branches in a repo. Empty list when not a repo.
@@ -54,7 +58,12 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
         };
         let r = b.into_reference();
         let full = r.name().unwrap_or("").to_string();
-        let head = r.peel_to_commit().ok().map(|c| c.id().to_string());
+        let commit = r.peel_to_commit().ok();
+        let head = commit.as_ref().map(|c| c.id().to_string());
+        let subject = commit
+            .as_ref()
+            .and_then(|c| c.summary().ok().flatten().map(str::to_string));
+        let time = commit.as_ref().map(|c| c.time().seconds());
         let (ahead, behind, upstream) = match (&upstream, r.peel_to_commit().ok()) {
             (Some((name, theirs)), Some(mine)) => {
                 let (a, b) = repo
@@ -75,6 +84,8 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
                 upstream,
                 ahead,
                 behind,
+                subject,
+                time,
             }),
             git2::BranchType::Remote => {
                 let (remote, name) = split_remote(&short);
@@ -87,6 +98,8 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
                     upstream: None,
                     ahead: 0,
                     behind: 0,
+                    subject,
+                    time,
                 });
             }
         }
@@ -121,6 +134,12 @@ mod tests {
         assert!(!b.is_empty());
         assert!(
             b.iter().all(|r| r.head.as_deref() == Some(head.as_str())),
+            "{b:?}"
+        );
+        // And that commit's subject and time, for a list to show.
+        assert!(
+            b.iter()
+                .all(|r| r.subject.as_deref() == Some("init") && r.time.is_some_and(|t| t > 0)),
             "{b:?}"
         );
     }

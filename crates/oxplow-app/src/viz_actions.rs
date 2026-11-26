@@ -1834,46 +1834,6 @@ view:
         assert!(err.to_string().contains("no form action"), "{err}");
     }
 
-    /// New Stream is one form over `oxplow.stream.create`: it starts on an
-    /// existing branch with a default name, and each source shows only its
-    /// own fields.
-    #[tokio::test]
-    async fn the_new_stream_form_shows_each_sources_fields() {
-        let (fx, _root) = fixture().await;
-        let start = form_of(&fx.svc, "oxplow/new-stream", BTreeMap::new())
-            .await
-            .unwrap();
-        assert_eq!(start.command.id, "oxplow.stream.create");
-        assert_eq!(start.values["source"], json!("existing"));
-        assert!(
-            start.values["title"]
-                .as_str()
-                .unwrap()
-                .starts_with("Stream "),
-            "{:?}",
-            start.values
-        );
-        let shown: Vec<(&str, bool)> = start
-            .fields
-            .iter()
-            .flatten()
-            .map(|f| (f.name(), f.visible_if().contains_key("source")))
-            .collect();
-        assert_eq!(
-            shown,
-            vec![
-                ("title", false),
-                ("source", false),
-                ("existing_branch", true),
-                ("new_branch", true),
-                ("start_point", true),
-                ("worktree", true),
-            ]
-        );
-        assert!(start.choices.contains_key("existing_branch"));
-        assert!(start.choices.contains_key("worktree"));
-    }
-
     /// A secret field is one its command keeps out of its record: a form
     /// whose command would record it is refused, and a secret never
     /// starts with a value.

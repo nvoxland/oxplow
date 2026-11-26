@@ -906,8 +906,8 @@ pub(super) async fn observe_analyze(host: &Host, body: &Value) -> Result<(), Str
         .map_err(|e| e.to_string())
 }
 
-/// `refs: { branches?: [{ name, kind?, head, stream?, default?, upstream?,
-/// ahead?, behind? }], tags?: [{ name, sha }], heads?: [{ stream, sha }] }`:
+/// `refs: { branches?: [{ name, kind?, remote?, head, stream?, default?,
+/// upstream?, ahead?, behind?, subject?, committed_at? }], tags?: [{ name, sha }], heads?: [{ stream, sha }] }`:
 /// the repository's refs as the git indexer stores them
 /// (`SqliteGitStore::replace_branches` / `replace_tags` /
 /// `replace_stream_heads`); a part left out keeps what was stored.
@@ -929,6 +929,8 @@ pub(super) async fn observe_refs(host: &Host, body: &Value) -> Result<(), String
                 upstream: text(b, "upstream"),
                 ahead: b.get("ahead").and_then(Value::as_u64).unwrap_or(0) as u32,
                 behind: b.get("behind").and_then(Value::as_u64).unwrap_or(0) as u32,
+                subject: text(b, "subject"),
+                committed_at: text(b, "committed_at"),
             });
         }
         git.replace_branches(rows)

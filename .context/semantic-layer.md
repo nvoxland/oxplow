@@ -650,7 +650,10 @@ hand), which language servers run and whose binary is on disk
 repo), every setting's effective value (`v_config_value`), the files of a filesystem (`v_file`: the stream's worktree by default), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
 registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares), the
-repository's working copies (`v_vcs_workspace`), its remotes (`v_vcs_remote`:
+repository's working copies (`v_vcs_workspace`; one whose folder is gone
+is left out, and each that no stream uses carries its head commit's subject
+and time and how many files it has changed: a `log` of one and a `status`,
+as of the read), its remotes (`v_vcs_remote`:
 `git remote -v`'s fetch URLs, what a forge link is built from; refreshed
 on `VcsRefsChanged` and `ConfigChanged`) and how far two revisions
 have parted and the commits between them (`v_branch_divergence`,

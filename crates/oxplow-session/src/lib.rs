@@ -35,6 +35,16 @@ pub enum SessionError {
     NotAWorktree(PathBuf),
     #[error("worktree slug \"{0}\" already exists")]
     DuplicateWorktreeSlug(String),
+    #[error("there is no branch `{0}`")]
+    NoSuchBranch(String),
+    #[error("`{branch}` is checked out {by}: git keeps a branch in one working copy")]
+    BranchInUse { branch: String, by: String },
+    #[error("there is already a branch `{0}`")]
+    BranchExists(String),
+    #[error("`{0}` can't be a branch name: names can't start with `-`")]
+    BadBranchName(String),
+    #[error("there is no revision `{0}`")]
+    UnknownRevision(String),
     #[error("vcs: {0}")]
     Vcs(#[from] VcsError),
     #[error("storage: {0}")]
@@ -234,8 +244,12 @@ impl StreamService {
         if worktree_path.exists() {
             // Scan existing streams for the path; if found, return that
             // stream (idempotent ensure semantics).
+            // The same stream asked for again is that stream; a stream on
+            // another branch has the folder, so this name can't be used.
             for existing in self.streams.list().await? {
-                if existing.worktree_path == worktree_path.to_string_lossy() {
+                if existing.worktree_path == worktree_path.to_string_lossy()
+                    && existing.branch == branch
+                {
                     return Ok(existing);
                 }
             }
@@ -274,6 +288,116 @@ impl StreamService {
         self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, slug, "worktree stream created");
         Ok(stream)
+    }
+
+    /// A stream on the branch `wanted`: a local branch (`foo`), or a
+    /// remote-tracking one (`origin/foo`), which is checked out as the local
+    /// branch of its name (made to track it when there is none). A branch
+    /// already checked out in a working copy no stream uses is that working
+    /// copy, adopted; one the main working copy or a stream has out is
+    /// refused, since git keeps a branch in one working copy.
+    pub async fn create_on_branch(
+        &self,
+        slug: &str,
+        title: impl Into<String>,
+        wanted: &str,
+    ) -> Result<Stream, SessionError> {
+        let repo = &self.layout.project_dir;
+        let branches = self.vcs.branches(repo).await?;
+        let local = |name: &str| {
+            branches
+                .iter()
+                .any(|b| b.remote.is_none() && b.name == name)
+        };
+        let (branch, from) = if local(wanted) {
+            (wanted.to_string(), wanted.to_string())
+        } else if let Some(remote) = branches.iter().find(|b| {
+            b.remote
+                .as_deref()
+                .is_some_and(|r| format!("{r}/{}", b.name) == wanted)
+        }) {
+            (
+                remote.name.clone(),
+                if local(&remote.name) {
+                    remote.name.clone()
+                } else {
+                    wanted.to_string()
+                },
+            )
+        } else {
+            return Err(SessionError::NoSuchBranch(wanted.to_string()));
+        };
+
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let holder = self
+            .vcs
+            .list_workspaces(repo)
+            .await?
+            .into_iter()
+            .find(|w| w.branch.as_deref() == Some(branch.as_str()));
+        // A working copy whose folder is gone still holds its branch in git
+        // until pruned: prune it, and the branch gets a new working copy.
+        let holder = match holder {
+            Some(w) if !Path::new(&w.path).exists() => {
+                self.vcs.remove_workspace(repo, Path::new(&w.path)).await?;
+                None
+            }
+            other => other,
+        };
+        if let Some(w) = holder {
+            let at = canon(Path::new(&w.path));
+            let stream = self
+                .streams
+                .list()
+                .await?
+                .into_iter()
+                .find(|s| canon(Path::new(&s.worktree_path)) == at);
+            let by = match (&stream, w.is_main) {
+                (Some(s), _) => Some(format!("by the stream \"{}\" at {}", s.title, w.path)),
+                (None, true) => Some(format!("in the main working copy at {}", w.path)),
+                (None, false) => None,
+            };
+            return match by {
+                Some(by) => Err(SessionError::BranchInUse { branch, by }),
+                None => self.adopt_worktree(PathBuf::from(w.path), title).await,
+            };
+        }
+        self.create_worktree(slug, title, branch, from).await
+    }
+
+    /// A stream on a new branch `branch` made from `from`, any revision the
+    /// VCS resolves (a branch, a remote branch, a tag, a commit). Refused
+    /// before the VCS runs when the name is taken or the start point isn't
+    /// a revision.
+    pub async fn create_on_new_branch(
+        &self,
+        slug: &str,
+        title: impl Into<String>,
+        branch: &str,
+        from: &str,
+    ) -> Result<Stream, SessionError> {
+        let repo = &self.layout.project_dir;
+        if branch.starts_with('-') {
+            return Err(SessionError::BadBranchName(branch.to_string()));
+        }
+        let branches = self.vcs.branches(repo).await?;
+        if branches
+            .iter()
+            .any(|b| b.remote.is_none() && b.name == branch)
+        {
+            return Err(SessionError::BranchExists(branch.to_string()));
+        }
+        if from.starts_with('-') {
+            return Err(SessionError::UnknownRevision(from.to_string()));
+        }
+        match self.vcs.resolve(repo, from).await {
+            Ok(_) => {}
+            Err(VcsError::UnknownRevision(_)) => {
+                return Err(SessionError::UnknownRevision(from.to_string()))
+            }
+            Err(e) => return Err(e.into()),
+        }
+        self.create_worktree(slug, title, branch, from).await
     }
 
     /// Register an existing on-disk worktree as a new oxplow stream.

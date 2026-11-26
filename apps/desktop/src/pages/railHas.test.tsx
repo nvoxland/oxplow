@@ -3,7 +3,7 @@ import { cleanup, render } from "@testing-library/react";
 
 import { PageHost } from "./PageHost.js";
 import { contentsHas, railHas } from "./railHas.js";
-import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
+import { decl, fakePage, fakePageRuns, fakeRun, loader, node, tabsPage } from "./testing/fakeRun.js";
 import type { PageKey } from "../pageRuns.js";
 import type { Node, PageParam } from "../tauri-bridge/generated/bindings.js";
 
@@ -44,6 +44,12 @@ test("railHas: each of a filter, a selection, a rail node, a switch and the save
   expect(railHas(run(plain, [], node.viz("legend", "items", cols)), no)).toBe(true);
   expect(railHas(run(node.switch("m", "mode", [plain])), no)).toBe(true);
   expect(railHas(run(plain), { fills: false, saveOpen: true })).toBe(true);
+});
+
+// A switch inside the body is tabs there: its param puts nothing in the
+// rail, so a page with nothing else draws none.
+test("railHas: a nested switch's param is no filter, so it alone draws no rail", () => {
+  expect(railHas(tabsPage("list"), { fills: false, saveOpen: false })).toBe(false);
 });
 
 test("railHas: a page with any see-also link has a rail, though nothing else is in it", () => {

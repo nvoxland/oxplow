@@ -73,9 +73,10 @@ export function pageRunParams(
   return out;
 }
 
-/** The params a switch node turns on: a section of the page, somewhere to
- *  come back from as a pick is. */
-function switchParams(page: Page): Set<string> {
+/** The params a switch node turns on, wherever it is: a section of the
+ *  page, somewhere to come back from as a pick is, and never a filter (its
+ *  picker is the rail's links or its tabs). */
+export function switchParams(page: Page): Set<string> {
   const out = new Set<string>();
   const walk = (n: Node) => {
     if (n.kind === "switch") out.add(n.param);
