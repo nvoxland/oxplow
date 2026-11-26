@@ -1,4 +1,5 @@
 import { useAppPreference } from "../prefs/remembered.js";
+import { Menu as MenuGlyph } from "lucide-react";
 import { SettingsViz } from "./SettingsViz.js";
 import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewParam.js";
 import { Approvals } from "../kit/Approvals.js";
@@ -809,8 +810,10 @@ function RowsBody({
       .filter((a) => actionOffered(a, rowRecord(result.columns, row)))
       .map((a) => actionMenuItem(a, rowRecord(result.columns, row), actionOptions[a.id] ?? null, actions)),
   ];
-  // Every row of every row component: focusable, with its menu from a
-  // right-click or the keyboard (Menu key / Shift+F10).
+  // Every row of every row component: focusable, with its menu from the
+  // ☰ button at its end (`rowMenu.button`) or the keyboard (Menu key /
+  // Shift+F10). A right-click on a row opens nothing: on a tablet there is
+  // none, and the button is where a row's actions are.
   // A row that picks: a click (not on a link or control in it) or Enter
   // sets the param its column selects.
   // The row action a click or Enter runs: the viz's `primary`, where the row is offered it.
@@ -818,13 +821,8 @@ function RowsBody({
     const record = rowRecord(result.columns, row);
     return rowActions.find((a) => a.primary && actionOffered(a, record)) ?? null;
   };
-  const rowMenu: RowMenu = (row) => ({
+  const rowProps = (row: SqlCell[]): RowMenuProps => ({
     tabIndex: 0,
-    // In the capture phase: a link in the row opens its page in a new tab
-    // on its own right-click, and the row's menu is what a right-click on
-    // a row means, wherever on it.
-    onContextMenuCapture: (e) => ctxMenu.open(e, rowItems(row)),
-    onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
     onKeyDown: (e) => {
       if (picks && e.key === "Enter" && e.target === e.currentTarget) {
         e.preventDefault();
@@ -861,6 +859,26 @@ function RowsBody({
       if (primary) actions?.run(primary, rowRecord(result.columns, row));
     },
     ...(picks ? { "aria-selected": picks.selected(row) } : {}),
+  });
+  const rowMenu: RowMenu = Object.assign(rowProps, {
+    button: (row: SqlCell[]) => (
+      <button
+        type="button"
+        className="ox-icon-button ox-row-menu"
+        data-testid={`viz-row-menu-${result.rows.indexOf(row)}`}
+        title="Actions"
+        aria-label="Actions"
+        aria-haspopup="menu"
+        onClick={(e) => {
+          // The row's own click (pick, primary action) is not this one.
+          e.stopPropagation();
+          const rect = e.currentTarget.getBoundingClientRect();
+          ctxMenu.openAt({ x: rect.left, y: rect.bottom + 2 }, rowItems(row));
+        }}
+      >
+        <MenuGlyph size={14} aria-hidden />
+      </button>
+    ),
   });
   // A grouped list or table: its headings, each with its group's actions.
   const allGroups = rowGroups(viz, result);
@@ -1223,14 +1241,17 @@ function GroupHeading({
   );
 }
 
-type RowMenu = (row: SqlCell[]) => {
+type RowMenuProps = {
   tabIndex: number;
-  onContextMenuCapture(e: React.MouseEvent): void;
-  onContextMenu(e: React.MouseEvent): void;
   onKeyDown(e: React.KeyboardEvent): void;
   onClick?(e: React.MouseEvent): void;
   "aria-selected"?: boolean;
 };
+
+/** A row's props (focus, keys, click) and, as `button`, the ☰ at its end
+ *  that opens its menu: every row component spreads the one and draws the
+ *  other last. */
+type RowMenu = ((row: SqlCell[]) => RowMenuProps) & { button(row: SqlCell[]): ReactNode };
 
 function Viz({
   run,
@@ -1926,6 +1947,7 @@ function TreeItem({ node, path, closed, lazyOpen, shown, ...rest }: TreeVizProps
         {node.marks && node.marks.length > 0 ? (
           <MarksCell marks={node.marks.map((m) => ({ text: m.letter, tone: m.tone, hint: m.status }))} style={{ marginLeft: "auto", paddingLeft: 6 }} />
         ) : null}
+        {node.made ? null : <span style={node.marks && node.marks.length > 0 ? undefined : rowMenuEnd}>{rowMenu.button(node.row)}</span>}
       </div>
       {open && node.state === "loading" ? (
         <DelayedLoading>
@@ -2020,6 +2042,7 @@ function TimelineViz({
         const ref = e.ref && parseUri(e.ref) ? e.ref : null;
         return (
           <li key={i} data-testid={`viz-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }} {...rowMenu(e.row)}>
+            <span style={rowMenuFloat}>{rowMenu.button(e.row)}</span>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>
             <div>
               {ref ? (
@@ -2043,7 +2066,14 @@ function TimelineViz({
 function DetailViz({ row, cols, cell, rowMenu, buttons }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu; buttons: (key: string) => ReactNode }) {
   const value = (c: DisplayColumn) => ((row[c.index] ?? null) === null ? <span className="ox-faint">(none)</span> : cell(row, c));
   const drawn = cols.filter((c) => c.whenIndex === null || truthyCell(row[c.whenIndex]));
-  return <Facts testId="viz-detail" facts={drawn.map((c) => ({ key: c.key, label: c.label, value: value(c), actions: buttons(c.key) }))} {...rowMenu(row)} />;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <Facts testId="viz-detail" facts={drawn.map((c) => ({ key: c.key, label: c.label, value: value(c), actions: buttons(c.key) }))} {...rowMenu(row)} />
+      </div>
+      {rowMenu.button(row)}
+    </div>
+  );
 }
 
 const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string }> = {
@@ -2067,6 +2097,7 @@ function StepsViz({ steps, rowMenu }: { steps: ReturnType<typeof stepItems>; row
             <span style={{ color: s.status === "pending" ? "var(--text-secondary)" : undefined }}>
               {i + 1}. {s.label}
             </span>
+            <span style={rowMenuEnd}>{rowMenu.button(s.row)}</span>
           </li>
         );
       })}
@@ -2088,18 +2119,21 @@ function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRow
     <div data-testid="viz-hunks">
       {rows.map((r, i) => (
         <section key={i} data-testid={`viz-hunk-${i}`} style={{ borderBottom: "1px solid var(--border-subtle)" }} {...rowMenu(r.row)}>
-          <button
-            type="button"
-            aria-expanded={open === i}
-            onClick={() => setOpen((o) => (o === i ? null : i))}
-            style={{ ...disclosureStyle, width: "100%", textAlign: "left", padding: "6px 0", display: "flex", gap: 6 }}
-          >
-            <DisclosureGlyph open={open === i} />
-            <span style={{ fontFamily: "var(--font-mono)" }}>{r.path}</span>
-            <span style={{ color: "var(--text-secondary)" }}>
-              {r.from} → {r.to}
-            </span>
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              aria-expanded={open === i}
+              onClick={() => setOpen((o) => (o === i ? null : i))}
+              style={{ ...disclosureStyle, flex: 1, textAlign: "left", padding: "6px 0", display: "flex", gap: 6 }}
+            >
+              <DisclosureGlyph open={open === i} />
+              <span style={{ fontFamily: "var(--font-mono)" }}>{r.path}</span>
+              <span style={{ color: "var(--text-secondary)" }}>
+                {r.from} → {r.to}
+              </span>
+            </button>
+            {rowMenu.button(r.row)}
+          </div>
           {open === i ? (
             <div style={{ height: 360 }}>
               <DiffPane
@@ -2280,6 +2314,7 @@ function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProp
         {...rowMenu(row)}
         {...look.props}
       >
+        {dense ? null : <span style={rowMenuFloat}>{rowMenu.button(row)}</span>}
         <div style={dense ? denseHeadStyle : undefined}>
           {look.fold ? (
             <button
@@ -2307,6 +2342,7 @@ function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProp
             ))}
           </div>
         ) : null}
+        {dense ? rowMenu.button(row) : null}
         {view?.detail(row, i)}
       </li>
     );
@@ -2374,6 +2410,7 @@ function BoardViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                   {...rowMenu(row)}
                   {...look.props}
                 >
+                  <span style={rowMenuFloat}>{rowMenu.button(row)}</span>
                   <div>{head ? cell(row, head) : null}</div>
                   {rest.length > 0 ? (
                     <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
@@ -2446,6 +2483,8 @@ function TableViz({ rows, cols, cell, rowMenu, view, header, revealed, singleLin
   if (view?.rowButton && rows.some((row) => view.rowButton!(row) !== null)) {
     columns.push({ key: "__row-button", label: "", width: 40, truncate: false, wrap: "nowrap", render: ([row]) => view.rowButton!(row) });
   }
+  // Every row ends in its menu's button.
+  columns.push({ key: "__row-menu", label: "", width: 36, truncate: false, wrap: "nowrap", render: ([row]) => rowMenu.button(row) });
   const parts = sections(rows, view);
   return (
     <div ref={tableRef} style={{ display: "contents" }}>
@@ -2508,6 +2547,9 @@ const disclosureStyle: CSSProperties = {
  *  them, so two long rows never read as one block. */
 /** A parent row's fold: a bare arrow before its title, not a button. */
 const foldStyle: CSSProperties = { background: "transparent", border: "none", padding: 0, marginRight: 6, color: "var(--text-secondary)", cursor: "pointer", font: "inherit" };
+/** A row's ☰ at its end: floated right in a block row, pushed right in a flex one. */
+const rowMenuFloat: CSSProperties = { float: "right", marginLeft: 8 };
+const rowMenuEnd: CSSProperties = { marginLeft: "auto" };
 const listRowStyle: CSSProperties = { padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" };
 /** A compact list's row: one line, headline left, the rest right. */
 const denseRowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "3px 0", minHeight: 22 };

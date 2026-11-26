@@ -134,7 +134,7 @@ the heading too (a commit: its subject heads, its body is the lead).
   facts list, then `body` (a column of markdown). Its `id` column (default:
   a column named `id`, else the title) keys the subsection (`data-node`
   `<node id>/<id>`), so give it a stable one. The viz's row `actions` are
-  in each subsection's right-click menu (`when:` per row, as for a row).
+  in the ☰ at each subsection's heading (`when:` per row, as for a row).
   `group: <column>` (and `group_link: <column of URIs>`) puts rows with
   the same value (groups in the order each first appears) under one group
   heading, a section one level above the rows' subsections, with the same
@@ -204,7 +204,7 @@ page with the extension as the group and each problem a subsection.
 
 Each `things` row is a subsection of "Things": the name as a heading
 with an arrow to its page, "Kind" as a fact, `summary` as markdown, and Repair in
-its right-click menu where `failing` is set. A "Problems" line is one more
+its ☰ menu where `failing` is set. A "Problems" line is one more
 `body` line (a link in markdown); nesting is by what the SQL puts in
 `body`.
 
@@ -295,7 +295,7 @@ also?, submit?, help?, confirm?, prominent?, icon?, submenu?, drag?, key?, edit?
 row action) or the page (`page-format.md`).
 
 - `input` is the command's input; `"{{param.x}}"` binds a page param and,
-  with `row: true` (a row's right-click action), `"{{row.col}}"` binds that
+  with `row: true` (an action in the ☰ menu at the row's end), `"{{row.col}}"` binds that
   row's column, which the loader must return even when `columns:` doesn't
   show it. e.g. `{ id: finish, label: Finish, point:
   oxplow/task.move, row: true, context: { uri: "{{row.uri}}", stage:

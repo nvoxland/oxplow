@@ -6,7 +6,7 @@ import { expect, test } from "../../support/fixtures.js";
 import { open, shown } from "../../support/ui.js";
 
 // What any page's actions do in the shell, over one small extension: a row's
-// right-click menu opens a form (a modal, or a prompt strip when it asks for
+// ☰ menu opens a form (a modal, or a prompt strip when it asks for
 // one field) and submits it; a command that asks is confirmed in a strip; a
 // secret field is masked and never echoed; a node's own action button opens a
 // form too; an action whose `when` is false is not offered; an action with
@@ -132,7 +132,7 @@ test("a row's menu opens a form, the form submits, and the page shows the result
   await fileTask(daemon, "Wallaby one");
   const host = await openPage(page, daemon);
   const row = host.getByRole("row", { name: /Wallaby one/ });
-  await row.click({ button: "right" });
+  await row.getByRole("button", { name: "Actions" }).click();
   await page.getByTestId("menu-item-viz-action-copy").click();
   // Two fields: a modal form, its field starting from the row.
   const form = page.getByTestId("viz-action-form");
@@ -147,7 +147,7 @@ test("a row's menu opens a form, the form submits, and the page shows the result
 test("a form of one text field is a prompt strip, and Enter submits it", async ({ page, daemon }) => {
   await fileTask(daemon, "Wallaby two");
   const host = await openPage(page, daemon);
-  await host.getByRole("row", { name: /Wallaby two/ }).click({ button: "right" });
+  await host.getByRole("row", { name: /Wallaby two/ }).getByRole("button", { name: "Actions" }).click();
   await page.getByTestId("menu-item-viz-action-rename").click();
   const field = page.getByTestId("viz-action-form-fields-title");
   await expect(field).toHaveValue("Wallaby two again");
@@ -161,7 +161,7 @@ test("a command that asks is confirmed in a strip before it runs", async ({ page
   await fileTask(daemon, "Wallaby three");
   const host = await openPage(page, daemon);
   const row = host.getByRole("row", { name: /Wallaby three/ });
-  await row.click({ button: "right" });
+  await row.getByRole("button", { name: "Actions" }).click();
   await page.getByTestId("menu-item-viz-action-remove").click();
   // Nothing has run: the row is still there until the strip is confirmed.
   await expect(page.getByTestId("viz-action-confirm-run")).toBeVisible();
@@ -174,11 +174,11 @@ test("an action whose `when` is false is not offered on that row", async ({ page
   await fileTask(daemon, "Wallaby locked");
   await fileTask(daemon, "Wallaby open");
   const host = await openPage(page, daemon);
-  await host.getByRole("row", { name: /Wallaby locked/ }).click({ button: "right" });
+  await host.getByRole("row", { name: /Wallaby locked/ }).getByRole("button", { name: "Actions" }).click();
   await expect(page.getByTestId("menu-item-viz-action-copy")).toBeVisible();
   await expect(page.getByTestId("menu-item-viz-action-rename")).not.toBeVisible();
   await page.keyboard.press("Escape");
-  await host.getByRole("row", { name: /Wallaby open/ }).click({ button: "right" });
+  await host.getByRole("row", { name: /Wallaby open/ }).getByRole("button", { name: "Actions" }).click();
   await expect(page.getByTestId("menu-item-viz-action-rename")).toBeVisible();
 });
 
@@ -216,7 +216,7 @@ test("a form node's secret field is masked, and the page never shows it", async 
 test("an action with options is a submenu of them, the row's own checked, and the one picked runs", async ({ page, daemon }) => {
   await fileTask(daemon, "Wallaby marked");
   const host = await openPage(page, daemon);
-  await host.getByRole("row", { name: /Wallaby marked/ }).click({ button: "right" });
+  await host.getByRole("row", { name: /Wallaby marked/ }).getByRole("button", { name: "Actions" }).click();
   await page.getByTestId("menu-item-viz-action-mark").click();
   // A new item is in its list's todo stage: ready, checked and not offered.
   const own = page.getByTestId("menu-item-viz-action-mark-ready");

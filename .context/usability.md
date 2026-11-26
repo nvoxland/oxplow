@@ -773,15 +773,23 @@ not a pick and isn't in the address.
 
 ## Per-row actions (right-click menus)
 
-> The IA redesign briefly moved per-row actions onto visible kebab `⋯`
-> buttons; we reversed that. Right-click is discoverable enough for
-> anyone who expects it and the kebab ate row space, so **per-row
-> actions are right-click only again** — no `⋯` buttons on rows. (The
-> old `Kebab.tsx` primitive is deleted.) A page's row actions
-> (`row: true`) are that menu, and nothing else: a declared page gets no
-> row buttons either.
+> **A page row's menu is its ☰ button, not a right-click.** Every row a
+> page draws (a table, list, board, tree, timeline, steps, hunks, detail
+> or sections row) ends in a ☰ (lucide `Menu`, `rowMenu.button` in
+> `viz/VizView.tsx`, testid `viz-row-menu-<i>`, label "Actions") that
+> opens its whole menu: Add to Context, the page's row actions
+> (`row: true`), Open In and the commands about what the row links to. A
+> right-click on a page row opens nothing of its own. The reason is the
+> tablet client: a touch screen has no right-click, and a button shows
+> where a row's actions are. (The IA redesign's `⋯` kebab was removed
+> for the row space it took; the ☰ came back for touch.) The keyboard
+> keeps Menu / Shift+F10 on the focused row. A primary form action still
+> has its own icon before the ☰ (`rowButton`). Surfaces that are not page
+> rows (the Navigator, tab strips, the terminal, dashboard tiles,
+> selected text) keep their right-click menus below; a page's body has
+> none (its ☰ in the nav bar holds it all).
 
-- **Right-click a row to open its action menu.** The shared hook is
+- **Outside page rows, right-click opens a row's menu.** The shared hook is
   `apps/desktop/src/components/useRowContextMenu.tsx`:
   - `useRowContextMenu(items, header?)` — bind the items when the row is
     its own component; spread `onContextMenu` / `onKeyDown` and render
@@ -1332,12 +1340,9 @@ caller may bypass the bus to write to the terminal.
 
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
-  offered with no thread selected too), a
-  right-click on the page's body that no row, editor or selection takes
-  (it opens the same ☰ at the pointer, `Page.tsx` → `PageMenu.openAtRef`),
-  the editor's menu (**Add Selection to Context** with a selection, else
+  offered with no thread selected too), the editor's menu (**Add Selection to Context** with a selection, else
   **Add File to Context**, `editorContextEntry`), a diff's right side, a
-  page row's menu, a backlink's menu, the terminal's menu (**Add Selection
+  page row's ☰, a backlink's menu, the terminal's menu (**Add Selection
   to Context**, else **Add to Context** for the session; `terminalMenu.ts`,
   which also carries Copy and Paste — the OS menu is suppressed there now)
   and a page's menu over its selected text (**Add Selection to

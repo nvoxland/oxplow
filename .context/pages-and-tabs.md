@@ -1168,10 +1168,10 @@ out and the ☰ itself hidden when it would be empty:
 3. **View as** (when two or more pages render the URI; the same list the
    bar's modes control swaps in one click);
 
-A right-click on the page's body that no row, editor or selection takes
-opens this same menu at the pointer (`Page.tsx` `onBodyContextMenu` →
-`PageMenu`'s `openAtRef`), so Add to Context for the whole page is one
-click from anywhere on it; a child that owns its menu stops the event.
+A right-click on the page's body opens no menu of the page's: this ☰
+and each row's ☰ hold everything, and a touch screen has no right-click
+(usability.md "Per-row actions"). Selected text keeps its own right-click
+menu (Add Selection to Context).
 4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which
    open their panel under the ☰ (`page-nav-backlinks-popover`,
    `page-nav-outbound-popover`, `page-pin-menu`) rather than a submenu.

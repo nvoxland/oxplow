@@ -204,9 +204,9 @@ test("a board is a column per group, its values first and empty ones too; a drop
   expect(ran[0]).toMatchObject({ action: "move", row: record(0), drop: { group: "doing", after: null } });
 });
 
-// A card's title is a link, and a link's own right-click opens its page in a
-// new tab; on a board the right-click on a card is the card's menu.
-test("a right-click on a board card's title link opens the card's menu, not its page", async () => {
+// A card's title is a link; its ☰ opens the card's menu and never the
+// link's page.
+test("a board card's ☰ opens the card's menu, not its page", async () => {
   const opened: string[] = [];
   const run = runOf({
     viz: "board",
@@ -224,8 +224,7 @@ test("a right-click on a board card's title link opens the card's menu, not its 
       <VizView run={withUris} onOpenPage={(r) => opened.push(r.id)} />
     </PageNavigationContext.Provider>,
   );
-  const title = view.getByTestId("viz-row-0").querySelector("button, a") as HTMLElement;
-  fireEvent.contextMenu(title);
+  fireEvent.click(view.getByTestId("viz-row-menu-0"));
   expect(await waitFor(() => view.getByTestId("menu-item-viz-action-finish"))).toBeTruthy();
   expect(opened).toEqual([]);
 });

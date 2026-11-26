@@ -73,7 +73,7 @@ a typo is an error at the line):
   A page's `description` says what the page is (what it shows, for
   what, over which scope and order), not what you can do on it. A page
   whose purpose is an action (a form to file an item) may name that action; never list UI mechanics ("drag
-  to reorder", "right-click for the rest") or the actions on offer.
+  to reorder", "☰ for the rest") or the actions on offer.
 - **`loaders:`**: named loaders ("Loaders" below).
 - **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").
 
@@ -453,7 +453,7 @@ heading level is one below the enclosing section (`SectionLevelContext`:
 (`keepEmpty`), and a `data-node` of `<viz node>/<row key>`. The key is the
 `sections.id` column, else a column named `id`, else the title (a repeat
 gets `-2`, `-3`) — so give a `sections` loader a stable `id`. Row `actions`
-are in each subsection's right-click menu (and a `primary` one on click),
+are in the ☰ at each subsection's heading (and a `primary` one on click),
 as for a `list` row. Contents lists subsections under their parent up to
 `CONTENTS_SUBSECTIONS_MAX` (10; `viz/Contents.tsx`, the one constant): the
 viz's root carries `data-sections=<rows>`; past ten, one "… N more" entry
@@ -636,7 +636,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   `v_oxplow_task.state`, never a list's own stage), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
   `conflicted`), the kinds (`epic`, `task`, `knowledge`, `file`, `folder`,
-  `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon
+  `commit`, `diff`, `metric`, `dashboard`, `comment`; `oxplow`, the app's
+  logo, for something oxplow ran), the resource icon
   names (`extension_resources::ICONS`), and any page kind's icon. `tone`'s
   value is `accent`, `success`, `warning`, `danger` or `muted`. Values
   come from the query, so the loader cannot check them: an unknown name
@@ -833,8 +834,10 @@ is gone, is the toast's (usability.md "A person's command that fails").
   refuses it on an action that isn't a form, and blank.
 - `primary: true` (a row action) is what a click on the row, or Enter,
   runs: the first one the row is offered (`when`). When it is a form, a
-  table row also ends in its icon button (a pencil, or its `icon`; the
-  label its hover: `rowButton`, `usability.md`). `prominent: true`
+  table row also has its icon button (a pencil, or its `icon`; the
+  label its hover: `rowButton`, `usability.md`) before the ☰ every row
+  ends in, which opens the row's whole menu (a right-click on a page row
+  opens nothing: `usability.md` "Per-row actions"). `prominent: true`
   keeps a page action a button in the nav bar; the rest go in the ☰ menu
   (`submenu` groups them). `bulk` runs once per marked row; `key` runs on
   the cursor row; `group: <value>` puts the button in that group's

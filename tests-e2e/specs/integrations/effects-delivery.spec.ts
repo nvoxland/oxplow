@@ -38,7 +38,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   // The person fixes what made it fail, then retries: the effect reads the
   // item as it is now.
   await run(daemon, "oxtask.task.update", { id: taskIdOf(await refOf(daemon, "Plum [fail]")), title: "Plum" });
-  await row.click({ button: "right" });
+  await row.getByRole("button", { name: "Actions" }).click();
   await page.getByTestId("menu-item-viz-action-retry").click();
   await page.getByTestId("viz-action-confirm-run").click();
   await expect(row).toHaveCount(0);

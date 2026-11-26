@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, waitFor, within } from "@testing-library/react";
 
 import type { ReactElement, ReactNode } from "react";
 import type { VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -153,10 +153,10 @@ test("a row action is in the subsection's right-click menu, offered by `when`, a
     />,
   );
   // Alpha's `broken` is 0: not offered. Beta's is 1.
-  fireEvent.contextMenu(view.getByTestId("viz-section-a"));
+  fireEvent.click(within(view.getByTestId("viz-section-a")).getByLabelText("Actions"));
   expect(view.queryByTestId("menu-item-viz-action-fix")).toBeNull();
   fireEvent.keyDown(document.body, { key: "Escape" });
-  fireEvent.contextMenu(view.getByTestId("viz-section-b"));
+  fireEvent.click(within(view.getByTestId("viz-section-b")).getByLabelText("Actions"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-viz-action-fix")));
   await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["fix"]));
   expect((actionRuns[0]!.row as Record<string, unknown>).id).toBe("b");
