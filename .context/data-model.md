@@ -1856,8 +1856,10 @@ foundation's `thread-activity`, bundled's `usage`), which re-run on `DatasetsCha
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
-V126 (P6.G1), in three lists since V79: the person's left-nav layout in
-this project. A row is a panel (`ext:<namespace>/<id>`) at a
+V126 (P6.G1), in three lists since V79, and each device's own since V85
+(`device_id`, in the unique index; the rows there were went, so each device
+starts from the panels' declared order): a device's left-nav layout in this
+project. A row is a panel (`ext:<namespace>/<id>`) at a
 `visibility_scope` — `thread` (`thread_id`), `stream` (`stream_id`) or
 `project` (neither), FKs cascading as bookmarks' — with its `position` in
 that list, `collapsed`, and `hidden` (a project row only). A viewer — a
@@ -1873,7 +1875,9 @@ stream Z. A panel no list names shows expanded at the end of the
 project's, and a named panel that no longer exists is dropped
 (`components/Panels/panelLayout.ts` `resolveLayout`). Local state, never
 the repo. UI-only RPCs `get_panel_layout` / `set_panel_layout { stream_id?,
-thread_id? }` (a thread's stream is its own, `viewer_tx`).
+thread_id? }` (a thread's stream is its own, `viewer_tx`) read and write the
+caller's device's lists; a request with no device reads the defaults (no
+list) and may not set them. The rules hold within one device's lists.
 
 ### `ui_preference` and `component_memory` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
 

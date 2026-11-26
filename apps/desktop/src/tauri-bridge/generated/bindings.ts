@@ -134,12 +134,14 @@ export const commands = {
 	querySql: (sql: string, params: SqlCell[] | null, limit: number | null, raw: boolean | null) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("query_sql", { sql, params, limit, raw })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getPanelLayout: (streamId: string | null, threadId: string | null) => typedError<ScopedPanelLayout, IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout", { streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	setPanelLayout: (streamId: string | null, threadId: string | null, layout: ScopedPanelLayout) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { streamId, threadId, layout })),
 	/**

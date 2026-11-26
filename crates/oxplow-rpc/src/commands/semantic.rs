@@ -51,12 +51,16 @@ async fn panel_viewer(
 /// thread's list, its stream's and the project's, each panel's order and
 /// whether it's collapsed (or, in the project's, hidden). UI-only.
 pub async fn get_panel_layout(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     stream_id: Option<String>,
     thread_id: Option<String>,
 ) -> Result<oxplow_db::ScopedPanelLayout, IpcError> {
-    let viewer = panel_viewer(svc, stream_id, thread_id).await?;
-    Ok(svc.panel_layout_store.get(viewer).await?)
+    let viewer = panel_viewer(req, stream_id, thread_id).await?;
+    // A request with no device has no layout of its own: the defaults.
+    match req.caller {
+        Some(caller) => Ok(req.panel_layout_store.get(&caller.device, viewer).await?),
+        None => Ok(oxplow_db::ScopedPanelLayout::default()),
+    }
 }
 
 /// Everything the caller's device remembers outside any one tab (page
@@ -97,18 +101,56 @@ pub async fn set_ui_preference(
     reason = "off the bus: the left-nav panel layout"
 )]
 pub async fn set_panel_layout(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     stream_id: Option<String>,
     thread_id: Option<String>,
     layout: oxplow_db::ScopedPanelLayout,
 ) -> Result<(), IpcError> {
-    let viewer = panel_viewer(svc, stream_id, thread_id).await?;
-    Ok(svc.panel_layout_store.set(viewer, layout).await?)
+    let device = &req.caller()?.device;
+    let viewer = panel_viewer(req, stream_id, thread_id).await?;
+    Ok(req.panel_layout_store.set(device, viewer, layout).await?)
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    /// Each device keeps its own left-nav layout; a request with no device
+    /// reads the defaults and may not place panels.
+    #[tokio::test]
+    async fn each_device_keeps_its_own_panel_layout() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let mac = crate::test_support::caller();
+        let tablet = oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::generate(),
+            connection: oxplow_domain::ConnectionId::generate(),
+        };
+        let viewer = json!({ "streamId": stream.id.to_string() });
+        let layout = json!({ "thread": [], "stream": [], "project": [{ "panel": "ext:acme/go", "hidden": false, "collapsed": false }] });
+        let mut set = viewer.clone();
+        set["layout"] = layout;
+        crate::dispatch_as("set_panel_layout", set.clone(), &svc, Some(&mac))
+            .await
+            .unwrap();
+        let get = |caller: Option<&oxplow_domain::Caller>| {
+            let svc = svc.clone();
+            let viewer = viewer.clone();
+            let caller = caller.cloned();
+            async move {
+                crate::dispatch_as("get_panel_layout", viewer, &svc, caller.as_ref())
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(get(Some(&mac)).await["project"][0]["panel"], "ext:acme/go");
+        assert_eq!(get(Some(&tablet)).await["project"], json!([]));
+        assert_eq!(get(None).await["project"], json!([]));
+        let refused = crate::dispatch_as("set_panel_layout", set, &svc, None)
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, "INVALID");
+    }
 
     /// Two devices keep their own app preference and both read one
     /// component's memory; with no device a component's memory is written and
