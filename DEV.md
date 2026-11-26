@@ -240,9 +240,10 @@ cargo build -p oxplow-host -p oxplow-daemon && bun run --cwd apps/desktop build
 ```
 
 Open `http://127.0.0.1:7400/`, type the code, and Open the project. On a
-server, add `--public-bind <address>:7400 --allow-host <name>` and
-`--tls-cert`/`--tls-key` (`tailscale cert <name>`), and pair from the other
-machine's browser. `oxplow-host stop` ends it; `oxplow-host devices` lists
+server, add `--public-bind <private-address>:7400`: other devices come in
+over HTTPS with the host's own certificate for that address (a browser there
+trusts `/host/ca.pem` once; `--tls-cert`/`--tls-key` give one of your own),
+and pair from the other machine's browser. `oxplow-host stop` ends it; `oxplow-host devices` lists
 the paired browsers. An installed app runs the same with `oxplow host …`.
 
 For the renderer alone on a daemon of your own (profiling), the Vite dev

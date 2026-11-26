@@ -37,6 +37,10 @@ pub struct ServeConfig {
     pub boot_wait: Duration,
     /// Told when a client asks the host to stop (`POST /host/shutdown`).
     pub stop: Arc<tokio::sync::Notify>,
+    /// The home's own root certificate (PEM), when the listener for other
+    /// devices uses a certificate from it: `/host/ca.pem` gives it to a
+    /// device to trust.
+    pub root_pem: Arc<std::sync::Mutex<Option<String>>>,
     /// How browsers reach this listener: `http`, or `https` for the TLS
     /// listener for other devices. The page's base and a component's CSP
     /// say it.
@@ -94,7 +98,15 @@ pub fn app(cfg: ServeConfig) -> Router {
             .build()
             .expect("an HTTP client"),
     };
+    let root_pem = cfg.root_pem.clone();
     let project = Router::new()
+        .route(
+            "/host/ca.pem",
+            get(move || {
+                let root = root_pem.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                async move { root_certificate(root) }
+            }),
+        )
         .route("/", get(ui::host_home))
         .route("/p/{id}", get(ui::project_redirect))
         .route("/p/{id}/", get(ui::project_page))
@@ -144,6 +156,28 @@ async fn check_host(State(web): State<Web>, req: Request, next: Next) -> Respons
         next.run(req).await
     } else {
         refuse(StatusCode::FORBIDDEN, "host not allowed")
+    }
+}
+
+/// The home's root for a device to install (no token: a root certificate is
+/// public). `.crt` with the CA type, so a phone offers to install it.
+fn root_certificate(root: Option<String>) -> Response {
+    match root {
+        Some(pem) => (
+            [
+                (header::CONTENT_TYPE, "application/x-x509-ca-cert"),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"oxplow-root.crt\"",
+                ),
+            ],
+            pem,
+        )
+            .into_response(),
+        None => refuse(
+            StatusCode::NOT_FOUND,
+            "this host uses a certificate of its own; nothing to install",
+        ),
     }
 }
 
@@ -363,6 +397,7 @@ mod tests {
                 boot_wait,
                 stop: Default::default(),
                 scheme: Default::default(),
+                root_pem: Default::default(),
             });
             let addr = serve(app).await;
             Self {
@@ -1042,6 +1077,7 @@ mod tests {
             boot_wait: Duration::from_secs(5),
             stop: Default::default(),
             scheme: Default::default(),
+            root_pem: Default::default(),
         }))
         .await;
         let call = http()
@@ -1089,6 +1125,7 @@ mod tests {
             boot_wait: Duration::from_secs(1),
             stop: Default::default(),
             scheme: Default::default(),
+            root_pem: Default::default(),
         }))
         .await;
         for path in [format!("/p/{id}/"), "/assets/app.js".to_string()] {

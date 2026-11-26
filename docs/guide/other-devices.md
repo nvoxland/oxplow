@@ -5,24 +5,30 @@ computer's browser at the same time, and the Mac app can use Oxplow
 running on a server. The agents and terminals are shared; each device
 keeps its own place (its stream, its tabs, its layout).
 
-There are no accounts. Each device pairs once with a short code, and the
-link runs over a private network you already trust: Tailscale,
-WireGuard, or an SSH tunnel.
+There are no accounts and nothing to install. Each device pairs once
+with a short code, over HTTPS with a certificate Oxplow makes itself. The
+devices only need to reach each other: the same home network is enough, and
+so is a private network such as Tailscale or WireGuard.
 
 ## Use your Mac from a tablet
 
 1. On the Mac, choose **Oxplow ▸ Devices…**.
-2. Under **Allow other devices**, turn it on and set the address other
-   devices reach the Mac by. With Tailscale, **Use Tailscale** fills in
-   the Mac's tailnet address and name.
-3. For the microphone and the clipboard the tablet's browser needs
-   HTTPS. With Tailscale, `tailscale cert <your-mac>.<tailnet>.ts.net`
-   writes a certificate and key; put their paths in the two fields.
-4. **Save**, then quit Oxplow and open it again: the settings apply at
-   the next start.
-5. Choose **Pair a Device**. On the tablet, open the address the window
-   shows (`https://<your-mac>…:7400/`) and type the code. It is good once,
-   for ten minutes.
+2. Under **Allow other devices**, turn it on and pick the Mac's address
+   (the one on your home network, say `192.168.1.20`). **Save**, then quit
+   Oxplow and open it again: the settings apply at the next start.
+3. The first time on a tablet, make it trust the Mac. Open
+   `https://192.168.1.20:7400/host/ca.pem` there (past the browser's
+   warning) and install it:
+   - Android: Settings ▸ Security ▸ More ▸ Install a certificate ▸ CA
+     certificate.
+   - iPhone, iPad: install the downloaded profile, then turn it on under
+     Settings ▸ General ▸ About ▸ Certificate Trust Settings.
+
+   The certificate can vouch only for addresses and names on private
+   networks, never for a real website.
+4. Choose **Pair a Device** on the Mac. On the tablet, open
+   `https://192.168.1.20:7400/` and type the code. It is good once, for
+   ten minutes.
 
 The tablet then lists the projects; **Open** one to use it. Closing a
 project on the tablet lets go of it there; it keeps running while the Mac
@@ -42,10 +48,13 @@ already an Oxplow project (it has a `.oxplow/` folder):
 
 ```bash
 oxplow host project add ~/src/myproject
-oxplow host serve --bind 127.0.0.1:7400 \
-  --public-bind <tailnet-address>:7400 --allow-host <server>.<tailnet>.ts.net \
-  --tls-cert server.crt --tls-key server.key
+oxplow host serve --bind 127.0.0.1:7400 --public-bind <private-address>:7400
 ```
+
+It makes its own certificate as the Mac does; a device trusts it once from
+`https://<private-address>:7400/host/ca.pem`. For a name that is not on a
+private network, give a certificate of your own (`--tls-cert`,
+`--tls-key`, signed by any CA) and `--allow-host <name>`.
 
 This host runs until you stop it (`oxplow host stop`). Run it under
 systemd or tmux to keep it past your SSH session. `oxplow host pair`
@@ -54,7 +63,7 @@ To build it yourself, see
 [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md) "Run
 headless".
 
-From a browser, open `https://<server>…:7400/` and type the code. From
+From a browser, open `https://<private-address>:7400/` and type the code. From
 the Mac app, the launcher's **Other computers** takes the server's
 address and a code, then lists its projects to open. Over an SSH tunnel
 instead (`ssh -L 7400:127.0.0.1:7400 server`, the host on

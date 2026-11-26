@@ -98,7 +98,8 @@ The app's host is a child of the app, as a daemon is a child of the host
   `session.json`, as before.
 - **Devices window** (Oxplow ▸ Devices…, in a project window or the
   launcher; `host/DevicesSlideover.tsx`): Pair a Device shows a code, its
-  countdown and the address to open on the device; the paired devices
+  countdown and the address to open on the device, and how a device trusts
+  the host's own certificate the first time; the paired devices
   (rename in place, Remove after a confirm, a dot when connected); "Allow
   other devices". Its calls are Tauri shell commands (`commands/devices.rs`)
   to the app's own host client as its owner: no page calls `/host/*`, so the
@@ -108,11 +109,12 @@ The app's host is a child of the app, as a daemon is a child of the host
   `{ allowOtherDevices, address, names, tlsCert, tlsKey }`. The app reads it
   when it starts its host and passes `--public-bind <address>` (port 7400 when
   none is given: fixed, since a browser's origin holds its token), an
-  `--allow-host` per name, and the certificate. Never every network by
-  default: the person names an address (Use Tailscale fills the Mac's tailnet
-  address and MagicDNS name from `tailscale status --json`). A change applies
-  at the next app start (the window says whether the host runs with it). On,
-  the host starts with the app, not at the first open.
+  `--allow-host` for the address and each name, and a certificate of the
+  person's own when given (else the host issues its own; private names
+  only). Never every network by default: the person picks one of this Mac's
+  private addresses (`host_addresses`, `certs::private_addresses`). A change
+  applies at the next app start (the window says whether the host runs with
+  it). On, the host starts with the app, not at the first open.
 - **Quit asks first** when another device has a window open (`/host/status`
   `connected`): "<names> are using Oxplow on this computer. Quitting stops
   their projects and agents too." The app menu's Quit is a custom item
@@ -148,18 +150,33 @@ The app's host is a child of the app, as a daemon is a child of the host
 
 ## HTTPS
 
-`--public-bind <addr>` listens a second time, for other devices; `--bind`
-stays plain HTTP for this machine (the Mac app's windows reach their host on
-`127.0.0.1`, where a certificate for the tailnet name would not match). With
-`--tls-cert` and `--tls-key` (PEM; `tailscale cert <name>` writes both for
-the machine's tailnet name, `mkcert` for a LAN name) the public listener is
-HTTPS (`tls.rs`, rustls; each handshake in its own task, 10 s at most; a
-certificate that cannot be read, like a bind that fails, leaves the listener
-out, never the host, and `/host/status` says why), and
-the second stdout line says `oxplow-host listening for other devices on
-https://…`. A page reached there gets an `https` base and its component
-frames an `https` CSP (`web::Scheme`). A browser needs HTTPS for a secure
-context: the microphone, the clipboard.
+Other devices come in over HTTPS only, and need nothing installed but a
+certificate trusted once. `--public-bind <addr>` listens a second time, for
+them; `--bind` stays plain HTTP on loopback for this machine (the Mac app's
+windows, where no certificate is needed).
+
+- **The host's own certificate** (`certs.rs`, the default). The home gets a
+  root once (`host-ca.pem`; its key `host-ca-key.pem`, mode 0600; its name in
+  `host-ca-name.txt`), and at each start the host issues a certificate from
+  it for the listener's address (every private address of this machine when
+  it is `0.0.0.0`) and the `--allow-host` names, for 397 days. The root may
+  vouch only for private networks (name constraints: 10/8, 172.16/12,
+  192.168/16, 100.64/10, 169.254/16, 127/8, fc00::/7, fe80::/10, and names
+  under `local`, `lan`, `home.arpa`, `internal`, `ts.net`), so its key, should
+  it leak, cannot stand in for a real site; a public address or name is
+  refused, saying to give a certificate of your own. A device trusts the root
+  once: `GET /host/ca.pem` (no token; a root is public) answers it as
+  `oxplow-root.crt`, `application/x-x509-ca-cert`, which a phone offers to
+  install. The pair screen links it, and the Devices window says the steps.
+- **A certificate of your own** (`--tls-cert`, `--tls-key`, PEM, signed by any
+  CA) takes its place; `/host/ca.pem` then answers 404.
+
+Either way `tls.rs` serves it (rustls; each handshake in its own task, 10 s at
+most). A certificate that cannot be had, like a bind that fails, leaves the
+listener out, never the host, and `/host/status` says why. The second stdout
+line says `oxplow-host listening for other devices on https://…`. A page
+reached there gets an `https` base and its component frames an `https` CSP
+(`web::Scheme`), and a secure context: the microphone, the clipboard.
 
 ## Pairing
 

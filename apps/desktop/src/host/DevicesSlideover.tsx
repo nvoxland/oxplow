@@ -5,7 +5,7 @@ import {
   hostPairingCode,
   hostRemoveDevice,
   hostRenameDevice,
-  hostTailscale,
+  hostAddresses,
   setHostSettings,
 } from "../api.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
@@ -23,7 +23,7 @@ export type DevicesApi = {
   hostRenameDevice: typeof hostRenameDevice;
   hostRemoveDevice: typeof hostRemoveDevice;
   setHostSettings: typeof setHostSettings;
-  hostTailscale: typeof hostTailscale;
+  hostAddresses: typeof hostAddresses;
 };
 
 const DEVICES_API: DevicesApi = {
@@ -32,7 +32,7 @@ const DEVICES_API: DevicesApi = {
   hostRenameDevice,
   hostRemoveDevice,
   setHostSettings,
-  hostTailscale,
+  hostAddresses,
 };
 
 /** The form's fields, as typed: names one per comma, paths as text. */
@@ -90,6 +90,7 @@ export function DevicesSlideover({
   const [now, setNow] = useState(() => Date.now());
   const [saved, setSaved] = useState<Draft | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [addresses, setAddresses] = useState<string[]>([]);
 
   const read = useCallback(async () => {
     try {
@@ -105,8 +106,13 @@ export function DevicesSlideover({
   }, [api]);
 
   useEffect(() => {
-    if (open) void read();
-  }, [open, read]);
+    if (!open) return;
+    void read();
+    void api
+      .hostAddresses()
+      .then(setAddresses)
+      .catch(() => setAddresses([]));
+  }, [open, read, api]);
 
   // The code's countdown, and the list again while it is good (a device
   // that pairs shows up).
@@ -189,6 +195,21 @@ export function DevicesSlideover({
             Pair a Device
           </button>
         )}
+        {view?.settings.allowOtherDevices && !view.settings.tlsCert && view.openOnDevice[0] ? (
+          <div data-testid="devices-trust" style={mutedStyle}>
+            <p>
+              The first time on a device, make it trust this Mac: open{" "}
+              <code>{view.openOnDevice[0]}host/ca.pem</code> there (past the warning) and install it.
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Android: Settings ▸ Security ▸ More ▸ Install a certificate ▸ CA certificate.</li>
+              <li>
+                iPhone, iPad: Settings ▸ Profile Downloaded ▸ Install, then Settings ▸ General ▸ About ▸
+                Certificate Trust Settings ▸ turn it on.
+              </li>
+            </ul>
+          </div>
+        ) : null}
         {view && !view.settings.allowOtherDevices ? (
           <p style={mutedStyle} data-testid="devices-off">
             Other devices cannot reach this Mac yet: turn on Allow other devices below.
@@ -268,52 +289,48 @@ export function DevicesSlideover({
             Other devices may reach this Mac
           </label>
           <label style={fieldStyle}>
-            Address
-            <span style={{ display: "flex", gap: 6 }}>
-              <input
-                data-testid="devices-address"
-                value={draft.address}
-                placeholder="100.101.102.103 (this Mac on your private network)"
-                onChange={(e) => set({ address: e.target.value })}
-                style={{ flex: 1 }}
-              />
-              <button
-                type="button"
-                data-testid="devices-tailscale"
-                onClick={() =>
-                  void run(async () => {
-                    const me = await api.hostTailscale();
-                    if (me === null) throw new Error("Tailscale is not running on this Mac");
-                    set({ address: me.address, names: me.name ?? draft.names });
-                  })
-                }
-              >
-                Use Tailscale
-              </button>
-            </span>
+            This Mac's address for them
+            <select
+              data-testid="devices-address"
+              value={draft.address}
+              onChange={(e) => set({ address: e.target.value })}
+            >
+              <option value="">Choose one…</option>
+              {[...new Set([...(draft.address ? [draft.address] : []), ...addresses])].map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
           </label>
           <label style={fieldStyle}>
-            Names a device uses (comma between)
+            Other names a device may use (comma between; optional)
             <input
               data-testid="devices-names"
               value={draft.names}
-              placeholder="mac.tailnet.ts.net"
+              placeholder="studio.local"
               onChange={(e) => set({ names: e.target.value })}
             />
           </label>
-          <label style={fieldStyle}>
-            HTTPS certificate (PEM; <code>tailscale cert &lt;name&gt;</code> makes one)
-            <input data-testid="devices-cert" value={draft.cert} onChange={(e) => set({ cert: e.target.value })} />
-          </label>
-          <label style={fieldStyle}>
-            Its key (PEM)
-            <input data-testid="devices-key" value={draft.key} onChange={(e) => set({ key: e.target.value })} />
-          </label>
+          <details data-testid="devices-own-cert" open={draft.cert !== "" || draft.key !== ""}>
+            <summary style={mutedStyle}>Use your own certificate</summary>
+            <p style={mutedStyle}>
+              Oxplow makes its own certificate; a device trusts it once. One signed by another CA
+              (PEM files) can take its place.
+            </p>
+            <label style={fieldStyle}>
+              Certificate
+              <input data-testid="devices-cert" value={draft.cert} onChange={(e) => set({ cert: e.target.value })} />
+            </label>
+            <label style={fieldStyle}>
+              Its key
+              <input data-testid="devices-key" value={draft.key} onChange={(e) => set({ key: e.target.value })} />
+            </label>
+          </details>
           <p style={mutedStyle}>
             {view?.settingsApplied
               ? "Oxplow uses these now."
-              : "These apply the next time Oxplow starts (quit and open it again)."}{" "}
-            Without HTTPS a device's browser has no microphone or clipboard here.
+              : "These apply the next time Oxplow starts (quit and open it again)."}
           </p>
           <div style={{ display: "flex", gap: 8 }}>
             <button type="submit" data-testid="devices-save" disabled={!changed}>

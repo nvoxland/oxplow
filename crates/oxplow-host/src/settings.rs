@@ -3,10 +3,11 @@
 //! (beside `device.json` and `session.json`), edited in the Devices window,
 //! read when the app starts its host, so a change applies at the next start.
 //!
-//! Off: the host listens on loopback only. On: a second listener on the
-//! address the person chose (never every network by default: the Mac's
-//! Tailscale address, say), with the names a device reaches it by for the
-//! `Host` check, and HTTPS when a certificate and key are given.
+//! Off: the host listens on loopback only. On: a second listener, HTTPS
+//! only, on the address the person chose from this machine's (never every
+//! network by default), with the names a device reaches it by for the
+//! `Host` check. Its certificate is the home's own (`crate::certs`, which a
+//! device trusts once), or one of the person's signed by any CA.
 
 use std::path::{Path, PathBuf};
 
@@ -23,9 +24,11 @@ pub struct HostSettings {
     /// Where other devices reach this machine: `100.101.102.103:7400`, or a
     /// bare address (the default port is added).
     pub address: String,
-    /// The names a device uses in its address bar (`mac.tailnet.ts.net`).
+    /// Names a device may use in its address bar besides the address
+    /// (`studio.local`). With the host's own certificate, private names only.
     pub names: Vec<String>,
-    /// PEM files for HTTPS (`tailscale cert <name>` writes both).
+    /// A certificate of the person's own (PEM, signed by any CA) in place of
+    /// the host's.
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
 }
@@ -36,8 +39,10 @@ pub enum SettingsError {
     NoAddress,
     #[error("\"{0}\" is not an address (write it like 100.101.102.103 or 100.101.102.103:7400)")]
     BadAddress(String),
-    #[error("HTTPS needs both the certificate and its key")]
+    #[error("a certificate of your own needs both the certificate and its key")]
     HalfTls,
+    #[error("{0} is no private name, so the host's own certificate cannot cover it; give a certificate of your own")]
+    PublicName(String),
 }
 
 pub fn path(config_dir: &Path) -> PathBuf {
@@ -94,7 +99,16 @@ impl HostSettings {
             args.push(name.to_string());
         }
         match (&self.tls_cert, &self.tls_key) {
-            (None, None) => {}
+            (None, None) => {
+                if let Some(public) = self
+                    .names
+                    .iter()
+                    .map(|n| n.trim())
+                    .find(|n| !n.is_empty() && !crate::certs::is_private_name(n))
+                {
+                    return Err(SettingsError::PublicName(public.to_string()));
+                }
+            }
             (Some(cert), Some(key)) => {
                 args.push("--tls-cert".into());
                 args.push(cert.display().to_string());
@@ -105,51 +119,6 @@ impl HostSettings {
         }
         Ok(args)
     }
-}
-
-/// What Tailscale says about this machine, to fill the settings in: its
-/// tailnet address and its MagicDNS name (`tailscale cert` makes a
-/// certificate for that name).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TailscaleSelf {
-    pub address: String,
-    pub name: Option<String>,
-}
-
-/// This machine from `tailscale status --json` output. Pure.
-pub fn tailscale_self(status_json: &str) -> Option<TailscaleSelf> {
-    let status: serde_json::Value = serde_json::from_str(status_json).ok()?;
-    let me = &status["Self"];
-    let address = me["TailscaleIPs"]
-        .as_array()?
-        .iter()
-        .filter_map(|ip| ip.as_str())
-        .find(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok())?
-        .to_string();
-    let name = me["DNSName"]
-        .as_str()
-        .map(|n| n.trim_end_matches('.').to_string())
-        .filter(|n| !n.is_empty());
-    Some(TailscaleSelf { address, name })
-}
-
-/// Ask the Tailscale CLI (on the path, or the Mac app's) about this machine;
-/// `None` without Tailscale or when it is not up. **Blocking.**
-pub fn ask_tailscale() -> Option<TailscaleSelf> {
-    [
-        "tailscale",
-        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-    ]
-    .into_iter()
-    .find_map(|cli| {
-        let out = std::process::Command::new(cli)
-            .args(["status", "--json"])
-            .output()
-            .ok()?;
-        out.status.success().then_some(out.stdout)
-    })
-    .and_then(|stdout| tailscale_self(&String::from_utf8_lossy(&stdout)))
 }
 
 #[cfg(test)]
@@ -191,20 +160,6 @@ mod tests {
     }
 
     #[test]
-    fn tailscale_says_this_machines_address_and_name() {
-        let json = r#"{"Self":{"DNSName":"mac.tailnet.ts.net.","TailscaleIPs":["fd7a:115c::1","100.101.102.103"]}}"#;
-        assert_eq!(
-            tailscale_self(json),
-            Some(TailscaleSelf {
-                address: "100.101.102.103".into(),
-                name: Some("mac.tailnet.ts.net".into()),
-            })
-        );
-        assert_eq!(tailscale_self(r#"{"Self":{}}"#), None);
-        assert_eq!(tailscale_self("not json"), None);
-    }
-
-    #[test]
     fn what_cannot_work_is_said_and_not_kept() {
         let home = tempfile::tempdir().unwrap();
         let on = |address: &str| HostSettings {
@@ -222,6 +177,16 @@ mod tests {
             ..on("100.64.0.1")
         };
         assert_eq!(half.serve_args(), Err(SettingsError::HalfTls));
+        // The host's own certificate covers private names only.
+        let named = |name: &str| HostSettings {
+            names: vec![name.into()],
+            ..on("192.168.1.20")
+        };
+        assert!(named("studio.local").serve_args().is_ok());
+        assert_eq!(
+            named("mac.example.com").serve_args(),
+            Err(SettingsError::PublicName("mac.example.com".into()))
+        );
         assert!(half.save(home.path()).is_err());
         assert_eq!(
             HostSettings::load(home.path()),

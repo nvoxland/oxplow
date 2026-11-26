@@ -27,6 +27,9 @@ axum = { version = "0.8", features = ["json", "ws"] }
 bytes = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+if-addrs = "0.15"
+time = { version = "0.3" }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["tls12", "aws_lc_rs"] }
 tokio-tungstenite = { workspace = true }

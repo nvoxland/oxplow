@@ -133,3 +133,60 @@ fn a_bad_certificate_leaves_other_devices_out_and_says_why() {
         "{status}"
     );
 }
+
+/// With no certificate given, the listener for other devices is HTTPS with
+/// one from the home's own root, which a device downloads at `/host/ca.pem`
+/// and trusts: then the host is reached with no warning.
+#[test]
+fn with_no_certificate_the_host_issues_its_own_and_offers_its_root() {
+    let home = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
+        .args(["serve", "--token-stdin", "--public-bind", "127.0.0.1:0"])
+        .env("OXPLOW_HOME", home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    writeln!(child.stdin.as_mut().unwrap(), "tok").unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    lines.next().unwrap().unwrap();
+    let public = lines.next().unwrap().unwrap();
+    let public = public
+        .strip_prefix("oxplow-host listening for other devices on ")
+        .unwrap()
+        .to_string();
+    assert!(public.starts_with("https://"), "{public}");
+
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (root, home_page) = rt.block_on(async {
+        // Before it is trusted, a device gets the root past the warning.
+        let untrusted = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        let root = untrusted
+            .get(format!("{public}/host/ca.pem"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(root.headers()["content-type"], "application/x-x509-ca-cert");
+        let root = root.bytes().await.unwrap();
+        // Trusting only that root, the host's page loads.
+        let trusting = reqwest::Client::builder()
+            .tls_certs_only([reqwest::Certificate::from_pem(&root).unwrap()])
+            .build()
+            .unwrap();
+        let page = trusting.get(format!("{public}/host/status")).send().await;
+        (root, page.map(|r| r.status().as_u16()))
+    });
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(String::from_utf8_lossy(&root).contains("BEGIN CERTIFICATE"));
+    assert_eq!(
+        home_page.unwrap(),
+        401,
+        "reached over trusted HTTPS (and asked for a token)"
+    );
+}

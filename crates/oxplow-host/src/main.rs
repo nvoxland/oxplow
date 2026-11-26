@@ -183,18 +183,26 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         b.parse()
             .unwrap_or_else(|e| fail(format!("invalid --public-bind address: {e}")))
     });
-    let tls_asked = tls_cert.is_some();
-    let tls = match (tls_cert, tls_key) {
+    // Other devices come in over HTTPS only: with the certificate given
+    // (signed by any CA), else one the home's own root issues for this
+    // listener (`certs.rs`; a device trusts that root once). One that cannot
+    // be had leaves the listener for other devices out, never a plain one in
+    // its place; this machine's windows still work, and the Devices window
+    // says why.
+    let own_cert = match (tls_cert, tls_key) {
         (None, None) => None,
-        // A certificate that cannot be read leaves the listener for other
-        // devices out (never a plain one in its place); this machine's
-        // windows still work, and the Devices window says why.
-        (Some(cert), Some(key)) if public_bind.is_some() => {
-            Some(oxplow_host::tls::acceptor(&cert, &key).map_err(|e| e.to_string()))
+        (Some(_), Some(_)) if public_bind.is_none() => {
+            fail("--tls-cert and --tls-key are for --public-bind")
         }
-        (Some(_), Some(_)) => fail("--tls-cert and --tls-key are for --public-bind"),
+        (Some(cert), Some(key)) => Some((cert, key)),
         _ => fail("--tls-cert and --tls-key go together"),
     };
+    let tls = public_bind.map(|addr| match &own_cert {
+        Some((cert, key)) => oxplow_host::tls::acceptor(cert, key)
+            .map(|a| (a, None))
+            .map_err(|e| e.to_string()),
+        None => issued_acceptor(config_dir, addr, &allow_hosts),
+    });
     if for_app && !token_stdin {
         fail("--for-app needs --token-stdin: the app's stdin is the host's lifeline");
     }
@@ -284,7 +292,11 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 Some(dir) => tracing::info!(ui = %dir.display(), "serving the UI"),
                 None => tracing::warn!("no UI folder found; pass --ui <dir>"),
             }
+            // The home's own root, once the listener for other devices has a
+            // certificate from it: a device downloads it to trust the host.
+            let root_for_devices: Arc<std::sync::Mutex<Option<String>>> = Default::default();
             let config = |scheme, listener| oxplow_host::web::ServeConfig {
+                root_pem: root_for_devices.clone(),
                 host: host.clone(),
                 access: access.clone(),
                 listener,
@@ -325,17 +337,18 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 *access.public.lock().unwrap_or_else(|e| e.into_inner()) =
                     oxplow_host::access::PublicListener::Failed { error };
             };
-            let tls = match tls {
+            let (tls, root_pem) = match tls {
                 Some(Err(e)) => {
                     left_out(e);
-                    None
+                    (None, None)
                 }
-                Some(Ok(acceptor)) => Some(acceptor),
-                None => None,
+                Some(Ok((acceptor, root))) => (Some(acceptor), root),
+                None => (None, None),
             };
+            *root_for_devices.lock().unwrap_or_else(|e| e.into_inner()) = root_pem;
             let public_tcp = match public_bind {
                 None => None,
-                Some(_) if tls.is_none() && tls_asked => None,
+                Some(_) if tls.is_none() => None,
                 Some(addr) => match tokio::net::TcpListener::bind(addr).await {
                     Ok(tcp) => Some(tcp),
                     Err(e) => {
@@ -348,11 +361,7 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 None => None,
                 Some(tcp) => {
                     let at = tcp.local_addr().unwrap_or_else(|e| fail(e));
-                    let scheme = if tls.is_some() {
-                        oxplow_host::web::Scheme::Https
-                    } else {
-                        oxplow_host::web::Scheme::Http
-                    };
+                    let scheme = oxplow_host::web::Scheme::Https;
                     println!(
                         "oxplow-host listening for other devices on {}://{at}",
                         scheme.as_str()
@@ -363,14 +372,12 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                         };
                     tracing::info!(%at, scheme = scheme.as_str(), "listening for other devices");
                     let public_app = oxplow_host::web::app(config(scheme, Listener::Public));
-                    Some(match tls.clone() {
-                        Some(acceptor) => {
-                            let listener = oxplow_host::tls::TlsListener::new(tcp, acceptor)
-                                .unwrap_or_else(|e| fail(e));
-                            tokio::spawn(async move { axum::serve(listener, public_app).await })
-                        }
-                        None => tokio::spawn(async move { axum::serve(tcp, public_app).await }),
-                    })
+                    let acceptor = tls.clone().expect("a public listener has its TLS");
+                    let listener = oxplow_host::tls::TlsListener::new(tcp, acceptor)
+                        .unwrap_or_else(|e| fail(e));
+                    Some(tokio::spawn(async move {
+                        axum::serve(listener, public_app).await
+                    }))
                 }
             };
             let public_ended = async {
@@ -432,6 +439,37 @@ impl Drop for OwnerSocket {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
+}
+
+/// TLS for the listener for other devices at `addr`, from the home's own
+/// root: a certificate for that address (every private address of this
+/// machine when it is unspecified) and the allowed names, issued now. The
+/// root's PEM comes too, for devices to download (`/host/ca.pem`).
+fn issued_acceptor(
+    config_dir: &std::path::Path,
+    addr: SocketAddr,
+    names: &[String],
+) -> Result<(tokio_rustls::TlsAcceptor, Option<String>), String> {
+    use oxplow_host::certs;
+    let root = certs::LocalRoot::load_or_make(config_dir).map_err(|e| e.to_string())?;
+    let ips = if addr.ip().is_unspecified() {
+        certs::private_addresses()
+    } else {
+        vec![addr.ip()]
+    };
+    let (cert, key) = root.issue(&ips, names).map_err(|e| {
+        format!("{e}; give a certificate of your own (--tls-cert, --tls-key) for that")
+    })?;
+    let acceptor = oxplow_host::tls::acceptor_pem(
+        cert.as_bytes(),
+        key.as_bytes(),
+        "the issued certificate",
+        "its key",
+    )
+    .map_err(|e| e.to_string())?;
+    let root_pem =
+        std::fs::read_to_string(certs::root_path(config_dir)).map_err(|e| e.to_string())?;
+    Ok((acceptor, Some(root_pem)))
 }
 
 /// How long the app's host waits for the lock of the app's previous host,

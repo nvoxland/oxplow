@@ -759,8 +759,9 @@ export async function setHostSettings(
   unwrap(await commands.setHostSettings(settings));
 }
 
-export async function hostTailscale(): Promise<import("./tauri-bridge/generated/bindings.js").TailscaleSelf | null> {
-  return unwrap(await commands.hostTailscale());
+/// This Mac's addresses on private networks, to choose where devices reach it.
+export async function hostAddresses(): Promise<string[]> {
+  return unwrap(await commands.hostAddresses());
 }
 
 // ---- Hosts on other machines (the launcher) ----

@@ -30,7 +30,7 @@ function fake(over: Partial<DevicesView> = {}) {
       calls.push(`save ${JSON.stringify(next)}`);
       settings = next;
     },
-    hostTailscale: async () => ({ address: "100.64.0.1", name: "mac.ts.net" }),
+    hostAddresses: async () => ["192.168.1.20", "100.64.0.1"],
   };
   return { api, calls };
 }
@@ -59,30 +59,39 @@ test("a device is renamed in place and removed after a confirm", async () => {
   await waitFor(() => expect(calls).toContain("remove dev-1"));
 });
 
-// Save is off until something differs; Tailscale fills the address and
-// name; Discard puts the saved values back.
+// Save is off until something differs; the address is one of this Mac's.
 test("the settings save only when changed", async () => {
   const { api, calls } = fake();
   render(<DevicesSlideover open onClose={() => {}} api={api} />);
   const save = (await screen.findByTestId("devices-save")) as HTMLButtonElement;
   expect(save.disabled).toBe(true);
   fireEvent.click(screen.getByTestId("devices-allow"));
-  fireEvent.click(screen.getByTestId("devices-tailscale"));
-  await waitFor(() => expect((screen.getByTestId("devices-address") as HTMLInputElement).value).toBe("100.64.0.1"));
+  await screen.findByRole("option", { name: "192.168.1.20" });
+  fireEvent.change(screen.getByTestId("devices-address"), { target: { value: "192.168.1.20" } });
   expect(save.disabled).toBe(false);
   fireEvent.click(save);
   await waitFor(() => expect(calls.some((c) => c.startsWith("save "))).toBe(true));
   const saved = JSON.parse(calls.find((c) => c.startsWith("save "))!.slice(5)) as HostSettings;
-  expect(saved).toEqual({ allowOtherDevices: true, address: "100.64.0.1", names: ["mac.ts.net"], tlsCert: null, tlsKey: null });
+  expect(saved).toEqual({ allowOtherDevices: true, address: "192.168.1.20", names: [], tlsCert: null, tlsKey: null });
+});
+
+// With the host's own certificate, the window says how a device trusts it.
+test("a device is told how to trust the Mac", async () => {
+  const { api } = fake({
+    settings: { allowOtherDevices: true, address: "192.168.1.20", names: [], tlsCert: null, tlsKey: null },
+    openOnDevice: ["https://192.168.1.20:7400/"],
+  });
+  render(<DevicesSlideover open onClose={() => {}} api={api} />);
+  expect((await screen.findByTestId("devices-trust")).textContent).toContain("https://192.168.1.20:7400/host/ca.pem");
 });
 
 test("Escape in the settings puts the saved values back", async () => {
   const { api, calls } = fake();
   render(<DevicesSlideover open onClose={() => {}} api={api} />);
-  const address = (await screen.findByTestId("devices-address")) as HTMLInputElement;
-  fireEvent.change(address, { target: { value: "100.64.0.9" } });
-  fireEvent.keyDown(address, { key: "Escape" });
-  expect(address.value).toBe("");
+  const names = (await screen.findByTestId("devices-names")) as HTMLInputElement;
+  fireEvent.change(names, { target: { value: "studio.local" } });
+  fireEvent.keyDown(names, { key: "Escape" });
+  expect(names.value).toBe("");
   expect(calls).toEqual([]);
 });
 

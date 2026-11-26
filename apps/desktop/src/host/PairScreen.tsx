@@ -100,6 +100,15 @@ export function PairScreen({
             {pairing ? "Pairing…" : "Pair"}
           </button>
         </form>
+        <p style={{ ...subtitleStyle, marginTop: 16 }} data-testid="pair-trust">
+          Did the browser warn about this page? Make this device trust the computer once:{" "}
+          <a href={`${host}/host/ca.pem`} download="oxplow-root.crt">
+            download its certificate
+          </a>{" "}
+          and install it (Android: Settings ▸ Security ▸ More ▸ Install a certificate ▸ CA certificate;
+          iPhone, iPad: install the downloaded profile, then turn it on in Settings ▸ General ▸ About ▸
+          Certificate Trust Settings), then load this page again.
+        </p>
         {error ? (
           <div data-testid="pair-error" role="alert" style={{ ...errorStyle, marginTop: 12 }}>
             {error}

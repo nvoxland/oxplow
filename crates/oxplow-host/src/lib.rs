@@ -6,6 +6,7 @@
 
 pub mod access;
 pub mod api;
+pub mod certs;
 pub mod client;
 pub mod devices;
 pub mod host;

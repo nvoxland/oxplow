@@ -820,11 +820,17 @@ export const commands = {
 	hostRemoveDevice: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("host_remove_device", { id })),
 	/**  Keep "Allow other devices"; it applies at the next app start. */
 	setHostSettings: (settings: HostSettings) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_host_settings", { settings })),
-	/**  What Tailscale says about this machine, to fill the settings in. */
-	hostTailscale: () => typedError<{
-	address: string,
-	name: string | null,
-} | null, IpcError_Serialize>(__TAURI_INVOKE("host_tailscale")),
+	/**
+	 *  This machine's addresses on private networks, for the settings to pick
+	 *  from (`oxplow_host::certs::private_addresses`).
+	 */
+	hostAddresses: () => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("host_addresses")),
+	/**
+	 *  The home's own root certificate (PEM), for the person to get onto a
+	 *  device that cannot download it from the host; `None` before the host
+	 *  first made one.
+	 */
+	hostRootCertificate: () => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("host_root_certificate")),
 	/**  Pair this Mac with a host on another machine. */
 	connectHost: (connect: ConnectHost) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("connect_host", { connect })),
 	/**  Each paired host, with its projects (or why it did not answer). */
@@ -3562,9 +3568,15 @@ export type HostSettings = {
 	 *  bare address (the default port is added).
 	 */
 	address?: string,
-	/**  The names a device uses in its address bar (`mac.tailnet.ts.net`). */
+	/**
+	 *  Names a device may use in its address bar besides the address
+	 *  (`studio.local`). With the host's own certificate, private names only.
+	 */
 	names?: string[],
-	/**  PEM files for HTTPS (`tailscale cert <name>` writes both). */
+	/**
+	 *  A certificate of the person's own (PEM, signed by any CA) in place of
+	 *  the host's.
+	 */
 	tlsCert?: string | null,
 	tlsKey?: string | null,
 };
@@ -6607,16 +6619,6 @@ export type TabSession = {
 	sessionJson: string,
 	/**  Bumped by every save: the next save gives it back. */
 	revision: TabRevision,
-};
-
-/**
- *  What Tailscale says about this machine, to fill the settings in: its
- *  tailnet address and its MagicDNS name (`tailscale cert` makes a
- *  certificate for that name).
- */
-export type TailscaleSelf = {
-	address: string,
-	name: string | null,
 };
 
 /**  One `test_conventions:` entry as the extension declares it. */

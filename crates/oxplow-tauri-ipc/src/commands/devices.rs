@@ -75,11 +75,8 @@ pub fn open_on_device(settings: &oxplow_host::settings::HostSettings) -> Vec<Str
     else {
         return Vec::new();
     };
-    let scheme = if settings.tls_cert.is_some() {
-        "https"
-    } else {
-        "http"
-    };
+    // Other devices come in over HTTPS only.
+    let scheme = "https";
     let names: Vec<String> = settings
         .names
         .iter()
@@ -227,13 +224,24 @@ pub async fn set_host_settings(
     settings.save(&config_dir()?).map_err(IpcError::invalid)
 }
 
-/// What Tailscale says about this machine, to fill the settings in.
+/// This machine's addresses on private networks, for the settings to pick
+/// from (`oxplow_host::certs::private_addresses`).
 #[tauri::command]
 #[specta::specta]
-pub async fn host_tailscale() -> Result<Option<oxplow_host::settings::TailscaleSelf>, IpcError> {
-    tauri::async_runtime::spawn_blocking(oxplow_host::settings::ask_tailscale)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+pub async fn host_addresses() -> Result<Vec<String>, IpcError> {
+    Ok(oxplow_host::certs::private_addresses()
+        .into_iter()
+        .map(|ip| ip.to_string())
+        .collect())
+}
+
+/// The home's own root certificate (PEM), for the person to get onto a
+/// device that cannot download it from the host; `None` before the host
+/// first made one.
+#[tauri::command]
+#[specta::specta]
+pub async fn host_root_certificate() -> Result<Option<String>, IpcError> {
+    Ok(std::fs::read_to_string(oxplow_host::certs::root_path(&config_dir()?)).ok())
 }
 
 #[cfg(test)]
@@ -242,7 +250,7 @@ mod tests {
     use oxplow_host::settings::HostSettings;
 
     #[test]
-    fn a_device_opens_each_name_with_the_port_over_https_with_a_certificate() {
+    fn a_device_opens_each_name_with_the_port_over_https() {
         let on = HostSettings {
             allow_other_devices: true,
             address: "100.101.102.103".into(),
@@ -251,13 +259,17 @@ mod tests {
             tls_key: Some("/k.pem".into()),
         };
         assert_eq!(open_on_device(&on), ["https://mac.tailnet.ts.net:7400/"]);
-        let plain = HostSettings {
+        let own = HostSettings {
             names: vec![],
             tls_cert: None,
             tls_key: None,
             ..on.clone()
         };
-        assert_eq!(open_on_device(&plain), ["http://100.101.102.103:7400/"]);
+        assert_eq!(
+            open_on_device(&own),
+            ["https://100.101.102.103:7400/"],
+            "always HTTPS"
+        );
         assert!(open_on_device(&HostSettings::default()).is_empty());
     }
 }

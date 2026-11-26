@@ -492,6 +492,7 @@ pub(crate) mod tests {
             boot_wait: Duration::from_secs(5),
             stop: stop.clone(),
             scheme: Default::default(),
+            root_pem: Default::default(),
         });
         tokio::spawn(async move {
             let _ = axum::serve(listener, app)

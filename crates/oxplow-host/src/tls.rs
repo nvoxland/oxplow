@@ -35,18 +35,37 @@ pub enum TlsError {
 
 /// The acceptor for the certificate chain and key in these PEM files.
 pub fn acceptor(cert: &Path, key: &Path) -> Result<TlsAcceptor, TlsError> {
-    let chain: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert)
-        .map_err(|e| TlsError::Cert(cert.display().to_string(), e.to_string()))?
-        .collect::<Result<_, _>>()
+    let cert_pem = std::fs::read(cert)
         .map_err(|e| TlsError::Cert(cert.display().to_string(), e.to_string()))?;
+    let key_pem =
+        std::fs::read(key).map_err(|e| TlsError::Key(key.display().to_string(), e.to_string()))?;
+    acceptor_pem(
+        &cert_pem,
+        &key_pem,
+        &cert.display().to_string(),
+        &key.display().to_string(),
+    )
+}
+
+/// The acceptor for a certificate chain and key given as PEM (`what_cert`
+/// and `what_key` name them in an error).
+pub fn acceptor_pem(
+    cert_pem: &[u8],
+    key_pem: &[u8],
+    what_cert: &str,
+    what_key: &str,
+) -> Result<TlsAcceptor, TlsError> {
+    let chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem)
+        .collect::<Result<_, _>>()
+        .map_err(|e| TlsError::Cert(what_cert.to_string(), e.to_string()))?;
     if chain.is_empty() {
         return Err(TlsError::Cert(
-            cert.display().to_string(),
+            what_cert.to_string(),
             "no certificate in it".into(),
         ));
     }
-    let key = PrivateKeyDer::from_pem_file(key)
-        .map_err(|e| TlsError::Key(key.display().to_string(), e.to_string()))?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem)
+        .map_err(|e| TlsError::Key(what_key.to_string(), e.to_string()))?;
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let config = rustls::ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
