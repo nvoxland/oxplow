@@ -22,9 +22,9 @@ export function subscribeNavigatorOpenRequests(cb: Listener): () => void {
 }
 
 /// A stream's or thread's right-click menu, asked for from outside the
-/// Navigator (the title bar's names), opened at `x`/`y`. The Navigator owns
-/// the menus — they act on its panel (rename, add thread) — so it opens
-/// them; the asker names what and where.
+/// shell's stream list (the title bar's names), opened at `x`/`y`. The
+/// window's `useStreamThreadMenus` owns the menus and opens them; the asker
+/// names what and where.
 export interface NavigatorMenuRequest {
   kind: "stream" | "thread";
   id: string;

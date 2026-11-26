@@ -848,13 +848,16 @@ is text on a coarse pointer (`useCoarsePointer`):
     `{menu}`. `header` titles the menu with what it acts on
     (`context-menu-header`) — the Navigator heads every stream / thread
     menu with its name, since a strip glyph shows only initials.
-  - **An item has one menu wherever it shows.** The Navigator builds each
-    stream's and thread's menu once (`streamMenu` / `threadMenu`) and
-    binds it to both the strip glyph and the panel row; an action whose
-    inline field lives in the panel (Rename, Add thread) opens it. A
-    surface outside the Navigator that names a stream or thread (the title
-    bar) asks for the menu over `navigator-bus` (`requestNavigatorMenu`,
-    opened with `useContextMenu().openAt`) rather than building its own.
+  - **An item has one menu wherever it shows.** Each stream's and
+    thread's menu is built once, by the window's `useStreamThreadMenus`
+    (`window/useStreamThreadMenus.tsx`: `streamMenu` / `threadMenu`, and
+    the flows they start: rename, add a thread, remove a stream), so any
+    shell has them. The Navigator binds them to both the strip glyph and
+    the panel row and draws the flows in its panel; an action whose inline
+    field lives there opens it (`reveal`). A surface outside the stream
+    list that names a stream or thread (the title bar) asks for the menu
+    over `navigator-bus` (`requestNavigatorMenu`) rather than building its
+    own; New Thread… asks over `new-thread-bus`.
   - `useContextMenu()` — call once in a parent that renders rows in a
     `.map()` (a per-row hook can't run there); each row does
     `onContextMenu={(e) => open(e, items)}` and the parent renders

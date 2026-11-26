@@ -2,19 +2,11 @@ import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSlideoutStrip } from "./useSlideoutStrip.js";
 import { SlideoutChevron } from "./SlideoutChevron.js";
-import {
-  subscribeNavigatorMenuRequests,
-  subscribeNavigatorOpenRequests,
-  type NavigatorMenuRequest,
-} from "../navigator-bus.js";
-import { archiveStream, type Stream, type Thread, type ThreadMark, type ThreadState } from "../api.js";
-import { subscribeNewThreadRequests } from "../new-thread-bus.js";
+import { subscribeNavigatorOpenRequests } from "../navigator-bus.js";
+import type { Stream, ThreadMark, ThreadState } from "../api.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
-import { useContextMenu, useRowContextMenu, type MenuItems } from "./useRowContextMenu.js";
-import type { MenuItem } from "../menu.js";
-import { openInForPath } from "../openIn.js";
-import { threadUri } from "../uri/uri.js";
-import { refCommandMenuItems, useRefOffers } from "./refCommands.js";
+import { useRowContextMenu, type MenuItems } from "./useRowContextMenu.js";
+import { markColour, useStreamThreadMenus } from "../window/useStreamThreadMenus.js";
 import { Slideover } from "./Slideover.js";
 import { titleInitials } from "../initials.js";
 
@@ -43,7 +35,6 @@ interface NavigatorProps {
   vcsEnabled: boolean;
 }
 
-type RenameTarget = { kind: "stream" | "thread"; id: string };
 
 /**
  * Combined stream + thread navigator.
@@ -112,8 +103,31 @@ export function Navigator({
   onOpenThreadSettings,
   vcsEnabled,
 }: NavigatorProps) {
-  const [pendingNewThreadFor, setPendingNewThreadFor] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<RenameTarget | null>(null);
+  // The menus and their flows are the window's (`useStreamThreadMenus`):
+  // a flow shows in this panel, so revealing one opens it.
+  const revealRef = useRef<() => void>(() => {});
+  const {
+    streamMenu,
+    threadMenu,
+    renaming,
+    setRenaming,
+    pendingNewThreadFor,
+    setPendingNewThreadFor,
+    removal,
+    requestedMenu,
+  } = useStreamThreadMenus({
+    streams,
+    threadStates,
+    streamStatuses,
+    currentStreamId,
+    onRenameStream,
+    onRenameThread,
+    onMarkThread,
+    onCloseThread,
+    onOpenStreamSettings,
+    onOpenThreadSettings,
+    reveal: () => revealRef.current(),
+  });
 
   // A rename or a new-thread entry is in flight: the user is committed to
   // an action inside the panel, so neither passive close path (pointer
@@ -129,41 +143,10 @@ export function Navigator({
   // Terminal page's tab strip runs on the same machine.
   const strip = useSlideoutStrip({ guard: formActive });
   const overlayOpen = strip.open;
-  // Remove-stream confirm flow
-  const [removeStream, setRemoveStream] = useState<Stream | null>(null);
-  const [removeWorktree, setRemoveWorktree] = useState(false);
-  const [removeBusy, setRemoveBusy] = useState(false);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-
+  revealRef.current = strip.openPanel;
   // The title bar's stream name (and any other surface pointing here)
   // opens the panel.
   useEffect(() => subscribeNavigatorOpenRequests(() => strip.openPanel()), [strip]);
-
-  // Command-palette "New Thread…" (and any other external surface)
-  // requests land here: open the overlay and show the inline creator
-  // for the requested stream — the same flow as the kebab menu item.
-  useEffect(
-    () =>
-      subscribeNewThreadRequests((streamId) => {
-        strip.openPanel();
-        setPendingNewThreadFor(streamId);
-      }),
-    [strip],
-  );
-
-  async function handleRemoveStream() {
-    if (!removeStream) return;
-    try {
-      setRemoveBusy(true);
-      setRemoveError(null);
-      await archiveStream(removeStream.id, removeWorktree);
-      setRemoveStream(null);
-    } catch (e) {
-      setRemoveError(String(e));
-    } finally {
-      setRemoveBusy(false);
-    }
-  }
 
   const orderedStreams = useMemo(() => {
     return streams.slice().sort((a, b) => {
@@ -204,104 +187,6 @@ export function Navigator({
     else handleSelectThread(streamId, threadId);
   };
 
-  // One menu per stream and per thread, the same whether it's opened from
-  // the strip's icon or the panel's row. Rename and Add thread work in the
-  // panel (their inline fields live there), so they open it.
-  const refOffersFor = useRefOffers();
-  const streamMenu = (s: Stream): MenuItem[] => {
-    const items: MenuItem[] = [
-      {
-        id: "stream.add-thread",
-        label: "Add thread",
-        enabled: true,
-        run: () => {
-          strip.openPanel();
-          setPendingNewThreadFor(s.id);
-        },
-      },
-      {
-        id: "stream.rename",
-        label: "Rename…",
-        enabled: !!onRenameStream,
-        run: () => {
-          strip.openPanel();
-          setRenaming({ kind: "stream", id: s.id });
-        },
-      },
-      {
-        id: "stream.settings",
-        label: "Settings…",
-        enabled: !!onOpenStreamSettings,
-        run: () => onOpenStreamSettings?.(s.id),
-      },
-    ];
-    // Its worktree outside oxplow (`openIn.ts`); Terminal only for this
-    // window's stream, where a new terminal opens.
-    const elsewhere = s.worktree_path ? openInForPath("dir", s.worktree_path, [], { terminal: s.id === currentStreamId }) : null;
-    if (elsewhere) items.push(elsewhere);
-    if (s.kind !== "primary") {
-      items.push({
-        id: "stream.remove",
-        label: "Remove…",
-        // Disable when an agent is currently running in any of this
-        // stream's threads — the IPC also rejects, but disabling avoids a
-        // useless prompt.
-        enabled: streamStatuses[s.id] !== "working",
-        run: () => {
-          setRemoveStream(s);
-          setRemoveWorktree(false);
-          setRemoveError(null);
-        },
-      });
-    }
-    return items;
-  };
-  const threadMenu = async (thread: Thread): Promise<MenuItem[]> => {
-    const markItem = (mark: ThreadMark | null): MenuItem => ({
-      id: `thread.mark.${mark ?? "none"}`,
-      label: mark ? MARK_LABELS[mark] : "None",
-      enabled: true,
-      checked: (thread.mark ?? null) === mark,
-      swatch: mark ? markColour(mark) : undefined,
-      run: () => onMarkThread?.(thread.id, mark),
-    });
-    const items: MenuItem[] = [];
-    items.push(
-      {
-        id: "thread.mark",
-        label: "Mark with…",
-        enabled: !!onMarkThread,
-        submenuHeader: "A colour on the thread's tab, for grouping threads your way. It changes nothing else.",
-        submenu: [...THREAD_MARKS.map(markItem), markItem(null)],
-      },
-      {
-        id: "thread.rename",
-        label: "Rename…",
-        enabled: !!onRenameThread,
-        run: () => {
-          strip.openPanel();
-          setRenaming({ kind: "thread", id: thread.id });
-        },
-      },
-      {
-        id: "thread.settings",
-        label: "Settings…",
-        enabled: !!onOpenThreadSettings,
-        run: () => onOpenThreadSettings?.(thread.id),
-      },
-      {
-        id: "thread.close",
-        label: "Close thread",
-        enabled: !!onCloseThread,
-        run: () => onCloseThread?.(thread.id),
-      },
-      // Then the commands about the thread (usability.md "Menus a page or
-      // row gets from extensions").
-      ...refCommandMenuItems(await refOffersFor(threadUri(thread.id))),
-    );
-    return items;
-  };
-
   // Build the list of "rows" so the strip and overlay can both walk
   // the same sequence — guaranteeing matching y-positions row-by-row.
   // `add-thread` rows are flyout-only (skipped in the strip render).
@@ -310,32 +195,6 @@ export function Navigator({
   // mirroring the main rail's panel look. The strip and the slide-over
   // overlay both map this same structure so glyph y-positions stay in
   // lock-step when the overlay opens.
-  // A stream's or thread's menu asked for from outside (the title bar's
-  // names): the same menu, headed the same way, at the asker's point.
-  const requested = useContextMenu();
-  const menuFor = (r: NavigatorMenuRequest): { items: MenuItems; header: string } | null => {
-    if (r.kind === "stream") {
-      const s = streams.find((x) => x.id === r.id);
-      return s ? { items: streamMenu(s), header: s.title } : null;
-    }
-    for (const ts of Object.values(threadStates)) {
-      const t = ts.threads.find((x) => x.id === r.id);
-      if (t) return { items: threadMenu(t), header: t.title };
-    }
-    return null;
-  };
-  const menuForRef = useRef(menuFor);
-  menuForRef.current = menuFor;
-  const openAt = requested.openAt;
-  useEffect(
-    () =>
-      subscribeNavigatorMenuRequests((r) => {
-        const menu = menuForRef.current(r);
-        if (menu) openAt({ x: r.x, y: r.y }, menu.items, menu.header);
-      }),
-    [openAt],
-  );
-
   const streamGroups = useMemo(
     () =>
       orderedStreams.map((s) => {
@@ -539,23 +398,23 @@ export function Navigator({
         </div>
       ) : null}
       <Slideover
-        open={!!removeStream}
-        onClose={() => { if (!removeBusy) setRemoveStream(null); }}
-        title={removeStream ? `Remove stream — ${removeStream.title}` : "Remove stream"}
+        open={!!removal.stream}
+        onClose={removal.cancel}
+        title={removal.stream ? `Remove stream — ${removal.stream.title}` : "Remove stream"}
         testId="stream-remove-slideover"
         footer={(
           <>
             <button
               type="button"
-              onClick={() => setRemoveStream(null)}
-              disabled={removeBusy}
+              onClick={removal.cancel}
+              disabled={removal.busy}
               style={{
                 background: "var(--surface-card)",
                 color: "var(--text-primary)",
                 border: "1px solid var(--border-subtle)",
                 padding: "6px 12px",
                 borderRadius: 6,
-                cursor: removeBusy ? "not-allowed" : "pointer",
+                cursor: removal.busy ? "not-allowed" : "pointer",
                 fontFamily: "inherit",
                 fontSize: "var(--text-xs)",
               }}
@@ -565,26 +424,26 @@ export function Navigator({
             <button
               type="button"
               data-testid="stream-remove-confirm"
-              onClick={() => { void handleRemoveStream(); }}
-              disabled={removeBusy}
+              onClick={() => { void removal.confirm(); }}
+              disabled={removal.busy}
               style={{
                 background: "#b32a2a",
                 color: "#fff",
                 border: "1px solid transparent",
                 padding: "6px 12px",
                 borderRadius: 6,
-                cursor: removeBusy ? "not-allowed" : "pointer",
+                cursor: removal.busy ? "not-allowed" : "pointer",
                 fontFamily: "inherit",
                 fontSize: "var(--text-xs)",
                 fontWeight: "var(--weight-medium)",
               }}
             >
-              {removeBusy ? "Removing…" : "Remove"}
+              {removal.busy ? "Removing…" : "Remove"}
             </button>
           </>
         )}
       >
-        {removeStream ? (
+        {removal.stream ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: "var(--text-xs)" }}>
             <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
               The stream and every thread under it will be archived (hidden from the rail). History — requests, snapshots, and visit logs — stays intact.
@@ -593,26 +452,26 @@ export function Navigator({
               <input
                 type="checkbox"
                 data-testid="stream-remove-delete-worktree"
-                checked={removeWorktree}
-                onChange={(e) => setRemoveWorktree(e.target.checked)}
-                disabled={removeBusy || removeStream.kind !== "worktree"}
+                checked={removal.worktree}
+                onChange={(e) => removal.setWorktree(e.target.checked)}
+                disabled={removal.busy || removal.stream.kind !== "worktree"}
               />
               <span>
                 Also delete the on-disk worktree
-                {removeStream.kind === "worktree" ? (
-                  <span style={{ color: "var(--text-secondary)" }}> ({removeStream.worktree_path})</span>
+                {removal.stream.kind === "worktree" ? (
+                  <span style={{ color: "var(--text-secondary)" }}> ({removal.stream.worktree_path})</span>
                 ) : (
                   <span style={{ color: "var(--text-secondary)" }}> — primary stream has no worktree to delete</span>
                 )}
               </span>
             </label>
-            {removeError ? (
-              <div style={{ color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{removeError}</div>
+            {removal.error ? (
+              <div style={{ color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{removal.error}</div>
             ) : null}
           </div>
         ) : null}
       </Slideover>
-      {requested.menu}
+      {requestedMenu}
     </div>
   );
 }
@@ -1136,22 +995,6 @@ function IconCell({
       </span>
     </span>
   );
-}
-
-/** The colours a person marks a thread with, in menu order. */
-const THREAD_MARKS: ThreadMark[] = ["amber", "red", "green", "blue", "violet"];
-
-const MARK_LABELS: Record<ThreadMark, string> = {
-  amber: "Amber",
-  red: "Red",
-  green: "Green",
-  blue: "Blue",
-  violet: "Violet",
-};
-
-/** A mark's colour token (`--thread-mark-<colour>`, theming.md). */
-function markColour(mark: ThreadMark): string {
-  return `var(--thread-mark-${mark})`;
 }
 
 /** A marked thread's corner fold: a right triangle, its right angle in
