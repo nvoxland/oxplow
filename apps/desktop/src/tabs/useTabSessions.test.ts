@@ -92,6 +92,22 @@ test("a save that fails is kept, and sent again on retry", async () => {
   expect(b.steps).toEqual(["save thr1 a @null", "save thr1 a @null"]);
 });
 
+test("a thread is kept once every save before the question has been answered", async () => {
+  const b = backend();
+  const saver = createSessionSaver(b.write, {});
+  let kept = 0;
+  void saver.idle("thr2").then(() => (kept += 100));
+  b.failOnce();
+  saver.save("thr1", "a");
+  void saver.idle("thr1").then(() => (kept += 1));
+  await flush();
+  expect(kept).toBe(100); // a thread with nothing to save is kept now; a failed save is not
+  saver.retry();
+  b.answers.shift()!({ saved: true, revision: 1 });
+  await flush();
+  expect(kept).toBe(101);
+});
+
 test("changes made before the stored tabs arrive are made over them", () => {
   const stored = open(emptySession(), { ref: knowledgePageRef("oxwiki", "kept") });
   const early: Array<[string, (s: Session) => Session]> = [

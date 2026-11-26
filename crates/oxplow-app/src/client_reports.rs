@@ -66,6 +66,12 @@ impl SocketLease {
     pub async fn replaced(&self) {
         self.socket.replaced().await
     }
+
+    /// Resolves once the daemon asks the socket to close (a window that
+    /// missed a call's answer): a normal close, the page reconnects.
+    pub async fn closing(&self) {
+        self.socket.closing().await
+    }
 }
 
 impl Drop for SocketLease {

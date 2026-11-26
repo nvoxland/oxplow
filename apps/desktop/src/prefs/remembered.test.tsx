@@ -47,6 +47,42 @@ test("the store reads what was kept, writes a change once after a pause, and ign
   await waitFor(() => expect(b.saves.at(-1)).toEqual(["app", "railWidth", null]));
 });
 
+test("a save that failed is sent again, and a reload does not bring the old value back", async () => {
+  const daemon = new Map<string, string>([["app\u0000railWidth", "320"]]);
+  let down = true;
+  let reload: () => void = () => {};
+  const saves: (string | null)[] = [];
+  const store = createRememberedStore(
+    {
+      load: async () => [...daemon].map(([id, valueJson]) => ({ scope: "app", key: id.split("\u0000")[1]!, valueJson })),
+      save: async (scope, key, valueJson) => {
+        saves.push(valueJson);
+        if (down) throw new Error("daemon away");
+        daemon.set(`${scope}\u0000${key}`, valueJson ?? "");
+      },
+      watch: (r) => {
+        reload = r;
+        return () => {};
+      },
+    },
+    5,
+    20,
+  );
+  await store.ready;
+  store.set("app", "railWidth", 500);
+  await waitFor(() => expect(saves[0]).toBe("500"));
+  // The daemon is still away: a reload (a reconnect) keeps the person's value.
+  reload();
+  await new Promise((r) => setTimeout(r, 10));
+  expect(store.get("app", "railWidth")).toBe(500);
+  // It comes back: the value is sent again, by delay or by the next read.
+  down = false;
+  await waitFor(() => expect(daemon.get("app\u0000railWidth")).toBe("500"));
+  reload();
+  await new Promise((r) => setTimeout(r, 10));
+  expect(store.get("app", "railWidth")).toBe(500);
+});
+
 function Wide() {
   const [w, setW] = useAppPreference("railWidth", 260);
   return (

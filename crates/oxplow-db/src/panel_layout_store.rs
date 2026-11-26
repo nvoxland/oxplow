@@ -539,7 +539,9 @@ mod tests {
                 &tablet,
                 a,
                 ScopedPanelLayout {
-                    project: vec![shown("tasks")],
+                    // `notes` is one of the Mac's thread panels: the tablet's
+                    // rule for it must not reach the Mac's row.
+                    project: vec![shown("notes")],
                     ..ScopedPanelLayout::default()
                 },
             )

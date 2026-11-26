@@ -506,10 +506,15 @@ export async function saveTabSession(threadId: string, sessionJson: string, revi
   return unwrap(await commands.saveTabSession(threadId, sessionJson, revision));
 }
 
-/// The tabs agents opened for this device while it was away, oldest first;
-/// the daemon forgets them once they are read.
-export async function takeQueuedTabs(): Promise<QueuedTab[]> {
-  return unwrap(await commands.takeQueuedTabs());
+/// The tabs agents opened for this device while it was away, oldest first.
+/// The daemon keeps them until `forgetQueuedTabs`.
+export async function listQueuedTabs(): Promise<QueuedTab[]> {
+  return unwrap(await commands.listQueuedTabs());
+}
+
+/// This window kept these queued tabs (`QueuedTab.id`): the daemon drops them.
+export async function forgetQueuedTabs(ids: QueuedTab["id"][]): Promise<void> {
+  unwrap(await commands.forgetQueuedTabs(ids));
 }
 
 /// Forget this device's tabs of `threadId`.

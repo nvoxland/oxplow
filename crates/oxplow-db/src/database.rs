@@ -2677,6 +2677,72 @@ mod tests {
         .unwrap();
     }
 
+    /// V85 drops the shared panel layout rows and keys the new table by
+    /// device: the same panel in the same place may be placed by two devices.
+    #[test]
+    fn v85_drops_the_shared_layout_and_keys_it_by_device() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(84))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO panel_layout (panel, visibility_scope, position) VALUES ('go', 'project', 0);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM panel_layout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "every device starts from the defaults");
+        let insert = |device: &str| {
+            conn.execute(
+                "INSERT INTO panel_layout (device_id, panel, visibility_scope, position)
+                 VALUES (?1, 'go', 'project', 0)",
+                [device],
+            )
+        };
+        insert("a").unwrap();
+        insert("b").unwrap();
+        insert("a").unwrap_err();
+    }
+
+    /// V88 makes a queued tab unique for its device and thread and keeps the
+    /// oldest row of a repeat.
+    #[test]
+    fn v88_keeps_the_oldest_of_a_repeated_queued_tab() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(87))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 's', 'main', 'refs/heads/main', 'main', '/r', 't', 't');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 't', 't', 't');
+             INSERT INTO tab_queued (device_id, thread_id, uri, queued_at) VALUES
+               ('d', 1, 'u', 'first'), ('d', 1, 'u', 'second'), ('d', 1, 'v', 'third');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT uri, queued_at FROM tab_queued ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![("u".into(), "first".into()), ("v".into(), "third".into())]
+        );
+        conn.execute(
+            "INSERT INTO tab_queued (device_id, thread_id, uri, queued_at) VALUES ('d', 1, 'u', 'x')",
+            [],
+        )
+        .unwrap_err();
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {

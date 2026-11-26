@@ -340,7 +340,10 @@ app, across its socket's reconnects). The client makes both ids;
   token already says the request is the person's. With the host, the host
   sets them from the device's own token.
 - A request with no caller reads per-device state as its defaults and may
-  not write it.
+  not write it, with two exceptions: a component's memory is shared by every
+  device (a request with no caller may write it), and a page visit with no
+  caller is recorded as every device's and read by every device
+  (`page_visit.rs`).
 - A person's command run keeps the device it was asked from
   (`v_command_run.device_id`): the RPC commands that run as the person pass
   the caller into the run's context (`.context/commands.md` "Run and
@@ -370,8 +373,14 @@ page stays alive) and a `{"channel":"beat"}` frame. A socket that answers no
 ping for two intervals, or whose send does not finish within one, is closed:
 its page runs, tab report and client-host registration go with it. The page
 keeps a watchdog fed by every frame (`createWatchdog` in `transport.ts`,
-`SOCKET_SILENCE_MS`): 50 s with nothing, and it closes the socket, which
-reconnects as a drop does. The 2-second `/ipc/ping` probe still drives the
+`SOCKET_SILENCE_MS`): 50 s with nothing, and the page drops the socket at
+once (`dropSocket`: its handlers go, it closes in the background) and
+reconnects, without waiting for the close handshake, which a dead path never
+finishes. The daemon also closes a socket whose window missed a call's answer
+(a normal close, not 4001; `ClientDevices::close`): the window stops hosting,
+and a live page reconnects and registers again, so one slow answer does not
+end its hosting. A frozen page is then away, and the tabs agents open for it
+wait. The 2-second `/ipc/ping` probe still drives the
 daemon-down dialog and the resync after an HTTP-level outage.
 
 ### Last used
@@ -382,7 +391,9 @@ it sends `{"channel":"used"}` on its event socket, at most once a second
 device's last use in memory (`ClientDevices::used`) and answers which
 connected page load was used last (`ClientDevices::last_used`; before any use
 is told, the newest connection): "last used in this project", where a call
-that no device asked for goes. An agent reads the tabs of every device, the
+that no device asked for goes. A person's run has a device and never goes
+to another one: it goes to its own page load (or the newer one of its
+device), and is refused `Unavailable` when that window hosts nothing yet. An agent reads the tabs of every device, the
 one used last first (`.context/pages-and-tabs.md` "What agents see of the
 tabs"): the tabs are the device's stored ones, so an away device lists them
 too; the window's tab report holds only live facts (the shown thread, focus,
@@ -429,15 +440,26 @@ the window used last gets the call ("Last used").
   connected device has, is refused (`Invalid`, `/client`). A device whose
   window is not open, or does not host the scope, is refused `Unavailable`,
   and the answer says so.
-- A device named by id that is not connected: the tab waits
-  (`tab_queued`, `TabQueueStore`), and the tool answers
+- A device named by id that is not connected, or connected with a window
+  that hosts nothing yet (it is loading, or missed an answer), is away: the
+  tab waits (`tab_queued`, `TabQueueStore`), and the tool answers
   `{ queued: true, device }`. Names are known only while a device is
   connected, so a name never queues. Only an agent on a thread can queue: the
-  tab opens in that thread.
-- The device's window takes its queue (`take_queued_tabs`: read and emptied
-  in one transaction) when it starts to host the daemon's calls and after
-  each reconnect, and opens each tab in its thread without focus, as an
-  agent's open does (`window/useWindowHost.ts`).
+  tab opens in that thread. Only a device this project knows can have a tab
+  wait (a row in `device_view_state`, `thread_selection` or `tab_session`, or
+  a connected one): any other id is `Invalid` on `/client`. The same page
+  waits once (`UNIQUE (device_id, thread_id, uri)`), at most 50 wait for a
+  device (the oldest goes), and a row older than 14 days is dropped.
+- The device's window reads its queue (`list_queued_tabs`) when it starts to
+  host the daemon's calls, after each reconnect, and when the daemon says a
+  tab was queued for it just after it connected (`OxplowEvent::TabsQueued`,
+  for the window's connection). A read returns the rows that can open (a
+  closed thread's or an archived stream's go, as do old ones) and keeps them.
+  The window opens each tab in its thread without focus, as an agent's open
+  does, waits until the thread's tabs are stored (`save_tab_session`
+  answered), then calls `forget_queued_tabs { ids }` (`window/useWindowHost.ts`).
+  A page load that dies before that reads the rows again; opening a page
+  that is open changes nothing.
 
 ## Known v1 gaps
 

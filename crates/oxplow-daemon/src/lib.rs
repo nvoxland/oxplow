@@ -320,6 +320,24 @@ fn replaced_close() -> Message {
     }))
 }
 
+/// The normal close that tells a page to reconnect (it missed a call's
+/// answer, so the daemon no longer takes it as a host).
+fn closing_close() -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code: 1000,
+        reason: "reconnect".into(),
+    }))
+}
+
+/// Resolves once the daemon asks `owner`'s socket to close; never for a
+/// socket that names no device.
+async fn closing(owner: &Option<oxplow_app::client_reports::SocketLease>) {
+    match owner {
+        Some(owner) => owner.closing().await,
+        None => std::future::pending().await,
+    }
+}
+
 /// Resolves once `owner`'s page load is replaced; never for a socket that
 /// names no device.
 async fn replaced(owner: &Option<oxplow_app::client_reports::SocketLease>) {
@@ -454,6 +472,10 @@ async fn events_stream(
             },
             () = replaced(&owner) => {
                 let _ = send!(replaced_close());
+                break;
+            }
+            () = closing(&owner) => {
+                let _ = send!(closing_close());
                 break;
             }
             _ = beat.tick() => {
@@ -1331,6 +1353,44 @@ mod tests {
         .expect("the Mac, used, is the device used last");
     }
 
+    /// A socket that names no device cannot make one the device used last.
+    #[tokio::test]
+    async fn use_from_a_socket_with_no_device_is_ignored() {
+        use futures::SinkExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const MAC: &str = "con-11111111-1111-4111-8111-111111111111";
+        let (mut anonymous, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{}/events?token={UI_TOKEN}",
+            daemon.bind_addr
+        ))
+        .await
+        .unwrap();
+        let (_mac, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={MAC}&name=Mac&kind=desktop",
+            daemon.bind_addr
+        ))
+        .await
+        .unwrap();
+        anonymous
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                USED_FRAME.into(),
+            ))
+            .await
+            .unwrap();
+        // Give the daemon time to hear it; the only device is still the one used last.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let mac = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        assert_eq!(svc.client_devices.last_used().map(|(d, _)| d), Some(mac));
+        assert_eq!(
+            svc.client_devices.list().len(),
+            1,
+            "no device for the anonymous socket"
+        );
+    }
+
     /// A page that answers no ping is gone: its socket closes and its device
     /// leaves. One that answers stays, and hears the watchdog's beat.
     #[tokio::test]
@@ -1387,6 +1447,56 @@ mod tests {
         assert!(
             svc.client_devices.get(&mine).is_some(),
             "the page that answers stays"
+        );
+    }
+
+    /// A window that misses a call's answer is forgotten as a host and its
+    /// socket closes (a normal close, not "replaced"): a live page then
+    /// reconnects and registers again.
+    #[tokio::test]
+    async fn a_call_that_times_out_closes_the_windows_socket() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const CON: &str = "con-11111111-1111-4111-8111-111111111111";
+        let url = format!(
+            "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={CON}&name=Mac&kind=desktop",
+            daemon.bind_addr
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let client_host = std::sync::Arc::new(oxplow_app::client_host::ClientHost::with_timeout(
+            svc.events.clone(),
+            svc.client_devices.clone(),
+            std::time::Duration::from_millis(100),
+        ));
+        client_host.register(CON, vec!["tabs.write".into()]);
+        let run = oxplow_domain::run::RunContext::core(
+            oxplow_domain::Actor::Agent {
+                session_id: None,
+                thread_id: Some(oxplow_domain::ThreadId::new(1)),
+                stream_id: None,
+            },
+            oxplow_domain::run::Mode::External,
+        );
+        client_host
+            .call(&run, "tabs.write", "open", serde_json::json!({}))
+            .await
+            .unwrap_err();
+        let closed = loop {
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(10), socket.next())
+                .await
+                .expect("the silent window's socket closes");
+            if let Some(Ok(tokio_tungstenite::tungstenite::Message::Close(close))) = frame {
+                break close;
+            }
+        };
+        let code = closed.map(|c| u16::from(c.code));
+        assert_ne!(
+            code,
+            Some(oxplow_app::client_reports::devices::REPLACED_CLOSE_CODE),
+            "a normal close: the page reconnects"
         );
     }
 

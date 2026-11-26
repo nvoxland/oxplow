@@ -622,8 +622,10 @@ fn show_op(services: ServicesSlot) -> Op {
                     .await;
                 // A device named wrongly is the agent's mistake to fix, not
                 // a window that was not open.
-                if let Err(e @ CommandError::Invalid { .. }) = &sent {
-                    return Err(e.clone());
+                if let Err(e @ CommandError::Invalid { field: Some(f), .. }) = &sent {
+                    if f == "/client" {
+                        return Err(e.clone());
+                    }
                 }
                 let mut result = json!({
                     "uri": uri,
@@ -2092,6 +2094,31 @@ mod show_tests {
             matches!(bad, oxplow_domain::CommandError::Invalid { .. }),
             "{bad:?}"
         );
+    }
+
+    /// An agent with no thread has no tabs to open a page in: with a window
+    /// open it still gets the page's text, not an error.
+    #[tokio::test]
+    async fn an_agent_with_no_thread_still_gets_the_text_of_a_shown_page() {
+        let (_dir, svc) = fixture().await;
+        svc.client_host.register("w1", vec!["tabs.write".into()]);
+        let out = svc
+            .commands
+            .run(
+                &Actor::Agent {
+                    session_id: None,
+                    thread_id: None,
+                    stream_id: None,
+                },
+                "oxplow.page.show",
+                json!({ "spec": VIEW }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(out["opened"], json!(false), "{out}");
+        assert!(out["text"].as_str().unwrap().contains("# Mine"), "{out}");
     }
 }
 

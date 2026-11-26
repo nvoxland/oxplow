@@ -441,10 +441,14 @@ device's own (migration V82; the device is the request's caller,
   this device has no row for, with no agent session, opens the session
   picker on it (the new-thread signal, per device).
 
-- `tab_queued(id, device_id, thread_id, uri, queued_at)` (V87): a tab an
-  agent opened for a device that was away (`TabQueueStore`). The device takes
-  its rows, oldest first, when its window next connects, and they are
-  deleted as they are read; a thread that goes takes its rows.
+- `tab_queued(id, device_id, thread_id, uri, queued_at, UNIQUE (device_id,
+  thread_id, uri))` (V87, the unique key V88): a tab an agent opened for a
+  device that was away (`TabQueueStore`), only for a device the project knows;
+  at most 50 per device (the oldest goes). The device reads its rows, oldest
+  first, when its window connects; a read drops the rows older than 14 days
+  and those of a closed thread or an archived stream, and keeps the rest until
+  the window has stored the tabs and calls `forget_queued_tabs`. Only deleting
+  a thread takes its rows with it (closing one does not: a read drops them).
 
 A device's choice that was archived (a stream) or closed (a thread) since,
 on another device say, reads as no choice: the primary stream, the

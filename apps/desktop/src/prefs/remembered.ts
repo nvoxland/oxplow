@@ -14,7 +14,8 @@
  * reads it again when the daemon reconnects or the rows change (another
  * device wrote a component's memory), and writes a change after a pause, per
  * key; a value equal to what's there writes nothing. A value waiting to be
- * saved wins over a reloaded one.
+ * saved, or whose save failed (sent again after a delay and at each read),
+ * wins over a reloaded one.
  */
 
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
@@ -68,7 +69,7 @@ export function componentMemoryProblem(store: RememberedStore, scope: string, ke
 
 const at = (scope: string, key: string) => `${scope}\u0000${key}`;
 
-export function createRememberedStore(backend: RememberedBackend, debounceMs = 300): RememberedStore {
+export function createRememberedStore(backend: RememberedBackend, debounceMs = 300, retryMs = 3000): RememberedStore {
   const values = new Map<string, unknown>();
   const listeners = new Set<() => void>();
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
@@ -81,13 +82,38 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
   // a read that started before them would bring back an older value.
   const saving = new Set<string>();
   const written = new Set<string>();
+  // Ids whose last save failed: still the person's value (a reload must not
+  // bring the old one back), sent again after a delay and before each read.
+  const failed = new Map<string, ReturnType<typeof setTimeout> | null>();
   let reading = 0;
   // Loaded: once a read's rows are applied (or the newest read failed). A
   // read a newer one replaced doesn't count, so nothing reads the values
   // before they are there.
   let loaded: () => void = () => {};
   const ready = new Promise<void>((resolve) => (loaded = resolve));
+  const send = (id: string) => {
+    const [scope, key] = id.split("\u0000") as [string, string];
+    clearTimeout(failed.get(id) ?? undefined);
+    failed.delete(id);
+    const now = values.get(id);
+    saving.add(id);
+    void backend
+      .save(scope, key, now === undefined ? null : JSON.stringify(now))
+      // A read in flight began before this save: it brings the old value.
+      .then(() => written.add(id))
+      .catch((e: unknown) => {
+        logUi("warn", "couldn't remember a value", { scope, key, error: String(e) });
+        failed.set(
+          id,
+          setTimeout(() => {
+            if (failed.has(id) && !pending.has(id)) send(id);
+          }, retryMs),
+        );
+      })
+      .finally(() => saving.delete(id));
+  };
   const read = (): Promise<void> => {
+    for (const id of Array.from(failed.keys())) if (!pending.has(id) && !saving.has(id)) send(id);
     const turn = ++reading;
     written.clear();
     return backend
@@ -102,7 +128,7 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
             // Not JSON: as if never kept.
           }
         }
-        const mine = (id: string) => pending.has(id) || saving.has(id) || written.has(id);
+        const mine = (id: string) => pending.has(id) || saving.has(id) || written.has(id) || failed.has(id);
         let differs = false;
         for (const [id, value] of incoming) {
           if (mine(id) || JSON.stringify(values.get(id)) === JSON.stringify(value)) continue;
@@ -139,12 +165,7 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
         id,
         setTimeout(() => {
           pending.delete(id);
-          const now = values.get(id);
-          saving.add(id);
-          void backend
-            .save(scope, key, now === undefined ? null : JSON.stringify(now))
-            .catch((e: unknown) => logUi("warn", "couldn't remember a value", { scope, key, error: String(e) }))
-            .finally(() => saving.delete(id));
+          send(id);
         }, debounceMs),
       );
     },

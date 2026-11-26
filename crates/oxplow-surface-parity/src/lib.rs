@@ -293,8 +293,12 @@ pub const MANIFEST: &[Capability] = &[
     ui("save_tab_session", "a window keeping its device's tabs of a thread"),
     ui("forget_tab_session", "a window forgetting its device's tabs of a thread"),
     ui(
-        "take_queued_tabs",
-        "a window taking the tabs agents opened for its device while it was away",
+        "list_queued_tabs",
+        "a window reading the tabs agents opened for its device while it was away",
+    ),
+    ui(
+        "forget_queued_tabs",
+        "a window dropping the queued tabs it has kept in its device's stored tabs",
     ),
     ui(
         "listen_for_oauth_redirect",

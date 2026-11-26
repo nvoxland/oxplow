@@ -29,9 +29,9 @@ command):
 | background-task progress | in memory and transient |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
-| the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
+| the left-nav panel layout (`set_panel_layout`, the caller device's own) | a UI layout pointer, like the selection pointers |
 | a device's tabs of a thread (`save_tab_session`, `forget_tab_session`) | the window's own layout, like the panel layout: written on every tab change, so a command run record each time would flood `command_run` |
-| the tabs an agent opened for a device that was away (`take_queued_tabs`) | the window taking its own waiting tabs when it connects: it reads and empties the device's queue, and opening each one is the window's own `tabs.write` |
+| the tabs an agent opened for a device that was away (`list_queued_tabs`, `forget_queued_tabs`) | the window taking its own waiting tabs when it connects: it reads the device's queue, opens each one with its own `tabs.write`, and drops the rows once its tabs are stored |
 | a device's page memory and app preferences, and a component's memory (`set_ui_preference`) | the person's UI memory, like the panel layout: a pointer, not an intent (`v_ui_preference` and `v_component_memory` read it) |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized dataset — not an intent |

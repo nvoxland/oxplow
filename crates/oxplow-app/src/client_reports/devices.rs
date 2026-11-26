@@ -51,8 +51,9 @@ struct Entry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Socket(u64);
 
-/// A socket's handle: which one it is, and whether another page load of its
-/// device took over (its socket then closes, saying so).
+/// A socket's handle: which one it is, whether another page load of its
+/// device took over (its socket then closes, saying so), and whether the
+/// daemon asked it to close ([`ClientDevices::close`]).
 #[derive(Debug, Clone)]
 pub struct SocketHandle {
     id: Socket,
@@ -62,6 +63,7 @@ pub struct SocketHandle {
 #[derive(Debug, Default)]
 struct Gone {
     replaced: AtomicBool,
+    closing: AtomicBool,
     notify: tokio::sync::Notify,
 }
 
@@ -87,6 +89,20 @@ impl SocketHandle {
         while !self.is_replaced() {
             self.gone.notify.notified().await;
         }
+    }
+
+    /// Resolves once the daemon asks the socket to close (a normal close:
+    /// a live page reconnects).
+    pub async fn closing(&self) {
+        while !self.gone.closing.load(Ordering::SeqCst) {
+            self.gone.notify.notified().await;
+        }
+    }
+
+    fn close(&self) {
+        self.gone.closing.store(true, Ordering::SeqCst);
+        self.gone.notify.notify_waiters();
+        self.gone.notify.notify_one();
     }
 
     fn replace(&self) {
@@ -193,6 +209,21 @@ impl ClientDevices {
             inner.devices.remove(device);
         }
         current
+    }
+
+    /// Ask the current socket of page load `connection` to close, with a
+    /// normal close (not "replaced"): a live page reconnects and registers
+    /// again; a frozen one is gone until it does. Nothing for a connection
+    /// with no socket.
+    pub fn close(&self, connection: &str) {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(e) = inner
+            .devices
+            .values()
+            .find(|e| e.connection.as_str() == connection)
+        {
+            e.socket.close();
+        }
     }
 
     /// The page load a connected device is on now.
@@ -333,6 +364,45 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         devices.used(&tab.id);
         assert_eq!(devices.last_used(), Some((tab.id.clone(), on_tab)));
+    }
+
+    /// A close asked for reaches the connection's current socket, as a
+    /// normal close: not a replacement, and no other device's socket.
+    #[test]
+    fn a_close_asked_for_reaches_the_connections_socket() {
+        let devices = ClientDevices::default();
+        let (mac, tab) = (device("Mac"), device("Tab S9"));
+        let (on_mac, on_tab) = (ConnectionId::generate(), ConnectionId::generate());
+        let mac_socket = devices.connected(mac, on_mac).unwrap().socket;
+        let tab_socket = devices.connected(tab, on_tab.clone()).unwrap().socket;
+        devices.close(on_tab.as_str());
+        devices.close("con-unknown");
+        assert!(tab_socket.gone.closing.load(Ordering::SeqCst));
+        assert!(!tab_socket.is_replaced());
+        assert!(!mac_socket.gone.closing.load(Ordering::SeqCst));
+    }
+
+    /// A device's use is kept across a close and a new connection: it is
+    /// still the one used last, and a device that is not connected is not
+    /// chosen.
+    #[test]
+    fn use_is_kept_across_a_reconnect_and_only_connected_devices_count() {
+        let devices = ClientDevices::default();
+        let (mac, tab) = (device("Mac"), device("Tab S9"));
+        let on_mac = ConnectionId::generate();
+        let mac_socket = devices.connected(mac.clone(), on_mac.clone()).unwrap();
+        devices
+            .connected(tab.clone(), ConnectionId::generate())
+            .unwrap();
+        devices.used(&mac.id);
+        assert!(devices.closed(&mac.id, &on_mac, mac_socket.socket.id()));
+        assert_eq!(devices.last_used().unwrap().0, tab.id, "the Mac is away");
+        devices.connected(mac.clone(), on_mac.clone()).unwrap();
+        assert_eq!(
+            devices.last_used(),
+            Some((mac.id, on_mac)),
+            "its use was kept"
+        );
     }
 
     #[test]

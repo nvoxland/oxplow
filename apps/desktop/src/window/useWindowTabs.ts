@@ -59,7 +59,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
   // (`tabs/session.ts`), restored on start and stored on every change.
   // The strip, the bodies, history, origins and the active tab all come
   // from it (`.context/pages-and-tabs.md` "Navigation model").
-  const { sessions, loaded: sessionsLoaded, update: updateSession } = useTabSessions();
+  const { sessions, loaded: sessionsLoaded, update: updateSession, kept: sessionsKept } = useTabSessions();
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -297,6 +297,7 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
     sessions,
     sessionsLoaded,
     updateSession,
+    sessionsKept,
     pageTitles,
     setPageTitle,
     dirtyTabs,

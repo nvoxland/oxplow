@@ -499,9 +499,10 @@ function ensureSocket(): void {
   const ws = new WebSocket(wsUrl);
   socket = ws;
   // The daemon beats every 20 s; a socket that hears nothing for longer is
-  // gone (a tablet that slept, a tunnel that dropped): close it, and the
-  // close reconnects.
-  const watchdog = createWatchdog(SOCKET_SILENCE_MS, () => ws.close());
+  // gone (a tablet that slept, a tunnel that dropped). It is dropped at
+  // once, not closed and waited for: on a dead path the close handshake
+  // takes a minute.
+  const watchdog = createWatchdog(SOCKET_SILENCE_MS, () => dropSocket(ws, () => down(1006)));
   watchdog.feed();
   ws.onmessage = (msg) => {
     watchdog.feed();
@@ -526,13 +527,13 @@ function ensureSocket(): void {
     flushFrames(ws, waitingFrames);
     handleSocketOpen();
   };
-  ws.onclose = (event) => {
+  const down = (code: number) => {
     watchdog.stop();
     socket = null;
     waitingFrames.length = 0;
     // A refused token or a replaced page load isn't a drop: nothing to
     // wait out or retry.
-    const meaning = socketCloseMeaning(event.code, tokenRefused);
+    const meaning = socketCloseMeaning(code, tokenRefused);
     if (meaning === "replaced") {
       markReplaced();
       return;
@@ -546,9 +547,26 @@ function ensureSocket(): void {
       reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
     }
   };
+  ws.onclose = (event) => down(event.code);
   ws.onerror = () => {
     ws.close();
   };
+}
+
+/// Take `ws` out of service now: nothing it says or does is heard again, it
+/// closes in the background, and `gone` runs once (the reconnect). Exported
+/// for tests.
+export function dropSocket(
+  ws: { onmessage: unknown; onopen: unknown; onclose: unknown; onerror: unknown; close(): void },
+  gone: () => void,
+): void {
+  ws.onmessage = ws.onopen = ws.onclose = ws.onerror = null;
+  try {
+    ws.close();
+  } catch {
+    // Already gone.
+  }
+  gone();
 }
 
 /// How long the socket may hear nothing before the page takes it for gone

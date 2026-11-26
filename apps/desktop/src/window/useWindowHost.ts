@@ -2,7 +2,8 @@ import type { Extension } from "../tauri-bridge/generated/bindings.js";
 import type { AgentSessionRow } from "../agentSessions.js";
 import type { Stream, ThreadState } from "../api.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import { desktopBridge, getCurrentStream, getThreadState, onRemoteReconnect, openInSystemBrowser, openProject, reportTabs, takeQueuedTabs } from "../api.js";
+import { desktopBridge, forgetQueuedTabs, getCurrentStream, getThreadState, onRemoteReconnect, openInSystemBrowser, openProject, reportTabs, subscribeOxplowEvents, listQueuedTabs } from "../api.js";
+import { getUiClientId } from "../uiClientId.js";
 import { startClientHost, type ClientCallContext, type ClientHandlers } from "../clientHost.js";
 import { copyText } from "../clipboard.js";
 import { buffers } from "../editor/openFiles.js";
@@ -38,6 +39,7 @@ export interface WindowHostOptions {
     | "sessions"
     | "sessionsLoaded"
     | "updateSession"
+    | "sessionsKept"
     | "closePageTab"
     | "centerActive"
     | "setCenterActive"
@@ -76,7 +78,7 @@ export function useWindowHost({
   view,
   openQuickOpen,
 }: WindowHostOptions) {
-  const { sessions, sessionsLoaded, updateSession, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, openingThread } = tabs;
+  const { sessions, sessionsLoaded, updateSession, sessionsKept, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, openingThread } = tabs;
   const { handleOpenPageRef, handleNavigateInTab } = openers;
   const { effectiveCenterActive, visitContextRef } = view;
   // Read when a call comes, so the handlers needn't be made again for it.
@@ -332,24 +334,47 @@ export function useWindowHost({
   }, [hosting]);
 
   // The tabs agents opened for this device while it was away open now, in
-  // their threads and without focus, as an agent's open does; again after a
-  // reconnect, since the device was away while the socket was down.
+  // their threads and without focus, as an agent's open does. They are read
+  // again after a reconnect (the device was away while the socket was down)
+  // and when the daemon says one was queued just after this window
+  // connected. A queued row goes only once the tabs are stored
+  // (`forgetQueuedTabs`): a load that dies before that reads it again, and
+  // opening a page that is open changes nothing.
+  const sessionsKeptRef = useRef(sessionsKept);
+  sessionsKeptRef.current = sessionsKept;
   useEffect(() => {
     if (!hosting) return;
-    const take = () =>
-      void takeQueuedTabs()
-        .then(async (queued) => {
-          for (const tab of queued) {
-            try {
-              await windowHandlersRef.current["tabs.write"]!.open!({ uri: tab.uri }, { threadId: tab.threadId, actor: "human", call: null });
-            } catch {
-              // A page that can't open (a file since deleted) leaves the others.
-            }
-          }
-        })
-        .catch(() => {});
+    let taking: Promise<void> | null = null;
+    const takeOnce = async () => {
+      const queued = await listQueuedTabs();
+      if (queued.length === 0) return;
+      for (const tab of queued) {
+        try {
+          await windowHandlersRef.current["tabs.write"]!.open!({ uri: tab.uri }, { threadId: tab.threadId, actor: "human", call: null });
+        } catch {
+          // A page that can't open (a file since deleted) leaves the others.
+        }
+      }
+      await Promise.all([...new Set(queued.map((tab) => tab.threadId))].map((thread) => sessionsKeptRef.current(thread)));
+      await forgetQueuedTabs(queued.map((tab) => tab.id));
+    };
+    // One at a time: a second take while one runs would open the same rows.
+    const take = () => {
+      taking ??= takeOnce()
+        .catch(() => {})
+        .finally(() => {
+          taking = null;
+        });
+    };
     take();
-    return onRemoteReconnect(take);
+    const stopReconnect = onRemoteReconnect(take);
+    const stopEvents = subscribeOxplowEvents((event) => {
+      if (event.kind === "tabsQueued" && event.client === getUiClientId()) take();
+    });
+    return () => {
+      stopReconnect();
+      stopEvents();
+    };
   }, [hosting]);
 
   return { windowHandlersRef, windowFocused, windowVisible };

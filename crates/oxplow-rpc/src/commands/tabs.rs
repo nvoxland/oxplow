@@ -67,13 +67,14 @@ pub async fn forget_tab_session(req: &RpcRequest<'_>, thread_id: ThreadId) -> Re
 }
 
 /// The tabs agents opened for the caller device while it was away, oldest
-/// first, each with the thread it opens in; they are gone from the queue
-/// once read. A request with no device has none.
+/// first, each with its row and the thread it opens in. A read keeps them:
+/// the window calls [`forget_queued_tabs`] once it has kept them in its
+/// stored tabs. A request with no device has none.
 #[expect(
     clippy::disallowed_methods,
     reason = "off the bus: the tabs an agent opened for a device that was away"
 )]
-pub async fn take_queued_tabs(req: &RpcRequest<'_>) -> Result<Vec<QueuedTab>, IpcError> {
+pub async fn list_queued_tabs(req: &RpcRequest<'_>) -> Result<Vec<QueuedTab>, IpcError> {
     let Some(caller) = req.caller else {
         return Ok(Vec::new());
     };
@@ -82,14 +83,40 @@ pub async fn take_queued_tabs(req: &RpcRequest<'_>) -> Result<Vec<QueuedTab>, Ip
         .take(&caller.device)
         .await?
         .into_iter()
-        .map(|(thread_id, uri)| QueuedTab { thread_id, uri })
+        .map(|row| QueuedTab {
+            id: QueuedTabId(row.id),
+            thread_id: row.thread,
+            uri: row.uri,
+        })
         .collect())
 }
 
-/// A tab waiting for a device: the page, and the thread it opens in.
+/// The caller device's window kept these queued tabs: their rows go.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "off the bus: the tabs an agent opened for a device that was away"
+)]
+pub async fn forget_queued_tabs(
+    req: &RpcRequest<'_>,
+    ids: Vec<QueuedTabId>,
+) -> Result<(), IpcError> {
+    let device = &req.caller()?.device;
+    let ids: Vec<i64> = ids.into_iter().map(|id| id.0).collect();
+    req.tab_queue_store.forget(device, &ids).await?;
+    Ok(())
+}
+
+/// A queued tab's row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(transparent)]
+#[specta(transparent)]
+pub struct QueuedTabId(#[specta(type = oxplow_domain::JsNumber)] pub i64);
+
+/// A tab waiting for a device: its row, the page, and the thread it opens in.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct QueuedTab {
+    pub id: QueuedTabId,
     pub thread_id: ThreadId,
     pub uri: String,
 }
@@ -115,6 +142,36 @@ mod tests {
             device: oxplow_domain::DeviceId::generate(),
             connection: oxplow_domain::ConnectionId::generate(),
         };
+        // The tablet has stored tabs here, and is away. A device nobody used
+        // is refused.
+        let stranger = oxplow_domain::DeviceId::generate();
+        let refused = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Agent {
+                    session_id: None,
+                    thread_id: Some(thread),
+                    stream_id: None,
+                },
+                "oxplow.page.show",
+                json!({ "spec": "title: Waiting\nview: { markdown: hi }\n", "client": stranger.to_string() }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("not known")
+                || refused.to_string().contains("known to this project"),
+            "{refused}"
+        );
+        crate::dispatch_as(
+            "save_tab_session",
+            json!({ "threadId": thread.to_string(), "sessionJson": "{}", "revision": null }),
+            &svc,
+            Some(&tablet),
+        )
+        .await
+        .unwrap();
         // An agent shows a page on the tablet, which is away.
         let shown = svc
             .commands
@@ -139,18 +196,39 @@ mod tests {
             let svc = svc.clone();
             let caller = caller.cloned();
             async move {
-                crate::dispatch_as("take_queued_tabs", json!({}), &svc, caller.as_ref())
+                crate::dispatch_as("list_queued_tabs", json!({}), &svc, caller.as_ref())
                     .await
                     .unwrap()
             }
         };
         assert_eq!(take(Some(&mac)).await, json!([]));
         assert_eq!(take(None).await, json!([]));
+        let waiting = take(Some(&tablet)).await;
+        let id = waiting[0]["id"].clone();
         assert_eq!(
-            take(Some(&tablet)).await,
-            json!([{ "threadId": thread.to_string(), "uri": uri }])
+            waiting,
+            json!([{ "id": id, "threadId": thread.to_string(), "uri": uri }])
         );
-        assert_eq!(take(Some(&tablet)).await, json!([]), "taken once");
+        assert_eq!(take(Some(&tablet)).await, waiting, "read, not yet kept");
+        let forget = |caller: Option<&oxplow_domain::Caller>| {
+            let svc = svc.clone();
+            let caller = caller.cloned();
+            let id = id.clone();
+            async move {
+                crate::dispatch_as(
+                    "forget_queued_tabs",
+                    json!({ "ids": [id] }),
+                    &svc,
+                    caller.as_ref(),
+                )
+                .await
+            }
+        };
+        forget(Some(&mac)).await.unwrap();
+        assert_eq!(take(Some(&tablet)).await, waiting, "only its own rows go");
+        assert_eq!(forget(None).await.unwrap_err().code, "INVALID");
+        forget(Some(&tablet)).await.unwrap();
+        assert_eq!(take(Some(&tablet)).await, json!([]), "kept, then gone");
     }
 
     /// A device's tabs read back as it saved them; another device, or a

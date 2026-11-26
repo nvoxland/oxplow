@@ -320,7 +320,13 @@ export const commands = {
 	 *  implementation and its docs live on the core. A request
 	 *  over Tauri IPC names no caller.
 	 */
-	takeQueuedTabs: () => typedError<QueuedTab[], IpcError_Serialize>(__TAURI_INVOKE("take_queued_tabs")),
+	listQueuedTabs: () => typedError<QueuedTab[], IpcError_Serialize>(__TAURI_INVOKE("list_queued_tabs")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	forgetQueuedTabs: (ids: QueuedTabId[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_queued_tabs", { ids })),
 	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
@@ -4556,6 +4562,12 @@ client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
 actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
+ *  A tab was queued for the device of window `client` (a connection id)
+ *  just after it connected: that window takes its queue now, not at its
+ *  next reconnect. Only that window does it.
+ */
+({ kind: "tabsQueued"; client: string }) & { actor?: never; agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+/**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
@@ -5764,11 +5776,15 @@ export type PublicContracts = {
 	withheld?: Withheld[],
 };
 
-/**  A tab waiting for a device: the page, and the thread it opens in. */
+/**  A tab waiting for a device: its row, the page, and the thread it opens in. */
 export type QueuedTab = {
+	id: QueuedTabId,
 	threadId: ThreadId,
 	uri: string,
 };
+
+/**  A queued tab's row. */
+export type QueuedTabId = number;
 
 /**
  *  What a query read, as SQLite's authorizer reported it while preparing

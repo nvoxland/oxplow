@@ -134,6 +134,10 @@ pub enum OxplowEvent {
         op: String,
         input: oxplow_domain::Json,
     },
+    /// A tab was queued for the device of window `client` (a connection id)
+    /// just after it connected: that window takes its queue now, not at its
+    /// next reconnect. Only that window does it.
+    TabsQueued { client: String },
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.

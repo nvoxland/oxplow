@@ -1801,12 +1801,12 @@ loads everything (`get_ui_preferences`: the device's own rows and every
 component's memory) and reads it again on a reconnect and when
 `v_ui_preference` or `v_component_memory` changes, a change shows at once and
 is written after a pause per key (`set_ui_preference`), a value waiting to be
-written wins over a reloaded one, a value equal to what's there writes
+written, or whose save failed (sent again after a delay and at each read),
+wins over a reloaded one, a value equal to what's there writes
 nothing; tests give it a backend
 (`RememberedContext`). **Nothing touches the browser's storage but
 `shellStorage.ts`**, which holds only the shell's own keys (the tab
-sessions, the open files' paths, the remote daemon and its token, the
-recent remotes, this browser's device id); `no-direct-storage.test.ts` holds
+remote daemon and its token, the recent remotes, this browser's device id); `no-direct-storage.test.ts` holds
 every other file to it.
 
 **One hook per kind, as easy as `useState`** (`tabs/useViewParam.ts`);

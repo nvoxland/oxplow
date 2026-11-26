@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createWatchdog,
+  dropSocket,
   isReplacedError,
   REPLACED_CLOSE_CODE,
   socketCloseMeaning,
@@ -387,4 +388,16 @@ test("a watchdog runs once nothing came for its time, and every frame puts it of
   dog.feed();
   dog.stop();
   expect(live()).toHaveLength(0);
+});
+
+// The watchdog takes a silent socket out of service at once: it doesn't wait
+// for the close handshake, which a dead path never finishes.
+test("a silent socket is dropped at once and its late close is not heard", () => {
+  let closed = 0;
+  let gone = 0;
+  const ws = { onmessage: () => {}, onopen: () => {}, onclose: () => (gone += 100), onerror: () => {}, close: () => (closed += 1) };
+  dropSocket(ws, () => (gone += 1));
+  expect(gone).toBe(1);
+  expect(closed).toBe(1);
+  expect([ws.onmessage, ws.onopen, ws.onclose, ws.onerror]).toEqual([null, null, null, null]);
 });

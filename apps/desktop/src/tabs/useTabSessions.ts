@@ -54,6 +54,13 @@ export function createSessionSaver(write: Writer, revisions: Record<string, numb
   const known = new Map<string, number>(Object.entries(revisions));
   const queues = new Map<string, Step[]>();
   const running = new Set<string>();
+  const idle = new Map<string, Array<() => void>>();
+  // A thread with nothing waiting or in flight has had every save answered.
+  const settle = (thread: string) => {
+    if (running.has(thread) || (queues.get(thread)?.length ?? 0) > 0) return;
+    for (const done of idle.get(thread) ?? []) done();
+    idle.delete(thread);
+  };
   const drain = async (thread: string) => {
     running.add(thread);
     try {
@@ -81,6 +88,7 @@ export function createSessionSaver(write: Writer, revisions: Record<string, numb
       }
     } finally {
       running.delete(thread);
+      settle(thread);
     }
   };
   const push = (thread: string, step: Step) => {
@@ -97,6 +105,13 @@ export function createSessionSaver(write: Writer, revisions: Record<string, numb
     /** The thread's tabs go, after what is already on its way; its next save
      *  starts a new row. */
     forget: (thread: string) => push(thread, { kind: "forget" }),
+    /** Resolves once everything saved or forgotten for `thread` so far has
+     *  been answered; a failed step holds it until a retry sends it. */
+    idle: (thread: string) =>
+      new Promise<void>((resolve) => {
+        idle.set(thread, [...(idle.get(thread) ?? []), resolve]);
+        settle(thread);
+      }),
     /** Send again what failed (the daemon is back). */
     retry() {
       for (const [thread, queue] of queues) if (queue.length > 0 && !running.has(thread)) void drain(thread);
@@ -121,6 +136,10 @@ export function useTabSessions() {
   const savedRef = useRef<Record<string, string>>({});
   const earlyRef = useRef<Array<readonly [string, (s: Session) => Session]>>([]);
   const loadingRef = useRef(false);
+  // Questions "are this thread's tabs kept yet?", answered once the saves
+  // that follow the change in flight are answered.
+  const [keptTick, setKeptTick] = useState(0);
+  const keptWaitersRef = useRef<Array<{ thread: string; resolve: () => void }>>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -158,7 +177,9 @@ export function useTabSessions() {
       savedRef.current[thread] = json;
       saver.save(thread, json);
     }
-  }, [sessions, loaded]);
+    // After the saves this change makes, so they are the ones waited for.
+    for (const { thread, resolve } of keptWaitersRef.current.splice(0)) void saver.idle(thread).then(resolve);
+  }, [sessions, loaded, keptTick]);
 
   const update = useCallback((thread: string, f: (s: Session) => Session) => {
     if (!saverRef.current) earlyRef.current.push([thread, f]);
@@ -178,5 +199,14 @@ export function useTabSessions() {
     delete savedRef.current[thread];
     saverRef.current?.forget(thread);
   }, []);
-  return { sessions, loaded, update, forget };
+  /** Resolves once `thread`'s tabs, as changed so far, are stored. */
+  const kept = useCallback(
+    (thread: string) =>
+      new Promise<void>((resolve) => {
+        keptWaitersRef.current.push({ thread, resolve });
+        setKeptTick((n) => n + 1);
+      }),
+    [],
+  );
+  return { sessions, loaded, update, forget, kept };
 }
