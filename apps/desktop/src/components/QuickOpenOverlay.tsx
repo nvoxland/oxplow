@@ -460,7 +460,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     {result.entry.badge ? (
                       <span style={badgeStyle}>{result.entry.badge}</span>
                     ) : null}
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
+                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>page</span>
                   </button>
                 );
               }
@@ -477,18 +477,18 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                       background: active ? "var(--accent-soft-bg)" : "transparent",
                     }}
                   >
-                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 11 }}>
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: "var(--text-xs)" }}>
                       ⌘
                     </span>
-                    <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: 11 }}>{result.entry.group}</span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>›</span>
+                    <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: "var(--text-xs)" }}>{result.entry.group}</span>
+                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>›</span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {result.entry.label}
                     </span>
                     {result.entry.shortcut ? (
-                      <span style={{ color: "var(--muted)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>{formatShortcut(result.entry.shortcut)}</span>
+                      <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)", fontFamily: "ui-monospace, monospace" }}>{formatShortcut(result.entry.shortcut)}</span>
                     ) : null}
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>command</span>
+                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>command</span>
                   </button>
                 );
               }
@@ -511,7 +511,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {result.hit.title || result.hit.uri}
                     </span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: "var(--text-xs)" }}>
                       {snippetParts(result.hit.snippet).map((part, i) =>
                         part.hit ? (
                           <strong key={i} style={{ color: "var(--text-primary)", fontWeight: 600 }}>
@@ -522,7 +522,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                         ),
                       )}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
+                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
                   </button>
                 );
               }
@@ -542,7 +542,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     <PageKindIcon kind="file" size={14} style={{ color: "var(--text-secondary)" }} />
                   </span>
                   <FilePath path={result.file.path} />
-                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.status)}</span>
+                  <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{shortStatus(result.file.status)}</span>
                 </button>
               );
             })
@@ -622,7 +622,7 @@ const metaStyle: CSSProperties = {
   justifyContent: "space-between",
   gap: 12,
   color: "var(--muted)",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
 };
 
 const errorStyle: CSSProperties = {
@@ -663,7 +663,7 @@ const emptyStyle: CSSProperties = {
 const moreStyle: CSSProperties = {
   color: "var(--muted)",
   padding: "6px 10px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontStyle: "italic",
 };
 
@@ -679,13 +679,13 @@ const categoryRowStyle: CSSProperties = {
   fontFamily: "inherit",
   textAlign: "left",
   color: "var(--text-secondary)",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   textTransform: "uppercase",
   letterSpacing: "0.06em",
 };
 
 const badgeStyle: CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   color: "var(--text-secondary)",
   background: "var(--surface-tab-inactive)",
   padding: "1px 6px",

@@ -126,7 +126,7 @@ export function BackgroundTaskIndicator() {
           border: "1px solid var(--border)",
           borderRadius: 4,
           color: "var(--fg)",
-          fontSize: 11,
+          fontSize: "var(--text-xs)",
           cursor: "pointer",
           maxWidth: 240,
         }}
@@ -156,7 +156,7 @@ export function BackgroundTaskIndicator() {
           }}
         >
           <div style={{
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             color: "var(--muted)",
             padding: "4px 6px 6px",
             borderBottom: "1px solid var(--border)",
@@ -187,22 +187,22 @@ function BackgroundTaskRow({ task }: { task: BackgroundTask }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)" }}>
-        <span style={{ color: "var(--muted)", fontSize: 10, minWidth: 80 }}>
+        <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)", minWidth: 80 }}>
           {KIND_LABEL[task.kind]}
         </span>
         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {task.label}
         </span>
         <StatusGlyph status={task.status} />
-        <span style={{ color: "var(--muted)", fontSize: 10 }}>{elapsed}s</span>
+        <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{elapsed}s</span>
       </div>
       {task.detail && (
-        <div style={{ color: "var(--muted)", fontSize: 11, paddingLeft: 86 }}>
+        <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", paddingLeft: 86 }}>
           {task.detail}
         </div>
       )}
       {task.error && (
-        <div style={{ color: "#fca5a5", fontSize: 11, paddingLeft: 86 }}>
+        <div style={{ color: "#fca5a5", fontSize: "var(--text-xs)", paddingLeft: 86 }}>
           {task.error}
         </div>
       )}

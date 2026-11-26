@@ -2524,7 +2524,7 @@ const groupHeadingStyle: CSSProperties = {
   alignItems: "center",
   gap: 6,
   padding: "10px 0 4px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   color: "var(--text-secondary)",
   textTransform: "uppercase",
@@ -2537,7 +2537,7 @@ const groupActionStyle: CSSProperties = {
   color: "var(--text-muted)",
   cursor: "pointer",
   font: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textTransform: "none",
 };
 const linkStyle: CSSProperties = {

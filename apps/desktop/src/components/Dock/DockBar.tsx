@@ -59,7 +59,7 @@ function DockButton({ panel, active }: { panel: DockPanelDef; active: boolean })
             minWidth: 14,
             padding: "0 4px",
             borderRadius: 7,
-            fontSize: 10,
+            fontSize: "var(--text-xs)",
             lineHeight: "14px",
             fontWeight: 600,
             textAlign: "center",

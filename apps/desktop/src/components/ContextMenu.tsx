@@ -319,7 +319,7 @@ const checkStyle: CSSProperties = {
 
 const shortcutStyle: CSSProperties = {
   color: "var(--muted)",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   flexShrink: 0,
 };
 

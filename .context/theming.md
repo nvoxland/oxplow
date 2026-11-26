@@ -201,6 +201,10 @@ a test may set it itself), which makes both 44px and the two smallest text
 sizes a step bigger (`--text-xs` 13px, `--text-sm` 14px). A control sized
 for a finger uses `--control-height` / `--hit-min`, never a pixel literal;
 custom component frames get the same values with the other tokens.
+The kit's icon buttons and items, its buttons (`min-height`), its param rows
+and the page nav bar's buttons read these tokens. `src/touch.guard.test.ts`
+fails on a pixel font size of 12 or less in the page layer (`viz`, `kit`,
+`pages`, `tabs`, `components`, the kit sheet): use a `var(--text-*)` token.
 
 ## Spacing and radius
 

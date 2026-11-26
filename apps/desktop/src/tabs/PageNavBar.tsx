@@ -230,7 +230,7 @@ export function PageNavBar({
                     background: "transparent",
                     padding: "2px 4px",
                     marginLeft: 2,
-                    fontSize: 11,
+                    fontSize: "var(--text-xs)",
                     color: "var(--text-secondary)",
                     fontVariantNumeric: "tabular-nums",
                     cursor: "pointer",
@@ -265,7 +265,7 @@ export function PageNavBar({
                       <div
                         style={{
                           padding: "4px 8px 6px",
-                          fontSize: 10,
+                          fontSize: "var(--text-xs)",
                           textTransform: "uppercase",
                           letterSpacing: 0.4,
                           color: "var(--text-secondary)",
@@ -307,7 +307,7 @@ export function PageNavBar({
                               flexShrink: 0,
                               width: 28,
                               color: "var(--text-secondary)",
-                              fontSize: 11,
+                              fontSize: "var(--text-xs)",
                               textAlign: "right",
                             }}
                           >
@@ -334,7 +334,7 @@ export function PageNavBar({
                 data-testid="page-nav-sibling-indicator"
                 title={siblings.indicatorTitle}
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-secondary)",
                   marginLeft: 2,
                   fontVariantNumeric: "tabular-nums",
@@ -443,7 +443,7 @@ export function PageNavBar({
                   Bookmarked at other values: update that bookmark
                 </button>
               ) : null}
-              <div style={{ padding: "4px 6px", fontSize: 11, color: "var(--muted)" }} data-testid="page-nav-bookmark-heading">
+              <div style={{ padding: "4px 6px", fontSize: "var(--text-xs)", color: "var(--muted)" }} data-testid="page-nav-bookmark-heading">
                 Bookmark for:
               </div>
               {VISIBILITY_SCOPES.map((scope) => {
@@ -508,10 +508,10 @@ function navButtonStyle(enabled: boolean): React.CSSProperties {
     cursor: enabled ? "pointer" : "default",
     opacity: enabled ? 1 : 0.4,
     fontSize: "var(--text-sm)",
-    minWidth: 28,
+    minWidth: "var(--control-height)",
     // One height for every control in the bar, its glyph, icon or label
     // centered: a text button and an icon-only one line up.
-    height: 28,
+    height: "var(--control-height)",
     boxSizing: "border-box",
     display: "inline-flex",
     alignItems: "center",

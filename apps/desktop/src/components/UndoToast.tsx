@@ -123,7 +123,7 @@ const actionStyle: CSSProperties = {
   borderRadius: 4,
   padding: "3px 8px",
   fontFamily: "inherit",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 

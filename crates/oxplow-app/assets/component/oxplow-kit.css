@@ -116,6 +116,7 @@
   background: var(--button-secondary-bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
+  min-height: var(--hit-min);
   padding: 2px var(--space-3);
   cursor: pointer;
 }
@@ -125,7 +126,7 @@
 .ox-button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* A row's icon button (a table row whose click opens a form): quiet until
    the row is hovered or it is focused. */
-.ox-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.ox-icon-button { width: var(--hit-min); height: var(--hit-min); display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
 tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-primary); border-color: var(--border-subtle); background: var(--surface-elevated); }
 .ox-icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* A row's ☰ (its menu): always shown, so a touch screen sees where a row's
@@ -343,7 +344,7 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   align-items: center;
   gap: var(--space-2);
-  min-height: 28px;
+  min-height: var(--control-height);
   font-size: var(--text-sm);
 }
 /* A long label wraps; it is never cut off. */
@@ -548,5 +549,5 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 
 /* `viz: icons`: a row as its icon alone, side by side (a rail panel's
    collapsed view). Its value is the hover. */
-.ox-icon-item { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; background: var(--surface-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
+.ox-icon-item { width: var(--hit-min); height: var(--hit-min); display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; background: var(--surface-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
 .ox-icon-item:hover { color: var(--text-primary); border-color: var(--border-strong); }

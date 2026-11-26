@@ -81,31 +81,9 @@ test("no drag MIME literal outside dragMimes.ts (ratchet)", () => {
 const LAYER = ["viz", "kit", "pages", "tabs", "components"].map((d) => join(SRC, d));
 const KIT_SHEET = join(ROOT, "..", "..", "crates/oxplow-app/assets/component/oxplow-kit.css");
 const SMALL_FONT = /font-?[sS]ize: *["']?([0-9]|1[0-2])(\.[0-9]+)?(px)?["']?[,; }]/;
-/** Small pixel font sizes still to move onto tokens (file -> count). */
-const FONT_KEPT: Record<string, number> = {
-  "components/Analytics/DailyBarChart.tsx": 1,
-  "components/BackgroundTaskIndicator.tsx": 6,
-  "components/BranchPicker.tsx": 9,
-  "components/ContextMenu.tsx": 1,
-  "components/Diff/DiffPane.tsx": 2,
-  "components/Dock/DockBar.tsx": 1,
-  "components/EditorPane.tsx": 3,
-  "components/ErrorBoundary.tsx": 2,
-  "components/Git/GitDialogs.tsx": 2,
-  "components/InlineConfirm.tsx": 3,
-  "components/InlinePromptStrip.tsx": 4,
-  "components/Markdown/FencedBlock.tsx": 1,
-  "components/Markdown/mermaidRender.ts": 2,
-  "components/QuickOpenOverlay.tsx": 13,
-  "components/RailHud/RailHud.tsx": 6,
-  "components/RefBadge.tsx": 1,
-  "components/TitleBar.tsx": 1,
-  "components/UndoToast.tsx": 1,
-  "tabs/BacklinksList.tsx": 4,
-  "tabs/Page.tsx": 1,
-  "tabs/PageNavBar.tsx": 5,
-  "viz/VizView.tsx": 2,
-};
+/** Small pixel font sizes still to move onto tokens (file -> count). Empty:
+ *  add nothing here, use a `var(--text-*)` token. */
+const FONT_KEPT: Record<string, number> = {};
 
 test("no font size of 12px or less in the page layer (ratchet)", () => {
   const files = LAYER.flatMap((d) => sources(d));

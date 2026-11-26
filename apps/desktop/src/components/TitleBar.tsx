@@ -173,7 +173,7 @@ const searchStyle: CSSProperties = {
 };
 
 const kbdStyle: CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   color: "var(--text-muted)",
   background: "var(--surface-tab-inactive)",
   padding: "0 5px",

@@ -26,7 +26,7 @@ export function RefBadge({ label, tone, color, title }: { label: string; tone: R
         border: "1px solid",
         borderRadius: 999,
         padding: "0 6px",
-        fontSize: 10,
+        fontSize: "var(--text-xs)",
         lineHeight: "14px",
         flexShrink: 0,
         fontFamily: tone === "sha" ? "var(--mono, monospace)" : undefined,

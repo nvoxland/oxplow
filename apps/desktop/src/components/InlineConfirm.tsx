@@ -131,7 +131,7 @@ const defaultTriggerStyle: CSSProperties = {
   color: "var(--fg)",
   borderRadius: 4,
   padding: "4px 8px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 
@@ -147,7 +147,7 @@ const destructiveButtonStyle: CSSProperties = {
   border: "1px solid #b91c1c",
   borderRadius: 4,
   padding: "4px 8px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 
@@ -157,6 +157,6 @@ const cancelButtonStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 4,
   padding: "4px 8px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };

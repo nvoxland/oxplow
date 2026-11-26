@@ -95,9 +95,9 @@ export function BacklinksList({
             {entry.label}
           </span>
           {entry.subtitle ? (
-            <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{entry.subtitle}</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{entry.subtitle}</span>
           ) : (
-            <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>commit</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>commit</span>
           )}
         </button>
       ))}
@@ -128,7 +128,7 @@ export function BacklinksList({
                 {entry.label}
               </span>
               {entry.subtitle ? (
-                <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{entry.subtitle}</span>
+                <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{entry.subtitle}</span>
               ) : null}
             </div>
           );
@@ -159,7 +159,7 @@ export function BacklinksList({
             {entry.label}
           </span>
           {entry.subtitle ? (
-            <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{entry.subtitle}</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{entry.subtitle}</span>
           ) : null}
         </button>
         );

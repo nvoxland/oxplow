@@ -690,7 +690,7 @@ function BlameOverlay({
         height: "100%",
         overflow: "hidden",
         fontFamily: "var(--font-mono)",
-        fontSize: 11,
+        fontSize: "var(--text-xs)",
         userSelect: "none",
         zIndex: 3,
       }}
@@ -797,7 +797,7 @@ const lspStatusStyle: CSSProperties = {
   border: "1px solid var(--border)",
   background: "var(--surface-hint)",
   color: "var(--muted)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   zIndex: 5,
   display: "flex",
   alignItems: "center",
@@ -805,7 +805,7 @@ const lspStatusStyle: CSSProperties = {
 };
 
 const lspInstallButtonStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   padding: "2px 6px",
   borderRadius: 3,
   border: "1px solid var(--border)",

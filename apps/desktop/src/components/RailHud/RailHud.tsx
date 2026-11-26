@@ -378,7 +378,7 @@ function RailSection({
           style={{
             cursor: "grab",
             color: "var(--text-muted)",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
             lineHeight: 1,
             padding: "0 2px",
             flexShrink: 0,
@@ -404,7 +404,7 @@ function RailSection({
             cursor: "pointer",
             padding: 0,
             textAlign: "left",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 600,
             color: titleColor,
             textTransform: "uppercase",
@@ -425,7 +425,7 @@ function RailSection({
             </span>
           ) : null}
           {count != null && count > 0 ? (
-            <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500 }}>{count}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", fontWeight: 500 }}>{count}</span>
           ) : null}
         </button>
         {headerAction}
@@ -555,7 +555,7 @@ export function RailHud({
                 margin: "2px 6px 6px",
                 padding: "10px 6px",
                 textAlign: "center",
-                fontSize: 11,
+                fontSize: "var(--text-xs)",
                 color: "var(--text-muted)",
                 borderRadius: 6,
                 border: `1px dashed ${sections.groupDropTarget === "remove" ? "var(--accent)" : "var(--border-subtle)"}`,
@@ -597,7 +597,7 @@ function GroupDivider({
         display: "flex",
         alignItems: "center",
         gap: 6,
-        fontSize: 10,
+        fontSize: "var(--text-xs)",
         fontWeight: 600,
         textTransform: "uppercase",
         letterSpacing: 0.4,
@@ -817,7 +817,7 @@ function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(val
               borderRadius: 4,
               color: active ? "var(--text-primary)" : "var(--text-secondary)",
               cursor: active ? "default" : "pointer",
-              fontSize: 10,
+              fontSize: "var(--text-xs)",
               padding: Icon ? "2px 3px" : "0 4px",
               display: "inline-flex",
               alignItems: "center",

@@ -77,7 +77,7 @@ export class ErrorBoundary extends Component<Props, State> {
         {error.stack ? (
           <details style={{ marginBottom: 12 }}>
             <summary style={{ cursor: "pointer", color: "var(--text-secondary)" }}>Stack</summary>
-            <pre style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.4 }}>
+            <pre style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: "var(--text-xs)", lineHeight: 1.4 }}>
               {error.stack}
             </pre>
           </details>
@@ -85,7 +85,7 @@ export class ErrorBoundary extends Component<Props, State> {
         {info?.componentStack ? (
           <details>
             <summary style={{ cursor: "pointer", color: "var(--text-secondary)" }}>Component stack</summary>
-            <pre style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.4 }}>
+            <pre style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: "var(--text-xs)", lineHeight: 1.4 }}>
               {info.componentStack}
             </pre>
           </details>

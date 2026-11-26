@@ -43,7 +43,7 @@ const toolbarButtonStyle: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 3,
   padding: "2px 8px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 
@@ -240,7 +240,7 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11, display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: "var(--text-xs)", display: "flex", gap: 8, alignItems: "center" }}>
         <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--fg)" }}>{spec.path}</span>
         <span>vs {spec.baseLabel}</span>
         {error ? <span style={{ color: "#ff6b6b" }}>{error}</span> : null}

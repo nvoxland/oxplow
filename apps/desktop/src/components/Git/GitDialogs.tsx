@@ -282,7 +282,7 @@ const STATUS_MARK: Record<GitStatusEntry["status"], string> = {
 
 const listStyle: CSSProperties = { maxHeight: "50vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 };
 const sectionStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   color: "var(--muted)",
   padding: "6px 8px 2px",
   textTransform: "uppercase",
@@ -302,7 +302,7 @@ const choiceStyle: CSSProperties = {
   textAlign: "left",
   cursor: "pointer",
 };
-const detailStyle: CSSProperties = { color: "var(--muted)", fontSize: 11, flexShrink: 0 };
+const detailStyle: CSSProperties = { color: "var(--muted)", fontSize: "var(--text-xs)", flexShrink: 0 };
 const rowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "3px 8px", fontSize: "var(--text-xs)" };
 const statusStyle: CSSProperties = { width: 12, color: "var(--muted)", fontFamily: "var(--font-mono)" };
 const nameStyle: CSSProperties = {
