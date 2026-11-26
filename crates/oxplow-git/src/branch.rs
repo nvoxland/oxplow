@@ -44,6 +44,10 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
     let mut out = Vec::new();
     for branch in branches.flatten() {
         let (b, ty) = branch;
+        // A remote's `HEAD` points at one of its branches: it is no branch.
+        if b.get().kind() == Some(git2::ReferenceType::Symbolic) {
+            continue;
+        }
         let Ok(Some(short)) = b.name() else { continue };
         let short = short.to_string();
         // A local branch's upstream, and how far the two have parted.
@@ -88,12 +92,14 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
                 time,
             }),
             git2::BranchType::Remote => {
-                let (remote, name) = split_remote(&short);
+                let Some((remote, name)) = split_remote_ref(&repo, &full) else {
+                    continue;
+                };
                 out.push(BranchRef {
                     kind: BranchRefKind::Remote,
-                    name: name.to_string(),
+                    name,
                     ref_: full,
-                    remote: Some(remote.to_string()),
+                    remote: Some(remote),
                     head,
                     upstream: None,
                     ahead: 0,
@@ -107,11 +113,32 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
     out
 }
 
-fn split_remote(short: &str) -> (&str, &str) {
-    match short.split_once('/') {
-        Some((r, n)) => (r, n),
-        None => ("", short),
-    }
+/// A remote-tracking ref (`refs/remotes/team/fork/x`) as its remote and
+/// its branch (`team/fork`, `x`). The remote is the one git's config says
+/// fetches into the ref, else the longest configured remote name it starts
+/// with, else its first segment (a ref left by a remote since removed): a
+/// remote's name may hold `/`, so the first `/` is no boundary.
+pub fn split_remote_ref(repo: &git2::Repository, full: &str) -> Option<(String, String)> {
+    let short = full.strip_prefix("refs/remotes/")?;
+    let configured = repo
+        .branch_remote_name(full)
+        .ok()
+        .and_then(|b| b.as_str().ok().map(str::to_string));
+    let prefixed = || {
+        repo.remotes().ok().and_then(|names| {
+            names
+                .iter()
+                .filter_map(|r| r.ok().flatten())
+                .filter(|r| short.starts_with(&format!("{r}/")))
+                .max_by_key(|r| r.len())
+                .map(str::to_string)
+        })
+    };
+    let remote = configured
+        .or_else(prefixed)
+        .or_else(|| short.split_once('/').map(|(r, _)| r.to_string()))?;
+    let name = short.strip_prefix(remote.as_str())?.strip_prefix('/')?;
+    Some((remote, name.to_string()))
 }
 
 #[cfg(test)]
@@ -141,6 +168,44 @@ mod tests {
             b.iter()
                 .all(|r| r.subject.as_deref() == Some("init") && r.time.is_some_and(|t| t > 0)),
             "{b:?}"
+        );
+    }
+
+    /// A remote is named by git's config, not by the first `/`: a branch of
+    /// remote `team/fork` is its `x`, not remote `team`'s `fork/x`. A
+    /// remote's `HEAD` points at a branch and is no branch itself.
+    #[test]
+    fn a_remote_branch_is_split_at_its_remotes_name() {
+        let dir = init_repo();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        repo.remote("team/fork", "https://example.invalid/fork.git")
+            .unwrap();
+        repo.remote("origin", "https://example.invalid/origin.git")
+            .unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap().id();
+        repo.reference("refs/remotes/team/fork/x", head, false, "")
+            .unwrap();
+        repo.reference("refs/remotes/origin/feature/y", head, false, "")
+            .unwrap();
+        repo.reference_symbolic(
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/feature/y",
+            false,
+            "",
+        )
+        .unwrap();
+        let mut remote: Vec<(String, String)> = list_branches(dir.path())
+            .into_iter()
+            .filter(|b| b.kind == BranchRefKind::Remote)
+            .map(|b| (b.remote.unwrap(), b.name))
+            .collect();
+        remote.sort();
+        assert_eq!(
+            remote,
+            vec![
+                ("origin".to_string(), "feature/y".to_string()),
+                ("team/fork".to_string(), "x".to_string())
+            ]
         );
     }
 

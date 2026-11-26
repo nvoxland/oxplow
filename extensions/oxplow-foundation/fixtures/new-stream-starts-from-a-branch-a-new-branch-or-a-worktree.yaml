@@ -14,7 +14,6 @@ given:
           - { name: main, head: $base.rev, stream: 1, default: true, subject: base, committed_at: "2026-11-20T10:00:00Z" }
           - { name: feat, head: $base.rev, upstream: origin/feat, ahead: 2, behind: 1, subject: base, committed_at: "2026-11-21T10:00:00Z" }
           - { name: feat, kind: remote, remote: origin, head: $base.rev, subject: base }
-          - { name: HEAD, kind: remote, remote: origin, head: $base.rev }
           - { name: theirs, kind: remote, remote: origin, head: $base.rev, subject: their work, committed_at: "2026-11-22T10:00:00Z" }
 when: { page: new-stream }
 expect:
