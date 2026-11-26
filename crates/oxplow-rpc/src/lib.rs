@@ -281,6 +281,7 @@ macro_rules! oxplow_command_table {
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> oxplow_app::client_reports::TabReportAnswer,
                 // each device's tabs of each thread (`.context/data-model.md` "tab_session")
                 list_tab_sessions => $crate::commands::tabs::list_tab_sessions {} -> Vec<::oxplow_db::tab_session_store::TabSession>,
+                list_other_device_tabs => $crate::commands::tabs::list_other_device_tabs { thread_id: ::oxplow_domain::ThreadId } -> Vec<$crate::commands::tabs::OtherDeviceTabs>,
                 save_tab_session => $crate::commands::tabs::save_tab_session { thread_id: ::oxplow_domain::ThreadId, session_json: String, revision: Option<::oxplow_db::tab_session_store::TabRevision> } -> ::oxplow_db::tab_session_store::TabSave,
                 forget_tab_session => $crate::commands::tabs::forget_tab_session { thread_id: ::oxplow_domain::ThreadId } -> (),
                 // the tabs agents opened for this device while it was away (`.context/remote-daemon.md` "An agent's tab on a device")

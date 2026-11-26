@@ -164,6 +164,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::page_action_form,
             commands::generated::report_tabs,
             commands::generated::list_tab_sessions,
+            commands::generated::list_other_device_tabs,
             commands::generated::save_tab_session,
             commands::generated::forget_tab_session,
             commands::generated::list_queued_tabs,

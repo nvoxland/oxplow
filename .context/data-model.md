@@ -439,7 +439,10 @@ device's own (migration V82; the device is the request's caller,
   256 KB. A save gives the revision it read (`TabSessionStore::save`) and is
   refused when the row moved on; a thread that goes takes its tabs. A thread
   this device has no row for, with no agent session, opens the session
-  picker on it (the new-thread signal, per device).
+  picker on it (the new-thread signal, per device). Another device's rows of
+  a thread are read by `list_other_device_tabs` (Continue from <device>:
+  never the caller's own, the device used last first), once, when the
+  person asks.
 
 - `tab_queued(id, device_id, thread_id, uri, queued_at, UNIQUE (device_id,
   thread_id, uri))` (V87, the unique key V88): a tab an agent opened for a

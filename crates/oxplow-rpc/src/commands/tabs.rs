@@ -33,6 +33,46 @@ pub async fn list_tab_sessions(req: &RpcRequest<'_>) -> Result<Vec<TabSession>, 
     }
 }
 
+/// Another device's stored tabs of a thread: which device, its name when
+/// the daemon knows it, and its session as it keeps it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherDeviceTabs {
+    pub device: String,
+    pub name: Option<String>,
+    pub session_json: String,
+}
+
+/// The other devices' tabs of `thread_id` (Continue from <device>): every
+/// device's but the caller's, the one the person used last first, then by
+/// id.
+pub async fn list_other_device_tabs(
+    req: &RpcRequest<'_>,
+    thread_id: ThreadId,
+) -> Result<Vec<OtherDeviceTabs>, IpcError> {
+    let mine = req.caller.map(|c| c.device.clone());
+    let used = req.client_devices.last_used().map(|(d, _)| d);
+    let mut out: Vec<(bool, OtherDeviceTabs)> = req
+        .tab_session_store
+        .list_all()
+        .await?
+        .into_iter()
+        .filter(|(device, row)| row.thread_id == thread_id && Some(device) != mine.as_ref())
+        .map(|(device, row)| {
+            (
+                Some(&device) == used.as_ref(),
+                OtherDeviceTabs {
+                    name: req.client_devices.get(&device).map(|d| d.name),
+                    device: device.as_str().to_string(),
+                    session_json: row.session_json,
+                },
+            )
+        })
+        .collect();
+    out.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.device.cmp(&b.1.device)));
+    Ok(out.into_iter().map(|(_, tabs)| tabs).collect())
+}
+
 /// Keep `session_json` as the caller device's tabs of `thread_id`, if they
 /// are still at `revision` (the one it read; `None` for a thread it has no
 /// tabs of yet). When they moved on since, nothing is written and the
@@ -314,6 +354,67 @@ mod tests {
             ask("list_tab_sessions", json!({}), Some(&mac))
                 .await
                 .unwrap(),
+            json!([])
+        );
+    }
+
+    /// Continue from another device: the other devices' tabs of a thread,
+    /// never the caller's own, and none of another thread.
+    #[tokio::test]
+    async fn another_devices_tabs_of_a_thread_are_read_for_continue() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .selected_or_first(None, &stream.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .to_string();
+        let mac = crate::test_support::caller();
+        let tablet = oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::generate(),
+            connection: oxplow_domain::ConnectionId::generate(),
+        };
+        let ask = |name: &'static str, args: serde_json::Value, caller: &oxplow_domain::Caller| {
+            let svc = svc.clone();
+            let caller = caller.clone();
+            async move { crate::dispatch_as(name, args, &svc, Some(&caller)).await }
+        };
+        let session = |thread: &str, json: &str| json!({ "threadId": thread, "sessionJson": json, "revision": null });
+        ask(
+            "save_tab_session",
+            session(&thread, "{\"tabs\":[\"mac\"]}"),
+            &mac,
+        )
+        .await
+        .unwrap();
+        ask(
+            "save_tab_session",
+            session(&thread, "{\"tabs\":[\"tablet\"]}"),
+            &tablet,
+        )
+        .await
+        .unwrap();
+        let other = ask(
+            "list_other_device_tabs",
+            json!({ "threadId": thread }),
+            &tablet,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            other,
+            json!([{ "device": mac.device.as_str(), "name": null, "sessionJson": "{\"tabs\":[\"mac\"]}" }])
+        );
+        assert_eq!(
+            ask(
+                "list_other_device_tabs",
+                json!({ "threadId": "thr999" }),
+                &tablet
+            )
+            .await
+            .unwrap(),
             json!([])
         );
     }

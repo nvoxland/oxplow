@@ -2,6 +2,7 @@ import { useResourcesLoader } from "./resources.js";
 import { useLayoutItems, useShellKind } from "./shells/shellChoice.js";
 import { PanelTray, PinnedPanel } from "./shells/PanelTray.js";
 import { shellMenu, withLayouts } from "./shells/shellMenu.js";
+import { continueItems } from "./window/continueFrom.js";
 import type { ShellWindow } from "./shells/shellWindow.js";
 import { TabletShell } from "./shells/TabletShell.js";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -10,6 +11,7 @@ import {
   type AgentStatus,
   type AgentStatusEntry,
   desktopBridge,
+  listOtherDeviceTabs,
   probeDaemon,
   runCommand,
   type SqlCell,
@@ -671,6 +673,7 @@ export function App() {
       ...shellMenu(menuGroups.filter((g) => g.id !== "view")),
       ...(layouts.length > 0 ? [{ id: "shell.menu.layout", label: "Layout", enabled: true, submenu: layouts }] : []),
     ],
+    continueFrom: async () => (selectedThreadId ? continueItems(await listOtherDeviceTabs(selectedThreadId), handleOpenPage) : []),
     tray: <PanelTray dock={<Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />} streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
     aside: <PinnedPanel streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
     gitDialogs: stream ? (

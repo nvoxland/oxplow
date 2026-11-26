@@ -43,6 +43,7 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
     activateTab: (id) => log.push(`activate ${id}`),
     closeTab: (id) => log.push(`close ${id}`),
     reorderTabs: (ids) => log.push(`order ${ids.join(",")}`),
+    continueFrom: async () => [],
     aside: <div data-testid="the-aside" />,
     gitDialogs: <div data-testid="the-git-dialogs" />,
     statusBar: <div data-testid="the-status-bar" />,
@@ -110,9 +111,18 @@ test("the menu holds the menu bar's commands", async () => {
   const w = win();
   const view = render(<TabletShell win={w} />);
   fireEvent.click(view.getByTestId("tablet-menu"));
-  fireEvent.click(view.getByTestId("menu-item-shell.menu.file"));
+  fireEvent.click(await view.findByTestId("menu-item-shell.menu.file"));
   fireEvent.click(await view.findByTestId("menu-item-save"));
   expect(w.log).toEqual(["save"]);
+});
+
+// Continue from another device: read as the menu opens.
+test("the menu has Continue from ▸ another device's pages", async () => {
+  const w = win({ continueFrom: async () => [{ id: "continue.dev-1", label: "Mac", enabled: true, run: () => {} }] });
+  const view = render(<TabletShell win={w} />);
+  fireEvent.click(view.getByTestId("tablet-menu"));
+  fireEvent.click(await view.findByTestId("menu-item-shell.menu.continue"));
+  expect((await view.findByTestId("menu-item-continue.dev-1")).textContent).toContain("Mac");
 });
 
 // The contract: every contribution has a place in each shell, or is a

@@ -5,6 +5,7 @@ import type {
   TabReport,
   TabReportAnswer,
   TabSave,
+  OtherDeviceTabs,
   TabSession,
   QueuedTab,
   HookEnvelope,
@@ -495,6 +496,12 @@ export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
 /// This device's stored tabs of every thread it opened (`tab_session`).
 export async function listTabSessions(): Promise<TabSession[]> {
   return unwrap(await commands.listTabSessions());
+}
+
+/// The other devices' stored tabs of `threadId`, the one used last first
+/// (Continue from <device>).
+export async function listOtherDeviceTabs(threadId: string): Promise<OtherDeviceTabs[]> {
+  return unwrap(await commands.listOtherDeviceTabs(threadId));
 }
 
 /// Keep this device's tabs of `threadId`, if still at `revision` (the one

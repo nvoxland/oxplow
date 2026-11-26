@@ -92,7 +92,13 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
           data-testid="tablet-menu"
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
-            commands.openAt({ x: r.left, y: r.bottom + 2 }, win.menu);
+            // Continue from ▸ is read as the menu opens; without it (none,
+            // or the read failed) the menu is the rest.
+            const items = win
+              .continueFrom()
+              .then((devices) => (devices.length > 0 ? [...win.menu, { id: "shell.menu.continue", label: "Continue from", enabled: true, submenu: devices }] : win.menu))
+              .catch(() => win.menu);
+            commands.openAt({ x: r.left, y: r.bottom + 2 }, items);
           }}
         >
           <MenuGlyph size={16} aria-hidden />

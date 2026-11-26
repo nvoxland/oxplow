@@ -142,6 +142,10 @@ that hides a feature.
   Find, the extensions' `ui.menu` ones) as File ▸ and Edit ▸ (`shellMenu`:
   the OS's own edit items left out). View is not there: it is the rail's
   panels, and this shell has its tray.
+  The ☰ also has **Continue from ▸ <device>** when another device has pages
+  open in the shown thread (`window/continueFrom.ts`, read as the menu
+  opens): it opens that device's page tabs here, its shown one last. The
+  two devices share nothing after; agent sessions show on both already.
   The **tray** (`shells/PanelTray.tsx`) is the rail's panels in the
   device's rail order (`usePanelLayout`), each a button with its icon, name
   and count, then the dock's bar. A tap opens the panel as a sheet (its

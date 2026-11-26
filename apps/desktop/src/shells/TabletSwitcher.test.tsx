@@ -39,6 +39,7 @@ function win(log: string[]): ShellWindow {
     activateTab: say("activate"),
     closeTab: say("close"),
     reorderTabs: say("order"),
+    continueFrom: async () => [],
     aside: null,
     gitDialogs: null,
     statusBar: null,

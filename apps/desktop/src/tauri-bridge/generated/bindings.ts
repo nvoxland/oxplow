@@ -308,6 +308,12 @@ export const commands = {
 	 *  implementation and its docs live on the core. A request
 	 *  over Tauri IPC names no caller.
 	 */
+	listOtherDeviceTabs: (threadId: ThreadId) => typedError<OtherDeviceTabs[], IpcError_Serialize>(__TAURI_INVOKE("list_other_device_tabs", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
 	saveTabSession: (threadId: ThreadId, sessionJson: string, revision: number | null) => typedError<TabSave, IpcError_Serialize>(__TAURI_INVOKE("save_tab_session", { threadId, sessionJson, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -4561,6 +4567,16 @@ export type OpenedRun_Serialize = {
 	 *  again as it re-runs); none for a page.
 	 */
 	panel: PartView_Serialize | null,
+};
+
+/**
+ *  Another device's stored tabs of a thread: which device, its name when
+ *  the daemon knows it, and its session as it keeps it.
+ */
+export type OtherDeviceTabs = {
+	device: string,
+	name: string | null,
+	sessionJson: string,
 };
 
 /**  Who contributed it. */

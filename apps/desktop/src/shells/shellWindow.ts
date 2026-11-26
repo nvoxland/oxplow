@@ -45,6 +45,9 @@ export interface ShellWindow {
   /** The menu bar's commands (Save, Find, the extensions' `ui.menu` ones)
    *  for a shell with no menu bar: File ▸, Edit ▸ (`shellMenu`). */
   menu: MenuItem[];
+  /** Continue from <device>: one item per other device with pages open in
+   *  the shown thread, read as the menu opens (`continueItems`). */
+  continueFrom(): Promise<MenuItem[]>;
   /** The window's panels as a tray (`PanelTray`: the rail's panels, then
    *  the dock), for a shell with no rail. */
   tray: ReactNode;
