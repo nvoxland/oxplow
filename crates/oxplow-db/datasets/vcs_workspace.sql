@@ -1,3 +1,5 @@
 SELECT CAST(NULL AS TEXT) AS path, CAST(NULL AS TEXT) AS branch, CAST(NULL AS TEXT) AS head,
-       CAST(NULL AS INTEGER) AS is_main, CAST(NULL AS INTEGER) AS stream_id
+       CAST(NULL AS INTEGER) AS is_main, CAST(NULL AS INTEGER) AS stream_id,
+       CAST(NULL AS TEXT) AS subject, CAST(NULL AS TEXT) AS committed_at,
+       CAST(NULL AS INTEGER) AS changes
 WHERE 0

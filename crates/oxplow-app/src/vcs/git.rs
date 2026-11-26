@@ -699,6 +699,8 @@ impl Vcs for GitProvider {
                     upstream: b.upstream,
                     ahead: b.ahead,
                     behind: b.behind,
+                    subject: b.subject,
+                    time: b.time,
                 })
                 .collect())
         })

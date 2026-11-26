@@ -166,6 +166,11 @@ pub struct Branch {
     pub ahead: u32,
     /// Commits its upstream has that the branch lacks; 0 without one.
     pub behind: u32,
+    /// Its head revision's subject (the message's first line).
+    pub subject: Option<String>,
+    /// When its head revision was made, in seconds since the Unix epoch.
+    #[specta(type = Option<crate::JsNumber>)]
+    pub time: Option<i64>,
 }
 
 /// A tag: a name fixed to one revision.

@@ -353,7 +353,7 @@ datasets:
     - { unique: id }
     - { not_null: uri }
 - name: branch
-  version: 2
+  version: 3
   description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."
   fields:
     - { name: "name", type: "TEXT", doc: "Branch name (without the remote)." }
@@ -366,6 +366,8 @@ datasets:
     - { name: "upstream", type: "TEXT", doc: "For a local branch that tracks one, its remote-tracking branch (`origin/main`); NULL otherwise. (v2)" }
     - { name: "ahead", type: "INTEGER", doc: "Commits a local branch has that its upstream lacks; 0 without an upstream and for a remote-tracking branch. (v2)" }
     - { name: "behind", type: "INTEGER", doc: "Commits a local branch's upstream has that it lacks; 0 without an upstream and for a remote-tracking branch. (v2)" }
+    - { name: "subject", type: "TEXT", doc: "Its head commit's subject (the message's first line). (v3)" }
+    - { name: "committed_at", type: "TEXT", doc: "When its head commit was made (RFC 3339). (v3)" }
 - name: branch_divergence
   version: 1
   key: [base, head, stream_id]
@@ -1831,7 +1833,7 @@ datasets:
     - { not_null: name }
     - { unique: name }
 - name: vcs_workspace
-  version: 1
+  version: 2
   key: [path]
   description: "The repository's working copies (git worktrees), the primary one first, with the stream working in each. Read live when a query names it. A working copy no stream uses — `WHERE NOT is_main AND stream_id IS NULL` — is what a new stream can adopt."
   fields:
@@ -1840,6 +1842,9 @@ datasets:
     - { name: "head", type: "TEXT", doc: "The commit it is at." }
     - { name: "is_main", type: "INT", doc: "1 for the repository's primary working copy." }
     - { name: "stream_id", type: "INT", doc: "The stream working in it (v_stream.id); NULL when none does." }
+    - { name: "subject", type: "TEXT", doc: "Its head commit's subject; NULL when it can't be read. (v2)" }
+    - { name: "committed_at", type: "TEXT", doc: "When its head commit was made (RFC 3339). (v2)" }
+    - { name: "changes", type: "INT", doc: "How many files differ from its head (changed, added, untracked), as of the read. (v2)" }
   tests:
     - { not_null: path }
     - { unique: path }
