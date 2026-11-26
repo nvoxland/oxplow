@@ -181,6 +181,57 @@ pub fn start_own_host(mut host: Command) -> Result<OwnHost, ClientError> {
     }
 }
 
+/// The owner socket of the host for `config_dir` (`serve` makes it, mode
+/// 0600): the CLI's way to the running host.
+pub fn owner_socket_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("host.sock")
+}
+
+/// `method path` on the running host, as its owner, over the owner socket;
+/// the JSON answer, or the host's words. **Blocking.**
+#[cfg(unix)]
+pub fn owner_call(
+    config_dir: &Path,
+    method: &str,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    use std::io::Read;
+    let socket = owner_socket_path(config_dir);
+    let mut stream = std::os::unix::net::UnixStream::connect(&socket)
+        .map_err(|e| format!("no host runs for this home ({}): {e}", socket.display()))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .map_err(|e| e.to_string())?;
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).map_err(|e| e.to_string())?;
+    let answer = String::from_utf8_lossy(&answer);
+    let (head, body) = answer
+        .split_once("\r\n\r\n")
+        .ok_or("the host's answer was cut short")?;
+    let ok = head
+        .split_whitespace()
+        .nth(1)
+        .is_some_and(|code| code.starts_with('2'));
+    let value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+    if ok {
+        Ok(value)
+    } else {
+        Err(value["error"]
+            .as_str()
+            .map_or_else(|| body.trim().to_string(), str::to_string))
+    }
+}
+
+#[cfg(not(unix))]
+pub fn owner_call(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
+    Err("the CLI reaches a host over a Unix socket, which this system lacks".into())
+}
+
 fn new_token() -> String {
     format!(
         "{}{}",
@@ -324,7 +375,12 @@ mod tests {
         let stop = Arc::new(tokio::sync::Notify::new());
         let app = crate::web::app(crate::web::ServeConfig {
             host: fx.host.clone(),
-            token: token.into(),
+            access: crate::access::Access::new(
+                token.into(),
+                crate::devices::Devices::open(&fx.home()).unwrap(),
+                Duration::from_millis(10),
+            ),
+            listener: crate::access::Listener::Loopback,
             ui_dir: None,
             allow_hosts: vec![],
             boot_wait: Duration::from_secs(5),

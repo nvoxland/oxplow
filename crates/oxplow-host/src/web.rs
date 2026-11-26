@@ -25,8 +25,10 @@ use crate::{api, proxy, ui};
 /// What `serve` is told.
 pub struct ServeConfig {
     pub host: Arc<Host>,
-    /// The host token, until pairing gives each device its own.
-    pub token: String,
+    /// The owner token and the paired devices, shared by every listener.
+    pub access: Arc<crate::access::Access>,
+    /// Which listener this router serves: whose tokens are good on it.
+    pub listener: crate::access::Listener,
     /// The built UI (`apps/desktop/dist`), read at run time. `None`: no UI.
     pub ui_dir: Option<PathBuf>,
     /// Names, besides loopback, a request may reach the host by.
@@ -61,7 +63,8 @@ impl Scheme {
 #[derive(Clone)]
 pub(crate) struct Web {
     pub host: Arc<Host>,
-    pub token: Arc<str>,
+    pub access: Arc<crate::access::Access>,
+    pub listener: crate::access::Listener,
     pub ui_dir: Option<Arc<PathBuf>>,
     pub allow_hosts: Arc<Vec<String>>,
     pub boot_wait: Duration,
@@ -72,8 +75,9 @@ pub(crate) struct Web {
 pub fn app(cfg: ServeConfig) -> Router {
     let web = Web {
         host: cfg.host.clone(),
-        token: cfg.token.clone().into(),
-        ui_dir: cfg.ui_dir.map(Arc::new),
+        access: cfg.access.clone(),
+        listener: cfg.listener,
+        ui_dir: cfg.ui_dir.clone().map(Arc::new),
         allow_hosts: Arc::new(
             cfg.allow_hosts
                 .iter()
@@ -91,16 +95,22 @@ pub fn app(cfg: ServeConfig) -> Router {
             .expect("an HTTP client"),
     };
     let project = Router::new()
-        .route("/", get(ui::launcher))
+        .route("/", get(ui::host_home))
         .route("/p/{id}", get(ui::project_redirect))
         .route("/p/{id}/", get(ui::project_page))
         .route("/p/{id}/events", get(proxy::events))
         .route("/p/{id}/{*rest}", any(proxy::rest))
         .fallback(ui::root_file)
         .with_state(web.clone());
-    api::router(cfg.host, cfg.token, cfg.stop)
-        .merge(project)
-        .layer(axum::middleware::from_fn_with_state(web, check_host))
+    api::router(api::ApiConfig {
+        host: cfg.host,
+        access: cfg.access,
+        listener: cfg.listener,
+        stop: cfg.stop,
+        ui_dir: cfg.ui_dir,
+    })
+    .merge(project)
+    .layer(axum::middleware::from_fn_with_state(web, check_host))
 }
 
 /// The lower-case name in a `Host` value, without its port (an IPv6 literal
@@ -311,6 +321,7 @@ mod tests {
         id: String,
         log: Log,
         ui: tempfile::TempDir,
+        access: Arc<crate::access::Access>,
     }
 
     async fn serve(router: Router) -> std::net::SocketAddr {
@@ -338,9 +349,15 @@ mod tests {
             .unwrap();
             std::fs::write(ui.path().join("assets/app.js"), "console.log(1)").unwrap();
             std::fs::write(ui.path().parent().unwrap().join("secret.txt"), "no").ok();
+            let access = crate::access::Access::new(
+                HOST_TOKEN.into(),
+                crate::devices::Devices::open(&fx.home()).unwrap(),
+                Duration::from_millis(10),
+            );
             let app = app(ServeConfig {
                 host: fx.host.clone(),
-                token: HOST_TOKEN.into(),
+                access: access.clone(),
+                listener: crate::access::Listener::Loopback,
                 ui_dir: Some(ui.path().to_path_buf()),
                 allow_hosts: allow.iter().map(|s| s.to_string()).collect(),
                 boot_wait,
@@ -354,6 +371,7 @@ mod tests {
                 id,
                 log,
                 ui,
+                access,
             }
         }
 
@@ -598,6 +616,89 @@ mod tests {
         assert_eq!(frame.reason.as_str(), "replaced");
     }
 
+    /// A paired device is who its token says: whatever device, name or
+    /// kind it gives (in any spelling), the daemon hears its record's, and
+    /// only its page load (`connection`) passes as sent.
+    #[tokio::test]
+    async fn a_device_is_what_its_record_says() {
+        let rig = Rig::running().await;
+        rig.wait_running().await;
+        let (tablet, token) = rig
+            .access
+            .devices
+            .pair("Tab S9", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let echoed: serde_json::Value = http()
+            .post(rig.p("ipc/x"))
+            .bearer_auth(&token)
+            .header("oxplow-device", "dev-the-mac")
+            .header("oxplow-connection", "con-7")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(echoed["device"], tablet.id.as_str());
+        assert_eq!(echoed["connection"], "con-7");
+
+        let mut ws = connect(&rig.ws(&format!(
+            "token={token}&d%65vice=dev-the-mac&device=dev-the-mac&connection=con-7&name=Mac&kind=desktop"
+        )))
+        .await;
+        let Client::Text(first) = next_msg(&mut ws).await else {
+            panic!("the query frame first");
+        };
+        assert!(first.contains(&format!("device={}", tablet.id)), "{first}");
+        assert!(!first.contains("dev-the-mac"), "{first}");
+        assert!(first.contains("connection=con-7"), "{first}");
+        assert!(first.contains("name=Tab+S9"), "{first}");
+        assert!(first.contains("kind=tablet"), "{first}");
+        assert!(!first.contains(&token), "{first}");
+        assert_eq!(
+            rig.access.tunnels.connected()[0].name,
+            "Tab S9",
+            "the host counts it"
+        );
+    }
+
+    /// A removed device's socket closes with a code that says so, and the
+    /// host ending closes every socket with its own.
+    #[tokio::test]
+    async fn the_host_closes_a_removed_devices_socket_and_every_socket_when_it_ends() {
+        let rig = Rig::running().await;
+        rig.wait_running().await;
+        let (tablet, token) = rig
+            .access
+            .devices
+            .pair("Tab S9", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let mut tab = connect(&rig.ws(&format!("token={token}&connection=con-1"))).await;
+        let mut mac = connect(&rig.ws(&format!(
+            "token={HOST_TOKEN}&device=dev-mac&connection=con-2&name=Mac&kind=desktop"
+        )))
+        .await;
+        rig.access.remove_device(&rig.fx.host, &tablet.id).unwrap();
+        let close = loop {
+            if let Client::Close(Some(frame)) = next_msg(&mut tab).await {
+                break frame;
+            }
+        };
+        assert_eq!(
+            u16::from(close.code),
+            crate::access::DEVICE_REMOVED_CLOSE_CODE
+        );
+        rig.access
+            .tunnels
+            .close_all(crate::access::HOST_ENDING_CLOSE_CODE);
+        let close = loop {
+            if let Client::Close(Some(frame)) = next_msg(&mut mac).await {
+                break frame;
+            }
+        };
+        assert_eq!(u16::from(close.code), crate::access::HOST_ENDING_CLOSE_CODE);
+    }
+
     #[tokio::test]
     async fn the_event_socket_needs_the_host_token() {
         let rig = Rig::running().await;
@@ -778,6 +879,11 @@ mod tests {
         let resp = http().get(rig.p("")).send().await.unwrap();
         assert_eq!(resp.status(), 200);
         assert_eq!(resp.headers()["content-type"], "text/html; charset=utf-8");
+        // No other site may frame it (a frame could be clicked through).
+        assert_eq!(
+            resp.headers()["content-security-policy"],
+            "frame-ancestors 'self'"
+        );
         let html = resp.text().await.unwrap();
         let origin = rig.url.trim_start_matches("http://");
         let script = html
@@ -791,7 +897,11 @@ mod tests {
         assert_eq!(ctx["kind"], "project");
         assert_eq!(ctx["project"], rig.id);
         assert_eq!(ctx["base"], format!("http://{origin}/p/{}", rig.id));
-        assert_eq!(ctx["token"], HOST_TOKEN);
+        assert_eq!(ctx["host"], format!("http://{origin}"));
+        // No token: anyone who loads the page would have it. A device uses
+        // the one it got at pairing.
+        assert_eq!(ctx["token"], serde_json::Value::Null);
+        assert!(!html.contains(HOST_TOKEN));
         // First in the head, before any script of the app.
         assert!(html.contains("<head><script>window.__OXPLOW__"), "{html}");
         // Frames may come from the page's own origin.
@@ -870,45 +980,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_root_lists_the_held_projects_and_escapes_their_names() {
+    async fn the_root_is_the_hosts_home_page() {
         let rig = Rig::new("", Duration::from_secs(10), &[]).await;
-        let empty = http()
-            .get(&rig.url)
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
-        assert!(empty.contains("No project is held"), "{empty}");
-        assert!(!empty.contains(&rig.id));
         rig.hold().await;
         let page = http().get(&rig.url).send().await.unwrap();
         assert_eq!(page.headers()["content-type"], "text/html; charset=utf-8");
         let html = page.text().await.unwrap();
-        assert!(html.contains(&format!("href=\"/p/{}/\"", rig.id)), "{html}");
-        assert!(html.contains("alpha"), "{html}");
-        // Only names: paths of the person's machine stay off a page anyone
-        // who reaches the host may load.
-        assert!(
-            !html.contains(rig.fx.dir.path().to_str().unwrap()),
-            "{html}"
-        );
-        let hostile = rig.fx.project("<b>x&\"'");
-        let host = rig.fx.host.clone();
-        tokio::task::spawn_blocking(move || host.add_hold("dev", &hostile).unwrap())
-            .await
-            .unwrap();
-        let html = http()
-            .get(&rig.url)
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
-        assert!(html.contains("&lt;b&gt;x&amp;&quot;&#39;"), "{html}");
-        assert!(!html.contains("<b>x"), "{html}");
+        // The app itself, which pairs first and then lists the projects
+        // through the API: nothing of the projects is on the page.
+        assert!(html.contains("\"kind\":\"hostHome\""), "{html}");
+        assert!(!html.contains(&rig.id), "{html}");
+        assert!(!html.contains("alpha"), "{html}");
     }
 
     #[tokio::test]
@@ -917,7 +999,12 @@ mod tests {
         let id = fx.project("alpha");
         let addr = serve(app(ServeConfig {
             host: fx.host.clone(),
-            token: HOST_TOKEN.into(),
+            access: crate::access::Access::new(
+                HOST_TOKEN.into(),
+                crate::devices::Devices::open(&fx.home()).unwrap(),
+                Duration::from_millis(10),
+            ),
+            listener: crate::access::Listener::Loopback,
             ui_dir: None,
             allow_hosts: vec![],
             boot_wait: Duration::from_secs(1),
@@ -935,8 +1022,8 @@ mod tests {
             let body: serde_json::Value = resp.json().await.unwrap();
             assert!(body["error"].as_str().unwrap().contains("--ui"), "{body}");
         }
-        // The list needs no UI folder.
+        // The home page is the app too.
         let root = http().get(format!("http://{addr}/")).send().await.unwrap();
-        assert_eq!(root.status(), 200);
+        assert_eq!(root.status(), 404);
     }
 }

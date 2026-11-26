@@ -29,6 +29,7 @@ fn usage() -> ! {
          \x20      oxplow-host project add <dir>\n\
          \x20      oxplow-host project list\n\
          \x20      oxplow-host project remove <id>\n\
+         \x20      oxplow-host pair | devices [remove <id>] | status | stop\n\
          \n\
          One host runs per OXPLOW_HOME. --token-stdin reads the host token from\n\
          the first line of stdin; otherwise a fresh one is generated and printed.\n\
@@ -42,6 +43,14 @@ fn usage() -> ! {
          this machine."
     );
     std::process::exit(2);
+}
+
+/// A call to the running host over its owner socket; fails with its words.
+fn owner_call(config_dir: &std::path::Path, method: &str, path: &str) -> serde_json::Value {
+    match oxplow_host::client::owner_call(config_dir, method, path) {
+        Ok(value) => value,
+        Err(e) => fail(e),
+    }
 }
 
 fn fail(message: impl std::fmt::Display) -> ! {
@@ -71,6 +80,40 @@ fn main() {
             Ok(p) => println!("removed {}  {}", p.id, p.path.display()),
             Err(e) => fail(e),
         },
+        ["pair"] => {
+            let code = owner_call(&config_dir, "POST", "/host/pairing");
+            println!(
+                "pairing code: {}  (good for {} minutes, once)",
+                code["code"].as_str().unwrap_or("?"),
+                code["expires_in"].as_u64().unwrap_or(0) / 60
+            );
+        }
+        ["devices"] => {
+            let devices = owner_call(&config_dir, "GET", "/host/devices");
+            for d in devices.as_array().into_iter().flatten() {
+                println!(
+                    "{}  {}  {}",
+                    d["id"].as_str().unwrap_or("?"),
+                    d["kind"].as_str().unwrap_or("?"),
+                    d["name"].as_str().unwrap_or("?")
+                );
+            }
+        }
+        ["devices", "remove", id] => {
+            owner_call(&config_dir, "DELETE", &format!("/host/devices/{id}"));
+            println!("removed {id}");
+        }
+        ["status"] => {
+            let status = owner_call(&config_dir, "GET", "/host/status");
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&status).unwrap_or_default()
+            );
+        }
+        ["stop"] => {
+            owner_call(&config_dir, "POST", "/host/shutdown");
+            println!("the host is stopping");
+        }
         _ => usage(),
     }
 }
@@ -202,6 +245,13 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 HoldsKept::InFile
             };
             let host = Host::open(config_dir, supervisor, kept);
+            let devices = oxplow_host::devices::Devices::open(config_dir).unwrap_or_else(|e| fail(e));
+            let access = oxplow_host::access::Access::new(
+                token.clone(),
+                devices,
+                oxplow_host::access::WRONG_CODE_WAIT,
+            );
+            use oxplow_host::access::Listener;
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
                 .unwrap_or_else(|e| fail(format!("bind {bind} failed: {e}")));
@@ -210,11 +260,6 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             if let Err(e) = instance.publish(&base_url, for_app) {
                 fail(format!("cannot write host.json: {e}"));
             }
-            println!("oxplow-host listening on {base_url}");
-            if generated {
-                println!("  host token: {token}");
-            }
-            tracing::info!(%base_url, "oxplow-host listening");
 
             let watcher = host.clone();
             tokio::spawn(async move {
@@ -230,9 +275,10 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 Some(dir) => tracing::info!(ui = %dir.display(), "serving the UI"),
                 None => tracing::warn!("no UI folder found; pass --ui <dir>"),
             }
-            let config = |scheme| oxplow_host::web::ServeConfig {
+            let config = |scheme, listener| oxplow_host::web::ServeConfig {
                 host: host.clone(),
-                token: token.clone(),
+                access: access.clone(),
+                listener,
                 ui_dir: ui_dir.clone(),
                 allow_hosts: allow_hosts.clone(),
                 // A daemon that boots no faster than this is a crash.
@@ -240,15 +286,40 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 stop: stop.clone(),
                 scheme,
             };
-            let app = oxplow_host::web::app(config(oxplow_host::web::Scheme::Http));
+            let app = oxplow_host::web::app(config(oxplow_host::web::Scheme::Http, Listener::Loopback));
+            // The CLI's way in (`oxplow host pair`): the owner, by the file's
+            // mode. A headless host's owner token is printed once and kept
+            // nowhere, so this is how it makes a pairing code.
+            #[cfg(unix)]
+            let owner_socket = owner_socket(config_dir, oxplow_host::web::app(config(
+                oxplow_host::web::Scheme::Http,
+                Listener::OwnerSocket,
+            )));
+            // Said once everything this machine reaches is up: the app (and
+            // the CLI's socket) may use it from this line on.
+            println!("oxplow-host listening on {base_url}");
+            if generated {
+                println!("  host token: {token}");
+            }
+            tracing::info!(%base_url, "oxplow-host listening");
             // Other devices, on their own listener: HTTPS when a certificate
             // was given.
-            let public = match public_bind {
+            // One that cannot bind is said and left out: this machine's
+            // windows still work.
+            let public_tcp = match public_bind {
                 None => None,
-                Some(addr) => {
-                    let tcp = tokio::net::TcpListener::bind(addr)
-                        .await
-                        .unwrap_or_else(|e| fail(format!("bind {addr} failed: {e}")));
+                Some(addr) => match tokio::net::TcpListener::bind(addr).await {
+                    Ok(tcp) => Some(tcp),
+                    Err(e) => {
+                        eprintln!("oxplow-host: other devices cannot reach this host: bind {addr} failed: {e}");
+                        tracing::error!(%addr, error = %e, "the listener for other devices did not bind");
+                        None
+                    }
+                },
+            };
+            let public = match public_tcp {
+                None => None,
+                Some(tcp) => {
                     let at = tcp.local_addr().unwrap_or_else(|e| fail(e));
                     let scheme = if tls.is_some() {
                         oxplow_host::web::Scheme::Https
@@ -260,7 +331,7 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                         scheme.as_str()
                     );
                     tracing::info!(%at, scheme = scheme.as_str(), "listening for other devices");
-                    let public_app = oxplow_host::web::app(config(scheme));
+                    let public_app = oxplow_host::web::app(config(scheme, Listener::Public));
                     Some(match tls.clone() {
                         Some(acceptor) => {
                             let listener = oxplow_host::tls::TlsListener::new(tcp, acceptor)
@@ -284,11 +355,52 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 _ = stop.notified() => "asked to stop".to_string(),
             };
             tracing::info!("oxplow-host stopping: {reason}");
+            // Each page says why its socket went ("Oxplow was quit").
+            access
+                .tunnels
+                .close_all(oxplow_host::access::HOST_ENDING_CLOSE_CODE);
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            #[cfg(unix)]
+            drop(owner_socket);
             let stopping = host.clone();
             let _ = tokio::task::spawn_blocking(move || stopping.shutdown()).await;
             drop(instance);
             std::process::exit(0);
         });
+}
+
+/// `host.sock` in the home, mode 0600, serving `app` as the owner. Removed
+/// when the returned guard drops.
+#[cfg(unix)]
+fn owner_socket(config_dir: &std::path::Path, app: axum::Router) -> Option<OwnerSocket> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = oxplow_host::client::owner_socket_path(config_dir);
+    // The lock is ours, so a socket file here is a killed host's.
+    let _ = std::fs::remove_file(&path);
+    let listener = match tokio::net::UnixListener::bind(&path) {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "no owner socket; the CLI cannot reach this host");
+            return None;
+        }
+    };
+    if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+        tracing::warn!(error = %e, "could not limit the owner socket to this user; leaving it out");
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    Some(OwnerSocket(path))
+}
+
+#[cfg(unix)]
+struct OwnerSocket(PathBuf);
+
+#[cfg(unix)]
+impl Drop for OwnerSocket {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// How long the app's host waits for the lock of the app's previous host,

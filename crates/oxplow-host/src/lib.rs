@@ -4,6 +4,7 @@
 //! forwards `/p/<project>/…` to it and serves the built UI.
 //! See `.context/host.md`.
 
+pub mod access;
 pub mod api;
 pub mod client;
 pub mod devices;

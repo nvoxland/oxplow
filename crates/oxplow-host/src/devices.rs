@@ -1,31 +1,30 @@
 //! Paired devices and pairing codes.
 //!
 //! A device (a tablet's browser, a phone, another computer) pairs once with a
-//! short code the owner shows it, and gets its own token. The host keeps only
-//! a hash of each token, in `devices.json` in the home, so a device stays
-//! paired across host restarts (each app start is one). A token names its
-//! device: the host, not the page, says who a request is from.
+//! short code the owner shows it, and gets an id and a token from the host.
+//! The host keeps only a hash of each token, in `devices.json` in the home, so
+//! a device stays paired across host restarts (each app start is one). A token
+//! names its device: the host, not the page, says who a request is from.
+//!
+//! The host is the only writer of the file and keeps it in memory; a file it
+//! cannot read stops it at start, so a damaged file is never read as "no
+//! devices" (every device would then have to pair again).
 //!
 //! Codes live in memory: 8 characters with no look-alikes, one use, 10
-//! minutes. Too many wrong codes close pairing for a while, so a code cannot
-//! be guessed.
+//! minutes. The pairing route makes a wrong code cost a wait, one attempt at
+//! a time, so a code cannot be guessed in its lifetime.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
-use fs2::FileExt;
 use oxplow_domain::{DeviceId, DeviceKind};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// How long a pairing code is good for.
 pub const CODE_LIFETIME: Duration = Duration::from_secs(10 * 60);
-/// Wrong codes allowed in [`GUESS_WINDOW`] before pairing closes.
-pub const GUESSES_ALLOWED: usize = 10;
-pub const GUESS_WINDOW: Duration = Duration::from_secs(10 * 60);
-/// How long pairing stays closed after too many wrong codes.
-pub const CLOSED_FOR: Duration = Duration::from_secs(10 * 60);
 /// The characters of a code: no 0/O, 1/I/L, so it reads aloud and types
 /// on a tablet without doubt.
 const CODE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -58,6 +57,8 @@ struct DevicesFile {
 pub enum DevicesError {
     #[error("no paired device has the id {0}")]
     Unknown(String),
+    #[error("cannot read {0}: {1}; fix or move it, then start the host again")]
+    Unreadable(PathBuf, String),
     #[error("the devices file failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -65,6 +66,7 @@ pub enum DevicesError {
 /// The paired devices of one home.
 pub struct Devices {
     path: PathBuf,
+    entries: Mutex<Vec<Entry>>,
 }
 
 fn hash(token: &str) -> String {
@@ -87,45 +89,61 @@ pub fn new_token() -> String {
 }
 
 impl Devices {
-    pub fn new(config_dir: &Path) -> Self {
-        Self {
-            path: config_dir.join("devices.json"),
-        }
+    /// Read the home's devices. A missing file is none; a file that cannot
+    /// be read or parsed is an error.
+    pub fn open(config_dir: &Path) -> Result<Self, DevicesError> {
+        let path = config_dir.join("devices.json");
+        let entries = match std::fs::read(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(DevicesError::Unreadable(path, e.to_string())),
+            Ok(bytes) => {
+                serde_json::from_slice::<DevicesFile>(&bytes)
+                    .map_err(|e| DevicesError::Unreadable(path.clone(), e.to_string()))?
+                    .devices
+            }
+        };
+        Ok(Self {
+            path,
+            entries: Mutex::new(entries),
+        })
     }
 
     pub fn list(&self) -> Vec<PairedDevice> {
-        self.read().into_iter().map(|e| e.device).collect()
+        self.lock().iter().map(|e| e.device.clone()).collect()
     }
 
-    /// Pair `id` (the device's own id, so what the daemon has seen of it
-    /// stays its), and answer its token. A device that pairs again gets a
-    /// new token; the old one no longer works.
-    pub fn pair(&self, id: DeviceId, name: &str, kind: DeviceKind) -> Result<String, DevicesError> {
+    /// Pair a new device; the host makes its id. Answers the device and its
+    /// token, which the device keeps and the host never sees again.
+    pub fn pair(
+        &self,
+        name: &str,
+        kind: DeviceKind,
+    ) -> Result<(PairedDevice, String), DevicesError> {
         let token = new_token();
+        let device = PairedDevice {
+            id: DeviceId::generate(),
+            name: oxplow_domain::client::device_name(Some(name)),
+            kind,
+            paired_at: now_secs(),
+        };
         let entry = Entry {
-            device: PairedDevice {
-                id: id.clone(),
-                name: oxplow_domain::client::device_name(Some(name)),
-                kind,
-                paired_at: now_secs(),
-            },
+            device: device.clone(),
             token_sha256: hash(&token),
         };
         self.change(|entries| {
-            entries.retain(|e| e.device.id != id);
             entries.push(entry);
             Ok(())
         })?;
-        Ok(token)
+        Ok((device, token))
     }
 
     /// The device `token` belongs to.
     pub fn who(&self, token: &str) -> Option<PairedDevice> {
         let wanted = hash(token);
-        self.read()
-            .into_iter()
+        self.lock()
+            .iter()
             .find(|e| crate::api::same_secret(&e.token_sha256, &wanted))
-            .map(|e| e.device)
+            .map(|e| e.device.clone())
     }
 
     pub fn rename(&self, id: &DeviceId, name: &str) -> Result<PairedDevice, DevicesError> {
@@ -150,51 +168,35 @@ impl Devices {
         })
     }
 
-    fn read(&self) -> Vec<Entry> {
-        std::fs::read(&self.path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<DevicesFile>(&bytes).ok())
-            .map(|f| f.devices)
-            .unwrap_or_default()
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Change the list and write it; a write that fails changes nothing.
     fn change<T>(
         &self,
         f: impl FnOnce(&mut Vec<Entry>) -> Result<T, DevicesError>,
     ) -> Result<T, DevicesError> {
+        let mut entries = self.lock();
+        let mut next = entries.clone();
+        let out = f(&mut next)?;
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(oxplow_config::lock_path(&self.path))?;
-        lock.lock_exclusive()?;
-        let mut devices = self.read();
-        let out = f(&mut devices)?;
-        let bytes =
-            serde_json::to_vec_pretty(&DevicesFile { devices }).map_err(std::io::Error::other)?;
+        let bytes = serde_json::to_vec_pretty(&DevicesFile {
+            devices: next.clone(),
+        })
+        .map_err(std::io::Error::other)?;
         oxplow_config::write_atomic(&self.path, &bytes)?;
+        *entries = next;
         Ok(out)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum PairError {
-    #[error("that code is wrong or has expired; ask for a new one")]
-    Wrong,
-    #[error("too many wrong codes; pairing is closed for a few minutes")]
-    Closed,
-}
-
-/// The codes the owner asked for, and the wrong guesses.
+/// The codes the owner asked for.
 #[derive(Default)]
 pub struct Pairing {
     codes: HashMap<String, Instant>,
-    wrong: VecDeque<Instant>,
-    closed_until: Option<Instant>,
 }
 
 /// `ABCDEFGH` as people read it: `ABCD-EFGH`.
@@ -202,15 +204,23 @@ pub fn show_code(code: &str) -> String {
     format!("{}-{}", &code[..CODE_LEN / 2], &code[CODE_LEN / 2..])
 }
 
+/// Random bytes for a code: a v4 UUID's, less the two that carry its
+/// version and variant bits (fixed, so they would narrow a character).
+fn code_bytes() -> [u8; CODE_LEN] {
+    let bytes = *uuid::Uuid::new_v4().as_bytes();
+    let mut out = [0u8; CODE_LEN];
+    for (slot, at) in out.iter_mut().zip([0, 1, 2, 3, 4, 5, 7, 9]) {
+        *slot = bytes[at];
+    }
+    out
+}
+
 impl Pairing {
     /// A new code, good until the time answered.
     pub fn new_code(&mut self, now: Instant) -> (String, Instant) {
         self.codes.retain(|_, expires| *expires > now);
-        let bytes = uuid::Uuid::new_v4();
-        let code: String = bytes
-            .as_bytes()
+        let code: String = code_bytes()
             .iter()
-            .take(CODE_LEN)
             .map(|b| CODE_ALPHABET[*b as usize % CODE_ALPHABET.len()] as char)
             .collect();
         let expires = now + CODE_LIFETIME;
@@ -218,38 +228,15 @@ impl Pairing {
         (code, expires)
     }
 
-    /// Use `given` (any case, dashes and spaces ignored): it is good once.
-    pub fn take(&mut self, given: &str, now: Instant) -> Result<(), PairError> {
-        if self.closed_until.is_some_and(|until| until > now) {
-            return Err(PairError::Closed);
-        }
-        self.closed_until = None;
+    /// Use `given` (any case, dashes and spaces ignored): it is good once,
+    /// until it expires.
+    pub fn take(&mut self, given: &str, now: Instant) -> bool {
         let code: String = given
             .chars()
             .filter(|c| !matches!(c, '-' | ' '))
             .map(|c| c.to_ascii_uppercase())
             .collect();
-        match self.codes.remove(&code) {
-            Some(expires) if expires > now => Ok(()),
-            _ => {
-                while self
-                    .wrong
-                    .front()
-                    .is_some_and(|at| now.duration_since(*at) > GUESS_WINDOW)
-                {
-                    self.wrong.pop_front();
-                }
-                self.wrong.push_back(now);
-                if self.wrong.len() >= GUESSES_ALLOWED {
-                    tracing::warn!("too many wrong pairing codes; pairing closes for a while");
-                    self.wrong.clear();
-                    self.codes.clear();
-                    self.closed_until = Some(now + CLOSED_FOR);
-                    return Err(PairError::Closed);
-                }
-                Err(PairError::Wrong)
-            }
-        }
+        matches!(self.codes.remove(&code), Some(expires) if expires > now)
     }
 }
 
@@ -257,57 +244,42 @@ impl Pairing {
 mod tests {
     use super::*;
 
-    fn tablet() -> DeviceId {
-        DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427").unwrap()
-    }
-
     #[test]
     fn a_paired_device_is_known_by_its_token_until_it_is_removed() {
         let home = tempfile::tempdir().unwrap();
-        let devices = Devices::new(home.path());
-        let token = devices
-            .pair(tablet(), "Tab S9", DeviceKind::Tablet)
-            .unwrap();
+        let devices = Devices::open(home.path()).unwrap();
+        let (tablet, token) = devices.pair("Tab S9", DeviceKind::Tablet).unwrap();
         assert_eq!(token.len(), 64);
-        let known = devices.who(&token).unwrap();
-        assert_eq!(
-            (known.id.clone(), known.name.as_str()),
-            (tablet(), "Tab S9")
-        );
+        assert_eq!(devices.who(&token), Some(tablet.clone()));
         assert_eq!(devices.who("not-a-token"), None);
         let file = std::fs::read_to_string(home.path().join("devices.json")).unwrap();
         assert!(!file.contains(&token), "only a hash is kept");
 
+        let (other, _) = devices.pair("Phone", DeviceKind::Phone).unwrap();
+        assert_ne!(other.id, tablet.id, "the host makes each id");
+
         assert_eq!(
-            devices.rename(&tablet(), "Kitchen tablet").unwrap().name,
+            devices.rename(&tablet.id, "Kitchen tablet").unwrap().name,
             "Kitchen tablet"
         );
-        assert_eq!(
-            Devices::new(home.path()).list()[0].name,
-            "Kitchen tablet",
-            "kept"
-        );
-        devices.remove(&tablet()).unwrap();
+        let reopened = Devices::open(home.path()).unwrap();
+        assert_eq!(reopened.who(&token).unwrap().name, "Kitchen tablet", "kept");
+        devices.remove(&tablet.id).unwrap();
         assert_eq!(devices.who(&token), None);
         assert!(matches!(
-            devices.remove(&tablet()),
+            devices.remove(&tablet.id),
             Err(DevicesError::Unknown(_))
         ));
     }
 
+    /// A damaged file is never read as "no devices": every device would
+    /// have to pair again, and the next write would lose them.
     #[test]
-    fn pairing_again_replaces_the_old_token() {
+    fn a_file_that_cannot_be_read_stops_the_host() {
         let home = tempfile::tempdir().unwrap();
-        let devices = Devices::new(home.path());
-        let first = devices
-            .pair(tablet(), "Tab S9", DeviceKind::Tablet)
-            .unwrap();
-        let second = devices
-            .pair(tablet(), "Tab S9", DeviceKind::Tablet)
-            .unwrap();
-        assert_eq!(devices.who(&first), None);
-        assert!(devices.who(&second).is_some());
-        assert_eq!(devices.list().len(), 1);
+        std::fs::write(home.path().join("devices.json"), "{ not json").unwrap();
+        let err = Devices::open(home.path()).err().unwrap().to_string();
+        assert!(err.contains("devices.json"), "{err}");
     }
 
     #[test]
@@ -318,44 +290,27 @@ mod tests {
         assert_eq!(code.len(), 8);
         assert!(code.bytes().all(|b| CODE_ALPHABET.contains(&b)), "{code}");
         assert_eq!(expires, now + CODE_LIFETIME);
-        let typed = show_code(&code).to_lowercase();
-        assert_eq!(pairing.take(&typed, now), Ok(()));
-        assert_eq!(pairing.take(&code, now), Err(PairError::Wrong), "once");
+        assert!(pairing.take(&show_code(&code).to_lowercase(), now));
+        assert!(!pairing.take(&code, now), "once");
 
         let (late, _) = pairing.new_code(now);
-        assert_eq!(
-            pairing.take(&late, now + CODE_LIFETIME + Duration::from_secs(1)),
-            Err(PairError::Wrong)
-        );
+        assert!(!pairing.take(&late, now + CODE_LIFETIME + Duration::from_secs(1)));
     }
 
+    /// Every position draws from the whole alphabet (a UUID's version
+    /// byte would have given one of them 16 values).
     #[test]
-    fn too_many_wrong_codes_close_pairing_for_a_while() {
+    fn every_character_of_a_code_ranges_over_the_alphabet() {
+        let mut seen = vec![std::collections::HashSet::new(); CODE_LEN];
         let mut pairing = Pairing::default();
-        let now = Instant::now();
-        let (good, _) = pairing.new_code(now);
-        for _ in 0..GUESSES_ALLOWED - 1 {
-            assert_eq!(pairing.take("WRONGCOD", now), Err(PairError::Wrong));
+        for _ in 0..4000 {
+            let (code, _) = pairing.new_code(Instant::now());
+            for (at, c) in code.chars().enumerate() {
+                seen[at].insert(c);
+            }
         }
-        assert_eq!(pairing.take("WRONGCOD", now), Err(PairError::Closed));
-        assert_eq!(
-            pairing.take(&good, now),
-            Err(PairError::Closed),
-            "codes went too"
-        );
-        let later = now + CLOSED_FOR + Duration::from_secs(1);
-        let (fresh, _) = pairing.new_code(later);
-        assert_eq!(pairing.take(&fresh, later), Ok(()));
-    }
-
-    #[test]
-    fn wrong_codes_long_ago_do_not_count() {
-        let mut pairing = Pairing::default();
-        let now = Instant::now();
-        for _ in 0..GUESSES_ALLOWED - 1 {
-            let _ = pairing.take("WRONGCOD", now);
+        for (at, chars) in seen.iter().enumerate() {
+            assert_eq!(chars.len(), CODE_ALPHABET.len(), "position {at}");
         }
-        let later = now + GUESS_WINDOW + Duration::from_secs(1);
-        assert_eq!(pairing.take("WRONGCOD", later), Err(PairError::Wrong));
     }
 }

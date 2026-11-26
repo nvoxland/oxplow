@@ -4,8 +4,11 @@
 //! The UI is built with a relative asset base, so the same files load at `/`
 //! and under `/p/<project>/`. `/p/<project>/` is the app's `index.html` with
 //! `window.__OXPLOW__` put first in its head, the way the Mac shell states it
-//! to a window it creates (`oxplow-tauri-ipc` `windows.rs`). `/` is, for now,
-//! a plain list of the held projects; the tablet shell replaces it.
+//! to a window it creates (`oxplow-tauri-ipc` `windows.rs`), but with no
+//! token: a device's page uses the token it got at pairing, kept in its
+//! storage, and pairs first when it has none. `/` is the same app as the host's
+//! home (`kind: "hostHome"`): pairing, then the projects; the tablet shell
+//! replaces it.
 
 use std::path::{Component, Path as FsPath, PathBuf};
 
@@ -14,22 +17,36 @@ use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use oxplow_app::component_http::content_type_for;
 
-use crate::host::DaemonState;
 use crate::web::{refuse, Web};
 
 const NO_UI: &str = "this host has no UI folder; start it with --ui <dir>";
 
-/// `window.__OXPLOW__` for the project's window, and the page's frame bound
-/// widened to its own origin. Pure.
-pub fn project_index(html: &str, origin: &str, project: &str, token: &str) -> String {
-    let context = serde_json::json!({
+/// The context of a project's page.
+pub fn project_context(origin: &str, project: &str) -> serde_json::Value {
+    serde_json::json!({
         "kind": "project",
         "base": format!("{origin}/p/{project}"),
+        "host": origin,
         "project": project,
-        // The host token, until pairing gives each device its own.
-        "token": token,
+        "token": null,
         "projectDir": null,
-    });
+    })
+}
+
+/// The context of the host's home page.
+pub fn home_context(origin: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "hostHome",
+        "base": null,
+        "host": origin,
+        "token": null,
+        "projectDir": null,
+    })
+}
+
+/// `html` with `window.__OXPLOW__ = context` first in its head, and the
+/// page's frame bound widened to its own origin. Pure.
+pub fn page_index(html: &str, origin: &str, context: &serde_json::Value) -> String {
     // `<` is escaped so no value can close the script.
     let json = context.to_string().replace('<', "\\u003c");
     let script = format!("<script>window.__OXPLOW__ = Object.freeze({json});</script>");
@@ -67,16 +84,46 @@ pub(crate) async fn project_page(
     let Some(origin) = origin(web.scheme, &headers) else {
         return refuse(StatusCode::BAD_REQUEST, "no Host");
     };
+    page(dir, &origin, &project_context(&origin, &id)).await
+}
+
+/// `/`: the host's home, for a device: pairing, then its projects.
+pub(crate) async fn host_home(State(web): State<Web>, headers: HeaderMap) -> Response {
+    let Some(dir) = &web.ui_dir else {
+        return refuse(StatusCode::NOT_FOUND, NO_UI);
+    };
+    let Some(origin) = origin(web.scheme, &headers) else {
+        return refuse(StatusCode::BAD_REQUEST, "no Host");
+    };
+    page(dir, &origin, &home_context(&origin)).await
+}
+
+/// The app's `index.html` with `context`, never cached, and never framed by
+/// another site.
+async fn page(dir: &FsPath, origin: &str, context: &serde_json::Value) -> Response {
     let Ok(index) = tokio::fs::read(dir.join("index.html")).await else {
         return refuse(StatusCode::NOT_FOUND, "the UI folder has no index.html");
     };
-    let html = project_index(&String::from_utf8_lossy(&index), &origin, &id, &web.token);
+    let html = page_index(&String::from_utf8_lossy(&index), origin, context);
     let mut response = Html(html).into_response();
-    response.headers_mut().insert(
+    let headers = response.headers_mut();
+    headers.insert(
         header::CACHE_CONTROL,
         header::HeaderValue::from_static("no-store"),
     );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        header::HeaderValue::from_static("frame-ancestors 'self'"),
+    );
     response
+}
+
+/// A short hash of the served `index.html`: its asset names change with each
+/// build, so this changes too.
+pub(crate) async fn build_id(dir: &FsPath) -> Option<String> {
+    use sha2::Digest;
+    let index = tokio::fs::read(dir.join("index.html")).await.ok()?;
+    Some(hex::encode(&sha2::Sha256::digest(&index)[..8]))
 }
 
 /// `/p/<project>/<file>`: a file of the UI (the app asks for them relative to
@@ -165,53 +212,6 @@ fn content_type(path: &FsPath) -> &'static str {
     }
 }
 
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
-/// `/`: the held projects, each a link to its page. Names and states only:
-/// the page is open to whoever may reach the host.
-pub(crate) async fn launcher(State(web): State<Web>) -> Response {
-    let held: Vec<_> = web
-        .host
-        .projects()
-        .into_iter()
-        .filter(|p| p.holds > 0)
-        .collect();
-    let items: String = held
-        .iter()
-        .map(|p| {
-            let state = match &p.state {
-                DaemonState::Starting => "starting",
-                DaemonState::Running => "running",
-                DaemonState::Stopping => "stopping",
-                DaemonState::Stopped => "stopped",
-                DaemonState::Crashed { .. } => "crashed",
-            };
-            format!(
-                "<li><a href=\"/p/{id}/\">{name}</a> <small>{state}</small></li>",
-                id = escape(&p.id),
-                name = escape(&p.name),
-            )
-        })
-        .collect();
-    let body = if held.is_empty() {
-        "<p>No project is held.</p>".to_string()
-    } else {
-        format!("<ul>{items}</ul>")
-    };
-    Html(format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>oxplow</title></head><body><h1>oxplow</h1>{body}</body></html>"
-    ))
-    .into_response()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,14 +234,18 @@ mod tests {
 
     #[test]
     fn a_value_cannot_close_the_script() {
-        let html = project_index("<head></head>", "http://h", "p</script><b>", "t");
+        let html = page_index(
+            "<head></head>",
+            "http://h",
+            &project_context("http://h", "p</script><b>"),
+        );
         assert_eq!(html.matches("</script>").count(), 1, "{html}");
         assert!(html.contains("\\u003c/script>"), "{html}");
     }
 
     #[test]
     fn a_page_with_no_head_gets_the_context_before_everything() {
-        let html = project_index("<body>x</body>", "http://h", "p", "t");
+        let html = page_index("<body>x</body>", "http://h", &home_context("http://h"));
         assert!(html.starts_with("<script>window.__OXPLOW__"), "{html}");
     }
 

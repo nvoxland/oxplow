@@ -3,7 +3,8 @@
  * `no-direct-storage.test.ts`, holds every other file to it). What lives
  * here is the shell's own: what must be there before the daemon answers,
  * or belongs to this window — the remote daemon to connect to and its
- * token, the recent remotes, and this browser's device id. The
+ * token, the recent remotes, this browser's device id, and the token the
+ * host gave it at pairing (the host origin's storage). The
  * window's own id lives only in memory, one per page load (`uiClientId.ts`).
  *
  * Nothing else is kept in the browser. A page's view is its **view
@@ -21,7 +22,8 @@ export type ShellKey =
   | "oxplow.remoteBase"
   | "oxplow.remoteToken"
   | "oxplow.recentRemotes"
-  | "oxplow.device";
+  | "oxplow.device"
+  | "oxplow.hostToken";
 
 function area(): Storage | null {
   try {

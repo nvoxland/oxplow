@@ -3,10 +3,13 @@
 //!
 //! `ipc/…`, `health`, `components/…`, `component-lib/…` go over HTTP and
 //! `events` is a WebSocket tunnel. A client proves itself to the host with
-//! the host token (bearer on HTTP, `?token=` on the socket, until pairing);
-//! the host drops it and puts the daemon's own token in its place, so a
-//! client never sees a daemon token. `Oxplow-Device` and `Oxplow-Connection`
-//! (and the socket's device query) pass as the client sent them.
+//! its token (bearer on HTTP, `?token=` on the socket): the owner's or a
+//! paired device's (`crate::access`). The host drops it and puts the daemon's
+//! own token in its place, so a client never sees a daemon token. For a
+//! device the host says who it is: `Oxplow-Device` and the socket's
+//! `device`, `name`, `kind` come from its record, and only `Oxplow-Connection`
+//! (the page load) passes as sent. The owner (the Mac app) names its own
+//! device.
 //!
 //! The component routes carry no client token, as the daemon's carry none (a
 //! sandboxed frame cannot send one). The `Host` check in front of every route
@@ -26,7 +29,8 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamClose;
 use tokio_tungstenite::tungstenite::Message as Upstream;
 
-use crate::api::{bearer, same_secret};
+use crate::access::{Caller, Connected, TunnelLease};
+use crate::api::bearer;
 use crate::host::Reach;
 use crate::ui;
 use crate::web::{refuse, Web};
@@ -73,14 +77,20 @@ pub(crate) async fn rest(
             refuse(StatusCode::NOT_FOUND, "no such route")
         };
     };
-    if needs_token && !is_preflight(&req) && !host_token_ok(&web, req.headers(), None) {
-        return refuse(StatusCode::UNAUTHORIZED, "missing or wrong host token");
-    }
+    let device = if needs_token && !is_preflight(&req) {
+        match caller(&web, req.headers(), None) {
+            None => return refuse(StatusCode::UNAUTHORIZED, "missing or wrong token"),
+            Some(Caller::Owner) => None,
+            Some(Caller::Device(d)) => Some(d.id),
+        }
+    } else {
+        None
+    };
     let endpoint = match reach(&web, &id).await {
         Ok(endpoint) => endpoint,
         Err(refused) => return *refused,
     };
-    forward(&web, &id, &rest, endpoint, req).await
+    forward(&web, &id, &rest, endpoint, req, device).await
 }
 
 /// A CORS preflight: a Mac window (`tauri://localhost`) asks before each
@@ -93,11 +103,22 @@ fn is_preflight(req: &Request) -> bool {
             .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
 }
 
-fn host_token_ok(web: &Web, headers: &HeaderMap, query: Option<&str>) -> bool {
-    let from_query = query.and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=")));
-    bearer(headers)
-        .or(from_query)
-        .is_some_and(|t| same_secret(t, &web.token))
+/// The parsed pairs of a query.
+fn pairs(query: Option<&str>) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(query.unwrap_or("").as_bytes())
+        .into_owned()
+        .collect()
+}
+
+/// Who a request is, by its bearer or (a socket) its `token` query.
+fn caller(web: &Web, headers: &HeaderMap, query: Option<&[(String, String)]>) -> Option<Caller> {
+    let from_query = query.and_then(|q| {
+        q.iter()
+            .find(|(k, _)| k == "token")
+            .map(|(_, v)| v.as_str())
+    });
+    web.access
+        .caller(web.listener, bearer(headers).or(from_query))
 }
 
 /// The daemon of `id`, waiting for one that is starting; the refusal to give
@@ -159,6 +180,7 @@ async fn forward(
     rest: &str,
     endpoint: DaemonEndpoint,
     req: Request,
+    device: Option<oxplow_domain::DeviceId>,
 ) -> Response {
     let (parts, body) = req.into_parts();
     let query = parts
@@ -173,7 +195,17 @@ async fn forward(
         if HOP_BY_HOP.contains(&lower) || lower == "authorization" || lower == PUBLIC_BASE {
             continue;
         }
+        if device.is_some() && lower == "oxplow-device" {
+            continue;
+        }
         out.headers_mut().append(name.clone(), value.clone());
+    }
+    if let Some(device) = device
+        .as_ref()
+        .and_then(|d| HeaderValue::from_str(d.as_str()).ok())
+    {
+        out.headers_mut()
+            .insert(HeaderName::from_static("oxplow-device"), device);
     }
     let token = HeaderValue::from_str(&format!("Bearer {}", endpoint.token)).expect("a header");
     out.headers_mut().insert(header::AUTHORIZATION, token);
@@ -228,27 +260,28 @@ pub(crate) async fn events(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !host_token_ok(&web, &headers, query.as_deref()) {
-        return refuse(StatusCode::UNAUTHORIZED, "missing or wrong host token");
-    }
+    let given = pairs(query.as_deref());
+    let Some(who) = caller(&web, &headers, Some(&given)) else {
+        return refuse(StatusCode::UNAUTHORIZED, "missing or wrong token");
+    };
     let endpoint = match reach(&web, &id).await {
         Ok(endpoint) => endpoint,
         Err(refused) => return *refused,
     };
-    // The client's own token is dropped; everything else it said about
-    // itself (device, connection, name, kind) is the daemon's to read.
-    let mut pairs: Vec<&str> = query
-        .as_deref()
-        .unwrap_or("")
-        .split('&')
-        .filter(|kv| !kv.is_empty() && !kv.starts_with("token="))
-        .collect();
-    let token = format!("token={}", endpoint.token);
-    pairs.push(&token);
+    let (sent, connected) = identity(&who, given);
+    // Built apart: the serializer is not `Send`, and must not live across
+    // the await below.
+    let query = {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in &sent {
+            query.append_pair(k, v);
+        }
+        query.append_pair("token", &endpoint.token);
+        query.finish()
+    };
     let url = format!(
-        "{}/events?{}",
-        endpoint.base_url.replacen("http", "ws", 1),
-        pairs.join("&")
+        "{}/events?{query}",
+        endpoint.base_url.replacen("http", "ws", 1)
     );
     // Open the daemon's side first: a daemon that refuses is a 502 here, not
     // a socket that opens and closes.
@@ -259,7 +292,52 @@ pub(crate) async fn events(
             return refuse(StatusCode::BAD_GATEWAY, "the daemon did not answer");
         }
     };
-    ws.on_upgrade(move |client| tunnel(client, upstream))
+    let lease = web.access.open_tunnel(connected);
+    ws.on_upgrade(move |client| tunnel(client, upstream, lease))
+}
+
+/// What the daemon is told about the socket's page load, and who it is for
+/// the host's count. The client's token never passes. The owner (the Mac
+/// app) says its own device; a device is what its record says, and only the
+/// page load (`connection`) passes as it sent it. Rebuilt from the parsed
+/// pairs, so no spelling of a key slips past.
+fn identity(who: &Caller, given: Vec<(String, String)>) -> (Vec<(String, String)>, Connected) {
+    let value = |key: &str| {
+        given
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    match who {
+        Caller::Owner => {
+            let connected = Connected {
+                device: value("device"),
+                name: value("name"),
+                kind: serde_json::from_value(serde_json::Value::String(value("kind"))).ok(),
+            };
+            let sent = given.into_iter().filter(|(k, _)| k != "token").collect();
+            (sent, connected)
+        }
+        Caller::Device(d) => {
+            let kind = serde_json::to_value(d.kind)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
+            let sent = vec![
+                ("device".to_string(), d.id.to_string()),
+                ("connection".to_string(), value("connection")),
+                ("name".to_string(), d.name.clone()),
+                ("kind".to_string(), kind),
+            ];
+            let connected = Connected {
+                device: d.id.to_string(),
+                name: d.name.clone(),
+                kind: Some(d.kind),
+            };
+            (sent, connected)
+        }
+    }
 }
 
 type UpstreamSocket =
@@ -268,9 +346,11 @@ type UpstreamSocket =
 /// Frames both ways, each direction in order. A send waits for the other
 /// side to take the frame, so a slow reader slows the writer instead of the
 /// host holding what it cannot deliver. It ends when either side does.
-async fn tunnel(client: WebSocket, upstream: UpstreamSocket) {
-    let (mut to_client, mut from_client) = client.split();
+async fn tunnel(client: WebSocket, upstream: UpstreamSocket, lease: TunnelLease) {
+    let (to_client, mut from_client) = client.split();
+    let to_client = tokio::sync::Mutex::new(to_client);
     let (mut to_daemon, mut from_daemon) = upstream.split();
+    let mut closed = lease.closed.clone();
     let up = async {
         while let Some(Ok(frame)) = from_client.next().await {
             let end = matches!(frame, Message::Close(_));
@@ -285,12 +365,36 @@ async fn tunnel(client: WebSocket, upstream: UpstreamSocket) {
                 continue;
             };
             let end = matches!(frame, Message::Close(_));
-            if to_client.send(frame).await.is_err() || end {
+            if to_client.lock().await.send(frame).await.is_err() || end {
                 break;
             }
         }
     };
-    tokio::select! { _ = up => {}, _ = down => {} }
+    // The host closes it: the device was removed, or the host is ending.
+    let ended = async {
+        let code = loop {
+            if let Some(code) = *closed.borrow_and_update() {
+                break code;
+            }
+            if closed.changed().await.is_err() {
+                return std::future::pending::<()>().await;
+            }
+        };
+        let reason = match code {
+            crate::access::HOST_ENDING_CLOSE_CODE => "the host is ending",
+            _ => "this device was removed",
+        };
+        let _ = to_client
+            .lock()
+            .await
+            .send(Message::Close(Some(CloseFrame {
+                code,
+                reason: reason.into(),
+            })))
+            .await;
+    };
+    tokio::select! { _ = up => {}, _ = down => {}, _ = ended => {} }
+    drop(lease);
 }
 
 fn to_upstream(frame: Message) -> Upstream {

@@ -93,6 +93,14 @@ export async function load(page: Page, path = "/"): Promise<void> {
   await windowReady(page);
 }
 
+/** Open a screen of the shell that is no app window (a host's pair or
+ *  home screen) and wait until `testId` shows: it never registers as a
+ *  window. */
+export async function loadScreen(page: Page, path: string, testId: string): Promise<void> {
+  await page.goto(path);
+  await expect(page.getByTestId(testId)).toBeVisible();
+}
+
 /** Reload the window and wait until it is ready again (a reloaded page is
  *  a new document: not ready until it registers again). */
 export async function reload(page: Page): Promise<void> {

@@ -99,11 +99,16 @@ export function resolveToken(sources: {
   injected?: Endpoint;
   env?: Endpoint;
   fragment?: string | null;
+  /// A paired device's own token (a page the host served carries none).
+  paired?: string | null;
 }): string | null {
   const fromFragment = /(?:^#|&)oxplow-token=([^&]+)/.exec(sources.fragment ?? "")?.[1];
   if (fromFragment) return decodeURIComponent(fromFragment);
   for (const tier of [sources.stored, sources.injected, sources.env]) {
-    if (cleanBase(tier?.base)) return tier?.token?.trim() || null;
+    if (!cleanBase(tier?.base)) continue;
+    const token = tier?.token?.trim() || null;
+    if (tier === sources.injected && token === null) return sources.paired?.trim() || null;
+    return token;
   }
   return null;
 }
@@ -133,6 +138,7 @@ function readRemoteEndpoint(): { base: string | null; token: string | null; stor
   const env = (import.meta as { env?: Record<string, string> }).env;
   const ctx = readWindowContext();
   const sources = {
+    paired: ctx?.host ? shellStorage.getItem("oxplow.hostToken") : null,
     stored,
     injected: { base: ctx?.base ?? null, token: ctx?.token ?? null },
     env: { base: env?.VITE_OXPLOW_REMOTE ?? null, token: env?.VITE_OXPLOW_REMOTE_TOKEN ?? null },
@@ -164,6 +170,64 @@ export function filesLocalFrom(sources: {
 const endpoint = readRemoteEndpoint();
 const remoteBase: string | null = endpoint.base;
 const remoteToken: string | null = endpoint.token;
+
+/// The host's origin, when a host served this page (`window.__OXPLOW__.host`):
+/// its API is there, and the page uses the device's own token.
+export function hostOrigin(): string | null {
+  return readWindowContext()?.host ?? null;
+}
+
+/// Whether this page must pair before anything else: a host served it and
+/// this browser has no token for that host yet.
+export function needsPairing(): boolean {
+  return hostOrigin() !== null && !readWindowContext()?.token && hostToken() === null;
+}
+
+/// The token this device got at pairing with the host that served this
+/// page, if any.
+export function hostToken(): string | null {
+  return shellStorage.getItem("oxplow.hostToken")?.trim() || null;
+}
+
+/// The token this device got at pairing, kept for the host's origin; the
+/// page loads again to use it.
+export function keepHostToken(token: string): void {
+  shellStorage.setItem("oxplow.hostToken", token);
+}
+
+/// This device's token no longer works (it was removed, or the host forgot
+/// it): forget it and load again, which pairs.
+export function forgetHostToken(): void {
+  shellStorage.removeItem("oxplow.hostToken");
+  window.location.reload();
+}
+
+/// The served UI's build when this page loaded, from `/host/me`.
+let loadedBuild: string | null | undefined;
+
+/// Ask the host who this device is. A token it no longer knows means pair
+/// again (a browser cannot see the 401 on a socket's upgrade, so this is how
+/// a removed device finds out); a build that changed since this page loaded
+/// means load again (the app restarted with a new build).
+async function checkHost(): Promise<void> {
+  const host = hostOrigin();
+  if (host === null || remoteToken === null) return;
+  let answer: Response;
+  try {
+    answer = await fetch(`${host}/host/me`, { headers: authHeaders(remoteToken) });
+  } catch {
+    return; // the host is away; the socket keeps trying
+  }
+  if (answer.status === 401) {
+    forgetHostToken();
+    return;
+  }
+  if (!answer.ok) return;
+  const me = (await answer.json().catch(() => null)) as { build?: string | null } | null;
+  const build = me?.build ?? null;
+  if (loadedBuild === undefined) loadedBuild = build;
+  else if (build !== null && build !== loadedBuild) window.location.reload();
+}
 
 /** The event socket says which device and page load it is (a browser
  *  cannot set headers on a WebSocket, so they ride in the query); it owns
@@ -382,17 +446,27 @@ let reconnectDelayMs = 500;
 /// daemon keeps one per device, `client_reports::devices`) — after which
 /// the socket isn't opened or retried either.
 /// Local mode never fires any.
-export type RemoteConnectionState = "up" | "down" | "refused" | "replaced";
+export type RemoteConnectionState = "up" | "down" | "refused" | "replaced" | "ended";
 
 /// The close code the daemon gives a replaced page load's socket
 /// (`client_reports::devices::REPLACED_CLOSE_CODE`).
 export const REPLACED_CLOSE_CODE = 4001;
+/// The host is ending: the app that runs it quit (`oxplow_host::access`).
+export const HOST_ENDING_CLOSE_CODE = 4002;
+/// The host's owner removed this device: its token is gone.
+export const DEVICE_REMOVED_CLOSE_CODE = 4003;
 
 /// What a socket's close means: this page load was replaced, the daemon
-/// refused the token, or a drop to wait out and retry. Pure; exported for
-/// tests.
-export function socketCloseMeaning(code: number, tokenRefused: boolean): "replaced" | "refused" | "retry" {
+/// refused the token, this device was removed (pair again), the host is
+/// ending (say so, try again slowly), or a drop to wait out and retry.
+/// Pure; exported for tests.
+export function socketCloseMeaning(
+  code: number,
+  tokenRefused: boolean,
+): "replaced" | "refused" | "removed" | "ended" | "retry" {
   if (code === REPLACED_CLOSE_CODE) return "replaced";
+  if (code === DEVICE_REMOVED_CLOSE_CODE) return "removed";
+  if (code === HOST_ENDING_CLOSE_CODE) return "ended";
   if (tokenRefused) return "refused";
   return "retry";
 }
@@ -430,6 +504,13 @@ export function isTokenRefused(): boolean {
 }
 
 function markTokenRefused(): void {
+  // On a page a host served, a refused token is this device's, and it no
+  // longer works (its owner removed it): pair again. A page with no token
+  // yet (the pair screen is up) has nothing to forget.
+  if (hostOrigin() !== null && !readWindowContext()?.token && remoteToken !== null) {
+    forgetHostToken();
+    return;
+  }
   if (tokenRefused) return;
   tokenRefused = true;
   socket?.close();
@@ -490,6 +571,7 @@ export function handleSocketOpen(): void {
   reconnectDelayMs = 500;
   notifyConnectionState("up");
   for (const h of reconnectHandlers) h();
+  void checkHost();
 }
 
 function ensureSocket(): void {
@@ -539,12 +621,19 @@ function ensureSocket(): void {
       return;
     }
     if (meaning === "refused" || replaced) return;
-    notifyConnectionState("down");
+    if (meaning === "removed") {
+      forgetHostToken();
+      return;
+    }
+    // The app that runs the host quit: say so, and wait for it longer.
+    if (meaning === "ended") reconnectDelayMs = Math.max(reconnectDelayMs, 5_000);
+    notifyConnectionState(meaning === "ended" ? "ended" : "down");
+    if (meaning === "retry") void checkHost();
     // Backoff reconnect; the RemoteConnectionBanner drives the
     // user-facing state off the notifications above.
     if (channelHandlers.size > 0) {
       setTimeout(ensureSocket, reconnectDelayMs);
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, meaning === "ended" ? 30_000 : 10_000);
     }
   };
   ws.onclose = (event) => down(event.code);

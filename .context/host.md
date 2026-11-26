@@ -3,8 +3,9 @@
 `oxplow-host` (`crates/oxplow-host`) is one headless process per
 `OXPLOW_HOME`. It holds no project state. It keeps a registry of projects and
 the holds devices have on them, and it runs one `oxplow-daemon` per held
-project. Built so far: the core, routing, the served UI and the Mac app's own
-host. Not built yet: pairing.
+project. Built so far: the core, routing, the served UI, the Mac app's own
+host, HTTPS and pairing. Not built yet: the Mac app's Devices window, "Allow
+other devices", the quit warning, and the app using a headless host.
 
 There are two kinds of host, and no host ever stops because nothing is held
 or nobody is connected:
@@ -48,15 +49,19 @@ or nobody is connected:
   `DaemonSupervisor::poll_exits` twice a second and marks an exited daemon
   `crashed`. There is no restart loop: only a new hold (a person opening the
   project again) starts a crashed daemon.
-- **API**, all under `/host/` and all needing the host token (`Authorization:
-  Bearer`): `GET /host/status` (version, pid, projects with state),
-  `GET /host/projects`, `POST /host/projects` (JSON `{ path }`: register that
-  folder, or find it registered; 400 for a folder that is not a project),
-  `POST /host/holds` and `DELETE /host/holds` (JSON `{ device, project }`; each
-  answers the project's view; 404 for an unknown project, 400 for no device),
-  and `POST /host/shutdown` (202; the host stops, its daemons with it). The token comes from stdin (`--token-stdin`, as
-  the daemon's does) or is generated and printed. Device tokens and pairing
-  replace it in the pairing step.
+- **API**, all under `/host/` (`api.rs`; who may call each, see "Pairing"):
+  `GET /host/status` (version, pid, projects with state, `connected` devices),
+  `GET /host/projects` (each with `held_by_you` for a device), `POST
+  /host/projects` (JSON `{ path }`: register that folder, or find it
+  registered; 400 for a folder that is not a project), `POST|DELETE
+  /host/holds` (JSON `{ device, project }`; each answers the project's view;
+  404 for an unknown project, 400 for no device), `POST /host/shutdown` (202;
+  the host stops, its daemons with it), `POST /host/pairing`, `POST
+  /host/pair`, `GET /host/devices`, `PATCH|DELETE /host/devices/<id>`, `GET
+  /host/me` and `DELETE /host/me`. A body is read after the caller is known, so
+  a missing token is a 401 whatever the body.
+- **The owner token** comes from stdin (`--token-stdin`, as the daemon's does)
+  or is generated and printed.
 - **Flags** of `serve`: `--bind`, `--token-stdin`, `--ui <dir>` (the built UI),
   `--allow-host <name>` (repeatable), `--daemon <path>` (another daemon
   binary, as `BinaryDaemon`: the browser suite runs `oxplow-daemon-sim`) and
@@ -107,6 +112,63 @@ https://…`. A page reached there gets an `https` base and its component
 frames an `https` CSP (`web::Scheme`). A browser needs HTTPS for a secure
 context: the microphone, the clipboard.
 
+## Pairing
+
+Two roles (`access.rs`). They are roles, not a wall: a paired device can open
+a terminal on the host's machine.
+
+- **The owner** holds the token the host started with: the Mac app's per-run
+  token, or a headless host's. It is good only on the loopback listener
+  (`--bind`) and on the **owner socket**, `host.sock` in the home (mode 0600;
+  every request there is the owner, by the file's mode). The CLI uses the
+  socket: `oxplow-host pair` (or `oxplow host pair`) prints a code, `devices
+  [remove <id>]`, `status`, `stop`.
+- **A device** holds the token it got at pairing, good on every listener.
+  `devices.json` in the home keeps `{ id, name, kind, paired_at,
+  token_sha256 }` (`devices.rs`): only a hash, so the file never holds a
+  token. The host is its only writer and keeps it in memory; a file it cannot
+  read stops the host at start with the reason (never read as "no devices").
+
+Routes by role: owner only: `POST /host/pairing`, `GET /host/devices`,
+`PATCH|DELETE /host/devices/<id>`, `POST /host/projects`, `POST
+/host/shutdown`. Owner or device: `GET /host/status`, `GET /host/projects`,
+`POST|DELETE /host/holds` (a device's hold is always its own), `GET /host/me`
+(`{ owner, device, build }`), `DELETE /host/me` (a device forgets itself).
+Anyone who reaches the host: `POST /host/pair`.
+
+- **A code** (`POST /host/pairing`, owner) is 8 characters with no
+  look-alikes (`23456789ABCDEFGHJKMNPQRSTUVWXYZ`), shown `ABCD-EFGH`, good once
+  for 10 minutes, kept in memory.
+- **`POST /host/pair` `{ code, name, kind }`** answers `{ device, token }`:
+  the host makes the device's id (a device never chooses one). It takes only
+  `Content-Type: application/json`, and an `Origin` that is the host's own
+  when it names one: a page on another site cannot send it without a
+  preflight, and no `/host/*` route answers one. A wrong code costs a second,
+  one attempt at a time (`WRONG_CODE_WAIT`), so a code's 10 minutes allow 600
+  guesses of 31^8, and nobody can keep pairing closed for others.
+- **Who a device is** comes from its record: on `ipc/…` the host replaces
+  `Oxplow-Device`; the socket's query is rebuilt from its parsed pairs, with
+  only `connection` (the page load) as sent and `device`, `name`, `kind`
+  from the record. The owner's pass as sent (the Mac app names its device).
+- **Removing a device** (`DELETE /host/devices/<id>`, or `DELETE /host/me`)
+  revokes its token, releases its holds and closes its sockets with **4003**.
+  The host counts open sockets per device for `connected`.
+- **The host ending** (a quit, a signal, `POST /host/shutdown`) closes every
+  socket with **4002** first, so a page says why.
+
+On the page (`apps/desktop/src/host/`, `transport.ts`): a page the host served
+carries no token and says `host: <origin>`. With no token for that host in its
+storage (`oxplow.hostToken`) it shows **PairScreen** before the app mounts:
+the code and a name for the device; it keeps the token and the host's id for
+the device (`oxplow.device`) and loads again. `/` is **HostHome**: pair, then
+the host's projects; Open holds one for the device and goes to it, Close lets
+go. A refused token (a 401 on a call, a 401 from `GET /host/me` after a drop
+— a browser cannot see a socket upgrade's 401 — or a 4003) forgets the token
+and pairs again. A 4002 shows "Oxplow was quit on the computer that runs it"
+and retries slowly. After each reconnect the page compares `/host/me`'s
+`build` (a hash of the served `index.html`) with the one it loaded with, and
+loads again when it changed.
+
 ## The `Host` check
 
 Every request, whatever its route, must carry a `Host` the host allows: the
@@ -129,16 +191,15 @@ WebSocket tunnel to its `/events`.
   up to the daemon boot timeout (60 s), then `503` with `Retry-After`. Not
   held, stopped or stopping is `404`, crashed is `502`, an id the registry
   lacks is `404`; each body is short JSON (`error`, `project`, `state`).
-- **Tokens.** `ipc/…` and `events` need the host token (bearer; `?token=` on
-  the socket), except a CORS preflight (`OPTIONS` with
+- **Tokens.** `ipc/…` and `events` need the owner's or a device's token
+  (bearer; `?token=` on the socket), except a CORS preflight (`OPTIONS` with
   `Access-Control-Request-Method`): a Mac window is `tauri://localhost`, so
   its calls are cross-origin, WebKit asks first and never sends a token
   then, and the daemon's CORS layer answers it. The host drops it and sends the daemon's own, which only the
   host holds. `health`, `components/…` and `component-lib/…` need no client
   token, as the daemon's need none (a sandboxed frame cannot send one); the
-  `Host` check is their guard. `Oxplow-Device`, `Oxplow-Connection` and the
-  socket's `device`, `connection`, `name`, `kind` query pass as the client
-  sent them; pairing replaces them with the device token's.
+  `Host` check is their guard. A device's identity comes from its record (see
+  "Pairing").
 - **The tunnel** opens the daemon's socket first (a daemon that refuses is a
   `502`, not a socket that opens and closes). Frames pass both ways, each way
   in order: text, binary, ping, pong and close with its code. A send waits for
@@ -164,24 +225,23 @@ with `base: "./"`, so the same files load under `/` and `/p/<id>/` (and from
 Tauri's asset protocol).
 
 - `/p/<id>/` is `index.html` with `window.__OXPLOW__ = { kind: "project",
-  base: "http://<Host>/p/<id>", project, token, projectDir: null }` put first
-  in `<head>` (the Mac shell's injection, `windows.rs`; read by
-  `windowContext.ts` and `transport.ts`). The token is the host token until
-  pairing: **anyone who can load the page has it**, so use it on loopback or a
-  trusted network only. The meta CSP's `frame-src` also gets the page's
-  origin, so a component frame from a non-loopback name loads. The page exists
-  for any registered project, held or not; the app shows its own disconnected
-  state.
+  base: "<scheme>://<Host>/p/<id>", host: "<scheme>://<Host>", project, token:
+  null, projectDir: null }` put first in `<head>` (as the Mac shell injects a
+  window's, `windows.rs`; read by `windowContext.ts` and `transport.ts`). No
+  token: a device uses its own. The meta CSP's `frame-src` also gets the
+  page's origin, so a component frame from a non-loopback name loads, and the
+  response says `frame-ancestors 'self'`. The page exists for any registered
+  project, held or not; the app shows its own disconnected state.
 - `/p/<id>/<file>` and `/<file>` are files of the folder: plain names only
   (no `..`, no empty segment, percent escapes decoded first). `assets/…` is
   cached as immutable, the rest `no-cache`.
-- `/` is a plain list of held projects (name, state, link), a placeholder for
-  the tablet shell; it shows no paths. The app's own launcher needs the Mac
-  shell's commands, so a browser cannot show it.
+- `/` is the same `index.html` with `kind: "hostHome"` (pairing, then the
+  projects; nothing of them is in the page), a placeholder for the tablet
+  shell.
 
 ## Later steps
 
-`/host/events` (project states, and "the host is ending" so a tablet can say
-why), pairing with device tokens (the fixed port and allowed names of "Allow
-other devices" are given to the app's host at its start), a warning at quit
-when another device is connected, and the app using a headless host.
+`/host/events` (project states, for the tablet shell), the Mac app's Devices
+window and "Allow other devices" (the addresses, names and certificate given
+to the app's host at its start), a warning at quit when another device is
+connected, and the app using a headless host.

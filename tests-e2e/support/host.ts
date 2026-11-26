@@ -13,12 +13,21 @@ import { isolated } from "./daemon.js";
 export type Host = {
   /** Where the host listens (`http://127.0.0.1:<port>`). */
   base: string;
-  /** The host token every client presents until pairing. */
+  /** The owner's token (this machine; the Mac app holds it). A device's
+   *  page has none: it pairs. */
   token: string;
   /** Register a throwaway git project called `name`; its id. */
   addProject(name: string): string;
   /** Hold `project` for a device and wait until its daemon runs. */
   hold(project: string, device?: string): Promise<void>;
+  /** A pairing code, as the owner makes one (Devices… on the Mac). */
+  pairingCode(): Promise<string>;
+  /** The paired devices. */
+  devices(): Promise<Array<{ id: string; name: string; kind: string }>>;
+  /** Remove a paired device, as its owner. */
+  removeDevice(id: string): Promise<void>;
+  /** The host's status: who is connected now. */
+  status(): Promise<{ connected: Array<{ device: string; name: string }> }>;
   stop(): Promise<void>;
 };
 
@@ -105,6 +114,18 @@ export async function startHost(): Promise<Host> {
           if (Date.now() > until) throw new Error(`the daemon never ran (${mine?.state})`);
           await new Promise((r) => setTimeout(r, 200));
         }
+      },
+      async pairingCode() {
+        return ((await call("POST", "/host/pairing")) as { code: string }).code;
+      },
+      async devices() {
+        return (await call("GET", "/host/devices")) as Array<{ id: string; name: string; kind: string }>;
+      },
+      async removeDevice(id) {
+        await call("DELETE", `/host/devices/${id}`);
+      },
+      async status() {
+        return (await call("GET", "/host/status")) as { connected: Array<{ device: string; name: string }> };
       },
       stop,
     };

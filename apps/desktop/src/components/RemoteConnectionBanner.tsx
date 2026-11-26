@@ -18,7 +18,9 @@ import {
 /// daemon-side work (agents, watchers) ran through the gap either
 /// way. `refused` when the daemon refused this window's token:
 /// not a drop, so sticky — only reconnecting with the right token helps.
-export type BannerState = "hidden" | "down" | "restored" | "refused";
+/// `ended` when the host said it is ending (the app that runs it quit): the
+/// page keeps trying, slowly, until it starts again.
+export type BannerState = "hidden" | "down" | "restored" | "refused" | "ended";
 
 /// How long the "reconnected" confirmation lingers before it
 /// auto-dismisses (ms). Non-blocking — purely informational.
@@ -29,8 +31,9 @@ export const RESTORED_AUTO_DISMISS_MS = 4000;
 /// initial connect) stays hidden.
 export function nextBannerState(prev: BannerState, event: RemoteConnectionState): BannerState {
   if (prev === "refused" || event === "refused") return "refused";
-  if (event === "down") return "down";
-  return prev === "down" ? "restored" : prev;
+  if (event === "ended") return "ended";
+  if (event === "down") return prev === "ended" ? "ended" : "down";
+  return prev === "down" || prev === "ended" ? "restored" : prev;
 }
 
 /// Top-of-window strip shown only in remote mode. Mounted once in App.
@@ -73,6 +76,17 @@ export function RemoteConnectionBanner() {
         >
           Disconnect
         </button>
+      </div>
+    );
+  }
+
+  if (state === "ended") {
+    return (
+      <div data-testid="remote-banner-ended" style={{ ...stripStyle, ...downStyle }}>
+        <span>
+          Oxplow was quit on the computer that runs it, so its projects stopped. This page connects
+          again when Oxplow starts there.
+        </span>
       </div>
     );
   }

@@ -1,5 +1,6 @@
 //! `serve --public-bind` listens a second time, for other devices, over
-//! HTTPS when it has a certificate; `--bind` stays plain for this machine.
+//! HTTPS when it has a certificate; `--bind` stays plain for this machine,
+//! and only there is the owner's token good.
 
 // Terse unwraps are the assertion style in test crates.
 #![allow(clippy::unwrap_used)]
@@ -15,6 +16,8 @@ fn testdata(name: &str) -> std::path::PathBuf {
 
 #[test]
 fn other_devices_reach_the_host_over_https_and_this_machine_over_http() {
+    // A 401 over HTTPS shows the TLS listener answered; the owner's 200 on
+    // loopback, that loopback stays plain.
     let home = tempfile::tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
         .args([
@@ -72,6 +75,10 @@ fn other_devices_reach_the_host_over_https_and_this_machine_over_http() {
     });
     child.kill().unwrap();
     child.wait().unwrap();
-    assert_eq!(secure.unwrap(), 200);
+    assert_eq!(
+        secure.unwrap(),
+        401,
+        "the owner's token is for this machine only"
+    );
     assert_eq!(plain.unwrap(), 200);
 }

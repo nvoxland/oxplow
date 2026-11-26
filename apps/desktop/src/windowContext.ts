@@ -12,6 +12,9 @@ export type WindowContext = {
   /// The host's id for the project, when a host served this page
   /// (`/p/<project>/`); the shell names a project by its folder instead.
   project?: string;
+  /// The host's origin, when a host served this page: its API is there
+  /// (pairing, the device's own token), and the page carries no token.
+  host?: string;
   /// The Mac app's device: its id is kept by the shell across runs.
   device?: { id: string; name: string };
 };

@@ -4,6 +4,8 @@ import {
   dropSocket,
   isReplacedError,
   REPLACED_CLOSE_CODE,
+  DEVICE_REMOVED_CLOSE_CODE,
+  HOST_ENDING_CLOSE_CODE,
   socketCloseMeaning,
   invokeRoute,
   ipcRequest,
@@ -207,6 +209,14 @@ describe("resolveToken", () => {
     expect(resolveToken({})).toBeNull();
   });
 
+  // A page the host served carries no token: a paired device uses the one
+  // it got at pairing, kept in the host origin's storage.
+  test("a host's page uses the device's own token", () => {
+    expect(resolveToken({ injected: { base: DAEMON, token: null }, paired: "dev-token" })).toBe("dev-token");
+    expect(resolveToken({ injected: { base: DAEMON, token: null }, paired: null })).toBeNull();
+    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, paired: "dev-token" })).toBe("i");
+  });
+
   test("a token in the URL fragment wins (a person pasted it)", () => {
     expect(resolveToken({ injected: { base: DAEMON, token: "i" }, fragment: "#oxplow-token=f" })).toBe("f");
     expect(resolveToken({ injected: { base: DAEMON, token: "i" }, fragment: "#other=1" })).toBe("i");
@@ -348,6 +358,10 @@ test("what a socket's close means", () => {
   expect(socketCloseMeaning(REPLACED_CLOSE_CODE, false)).toBe("replaced");
   expect(socketCloseMeaning(1006, false)).toBe("retry");
   expect(socketCloseMeaning(1006, true)).toBe("refused");
+  // The host removed this device: pair again. The host is ending (the app
+  // quit): say so, and keep trying slowly.
+  expect(socketCloseMeaning(DEVICE_REMOVED_CLOSE_CODE, false)).toBe("removed");
+  expect(socketCloseMeaning(HOST_ENDING_CLOSE_CODE, false)).toBe("ended");
 });
 
 test("a REPLACED answer is the replaced page load's", () => {
