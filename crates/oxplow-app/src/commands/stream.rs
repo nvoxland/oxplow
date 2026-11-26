@@ -116,6 +116,9 @@ fn session(e: oxplow_session::SessionError) -> CommandError {
     use oxplow_session::SessionError as E;
     match e {
         E::DuplicateWorktreeSlug(_) => invalid("/title", e.to_string()),
+        E::NoSuchBranch(_) | E::BranchInUse { .. } => invalid("/existing_branch", e.to_string()),
+        E::BranchExists(_) | E::BadBranchName(_) => invalid("/new_branch", e.to_string()),
+        E::UnknownRevision(_) => invalid("/start_point", e.to_string()),
         E::Storage(oxplow_domain::DomainError::NotFound) => invalid("/stream", "no such stream"),
         other => CommandError::Failed {
             message: other.to_string(),
@@ -176,8 +179,9 @@ fn slug_of(title: &str) -> String {
 }
 
 /// `stream.create { title, source, … }` — a stream on a worktree: of an
-/// existing branch, of a new one forked from a start point, or adopted
-/// from disk. Each source names the fields it needs. The worktree's folder
+/// existing branch (local, or remote-tracking as `origin/foo`; one already
+/// in a working copy no stream uses adopts that copy), of a new one forked
+/// from any revision, or adopted from disk. Each source names the fields it needs. The worktree's folder
 /// comes from the title. Anyone's: agents set up parallel work too.
 /// It reaches the VCS and starts the stream's capture service.
 pub fn create_op(deps: StreamDeps) -> Op {
@@ -211,14 +215,14 @@ pub fn create_op(deps: StreamDeps) -> Op {
                     StreamSource::Existing => {
                         let branch = need(&input.existing_branch, "existing_branch")?;
                         deps.streams
-                            .create_worktree(&slug_of(&title), title, branch.clone(), branch)
+                            .create_on_branch(&slug_of(&title), title, &branch)
                             .await
                     }
                     StreamSource::New => {
                         let branch = need(&input.new_branch, "new_branch")?;
                         let from = need(&input.start_point, "start_point")?;
                         deps.streams
-                            .create_worktree(&slug_of(&title), title, branch, from)
+                            .create_on_new_branch(&slug_of(&title), title, &branch, &from)
                             .await
                     }
                     StreamSource::Worktree => {
@@ -617,6 +621,177 @@ mod tests {
         let made = serde_json::from_value::<Stream>(out.result).unwrap();
         assert_eq!(made.branch, "feature");
         assert_eq!(made.branch_source, "feature");
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    async fn create(fx: &ThreadFixture, input: serde_json::Value) -> Result<Stream, CommandError> {
+        fx.svc
+            .commands
+            .run(&Actor::Human, CREATE, input, false)
+            .await
+            .map(|out| serde_json::from_value::<Stream>(out.result).unwrap())
+    }
+
+    fn refused_at(result: Result<Stream, CommandError>, field: &str) -> String {
+        match result {
+            Err(CommandError::Invalid {
+                field: Some(f),
+                message,
+            }) if f == field => message,
+            other => panic!("expected a refusal at {field}: {other:?}"),
+        }
+    }
+
+    /// A remote-tracking branch with no local copy starts a stream on a
+    /// local branch of its name that tracks it, never on a local branch
+    /// named `origin/…`.
+    #[tokio::test]
+    async fn a_remote_branch_starts_a_stream_on_a_local_branch_that_tracks_it() {
+        let fx = services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "-q", "--bare"]);
+        git(
+            &root,
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        git(
+            &root,
+            &["push", "-q", "origin", "HEAD:refs/heads/remote-only"],
+        );
+        git(&root, &["fetch", "-q", "origin"]);
+        let made = create(
+            &fx,
+            json!({ "title": "Remote only", "source": "existing", "existing_branch": "origin/remote-only" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.branch, "remote-only");
+        assert_eq!(
+            git(
+                &root,
+                &["rev-parse", "--abbrev-ref", "remote-only@{upstream}"]
+            ),
+            "origin/remote-only"
+        );
+    }
+
+    /// A branch already checked out in a working copy no stream uses: the
+    /// stream is that working copy, adopted (git keeps a branch in one).
+    #[tokio::test]
+    async fn a_branch_in_a_worktree_no_stream_uses_adopts_that_worktree() {
+        let fx = services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let loose = root.join(format!(
+            "../{}-loose",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "loose",
+                loose.to_str().unwrap(),
+            ],
+        );
+        let made = create(
+            &fx,
+            json!({ "title": "Loose", "source": "existing", "existing_branch": "loose" }),
+        )
+        .await
+        .unwrap();
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap();
+        assert_eq!(
+            canon(std::path::Path::new(&made.worktree_path)),
+            canon(&loose)
+        );
+        assert_eq!(made.branch, "loose");
+    }
+
+    /// A branch git can't put in a new working copy is refused at the
+    /// field, saying why: one the main working copy or a stream has out,
+    /// and one that doesn't exist.
+    #[tokio::test]
+    async fn a_branch_in_use_or_unknown_is_refused_at_its_field() {
+        let fx = services_with_thread().await;
+        let main = main_branch(&fx).await;
+        let message = refused_at(
+            create(
+                &fx,
+                json!({ "title": "Main", "source": "existing", "existing_branch": main }),
+            )
+            .await,
+            "/existing_branch",
+        );
+        assert!(message.contains("checked out"), "{message}");
+        create(
+            &fx,
+            json!({ "title": "Taken", "source": "new", "new_branch": "taken", "start_point": main }),
+        )
+        .await
+        .unwrap();
+        let message = refused_at(
+            create(
+                &fx,
+                json!({ "title": "Taken again", "source": "existing", "existing_branch": "taken" }),
+            )
+            .await,
+            "/existing_branch",
+        );
+        assert!(message.contains("Taken"), "{message}");
+        let message = refused_at(
+            create(
+                &fx,
+                json!({ "title": "Nope", "source": "existing", "existing_branch": "nope" }),
+            )
+            .await,
+            "/existing_branch",
+        );
+        assert!(message.contains("nope"), "{message}");
+    }
+
+    /// A new branch starts from any revision git resolves (a tag here); one
+    /// it can't is refused at `start_point`, and a name that is already a
+    /// branch at `new_branch`, before git runs.
+    #[tokio::test]
+    async fn a_new_branch_starts_from_any_revision_and_needs_a_new_name() {
+        let fx = services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let main = main_branch(&fx).await;
+        git(&root, &["tag", "v1"]);
+        let made = create(
+            &fx,
+            json!({ "title": "From tag", "source": "new", "new_branch": "from-tag", "start_point": "v1" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.branch, "from-tag");
+        refused_at(
+            create(&fx, json!({ "title": "Bad", "source": "new", "new_branch": "bad", "start_point": "no-such-rev" }))
+                .await,
+            "/start_point",
+        );
+        refused_at(
+            create(&fx, json!({ "title": "Again", "source": "new", "new_branch": "from-tag", "start_point": main }))
+                .await,
+            "/new_branch",
+        );
+        refused_at(
+            create(&fx, json!({ "title": "Dash", "source": "new", "new_branch": "-x", "start_point": main })).await,
+            "/new_branch",
+        );
     }
 
     /// Each source needs its own fields, named when they are missing.

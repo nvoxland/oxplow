@@ -225,6 +225,29 @@ impl From<SessionError> for IpcError {
                 details: Vec::new(),
                 command_run_id: None,
             },
+            // A branch or a start point the create can't use: refused at
+            // the field that named it, as the command refuses it.
+            SessionError::NoSuchBranch(_)
+            | SessionError::BranchInUse { .. }
+            | SessionError::BranchExists(_)
+            | SessionError::BadBranchName(_)
+            | SessionError::UnknownRevision(_) => Self {
+                code: "INVALID".into(),
+                message: value.to_string(),
+                cause: None,
+                field: Some(
+                    match &value {
+                        SessionError::BranchExists(_) | SessionError::BadBranchName(_) => {
+                            "/new_branch"
+                        }
+                        SessionError::UnknownRevision(_) => "/start_point",
+                        _ => "/existing_branch",
+                    }
+                    .into(),
+                ),
+                details: Vec::new(),
+                command_run_id: None,
+            },
             SessionError::Vcs(e) => IpcError::from(DomainError::from(e.clone())),
             SessionError::Storage(e) => IpcError::from(e.clone()),
         }
