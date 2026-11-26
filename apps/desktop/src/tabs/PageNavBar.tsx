@@ -147,6 +147,9 @@ export function PageNavBar({
       data-testid="page-nav-bar"
       style={{
         display: "flex",
+        // On a narrow screen the buttons that don't fit go to a second line
+        // rather than squeezing the title to nothing.
+        flexWrap: "wrap",
         alignItems: "center",
         gap: 8,
         padding: "6px 12px",
@@ -351,7 +354,7 @@ export function PageNavBar({
             display: "flex",
             alignItems: titleIcon ? "center" : "baseline",
             gap: 8,
-            flex: 1,
+            flex: "1 1 120px",
             minWidth: 0,
             paddingLeft: 6,
           }}

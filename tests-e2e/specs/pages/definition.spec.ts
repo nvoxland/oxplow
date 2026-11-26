@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown, load } from "../../support/ui.js";
+import { expectNoHorizontalOverflow, open, shown, load } from "../../support/ui.js";
 
 // Definition is a display mode of a page's YAML file: Definition in About this page opens
 // the page's running copy drawn as Definition, and the Text view (the raw
@@ -106,4 +106,18 @@ test("Definition of a page whose file is open in the Text view is another tab: b
   await expect(page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="definition"]')).toHaveCount(1);
   await page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="numbat.yaml"]:not([data-testid*="definition"])').click();
   await expect(shown(page).getByTestId("viz-code")).toContainText("title: Defined Numbat");
+});
+
+test("the nav title shows at a narrow width, with no horizontal overflow", async ({ page, daemon }) => {
+  await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat } });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_defn/numbat");
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await page.getByTestId("menu-item-action-page-about").click();
+  await page.getByTestId("page-about-definition").click();
+  const title = page.getByTestId("page-nav-title").filter({ visible: true });
+  await expect(title).toHaveText("Definition: numbat.yaml");
+  const width = (await title.boundingBox())?.width ?? 0;
+  // Wide enough to read: not squeezed to nothing by the buttons beside it.
+  expect(width).toBeGreaterThan(60);
+  await expectNoHorizontalOverflow(page);
 });
