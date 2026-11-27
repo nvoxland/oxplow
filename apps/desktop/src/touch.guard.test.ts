@@ -64,6 +64,8 @@ const CONTEXT_MENU_KEPT: Record<string, number> = {
   "tabs/RouteLink.tsx": 2,
   "terminal/TerminalSurface.tsx": 1,
   "terminal/TerminalTabStrip.tsx": 1,
+  // A page row's props (`rowMenu`): the one place a viz row's menu opens.
+  "viz/VizView.tsx": 1,
 };
 
 test("no raw onContextMenu= outside the shared hook (ratchet)", () => {
