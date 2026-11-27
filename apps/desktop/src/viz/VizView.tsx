@@ -853,10 +853,10 @@ function RowsBody({
         : []),
     ];
   };
-  // Every row of every row component: focusable, with its menu from the
-  // ☰ button at its end (`rowMenu.button`) or the keyboard (Menu key /
-  // Shift+F10). A right-click on a row opens nothing: on a tablet there is
-  // none, and the button is where a row's actions are.
+  // Every row of every row component: focusable, with its menu from a
+  // right-click or the keyboard (Menu key / Shift+F10). A table row also
+  // ends in a ☰ button that opens it (`rowMenu.button`), which a touch
+  // screen can reach; the other row components draw none.
   // A row that picks: a click (not on a link or control in it) or Enter
   // sets the param its column selects.
   // The row action a click or Enter runs: the viz's `primary`, where the row is offered it.
@@ -880,6 +880,7 @@ function RowsBody({
       }
       ctxMenu.openForKey(e, rowItems(row));
     },
+    onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
     // Cmd/Ctrl+click marks the row, Shift+click the range to it; a plain
     // click clears the marks, then picks or runs the primary action.
     onClick: (e: React.MouseEvent) => {
@@ -1272,12 +1273,13 @@ type RowMenuProps = {
   tabIndex: number;
   onKeyDown(e: React.KeyboardEvent): void;
   onClick?(e: React.MouseEvent): void;
+  onContextMenu(e: React.MouseEvent): void;
   "aria-selected"?: boolean;
 };
 
-/** A row's props (focus, keys, click) and, as `button`, the ☰ at its end
- *  that opens its menu: every row component spreads the one and draws the
- *  other last. */
+/** A row's props (focus, keys, click, right-click): every row component
+ *  spreads them. `button` is the ☰ that opens its menu, which only a table
+ *  row draws, at its end. */
 type RowMenu = ((row: SqlCell[]) => RowMenuProps) & { button(row: SqlCell[]): ReactNode };
 
 function Viz({
@@ -1974,7 +1976,6 @@ function TreeItem({ node, path, closed, lazyOpen, shown, ...rest }: TreeVizProps
         {node.marks && node.marks.length > 0 ? (
           <MarksCell marks={node.marks.map((m) => ({ text: m.letter, tone: m.tone, hint: m.status }))} style={{ marginLeft: "auto", paddingLeft: 6 }} />
         ) : null}
-        {node.made ? null : <span style={node.marks && node.marks.length > 0 ? undefined : rowMenuEnd}>{rowMenu.button(node.row)}</span>}
       </div>
       {open && node.state === "loading" ? (
         <DelayedLoading>
@@ -2069,7 +2070,6 @@ function TimelineViz({
         const ref = e.ref && parseUri(e.ref) ? e.ref : null;
         return (
           <li key={i} data-testid={`viz-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }} {...rowMenu(e.row)}>
-            <span style={rowMenuFloat}>{rowMenu.button(e.row)}</span>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>
             <div>
               {ref ? (
@@ -2098,7 +2098,6 @@ function DetailViz({ row, cols, cell, rowMenu, buttons }: { row: SqlCell[]; cols
       <div style={{ flex: 1, minWidth: 0 }}>
         <Facts testId="viz-detail" facts={drawn.map((c) => ({ key: c.key, label: c.label, value: value(c), actions: buttons(c.key) }))} {...rowMenu(row)} />
       </div>
-      {rowMenu.button(row)}
     </div>
   );
 }
@@ -2124,7 +2123,6 @@ function StepsViz({ steps, rowMenu }: { steps: ReturnType<typeof stepItems>; row
             <span style={{ color: s.status === "pending" ? "var(--text-secondary)" : undefined }}>
               {i + 1}. {s.label}
             </span>
-            <span style={rowMenuEnd}>{rowMenu.button(s.row)}</span>
           </li>
         );
       })}
@@ -2159,7 +2157,6 @@ function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRow
                 {r.from} → {r.to}
               </span>
             </button>
-            {rowMenu.button(r.row)}
           </div>
           {open === i ? (
             <div style={{ height: 360 }}>
@@ -2341,7 +2338,6 @@ function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProp
         {...rowMenu(row)}
         {...look.props}
       >
-        {dense ? null : <span style={rowMenuFloat}>{rowMenu.button(row)}</span>}
         <div style={dense ? denseHeadStyle : undefined}>
           {look.fold ? (
             <button
@@ -2369,7 +2365,6 @@ function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProp
             ))}
           </div>
         ) : null}
-        {dense ? rowMenu.button(row) : null}
         {view?.detail(row, i)}
       </li>
     );
@@ -2437,7 +2432,6 @@ function BoardViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                   {...rowMenu(row)}
                   {...look.props}
                 >
-                  <span style={rowMenuFloat}>{rowMenu.button(row)}</span>
                   <div>{head ? cell(row, head) : null}</div>
                   {rest.length > 0 ? (
                     <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
@@ -2571,9 +2565,6 @@ const disclosureStyle: CSSProperties = {
  *  them, so two long rows never read as one block. */
 /** A parent row's fold: a bare arrow before its title, not a button. */
 const foldStyle: CSSProperties = { background: "transparent", border: "none", padding: 0, marginRight: 6, color: "var(--text-secondary)", cursor: "pointer", font: "inherit" };
-/** A row's ☰ at its end: floated right in a block row, pushed right in a flex one. */
-const rowMenuFloat: CSSProperties = { float: "right", marginLeft: 8 };
-const rowMenuEnd: CSSProperties = { marginLeft: "auto" };
 const listRowStyle: CSSProperties = { padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" };
 /** A compact list's row: one line, headline left, the rest right. */
 const denseRowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "3px 0", minHeight: 22 };

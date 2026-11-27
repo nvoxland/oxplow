@@ -303,7 +303,7 @@ test("a row that links somewhere isn't draggable, and offers Add to Context in i
   const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
   const row = view.getByTestId("viz-row-2");
   expect(row.getAttribute("draggable")).toBeNull();
-  fireEvent.click(view.getByTestId("viz-row-menu-2"));
+  fireEvent.contextMenu(row);
   const add = await waitFor(() => view.getByTestId("menu-item-add-row-to-context"));
   expect(add.textContent).toBe("Add to Context");
   // Every Add to Context entry wears the basket's @.
@@ -320,7 +320,7 @@ test("a row that names a file offers Open In ▸ for it", async () => {
       result: { columns: ["path"], rows: [["src/lib/a.ts"]], truncated: false },
     } as unknown as VizRun;
     const view = render(<VizView run={run} compact onOpenPage={() => {}} />);
-    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"));
     fireEvent.click(await waitFor(() => view.getByTestId("menu-item-open-in")));
     fireEvent.click(view.getByTestId("menu-item-open-in.terminal"));
     expect(opened).toEqual(["/w/src/lib"]);
@@ -354,7 +354,7 @@ test("a file row's Open In ▸ has an extension's Open In command for the file",
     const view = render(<VizView run={run} compact onOpenPage={() => {}} />);
     // The listing loads, then the row's menu asks the daemon.
     await waitFor(async () => {
-      fireEvent.click(view.getByTestId("viz-row-menu-0"));
+      fireEvent.contextMenu(view.getByTestId("viz-row-0"));
       fireEvent.click(await waitFor(() => view.getByTestId("menu-item-open-in")));
       expect(view.getByTestId("menu-item-ref-command-acme.notebook.open")).toBeTruthy();
     });

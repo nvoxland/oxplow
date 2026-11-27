@@ -204,9 +204,9 @@ test("a board is a column per group, its values first and empty ones too; a drop
   expect(ran[0]).toMatchObject({ action: "move", row: record(0), drop: { group: "doing", after: null } });
 });
 
-// A card's title is a link; its ☰ opens the card's menu and never the
-// link's page.
-test("a board card's ☰ opens the card's menu, not its page", async () => {
+// A card's title is a link; a right-click on the card opens its menu and
+// never the link's page.
+test("a board card's right-click opens the card's menu, not its page", async () => {
   const opened: string[] = [];
   const run = runOf({
     viz: "board",
@@ -224,7 +224,7 @@ test("a board card's ☰ opens the card's menu, not its page", async () => {
       <VizView run={withUris} onOpenPage={(r) => opened.push(r.id)} />
     </PageNavigationContext.Provider>,
   );
-  fireEvent.click(view.getByTestId("viz-row-menu-0"));
+  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
   expect(await waitFor(() => view.getByTestId("menu-item-viz-action-finish"))).toBeTruthy();
   expect(opened).toEqual([]);
 });
@@ -244,7 +244,7 @@ test("on a touch screen Select marks a row, then a tap marks or unmarks one", as
   globalThis.matchMedia = fingers;
   try {
     const view = render(<VizView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
-    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
     fireEvent.click(await view.findByTestId("menu-item-viz.select"));
     expect(view.getByTestId("viz-row-0").getAttribute("data-marked")).toBe("true");
     fireEvent.click(view.getByTestId("viz-row-2"));
@@ -263,7 +263,7 @@ test("on a touch screen Select marks a row, then a tap marks or unmarks one", as
 
 test("with a mouse a row's menu has no Select", async () => {
   const view = render(<VizView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
-  fireEvent.click(view.getByTestId("viz-row-menu-0"));
+  fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
   await view.findByTestId("menu-item-add-row-to-context");
   expect(view.queryByTestId("menu-item-viz.select")).toBeNull();
 });
@@ -277,7 +277,7 @@ test("on a touch screen marks that are no longer shown leave taps alone", async 
   try {
     const run = runOf({ actions: [finish] });
     const view = render(<VizView run={run} onOpenPage={() => {}} />);
-    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
     fireEvent.click(await view.findByTestId("menu-item-viz.select"));
     expect(view.getByTestId("viz-marks-count").textContent).toBe("1 selected");
     // The row it marked is done now: its cells, so its key, changed.
@@ -299,7 +299,7 @@ test("on a touch screen a row's menu moves it up or down as a drop would", async
     ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
   try {
     const view = render(<VizView run={runOf({ actions: [reorder] })} onOpenPage={() => {}} />);
-    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
     expect(view.queryByTestId("menu-item-viz.move.up")).toBeNull();
     fireEvent.click(await view.findByTestId("menu-item-viz.move.down"));
     await waitFor(() => expect(ran).toHaveLength(1));
@@ -324,7 +324,7 @@ test("on a touch screen Move Down on a parent row passes its children", async ()
       result: { columns: cols, rows: deep, truncated: false, reads: { datasets: [], tables: [], measures: [] } },
     } as unknown as VizRun;
     const view = render(<VizView run={run} onOpenPage={() => {}} />);
-    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
     fireEvent.click(await view.findByTestId("menu-item-viz.move.down"));
     await waitFor(() => expect(ran).toHaveLength(1));
     expect(ran[0]).toMatchObject({ row: { uri: "e" }, drop: { after: { uri: "t" }, before: null } });
