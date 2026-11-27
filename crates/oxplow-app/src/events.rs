@@ -112,6 +112,10 @@ pub enum OxplowEvent {
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer re-reads its settings.
     ConfigChanged,
+    /// The host's devices or its settings changed (a pairing, a rename, a
+    /// removal, `host-settings.json`): `v_host_device` and
+    /// `v_host_settings` are read again.
+    HostChanged,
     /// The extension catalog may have changed: a file under the primary
     /// worktree's `.oxplow/extensions/` did, or the `extensions` config key
     /// (the catalog's own signal). Every host listing what

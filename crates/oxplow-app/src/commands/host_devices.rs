@@ -5,15 +5,20 @@
 //! with the same `OXPLOW_HOME`. A daemon no host started (one run alone)
 //! reads `hosted: false`.
 //!
-//! - `oxplow.host.devices` (read): who is paired and connected, the code in
-//!   force, the settings and whether the host runs with them, the port and
-//!   where it came from, the addresses a device opens, this machine's
-//!   private addresses and `.local` name, whether there is a root to trust.
-//! - `oxplow.host.pair`, `rename_device`, `remove_device`, `set_settings`.
+//! - Read: the live datasets `v_host_device` (who is paired and connected)
+//!   and `v_host_settings` (one row: the settings and whether the host runs
+//!   with them, the port and where it came from, the addresses a device
+//!   opens, this machine's private addresses and `.local` name, whether
+//!   there is a root to trust, the code in force), from [`read`].
+//! - Write: `oxplow.host.pair`, `rename_device`, `remove_device`,
+//!   `set_settings`; each posts `HostChanged`, so the datasets are read
+//!   again.
 //!
-//! A person's only (or a page a person pressed): the read carries the code
-//! in force, and the writes let a device in. An agent, an effect or a job is
-//! refused. Not undoable: the host's own state, outside oxplow's database.
+//! The writes are a person's only (or a page a person pressed): they let a
+//! device in. An agent, an effect or a job is refused. The datasets are as
+//! readable as any (an agent on this machine could reach the owner socket
+//! from its shell anyway: owner and device are roles, not a wall). Not
+//! undoable: the host's own state, outside oxplow's database.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -29,8 +34,9 @@ use serde_json::{json, Value};
 use super::ops::Op;
 use super::util::{parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
+use crate::events::OxplowEvent;
+use oxplow_db::SqlCell;
 
-pub const DEVICES: &str = "oxplow.host.devices";
 pub const PAIR: &str = "oxplow.host.pair";
 pub const RENAME_DEVICE: &str = "oxplow.host.rename_device";
 pub const REMOVE_DEVICE: &str = "oxplow.host.remove_device";
@@ -112,72 +118,131 @@ async fn call(
         .unwrap_or_else(|e| Err(OwnerCallError::Failed(e.to_string())))
 }
 
-/// What the Devices page reads (`oxplow.host.devices`).
-async fn devices(home: &Path) -> Value {
-    let settings = HostSettings::load(home);
-    let (port, port_problem) = match settings.device_port() {
+/// What the host datasets hold (`v_host_device`, `v_host_settings`, read
+/// live): the paired devices, and one row of this computer's standing.
+pub struct HostRead {
+    pub devices: Vec<Vec<SqlCell>>,
+    pub settings: Vec<SqlCell>,
+}
+
+fn text(v: impl Into<String>) -> SqlCell {
+    SqlCell::Text(v.into())
+}
+fn opt_text(v: Option<String>) -> SqlCell {
+    v.map(SqlCell::Text).unwrap_or(SqlCell::Null(()))
+}
+fn flag(v: bool) -> SqlCell {
+    SqlCell::Int(i64::from(v))
+}
+fn json_cell(v: &impl serde::Serialize) -> SqlCell {
+    SqlCell::Text(serde_json::to_string(v).unwrap_or_else(|_| "null".into()))
+}
+
+/// Read the host of `home`: as its owner over its socket; a home with no
+/// host (a daemon run alone) is `hosted = 0`, and one that does not answer
+/// says why (`problem`).
+pub async fn read(home: &Path) -> HostRead {
+    let saved = HostSettings::load(home);
+    let (port, port_problem) = match saved.device_port() {
         Ok(p) => (Some(p), None),
         Err(e) => (None, Some(e.to_string())),
     };
-    let open_on_device = port
-        .map(|p| settings.open_on_device(p.port))
-        .unwrap_or_default();
-    let mut out = json!({
-        "hosted": false,
-        "problem": null,
-        "devices": [],
-        "pairing": null,
-        "settings": settings,
-        "applied": false,
-        "port": port,
-        "port_problem": port_problem,
-        "open_on_device": open_on_device,
-        "addresses": oxplow_host_access::network::private_addresses().iter().map(|ip| ip.to_string()).collect::<Vec<_>>(),
-        "local_name": oxplow_host_access::network::local_name(),
-        "root_certificate": settings.tls_cert.is_none() && oxplow_host_access::root_path(home).is_file(),
-    });
-    let status = match call(home.to_path_buf(), "GET", "/host/status".into(), None).await {
-        Ok(status) => status,
-        Err(OwnerCallError::NoHost(_)) => return out,
-        Err(e) => {
-            out["problem"] = json!(e.to_string());
-            return out;
-        }
-    };
-    out["hosted"] = json!(true);
-    let connected: Vec<String> = status["connected"]
-        .as_array()
-        .map(|c| {
-            c.iter()
-                .filter_map(|d| d["device"].as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let listed = call(home.to_path_buf(), "GET", "/host/devices".into(), None).await;
-    let pairing = call(home.to_path_buf(), "GET", "/host/pairing".into(), None).await;
-    match listed {
-        Ok(list) => {
-            out["devices"] = json!(list
+    let mut hosted = false;
+    let mut problem: Option<String> = None;
+    let mut devices = Vec::new();
+    let mut pairing: Option<Value> = None;
+    let mut public = Value::Null;
+    match call(home.to_path_buf(), "GET", "/host/status".into(), None).await {
+        Ok(status) => {
+            hosted = true;
+            public = status["public"].clone();
+            let connected: Vec<String> = status["connected"]
                 .as_array()
-                .map(|l| l
-                    .iter()
-                    .map(|d| json!({
-                        "id": d["id"],
-                        "name": d["name"],
-                        "kind": d["kind"],
-                        "paired_at": d["paired_at"],
-                        "connected": d["id"].as_str().is_some_and(|id| connected.iter().any(|c| c == id)),
-                    }))
-                    .collect::<Vec<_>>())
-                .unwrap_or_default());
+                .map(|c| {
+                    c.iter()
+                        .filter_map(|d| d["device"].as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            match call(home.to_path_buf(), "GET", "/host/devices".into(), None).await {
+                Ok(list) => {
+                    devices = list
+                        .as_array()
+                        .map(|l| {
+                            l.iter()
+                                .map(|d| {
+                                    let id = d["id"].as_str().unwrap_or_default().to_string();
+                                    vec![
+                                        text(id.clone()),
+                                        text(d["name"].as_str().unwrap_or_default()),
+                                        text(d["kind"].as_str().unwrap_or_default()),
+                                        d["paired_at"]
+                                            .as_i64()
+                                            .map(SqlCell::Int)
+                                            .unwrap_or(SqlCell::Null(())),
+                                        flag(connected.contains(&id)),
+                                    ]
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                }
+                Err(e) => problem = Some(e.to_string()),
+            }
+            pairing = call(home.to_path_buf(), "GET", "/host/pairing".into(), None)
+                .await
+                .ok()
+                .filter(|v| !v.is_null());
         }
-        Err(e) => out["problem"] = json!(e.to_string()),
+        Err(OwnerCallError::NoHost(_)) => {}
+        Err(e) => problem = Some(e.to_string()),
     }
-    if let Ok(code) = pairing {
-        out["pairing"] = code;
-    }
-    out["applied"] = json!(applied(&settings, port.map(|p| p.port), &status["public"]));
-    out
+    let addresses: Vec<String> = oxplow_host_access::network::private_addresses()
+        .iter()
+        .map(|ip| ip.to_string())
+        .collect();
+    let settings = vec![
+        flag(hosted),
+        opt_text(problem),
+        flag(saved.allow_other_devices),
+        text(saved.address.clone()),
+        json_cell(&saved.names),
+        saved
+            .port
+            .map(|p| SqlCell::Int(i64::from(p)))
+            .unwrap_or(SqlCell::Null(())),
+        port.map(|p| SqlCell::Int(i64::from(p.port)))
+            .unwrap_or(SqlCell::Null(())),
+        opt_text(port.map(|p| {
+            serde_json::to_value(p.from)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default()
+        })),
+        opt_text(port_problem),
+        opt_text(saved.tls_cert.as_ref().map(|p| p.display().to_string())),
+        opt_text(saved.tls_key.as_ref().map(|p| p.display().to_string())),
+        flag(hosted && applied(&saved, port.map(|p| p.port), &public)),
+        json_cell(
+            &port
+                .map(|p| saved.open_on_device(p.port))
+                .unwrap_or_default(),
+        ),
+        json_cell(&addresses),
+        opt_text(oxplow_host_access::network::local_name()),
+        flag(saved.tls_cert.is_none() && oxplow_host_access::root_path(home).is_file()),
+        opt_text(
+            pairing
+                .as_ref()
+                .and_then(|p| p["code"].as_str().map(str::to_string)),
+        ),
+        pairing
+            .as_ref()
+            .and_then(|p| p["expires_at"].as_i64())
+            .map(SqlCell::Int)
+            .unwrap_or(SqlCell::Null(())),
+    ];
+    HostRead { devices, settings }
 }
 
 /// Whether the host runs with `settings` now: its listener for other
@@ -202,9 +267,16 @@ pub fn applied(settings: &HostSettings, port: Option<u16>, public: &Value) -> bo
     })
 }
 
-fn output(result: Value) -> HandlerOutput {
+/// The command's answer; once it has run, the host datasets are read again
+/// (a Devices page open shows it).
+fn output(services: &ServicesSlot, result: Value) -> HandlerOutput {
+    let events = services.get().ok().map(|svc| svc.events.clone());
     HandlerOutput {
         result,
+        after_commit: events.map(|events| {
+            Box::new(move || events.emit(OxplowEvent::HostChanged))
+                as Box<dyn FnOnce() + Send + Sync>
+        }),
         ..HandlerOutput::default()
     }
 }
@@ -212,23 +284,6 @@ fn output(result: Value) -> HandlerOutput {
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     let home = |services: &ServicesSlot| -> Result<PathBuf, CommandError> {
         Ok(services.get()?.global_config_dir.clone())
-    };
-    let read = {
-        let services = services.clone();
-        Op::new(
-            "host.read",
-            "devices",
-            schema::<NoInput>(),
-            false,
-            Handler::External(Arc::new(move |invocation: Invocation, input| {
-                let services = services.clone();
-                Box::pin(async move {
-                    person_only(invocation.actor(), "Reading the host's devices")?;
-                    let _: NoInput = parse(input)?;
-                    Ok(output(devices(&home(&services)?).await))
-                })
-            })),
-        )
     };
     let pair = {
         let services = services.clone();
@@ -245,7 +300,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     let code = call(home(&services)?, "POST", "/host/pairing".into(), None)
                         .await
                         .map_err(host_error)?;
-                    Ok(output(code))
+                    Ok(output(&services, code))
                 })
             })),
         )
@@ -274,7 +329,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     )
                     .await
                     .map_err(host_error)?;
-                    Ok(output(device))
+                    Ok(output(&services, device))
                 })
             })),
         )
@@ -299,7 +354,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     )
                     .await
                     .map_err(host_error)?;
-                    Ok(output(device))
+                    Ok(output(&services, device))
                 })
             })),
         )
@@ -340,13 +395,14 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         .map_err(|words| super::util::invalid("/address", words))?;
                     // They apply when the host starts next.
                     Ok(output(
+                        &services,
                         json!({ "saved": true, "applies": "at the next start" }),
                     ))
                 })
             })),
         )
     };
-    vec![read, pair, rename, remove, set_settings]
+    vec![pair, rename, remove, set_settings]
 }
 
 #[cfg(test)]
@@ -453,29 +509,55 @@ mod tests {
             .map(|o| o.result)
     }
 
-    /// The page's read: the paired devices (which are connected), the code
-    /// in force, the settings; no host is `hosted: false`, not an error.
+    /// The rows of `sql` as JSON objects.
+    async fn rows(fx: &crate::test_fixtures::ThreadFixture, sql: &str) -> Vec<Value> {
+        let result = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
+        result
+            .rows
+            .into_iter()
+            .map(|row| {
+                let mut o = serde_json::Map::new();
+                for (c, v) in result.columns.iter().zip(row) {
+                    o.insert(c.clone(), serde_json::to_value(v).unwrap());
+                }
+                Value::Object(o)
+            })
+            .collect()
+    }
+
+    /// The datasets read the host: the paired devices (which are
+    /// connected), the code in force; no host is `hosted = 0`, not an error.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_devices_read_from_the_host_and_no_host_is_said() {
+    async fn the_datasets_read_the_host_and_no_host_is_said() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let home = fx.svc.global_config_dir.clone();
         std::fs::create_dir_all(&home).unwrap();
-        let alone = run(&fx, &Actor::Human, super::DEVICES, json!({}))
-            .await
-            .unwrap();
-        assert_eq!(alone["hosted"], false);
-        assert_eq!(alone["devices"], json!([]));
+        let alone = rows(&fx, "SELECT hosted, pairing_code FROM v_host_settings").await;
+        assert_eq!(alone, [json!({ "hosted": 0, "pairing_code": null })]);
+        assert!(rows(&fx, "SELECT * FROM v_host_device").await.is_empty());
 
         let seen = stand_in(&home, host_answers);
-        let read = run(&fx, &Actor::Human, super::DEVICES, json!({}))
-            .await
-            .unwrap();
-        assert_eq!(read["hosted"], true);
-        assert_eq!(read["devices"][0]["name"], "Tab S9");
-        assert_eq!(read["devices"][0]["connected"], true);
-        assert_eq!(read["devices"][1]["connected"], false);
-        assert_eq!(read["pairing"]["code"], "ABCD-EFGH");
-        assert_eq!(read["applied"], true, "off and off");
+        let devices = rows(
+            &fx,
+            "SELECT id, name, connected FROM v_host_device ORDER BY id",
+        )
+        .await;
+        assert_eq!(
+            devices,
+            [
+                json!({ "id": "dev-1", "name": "Tab S9", "connected": 1 }),
+                json!({ "id": "dev-2", "name": "Phone", "connected": 0 })
+            ]
+        );
+        let standing = rows(
+            &fx,
+            "SELECT hosted, applied, pairing_code, pairing_until FROM v_host_settings",
+        )
+        .await;
+        assert_eq!(
+            standing,
+            [json!({ "hosted": 1, "applied": 1, "pairing_code": "ABCD-EFGH", "pairing_until": 1 })]
+        );
         assert!(seen
             .lock()
             .unwrap()
@@ -524,8 +606,7 @@ mod tests {
         );
     }
 
-    /// An agent (or a page it pressed) may not read the code or let a
-    /// device in.
+    /// An agent (or a page it pressed) may not let a device in.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_is_refused() {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -539,7 +620,10 @@ mod tests {
             on_behalf_of: Box::new(agent.clone()),
         };
         for actor in [&agent, &page] {
-            for (name, input) in [(super::DEVICES, json!({})), (super::PAIR, json!({}))] {
+            for (name, input) in [
+                (super::PAIR, json!({})),
+                (super::REMOVE_DEVICE, json!({ "id": "dev-1" })),
+            ] {
                 let refused = run(&fx, actor, name, input).await.unwrap_err();
                 assert!(
                     matches!(refused, CommandError::Denied { .. }),

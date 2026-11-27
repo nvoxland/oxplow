@@ -1804,6 +1804,39 @@ datasets:
     - { name: "size_bytes", type: "INT", doc: "How large its saved transcript is." }
     - { name: "parent", type: "TEXT", doc: "The conversation it was forked from, if any." }
     - { name: "problem", type: "TEXT", doc: "Why the harness couldn't list its conversations now; NULL on a conversation." }
+- name: host_device
+  version: 1
+  key: [id]
+  description: "The devices paired with this computer's host (a tablet, another computer), and which are connected now. Read live from the host that started this oxplow, as its owner; none when no host did. Changed with `oxplow.host.rename_device` and `oxplow.host.remove_device`; a device pairs with a code from `oxplow.host.pair`."
+  fields:
+    - { name: "id", type: "TEXT", doc: "The host's id for the device (`dev-…`): what the rename and remove commands take." }
+    - { name: "name", type: "TEXT", doc: "What it is called." }
+    - { name: "kind", type: "TEXT", doc: "`desktop`, `tablet` or `phone`." }
+    - { name: "paired_at", type: "INT", doc: "When it paired, in Unix milliseconds." }
+    - { name: "connected", type: "INT", doc: "1 while it has a page of this host open." }
+- name: host_settings
+  version: 1
+  key: [hosted]
+  description: "This computer's host and whether other devices may reach it, as one row: the saved settings (`host-settings.json`, written by `oxplow.host.set_settings`), the port in force and where it came from, whether the host runs with them now, the addresses a device opens, and the pairing code in force. Read live; `hosted = 0` when no host started this oxplow."
+  fields:
+    - { name: "hosted", type: "INT", doc: "1 when a host started this oxplow and answers." }
+    - { name: "problem", type: "TEXT", doc: "Why the host did not answer, when it did not." }
+    - { name: "allow_other_devices", type: "INT", doc: "1 when the saved settings let other devices in." }
+    - { name: "address", type: "TEXT", doc: "The IP address of this computer's other devices use (saved)." }
+    - { name: "names", type: "TEXT", doc: "Names a device may use besides the address (`studio.local`), as a JSON array (saved)." }
+    - { name: "saved_port", type: "INT", doc: "The saved port; NULL for the default." }
+    - { name: "port", type: "INT", doc: "The port in force: `--device-port`, else `OXPLOW_DEVICE_PORT`, else the saved one, else 7400. NULL when the one given is no port (`port_problem`)." }
+    - { name: "port_from", type: "TEXT", doc: "Where it came from: `flag`, `env`, `saved` or `default`." }
+    - { name: "port_problem", type: "TEXT", doc: "Why the port given is no port." }
+    - { name: "tls_cert", type: "TEXT", doc: "A certificate of the person's own (a PEM file) in place of the host's (saved)." }
+    - { name: "tls_key", type: "TEXT", doc: "Its key (saved)." }
+    - { name: "applied", type: "INT", doc: "1 when the host runs with the saved settings (its listener for other devices is on that address and port, or off when they are off); 0 until the next start after a change." }
+    - { name: "open_on_device", type: "TEXT", doc: "The addresses a device opens (`https://<name or address>:<port>/`), as a JSON array." }
+    - { name: "addresses", type: "TEXT", doc: "This computer's addresses on private networks, the ones the address may be, as a JSON array." }
+    - { name: "local_name", type: "TEXT", doc: "The name it answers to on its local network (`<local hostname>.local`)." }
+    - { name: "root_certificate", type: "INT", doc: "1 when a device has the host's own root to trust (`/host/ca.pem`); 0 with a certificate of the person's own." }
+    - { name: "pairing_code", type: "TEXT", doc: "The pairing code in force (`ABCD-EFGH`), good once; NULL when none." }
+    - { name: "pairing_until", type: "INT", doc: "When it ends, in Unix milliseconds." }
 - name: agent_harness
   version: 3
   key: [id]

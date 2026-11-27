@@ -2392,7 +2392,6 @@ mod tests {
                 // The host's own state (its paired devices, pairing codes,
                 // `host-settings.json`), over its owner socket
                 // (`commands/host_devices`): a person's only.
-                "oxplow.host.devices",
                 "oxplow.host.pair",
                 "oxplow.host.remove_device",
                 "oxplow.host.rename_device",

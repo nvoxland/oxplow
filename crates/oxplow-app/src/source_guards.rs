@@ -170,6 +170,8 @@ const EMITTERS: &[(&str, &str)] = &[
     // The extension catalog's own signal: what extensions
     // contribute isn't a dataset to re-read, and a file path was a guess.
     ("ExtensionsChanged", "crates/oxplow-app/src/boot.rs"),
+    // The host's own state changed: its datasets are read again.
+    ("HostChanged", "crates/oxplow-app/src/commands/host_devices.rs"),
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
     ("MetricSamplesChanged", "crates/oxplow-app/src/datasets_changed.rs"),
     ("DatasetsChanged", "crates/oxplow-app/src/datasets_changed.rs"),
@@ -397,8 +399,9 @@ fn every_ui_event_has_a_listener() {
     // capture. The renderer re-reads those datasets, so it needs no listener.
     // A credential's news (`v_provider_credential`, a sign-in's end) is the
     // same: the datasets that follow it are re-read, and a sign-in's own end
-    // is the host's answer to the component that asked.
-    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged", "credentialChanged"];
+    // is the host's answer to the component that asked. The host's devices
+    // and settings (`v_host_device`, `v_host_settings`) likewise.
+    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged", "credentialChanged", "hostChanged"];
     let unheard: Vec<String> = event_kinds()
         .into_iter()
         .filter(|k| !DAEMON_ONLY.contains(&k.as_str()))

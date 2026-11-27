@@ -1048,13 +1048,8 @@ commands:
     scope: ai.test
     op: test_provider
     example: {"id": "anthropic", "model": "claude-haiku-5-5"}
-  # host.read / host.manage — the host's devices (the Devices page); a
-  # person's only.
-  - name: host.devices
-    summary: "The host's paired devices (which are connected), the pairing code in force, and the settings that let other devices in: allowed or not, applied or not, the address, port and names, the addresses a device opens. `hosted: false` when no host started this oxplow. A person's only."
-    scope: host.read
-    op: devices
-    example: {}
+  # host.manage — the host's devices (the Devices page; it reads
+  # v_host_device and v_host_settings); a person's only.
   - name: host.pair
     summary: "Make a pairing code: a device types it at this computer's address to pair. Good once, for ten minutes. A person's only."
     scope: host.manage

@@ -67,6 +67,8 @@ pub const NAMES: &[&str] = &[
     "provider_instance",
     "provider_credential",
     "provider_collector",
+    "host_device",
+    "host_settings",
 ];
 
 /// The columns a live dataset's rows have, in order.
@@ -161,6 +163,27 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         ],
         "vcs_remote" => &["name", "url"],
         "agent_harness" => &["id", "title", "enabled", "position", "settings"],
+        "host_device" => &["id", "name", "kind", "paired_at", "connected"],
+        "host_settings" => &[
+            "hosted",
+            "problem",
+            "allow_other_devices",
+            "address",
+            "names",
+            "saved_port",
+            "port",
+            "port_from",
+            "port_problem",
+            "tls_cert",
+            "tls_key",
+            "applied",
+            "open_on_device",
+            "addresses",
+            "local_name",
+            "root_certificate",
+            "pairing_code",
+            "pairing_until",
+        ],
         "file" => &[
             "filesystem",
             "stream_id",
@@ -399,6 +422,8 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::ConfigChanged | E::ExtensionsChanged | E::CredentialChanged { .. }
             ),
+            // The host's own state, which only its commands change here.
+            "host_device" | "host_settings" => matches!(event, E::HostChanged),
             // New captures, and the metrics a config or extension turns on.
             "metric_point" => matches!(
                 event,
@@ -617,6 +642,14 @@ impl LiveDatasets {
             "vcs_remote" => sources.vcs_remotes().await,
             "file" => sources.files(stream, filters).await,
             "agent_harness" => Ok(sources.agent_harnesses()),
+            "host_device" => Ok(crate::commands::host_devices::read(&sources.global_dir)
+                .await
+                .devices),
+            "host_settings" => Ok(vec![
+                crate::commands::host_devices::read(&sources.global_dir)
+                    .await
+                    .settings,
+            ]),
             "branch_divergence" => sources.branch_divergence(stream, filters).await,
             "commit_between" => sources.commits_between(stream, filters).await,
             "extension_change" => sources.extension_changes(stream, filters).await,
