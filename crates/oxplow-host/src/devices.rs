@@ -2,26 +2,26 @@
 //!
 //! A device (a tablet's browser, a phone, another computer) pairs once with a
 //! short code the owner shows it, and gets an id and a token from the host.
-//! The host keeps only a hash of each token, in `devices.json` in the home, so
-//! a device stays paired across host restarts (each app start is one). A token
-//! names its device: the host, not the page, says who a request is from.
-//!
-//! The host is the only writer of the file and keeps it in memory; a file it
-//! cannot read stops it at start, so a damaged file is never read as "no
-//! devices" (every device would then have to pair again).
+//! The host keeps only a hash of each token, in `host.db`'s `device` table,
+//! so a device stays paired across host restarts (each app start is one). A
+//! token names its device: the host, not the page, says who a request is
+//! from. A token is found by its hash: what a lookup's timing could tell is
+//! about a SHA-256 of the guess, which says nothing of another token.
 //!
 //! Codes live in memory: 8 characters with no look-alikes, one use, 10
 //! minutes. The pairing route makes a wrong code cost a wait, one attempt at
 //! a time, so a code cannot be guessed in its lifetime.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use oxplow_domain::{DeviceId, DeviceKind};
+use oxplow_domain::{DeviceId, DeviceKind, Timestamp};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use crate::db::HostDb;
 
 /// How long a pairing code is good for.
 pub const CODE_LIFETIME: Duration = Duration::from_secs(10 * 60);
@@ -40,43 +40,21 @@ pub struct PairedDevice {
     pub paired_at: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Entry {
-    #[serde(flatten)]
-    device: PairedDevice,
-    token_sha256: String,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct DevicesFile {
-    #[serde(default)]
-    devices: Vec<Entry>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum DevicesError {
     #[error("no paired device has the id {0}")]
     Unknown(String),
-    #[error("cannot read {0}: {1}; fix or move it, then start the host again")]
-    Unreadable(PathBuf, String),
-    #[error("the devices file failed: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("the devices store failed: {0}")]
+    Store(#[from] rusqlite::Error),
 }
 
 /// The paired devices of one home.
 pub struct Devices {
-    path: PathBuf,
-    entries: Mutex<Vec<Entry>>,
+    db: Arc<HostDb>,
 }
 
 fn hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
 }
 
 /// A token: 256 random bits as hex.
@@ -88,28 +66,47 @@ pub fn new_token() -> String {
     )
 }
 
+const COLUMNS: &str = "id, name, kind, paired_at";
+
+fn kind_text(kind: DeviceKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+fn device_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<PairedDevice> {
+    let bad = |at: usize, e: String| {
+        rusqlite::Error::FromSqlConversionFailure(at, rusqlite::types::Type::Text, e.into())
+    };
+    let id: String = row.get(0)?;
+    let kind: String = row.get(2)?;
+    let paired_at: String = row.get(3)?;
+    Ok(PairedDevice {
+        id: DeviceId::parse(&id).map_err(|e| bad(0, e.to_string()))?,
+        name: row.get(1)?,
+        kind: serde_json::from_value(serde_json::Value::String(kind))
+            .map_err(|e| bad(2, e.to_string()))?,
+        paired_at: Timestamp::parse(&paired_at)
+            .map(|t| (t.unix_ms() / 1000).max(0) as u64)
+            .map_err(|e| bad(3, e.to_string()))?,
+    })
+}
+
 impl Devices {
-    /// Read the home's devices. A missing file is none; a file that cannot
-    /// be read or parsed is an error.
-    pub fn open(config_dir: &Path) -> Result<Self, DevicesError> {
-        let path = config_dir.join("devices.json");
-        let entries = match std::fs::read(&path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(e) => return Err(DevicesError::Unreadable(path, e.to_string())),
-            Ok(bytes) => {
-                serde_json::from_slice::<DevicesFile>(&bytes)
-                    .map_err(|e| DevicesError::Unreadable(path.clone(), e.to_string()))?
-                    .devices
-            }
-        };
-        Ok(Self {
-            path,
-            entries: Mutex::new(entries),
-        })
+    pub fn new(db: Arc<HostDb>) -> Self {
+        Self { db }
     }
 
     pub fn list(&self) -> Vec<PairedDevice> {
-        self.lock().iter().map(|e| e.device.clone()).collect()
+        let conn = self.db.conn();
+        let listed = conn
+            .prepare(&format!("SELECT {COLUMNS} FROM device ORDER BY rowid"))
+            .and_then(|mut q| q.query_map([], device_of)?.collect::<Result<Vec<_>, _>>());
+        listed.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "cannot list the paired devices");
+            Vec::new()
+        })
     }
 
     /// Pair a new device; the host makes its id. Answers the device and its
@@ -120,76 +117,65 @@ impl Devices {
         kind: DeviceKind,
     ) -> Result<(PairedDevice, String), DevicesError> {
         let token = new_token();
+        let now = Timestamp::now();
         let device = PairedDevice {
             id: DeviceId::generate(),
             name: oxplow_domain::client::device_name(Some(name)),
             kind,
-            paired_at: now_secs(),
+            paired_at: (now.unix_ms() / 1000).max(0) as u64,
         };
-        let entry = Entry {
-            device: device.clone(),
-            token_sha256: hash(&token),
-        };
-        self.change(|entries| {
-            entries.push(entry);
-            Ok(())
-        })?;
+        self.db.conn().execute(
+            "INSERT INTO device (id, name, kind, paired_at, token_sha256) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![device.id.to_string(), device.name, kind_text(kind), now.to_text(), hash(&token)],
+        )?;
         Ok((device, token))
     }
 
     /// The device `token` belongs to.
     pub fn who(&self, token: &str) -> Option<PairedDevice> {
-        let wanted = hash(token);
-        self.lock()
-            .iter()
-            .find(|e| crate::api::same_secret(&e.token_sha256, &wanted))
-            .map(|e| e.device.clone())
+        let conn = self.db.conn();
+        conn.query_row(
+            &format!("SELECT {COLUMNS} FROM device WHERE token_sha256 = ?1"),
+            [hash(token)],
+            device_of,
+        )
+        .optional()
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "cannot look a device up");
+            None
+        })
     }
 
     pub fn rename(&self, id: &DeviceId, name: &str) -> Result<PairedDevice, DevicesError> {
-        self.change(|entries| {
-            let entry = entries
-                .iter_mut()
-                .find(|e| &e.device.id == id)
-                .ok_or_else(|| DevicesError::Unknown(id.to_string()))?;
-            entry.device.name = oxplow_domain::client::device_name(Some(name));
-            Ok(entry.device.clone())
-        })
+        let conn = self.db.conn();
+        let changed = conn.execute(
+            "UPDATE device SET name = ?2 WHERE id = ?1",
+            params![
+                id.to_string(),
+                oxplow_domain::client::device_name(Some(name))
+            ],
+        )?;
+        if changed == 0 {
+            return Err(DevicesError::Unknown(id.to_string()));
+        }
+        Ok(conn.query_row(
+            &format!("SELECT {COLUMNS} FROM device WHERE id = ?1"),
+            [id.to_string()],
+            device_of,
+        )?)
     }
 
     /// Forget `id`: its token no longer works.
     pub fn remove(&self, id: &DeviceId) -> Result<PairedDevice, DevicesError> {
-        self.change(|entries| {
-            let at = entries
-                .iter()
-                .position(|e| &e.device.id == id)
-                .ok_or_else(|| DevicesError::Unknown(id.to_string()))?;
-            Ok(entries.remove(at).device)
-        })
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
-        self.entries.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// Change the list and write it; a write that fails changes nothing.
-    fn change<T>(
-        &self,
-        f: impl FnOnce(&mut Vec<Entry>) -> Result<T, DevicesError>,
-    ) -> Result<T, DevicesError> {
-        let mut entries = self.lock();
-        let mut next = entries.clone();
-        let out = f(&mut next)?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let bytes = serde_json::to_vec_pretty(&DevicesFile {
-            devices: next.clone(),
-        })
-        .map_err(std::io::Error::other)?;
-        oxplow_config::write_atomic(&self.path, &bytes)?;
-        *entries = next;
-        Ok(out)
+        let conn = self.db.conn();
+        let gone = conn
+            .query_row(
+                &format!("DELETE FROM device WHERE id = ?1 RETURNING {COLUMNS}"),
+                [id.to_string()],
+                device_of,
+            )
+            .optional()?;
+        gone.ok_or_else(|| DevicesError::Unknown(id.to_string()))
     }
 }
 
@@ -283,13 +269,17 @@ mod tests {
     #[test]
     fn a_paired_device_is_known_by_its_token_until_it_is_removed() {
         let home = tempfile::tempdir().unwrap();
-        let devices = Devices::open(home.path()).unwrap();
+        let db = HostDb::open(home.path()).unwrap();
+        let devices = Devices::new(db.clone());
         let (tablet, token) = devices.pair("Tab S9", DeviceKind::Tablet).unwrap();
         assert_eq!(token.len(), 64);
         assert_eq!(devices.who(&token), Some(tablet.clone()));
         assert_eq!(devices.who("not-a-token"), None);
-        let file = std::fs::read_to_string(home.path().join("devices.json")).unwrap();
-        assert!(!file.contains(&token), "only a hash is kept");
+        let kept: String = db
+            .conn()
+            .query_row("SELECT token_sha256 FROM device", [], |r| r.get(0))
+            .unwrap();
+        assert_ne!(kept, token, "only a hash is kept");
 
         let (other, _) = devices.pair("Phone", DeviceKind::Phone).unwrap();
         assert_ne!(other.id, tablet.id, "the host makes each id");
@@ -298,24 +288,24 @@ mod tests {
             devices.rename(&tablet.id, "Kitchen tablet").unwrap().name,
             "Kitchen tablet"
         );
-        let reopened = Devices::open(home.path()).unwrap();
+        assert_eq!(devices.who(&token).unwrap().name, "Kitchen tablet");
+        let paired = devices.list();
+        assert_eq!(
+            paired.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
+            [tablet.id.clone(), other.id.clone()]
+        );
+        assert_eq!(paired[0].paired_at, tablet.paired_at, "read back as paired");
+        drop(devices);
+        drop(db);
+        let reopened = Devices::new(HostDb::open(home.path()).unwrap());
         assert_eq!(reopened.who(&token).unwrap().name, "Kitchen tablet", "kept");
+        let devices = reopened;
         devices.remove(&tablet.id).unwrap();
         assert_eq!(devices.who(&token), None);
         assert!(matches!(
             devices.remove(&tablet.id),
             Err(DevicesError::Unknown(_))
         ));
-    }
-
-    /// A damaged file is never read as "no devices": every device would
-    /// have to pair again, and the next write would lose them.
-    #[test]
-    fn a_file_that_cannot_be_read_stops_the_host() {
-        let home = tempfile::tempdir().unwrap();
-        std::fs::write(home.path().join("devices.json"), "{ not json").unwrap();
-        let err = Devices::open(home.path()).err().unwrap().to_string();
-        assert!(err.contains("devices.json"), "{err}");
     }
 
     #[test]

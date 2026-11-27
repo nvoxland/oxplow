@@ -217,7 +217,7 @@ mod tests {
 
     fn access() -> (tempfile::TempDir, Arc<Access>) {
         let home = tempfile::tempdir().unwrap();
-        let devices = Devices::open(home.path()).unwrap();
+        let devices = Devices::new(crate::db::HostDb::open(home.path()).unwrap());
         (
             home,
             Access::new("owner-secret".into(), devices, WRONG_CODE_WAIT),

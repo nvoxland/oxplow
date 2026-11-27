@@ -351,6 +351,13 @@ installed one — see [DEV.md](../DEV.md):
   set or recents list. The path is resolved by
   `oxplow_config::global_config_dir()` so `main.rs` can read it before
   any Tauri handle exists.
+- **`host.db`** — the host's own SQLite file in the same app-config dir:
+  paired devices, the projects it knows, a headless host's holds
+  (`crates/oxplow-host/src/db.rs`, its own refinery migrations in
+  `crates/oxplow-host/migrations/`, not the project schema). The running
+  host holds it in SQLite's exclusive locking mode for its whole life,
+  which is also what keeps one host per home; everyone else goes through
+  the host (`.context/host.md`).
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
   for the life of the project's `oxplow-daemon`, so a second daemon
   can't boot on the same `local.sqlite`. Helpers:

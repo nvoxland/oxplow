@@ -416,23 +416,20 @@ impl HostClient {
 pub(crate) mod tests {
     use super::*;
     use crate::host::tests::{Fixture, RUNS};
-    use crate::instance::HostInstance;
     use std::sync::Arc;
 
     const TOKEN: &str = "app-token";
 
     /// A host for `fx`'s home in this process, as `serve` runs one.
     pub(crate) async fn run_host(fx: &Fixture, token: &str) -> String {
-        let instance = HostInstance::acquire(&fx.home()).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        instance.publish(&url, true).unwrap();
         let stop = Arc::new(tokio::sync::Notify::new());
         let app = crate::web::app(crate::web::ServeConfig {
             host: fx.host.clone(),
             access: crate::access::Access::new(
                 token.into(),
-                crate::devices::Devices::open(&fx.home()).unwrap(),
+                crate::devices::Devices::new(fx.db.clone()),
                 Duration::from_millis(10),
             ),
             listener: crate::access::Listener::Loopback,
@@ -447,7 +444,6 @@ pub(crate) mod tests {
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async move { stop.notified().await })
                 .await;
-            drop(instance);
         });
         url
     }

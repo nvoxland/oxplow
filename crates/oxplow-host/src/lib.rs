@@ -8,6 +8,7 @@ pub mod access;
 pub mod api;
 pub mod certs;
 pub mod client;
+pub mod db;
 pub mod devices;
 pub mod host;
 pub mod instance;
@@ -19,5 +20,5 @@ pub mod tls;
 pub mod ui;
 pub mod web;
 
-/// The host's version, reported in `host.json` and `/host/status`.
+/// The host's version, reported in `/host/status`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

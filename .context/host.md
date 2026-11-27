@@ -19,21 +19,32 @@ or nobody is connected:
 
 ## What is built
 
-- **One host per home.** `oxplow-host serve` takes an exclusive lock on
-  `host.lock` in `global_config_dir()`. Once it listens it writes `host.json`
-  (`{ base_url, pid, version, for_app }`, atomically). A second `serve` for the
-  same home exits and names the running host and its kind; the app's host first
-  waits up to 15 s for a previous app host that is ending (it stops its daemons
-  after a quit). Dropping the instance removes `host.json`.
-- **Registry.** `host-projects.json` lists `{ id, path, name }`. The id is
-  `prj-` and 8 hex digits of a hash of the canonical path; if another project
-  has it, the next candidate is used. `oxplow-host project add <dir>` refuses a
-  folder with no `.oxplow/`. `project list` and `project remove <id>` need no
-  running host: the file is read on every use and changed under a lock.
+- **`host.db`** in `global_config_dir()` is the host's own state: the
+  paired devices, the projects, a headless host's holds (`db.rs`, its own
+  refinery migrations in `crates/oxplow-host/migrations/`). **It is also the
+  one-host-per-home guard**: `serve` opens it in SQLite's exclusive locking
+  mode, takes the lock at once (`BEGIN EXCLUSIVE`) and keeps it for its whole
+  life, so a second `serve` for the same home cannot open it; the OS lets go
+  of the lock when the process ends, a crash or a kill included. No WAL: one
+  file. A second `serve` exits and names the running host and its kind,
+  which it asks the running host over `host.sock` (`GET /host/status`:
+  `pid`, `version`, `for_app`); the app's host first waits up to 15 s for a
+  previous app host that is ending (it stops its daemons after a quit;
+  `instance::acquire`). A file that cannot be opened or migrated stops the
+  host with the reason, never read as empty. Everyone else reaches this
+  state through the running host.
+- **Registry.** `host.db`'s `project` table lists `{ id, path, name }` in
+  the order they were added. The id is `prj-` and 8 hex digits of a hash of
+  the canonical path; if another project has it, the next candidate is used.
+  `oxplow-host project add <dir>` refuses a folder with no `.oxplow/`.
+  `project add|list|remove` go through the running host over `host.sock`
+  (`POST|GET /host/projects`, `DELETE /host/projects/<id>`, which refuses a
+  project a device holds open), and open `host.db` themselves only when no
+  host answers (`main.rs` `projects_call`).
 - **Holds** are `(device, project)`. The host starts a project's daemon on the
   first hold and stops it when the last goes. Sleep or a lost connection is not
-  a release. A headless host keeps them in `host-holds.json` and starts again
-  what the file holds when it restarts. The app's host keeps them in memory
+  a release. A headless host keeps them in `host.db`'s `hold` table and starts
+  again what it holds when it restarts. The app's host keeps them in memory
   (`HoldsKept::InMemory`): they are the app's open windows, and a tablet holds
   its projects again when it comes back.
 - **Daemons** are started through `DaemonSupervisor` with `BundledDaemon` (the
@@ -230,14 +241,13 @@ a terminal on the host's machine.
   socket: `oxplow-host pair` (or `oxplow host pair`) prints a code, `devices
   [remove <id>]`, `status`, `stop`.
 - **A device** holds the token it got at pairing, good on every listener.
-  `devices.json` in the home keeps `{ id, name, kind, paired_at,
+  `host.db`'s `device` table keeps `{ id, name, kind, paired_at,
   token_sha256 }` (`devices.rs`): only a hash, so the file never holds a
-  token. The host is its only writer and keeps it in memory; a file it cannot
-  read stops the host at start with the reason (never read as "no devices").
+  token, and a request's token is found by its hash.
 
 Routes by role: owner only: `POST /host/pairing`, `GET /host/devices`,
-`PATCH|DELETE /host/devices/<id>`, `POST /host/projects`, `POST
-/host/shutdown`. Owner or device: `GET /host/status`, `GET /host/projects`,
+`PATCH|DELETE /host/devices/<id>`, `POST /host/projects`, `DELETE
+/host/projects/<id>`, `POST /host/shutdown`. Owner or device: `GET /host/status`, `GET /host/projects`,
 `POST|DELETE /host/holds` (a device's hold is always its own), `GET /host/me`
 (`{ owner, device, build }`), `DELETE /host/me` (a device forgets itself).
 Anyone who reaches the host: `POST /host/pair`.

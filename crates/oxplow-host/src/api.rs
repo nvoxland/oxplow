@@ -26,7 +26,7 @@ use std::time::Instant;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use oxplow_domain::{DeviceId, DeviceKind};
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,8 @@ struct ApiState {
 struct Status {
     version: &'static str,
     pid: u32,
+    /// The Mac app's own host, not a headless one.
+    for_app: bool,
     projects: Vec<ProjectView>,
     /// Devices with an open event socket now.
     connected: Vec<Connected>,
@@ -142,6 +144,7 @@ pub fn router(cfg: ApiConfig) -> Router {
     Router::new()
         .route("/host/status", get(status))
         .route("/host/projects", get(projects).post(add_project))
+        .route("/host/projects/{id}", delete(remove_project))
         .route("/host/holds", post(hold).delete(release))
         .route("/host/shutdown", post(shutdown))
         .route("/host/pairing", get(pairing_now).post(pairing))
@@ -215,6 +218,7 @@ async fn status(State(s): State<ApiState>, headers: HeaderMap) -> Response {
     Json(Status {
         version: crate::VERSION,
         pid: std::process::id(),
+        for_app: s.host.for_app(),
         projects: s.host.projects(),
         connected: s.access.tunnels.connected(),
         public: s
@@ -367,6 +371,29 @@ async fn add_project(
             | crate::registry::RegistryError::Unreadable(..)),
         ) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// Forget a project (the CLI's `project remove`); one a device holds open
+/// stays until it is closed there.
+async fn remove_project(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    check!(owner(&s, &headers));
+    if s.host.holds().iter().any(|h| h.project == id) {
+        return refuse(
+            StatusCode::CONFLICT,
+            "the project is open on a device; close it there first",
+        );
+    }
+    match s.host.registry().remove(&id) {
+        Ok(project) => Json(project).into_response(),
+        Err(e @ crate::registry::RegistryError::UnknownProject(_)) => {
+            refuse(StatusCode::NOT_FOUND, &e.to_string())
+        }
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
@@ -591,7 +618,7 @@ mod tests {
     async fn api(fx: &Fixture) -> Api {
         let access = Access::new(
             TOKEN.into(),
-            crate::devices::Devices::open(&fx.home()).unwrap(),
+            crate::devices::Devices::new(fx.db.clone()),
             std::time::Duration::from_millis(200),
         );
         let stop = Arc::new(tokio::sync::Notify::new());
@@ -1136,6 +1163,37 @@ mod tests {
         assert_eq!(released.status(), 200);
         let released: serde_json::Value = released.json().await.unwrap();
         assert_eq!(released["holds"], 0);
+    }
+
+    /// The owner removes a project it no longer wants listed; one a device
+    /// holds open stays, and the owner is told why.
+    #[tokio::test]
+    async fn a_project_is_removed_unless_it_is_held() {
+        let fx = Fixture::new(RUNS);
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        let id = fx.project("alpha");
+        let remove = || {
+            http.delete(format!("{url}/host/projects/{id}"))
+                .bearer_auth(TOKEN)
+                .send()
+        };
+        fx.host.add_hold("dev", &id).unwrap();
+        let held = remove().await.unwrap();
+        assert_eq!(held.status(), 409);
+        assert!(held.text().await.unwrap().contains("open"));
+        fx.host.release_hold("dev", &id).unwrap();
+
+        let removed: serde_json::Value = remove().await.unwrap().json().await.unwrap();
+        assert_eq!(removed["id"], id.as_str());
+        assert!(fx.host.registry().get(&id).is_none());
+        assert_eq!(remove().await.unwrap().status(), 404);
+        let unauthorized = http
+            .delete(format!("{url}/host/projects/{id}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), 401);
     }
 
     /// The Mac app opens a folder by its path: the host registers it (or

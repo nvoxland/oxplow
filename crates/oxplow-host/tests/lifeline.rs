@@ -44,16 +44,19 @@ fn ended_within(child: &mut Child, timeout: Duration) -> bool {
 fn the_apps_host_ends_when_the_app_does() {
     let home = tempfile::tempdir().unwrap();
     let (mut child, _) = serve(home.path(), true);
-    assert!(home.path().join("host.json").exists());
+    assert!(
+        matches!(
+            oxplow_host::db::HostDb::open(home.path()),
+            Err(oxplow_host::db::DbError::Held(_))
+        ),
+        "the running host holds the home"
+    );
     drop(child.stdin.take());
     assert!(
         ended_within(&mut child, Duration::from_secs(10)),
         "the host ended"
     );
-    assert!(
-        !home.path().join("host.json").exists(),
-        "and took host.json with it"
-    );
+    oxplow_host::db::HostDb::open(home.path()).expect("and let go of the home");
 }
 
 #[test]

@@ -1,16 +1,18 @@
-//! The projects the host knows: `host-projects.json` in the global config
-//! dir, each `{ id, path, name }`.
+//! The projects the host knows: `host.db`'s `project` table, each
+//! `{ id, path, name }`, in the order they were added.
 //!
-//! The CLI (`oxplow-host project add`) and a running host are different
-//! processes, so every read goes to the file and every change happens under
-//! a lock on a sidecar (never on the file, which a rename replaces). Writes
-//! are atomic, so a reader sees the old list or the new one.
+//! The running host holds `host.db`, so the CLI's `project add|list|remove`
+//! go through it (`/host/projects`) while it runs, and open the file
+//! themselves only when no host does.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use fs2::FileExt;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use crate::db::HostDb;
 
 /// One project the host can start a daemon for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,18 +35,12 @@ pub enum RegistryError {
     Unreadable(PathBuf, std::io::Error),
     #[error("no project has the id {0}")]
     UnknownProject(String),
-    #[error("the registry file failed: {0}")]
-    Io(#[from] std::io::Error),
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct RegistryFile {
-    #[serde(default)]
-    projects: Vec<Project>,
+    #[error("the projects store failed: {0}")]
+    Store(#[from] rusqlite::Error),
 }
 
 pub struct Registry {
-    path: PathBuf,
+    db: Arc<HostDb>,
 }
 
 /// The ids a path may take, best first: 8 hex digits of a hash of the path,
@@ -61,25 +57,49 @@ fn id_candidates(path: &Path) -> impl Iterator<Item = String> + '_ {
 }
 
 /// The id for `path`, skipping any that `taken` says another project has.
-pub(crate) fn id_for(path: &Path, taken: impl Fn(&str) -> bool) -> String {
+pub(crate) fn id_for(path: &Path, mut taken: impl FnMut(&str) -> bool) -> String {
     id_candidates(path)
         .find(|id| !taken(id))
         .expect("an endless iterator has a free id")
 }
 
+fn project_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: row.get(0)?,
+        path: PathBuf::from(row.get::<_, String>(1)?),
+        name: row.get(2)?,
+    })
+}
+
 impl Registry {
-    pub fn new(config_dir: &Path) -> Self {
-        Self {
-            path: config_dir.join("host-projects.json"),
-        }
+    pub fn new(db: Arc<HostDb>) -> Self {
+        Self { db }
     }
 
     pub fn list(&self) -> Vec<Project> {
-        self.read()
+        let conn = self.db.conn();
+        let listed = conn
+            .prepare("SELECT id, path, name FROM project ORDER BY rowid")
+            .and_then(|mut q| q.query_map([], project_of)?.collect::<Result<Vec<_>, _>>());
+        listed.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "cannot list the projects");
+            Vec::new()
+        })
     }
 
     pub fn get(&self, id: &str) -> Option<Project> {
-        self.read().into_iter().find(|p| p.id == id)
+        self.db
+            .conn()
+            .query_row(
+                "SELECT id, path, name FROM project WHERE id = ?1",
+                [id],
+                project_of,
+            )
+            .optional()
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "cannot read a project");
+                None
+            })
     }
 
     /// Add the project at `dir`, or return the entry it already has.
@@ -90,60 +110,45 @@ impl Registry {
         if !path.join(".oxplow").is_dir() {
             return Err(RegistryError::NotAProject(path));
         }
-        self.change(|projects| {
-            if let Some(known) = projects.iter().find(|p| p.path == path) {
-                return Ok(known.clone());
-            }
-            let id = id_for(&path, |id| projects.iter().any(|p| p.id == id));
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| id.clone());
-            let project = Project { id, path, name };
-            projects.push(project.clone());
-            Ok(project)
-        })
+        let text = path.to_string_lossy().into_owned();
+        let mut conn = self.db.conn();
+        let tx = conn.transaction()?;
+        let known = tx
+            .query_row(
+                "SELECT id, path, name FROM project WHERE path = ?1",
+                [&text],
+                project_of,
+            )
+            .optional()?;
+        if let Some(known) = known {
+            return Ok(known);
+        }
+        let id = {
+            let mut taken = tx.prepare("SELECT 1 FROM project WHERE id = ?1")?;
+            id_for(&path, |id| taken.exists([id]).unwrap_or(true))
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| id.clone());
+        tx.execute(
+            "INSERT INTO project (id, path, name) VALUES (?1, ?2, ?3)",
+            params![id, text, name],
+        )?;
+        tx.commit()?;
+        Ok(Project { id, path, name })
     }
 
     pub fn remove(&self, id: &str) -> Result<Project, RegistryError> {
-        self.change(|projects| {
-            let at = projects
-                .iter()
-                .position(|p| p.id == id)
-                .ok_or_else(|| RegistryError::UnknownProject(id.to_string()))?;
-            Ok(projects.remove(at))
-        })
-    }
-
-    fn read(&self) -> Vec<Project> {
-        std::fs::read(&self.path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<RegistryFile>(&bytes).ok())
-            .map(|f| f.projects)
-            .unwrap_or_default()
-    }
-
-    /// Read, change and write the list under the lock.
-    fn change<T>(
-        &self,
-        f: impl FnOnce(&mut Vec<Project>) -> Result<T, RegistryError>,
-    ) -> Result<T, RegistryError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(oxplow_config::lock_path(&self.path))?;
-        lock.lock_exclusive()?;
-        let mut projects = self.read();
-        let out = f(&mut projects)?;
-        let bytes =
-            serde_json::to_vec_pretty(&RegistryFile { projects }).map_err(std::io::Error::other)?;
-        oxplow_config::write_atomic(&self.path, &bytes)?;
-        Ok(out)
+        self.db
+            .conn()
+            .query_row(
+                "DELETE FROM project WHERE id = ?1 RETURNING id, path, name",
+                [id],
+                project_of,
+            )
+            .optional()?
+            .ok_or_else(|| RegistryError::UnknownProject(id.to_string()))
     }
 }
 
@@ -160,7 +165,7 @@ mod tests {
     #[test]
     fn a_project_is_added_listed_and_removed() {
         let tmp = tempfile::tempdir().unwrap();
-        let reg = Registry::new(&tmp.path().join("home"));
+        let reg = Registry::new(HostDb::open(&tmp.path().join("home")).unwrap());
         let dir = project_dir(tmp.path(), "alpha");
         let added = reg.add(&dir).unwrap();
         assert_eq!(added.name, "alpha");
@@ -184,7 +189,7 @@ mod tests {
     #[test]
     fn adding_a_project_twice_keeps_one_entry_and_its_id() {
         let tmp = tempfile::tempdir().unwrap();
-        let reg = Registry::new(tmp.path());
+        let reg = Registry::new(HostDb::open(&tmp.path().join("home")).unwrap());
         let dir = project_dir(tmp.path(), "alpha");
         let first = reg.add(&dir).unwrap();
         // The same folder by another path (a trailing `.`) is the same project.
@@ -196,7 +201,7 @@ mod tests {
     #[test]
     fn a_folder_without_oxplow_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
-        let reg = Registry::new(tmp.path());
+        let reg = Registry::new(HostDb::open(&tmp.path().join("home")).unwrap());
         let plain = tmp.path().join("plain");
         std::fs::create_dir_all(&plain).unwrap();
         assert!(matches!(
@@ -228,10 +233,14 @@ mod tests {
     }
 
     #[test]
-    fn a_second_registry_sees_what_the_first_wrote() {
+    fn the_projects_are_kept_in_the_order_they_were_added() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = project_dir(tmp.path(), "alpha");
-        let added = Registry::new(tmp.path()).add(&dir).unwrap();
-        assert_eq!(Registry::new(tmp.path()).list(), vec![added]);
+        let home = tmp.path().join("home");
+        let reg = Registry::new(HostDb::open(&home).unwrap());
+        let zeta = reg.add(&project_dir(tmp.path(), "zeta")).unwrap();
+        let alpha = reg.add(&project_dir(tmp.path(), "alpha")).unwrap();
+        drop(reg);
+        let again = Registry::new(HostDb::open(&home).unwrap());
+        assert_eq!(again.list(), vec![zeta, alpha]);
     }
 }

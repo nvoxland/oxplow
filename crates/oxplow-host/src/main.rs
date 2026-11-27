@@ -17,7 +17,6 @@ use oxplow_app::daemon_supervisor::{
     BinaryDaemon, BundledDaemon, DaemonLauncher, DaemonSupervisor, DEFAULT_STARTUP_TIMEOUT,
 };
 use oxplow_host::host::{HoldsKept, Host};
-use oxplow_host::instance::HostInstance;
 use oxplow_host::registry::Registry;
 
 fn usage() -> ! {
@@ -55,6 +54,36 @@ fn owner_call(config_dir: &std::path::Path, method: &str, path: &str) -> serde_j
     }
 }
 
+/// A project call: to the running host when one answers (it holds
+/// `host.db`), else `alone` over `host.db` opened here.
+fn projects_call<E: std::fmt::Display>(
+    config_dir: &std::path::Path,
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+    alone: impl FnOnce(&Registry) -> Result<serde_json::Value, E>,
+) -> serde_json::Value {
+    use oxplow_host_access::owner::{owner_call, OwnerCallError};
+    match owner_call(config_dir, method, path, body.as_ref()) {
+        Ok(value) => value,
+        Err(OwnerCallError::NoHost(_)) => {
+            let db = oxplow_host::db::HostDb::open(config_dir).unwrap_or_else(|e| fail(e));
+            alone(&Registry::new(db)).unwrap_or_else(|e| fail(e))
+        }
+        Err(e) => fail(e),
+    }
+}
+
+/// One project as the CLI prints it: id, name and folder.
+fn project_line(p: &serde_json::Value) -> String {
+    format!(
+        "{}  {}  {}",
+        p["id"].as_str().unwrap_or("?"),
+        p["name"].as_str().unwrap_or("?"),
+        p["path"].as_str().unwrap_or("?")
+    )
+}
+
 fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("oxplow-host: {message}");
     std::process::exit(1);
@@ -68,20 +97,32 @@ fn main() {
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["serve", ref rest @ ..] => serve(&config_dir, rest),
         ["project", "add", dir] => {
-            match Registry::new(&config_dir).add(std::path::Path::new(dir)) {
-                Ok(p) => println!("{}  {}  {}", p.id, p.name, p.path.display()),
-                Err(e) => fail(e),
-            }
+            let dir = std::path::absolute(dir).unwrap_or_else(|e| fail(e));
+            let body = serde_json::json!({ "path": dir });
+            let p = projects_call(&config_dir, "POST", "/host/projects", Some(body), |reg| {
+                reg.add(&dir)
+                    .map(|p| serde_json::to_value(p).unwrap_or_default())
+            });
+            println!("{}", project_line(&p));
         }
         ["project", "list"] => {
-            for p in Registry::new(&config_dir).list() {
-                println!("{}  {}  {}", p.id, p.name, p.path.display());
+            let list = projects_call(&config_dir, "GET", "/host/projects", None, |reg| {
+                Ok::<_, std::convert::Infallible>(
+                    serde_json::to_value(reg.list()).unwrap_or_default(),
+                )
+            });
+            for p in list.as_array().into_iter().flatten() {
+                println!("{}", project_line(p));
             }
         }
-        ["project", "remove", id] => match Registry::new(&config_dir).remove(id) {
-            Ok(p) => println!("removed {}  {}", p.id, p.path.display()),
-            Err(e) => fail(e),
-        },
+        ["project", "remove", id] => {
+            let path = format!("/host/projects/{id}");
+            let p = projects_call(&config_dir, "DELETE", &path, None, |reg| {
+                reg.remove(id)
+                    .map(|p| serde_json::to_value(p).unwrap_or_default())
+            });
+            println!("removed {}", project_line(&p));
+        }
         ["pair"] => {
             let code = owner_call(&config_dir, "POST", "/host/pairing");
             println!(
@@ -247,13 +288,9 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     if for_app && !token_stdin {
         fail("--for-app needs --token-stdin: the app's stdin is the host's lifeline");
     }
+    // The home's `host.db`, held for this host's life: one host per home.
     // The app's previous host may still be stopping its daemons after a quit.
-    let instance = if for_app {
-        HostInstance::acquire_waiting(config_dir, APP_HOST_LOCK_WAIT)
-    } else {
-        HostInstance::acquire(config_dir)
-    }
-    .unwrap_or_else(|e| fail(e));
+    let db = oxplow_host::instance::acquire(config_dir, for_app).unwrap_or_else(|e| fail(e));
     let (token, generated) = if token_stdin {
         let mut line = String::new();
         if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
@@ -301,9 +338,8 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             } else {
                 HoldsKept::InFile
             };
-            let host = Host::open(config_dir, supervisor, kept);
-            let devices =
-                oxplow_host::devices::Devices::open(config_dir).unwrap_or_else(|e| fail(e));
+            let host = Host::open(db.clone(), supervisor, kept).unwrap_or_else(|e| fail(e));
+            let devices = oxplow_host::devices::Devices::new(db.clone());
             let access = oxplow_host::access::Access::new(
                 token.clone(),
                 devices,
@@ -315,9 +351,6 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 .unwrap_or_else(|e| fail(format!("bind {bind} failed: {e}")));
             let addr = listener.local_addr().unwrap_or_else(|e| fail(e));
             let base_url = format!("http://{addr}");
-            if let Err(e) = instance.publish(&base_url, for_app) {
-                fail(format!("cannot write host.json: {e}"));
-            }
 
             let watcher = host.clone();
             tokio::spawn(async move {
@@ -444,7 +477,6 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             drop(owner_socket);
             let stopping = host.clone();
             let _ = tokio::task::spawn_blocking(move || stopping.shutdown()).await;
-            drop(instance);
             std::process::exit(0);
         });
 }
@@ -513,10 +545,6 @@ fn issued_acceptor(
         .map_err(|e| e.to_string())?;
     Ok((acceptor, Some(root_pem)))
 }
-
-/// How long the app's host waits for the lock of the app's previous host,
-/// which stops its daemons (a few seconds each) before it lets go.
-const APP_HOST_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The built UI when `--ui` is not given: a `ui` folder beside the binary
 /// (packaged), else `apps/desktop/dist` of the checkout the binary was built

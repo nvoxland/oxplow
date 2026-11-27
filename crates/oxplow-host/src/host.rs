@@ -3,7 +3,7 @@
 //!
 //! A hold is `(device, project)`. The first hold on a project starts its
 //! daemon; the last one released stops it. A headless host keeps its holds in
-//! `host-holds.json`, so a restarted host (a server's reboot) starts again
+//! `host.db`'s `hold` table, so a restarted host (a server's reboot) starts again
 //! what was held. The app's own host lives as long as the app, so its holds
 //! are the app's open windows, in memory ([`HoldsKept`]). Daemon states live
 //! in memory only.
@@ -22,12 +22,13 @@ use std::time::Duration;
 use oxplow_app::daemon_supervisor::{DaemonEndpoint, DaemonSupervisor};
 use serde::{Deserialize, Serialize};
 
+use crate::db::HostDb;
 use crate::registry::{Project, Registry};
 
 /// Where a host keeps its holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoldsKept {
-    /// In `host-holds.json`: a headless host starts again what was held.
+    /// In `host.db`: a headless host starts again what was held.
     InFile,
     /// In memory: the app's own host, whose holds are the app's windows.
     InMemory,
@@ -84,8 +85,8 @@ pub enum HostError {
     UnknownProject(String),
     #[error("a device name is needed")]
     NoDevice,
-    #[error("the holds file failed: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("the holds store failed: {0}")]
+    Store(#[from] rusqlite::Error),
 }
 
 struct Runtime {
@@ -101,19 +102,13 @@ struct Inner {
 
 pub struct Host {
     registry: Registry,
-    /// `None`: the holds are kept in memory only.
-    holds_path: Option<PathBuf>,
+    /// Where the holds are kept besides memory; `None` for the app's host.
+    holds_db: Option<Arc<HostDb>>,
     supervisor: Arc<DaemonSupervisor>,
     inner: Mutex<Inner>,
     queue: Sender<String>,
     /// Moves at each change of a hold or a daemon's state (`watch`).
     changes: tokio::sync::watch::Sender<u64>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct HoldsFile {
-    #[serde(default)]
-    holds: BTreeSet<Hold>,
 }
 
 enum Step {
@@ -123,23 +118,22 @@ enum Step {
 }
 
 impl Host {
-    /// Open the host for `config_dir`: read the holds, and start what is held.
+    /// Open the host over its `host.db`: read the holds (a headless host's),
+    /// and start what is held.
     pub fn open(
-        config_dir: &Path,
+        db: Arc<HostDb>,
         supervisor: Arc<DaemonSupervisor>,
         kept: HoldsKept,
-    ) -> Arc<Self> {
-        let holds_path = (kept == HoldsKept::InFile).then(|| config_dir.join("host-holds.json"));
-        let holds = holds_path
-            .as_ref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|b| serde_json::from_slice::<HoldsFile>(&b).ok())
-            .map(|f| f.holds)
-            .unwrap_or_default();
+    ) -> Result<Arc<Self>, HostError> {
+        let holds_db = (kept == HoldsKept::InFile).then(|| db.clone());
+        let holds = match &holds_db {
+            Some(db) => kept_holds(db)?,
+            None => BTreeSet::new(),
+        };
         let (queue, jobs) = channel::<String>();
         let host = Arc::new(Self {
-            registry: Registry::new(config_dir),
-            holds_path,
+            registry: Registry::new(db),
+            holds_db,
             supervisor,
             inner: Mutex::new(Inner {
                 holds,
@@ -161,7 +155,12 @@ impl Host {
             })
             .expect("spawn the boot worker");
         host.resume();
-        host
+        Ok(host)
+    }
+
+    /// The app's own host (its holds in memory), not a headless one.
+    pub fn for_app(&self) -> bool {
+        self.holds_db.is_none()
     }
 
     pub fn registry(&self) -> &Registry {
@@ -217,12 +216,18 @@ impl Host {
             .registry
             .get(project)
             .ok_or_else(|| HostError::UnknownProject(project.to_string()))?;
-        let mut inner = self.lock();
-        inner.holds.insert(Hold {
+        let hold = Hold {
             device: device.to_string(),
             project: project.to_string(),
-        });
-        self.save_holds(&inner)?;
+        };
+        let mut inner = self.lock();
+        if let Some(db) = &self.holds_db {
+            db.conn().execute(
+                "INSERT OR IGNORE INTO hold (device, project) VALUES (?1, ?2)",
+                [&hold.device, &hold.project],
+            )?;
+        }
+        inner.holds.insert(hold);
         let rt = inner.runtime.entry(project.to_string()).or_insert(Runtime {
             path: known.path.clone(),
             state: DaemonState::Stopped,
@@ -249,11 +254,16 @@ impl Host {
         if known.is_none() && !inner.runtime.contains_key(project) {
             return Err(HostError::UnknownProject(project.to_string()));
         }
+        if let Some(db) = &self.holds_db {
+            db.conn().execute(
+                "DELETE FROM hold WHERE device = ?1 AND project = ?2",
+                [device, project],
+            )?;
+        }
         inner.holds.remove(&Hold {
             device: device.to_string(),
             project: project.to_string(),
         });
-        self.save_holds(&inner)?;
         let out = match (known, inner.runtime.get(project)) {
             (Some(p), _) => view(&inner, p),
             (None, Some(rt)) => view(
@@ -305,7 +315,7 @@ impl Host {
         self.changed();
     }
 
-    /// Start what the holds file says is held.
+    /// Start what the kept holds say is held.
     fn resume(&self) {
         let held: BTreeSet<String> = self
             .lock()
@@ -404,17 +414,6 @@ impl Host {
         }
     }
 
-    fn save_holds(&self, inner: &Inner) -> std::io::Result<()> {
-        let Some(path) = &self.holds_path else {
-            return Ok(());
-        };
-        let bytes = serde_json::to_vec_pretty(&HoldsFile {
-            holds: inner.holds.clone(),
-        })
-        .map_err(std::io::Error::other)?;
-        oxplow_config::write_atomic(path, &bytes)
-    }
-
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -436,6 +435,21 @@ fn taken_elsewhere(path: &Path) -> Option<String> {
         path.display(),
         running.pid
     ))
+}
+
+/// The holds a headless host kept.
+fn kept_holds(db: &HostDb) -> rusqlite::Result<BTreeSet<Hold>> {
+    let conn = db.conn();
+    let mut q = conn.prepare("SELECT device, project FROM hold")?;
+    let holds = q
+        .query_map([], |r| {
+            Ok(Hold {
+                device: r.get(0)?,
+                project: r.get(1)?,
+            })
+        })?
+        .collect();
+    holds
 }
 
 fn view(inner: &Inner, project: Project) -> ProjectView {
@@ -480,6 +494,8 @@ pub(crate) mod tests {
 
     pub(crate) struct Fixture {
         pub dir: tempfile::TempDir,
+        /// The home's `host.db`, which this test process holds.
+        pub db: Arc<HostDb>,
         pub host: Arc<Host>,
     }
 
@@ -497,13 +513,9 @@ pub(crate) mod tests {
                 .with_startup_timeout(Duration::from_secs(10))
                 .with_shutdown_grace(Duration::from_millis(500)),
             );
-            let host = Host::open(&dir.path().join("home"), supervisor, kept);
-            Self { dir, host }
-        }
-
-        /// The host's `OXPLOW_HOME` config dir.
-        pub(crate) fn home(&self) -> PathBuf {
-            self.dir.path().join("home")
+            let db = HostDb::open(&dir.path().join("home")).unwrap();
+            let host = Host::open(db.clone(), supervisor, kept).unwrap();
+            Self { dir, db, host }
         }
 
         pub(crate) fn project(&self, name: &str) -> String {
@@ -757,18 +769,19 @@ pub(crate) mod tests {
             }))
             .with_startup_timeout(Duration::from_secs(10)),
         );
-        let again = Host::open(&fx.dir.path().join("home"), supervisor, HoldsKept::InFile);
+        let again = Host::open(fx.db.clone(), supervisor, HoldsKept::InFile).unwrap();
         assert_eq!(again.holds().len(), 1);
         let reopened = Fixture {
             dir: tempfile::tempdir().unwrap(),
+            db: fx.db.clone(),
             host: again,
         };
         reopened.wait_for(&id, running);
     }
 
     /// The app's host lives as long as the app: its holds are the open
-    /// windows, kept in memory. A file a headless host left is not read, and
-    /// none is written.
+    /// windows, kept in memory. Holds a headless host kept are not read, and
+    /// none are written.
     #[test]
     fn an_app_host_keeps_its_holds_in_memory() {
         let fx = Fixture::new(RUNS);
@@ -776,24 +789,28 @@ pub(crate) mod tests {
         fx.host.add_hold("dev-tablet", &id).unwrap();
         fx.wait_for(&id, running);
         fx.host.shutdown();
-        let file = fx.home().join("host-holds.json");
-        let before = std::fs::read(&file).unwrap();
+        let kept = || kept_holds(&fx.db).unwrap();
+        let before = kept();
+        assert_eq!(before.len(), 1);
 
         let app = Fixture {
             host: Host::open(
-                &fx.home(),
+                fx.db.clone(),
                 Arc::new(DaemonSupervisor::with_launcher(Box::new(Fake {
                     script: RUNS.into(),
                 }))),
                 HoldsKept::InMemory,
-            ),
+            )
+            .unwrap(),
+            db: fx.db.clone(),
             dir: tempfile::tempdir().unwrap(),
         };
-        assert!(app.host.holds().is_empty(), "the file is not read");
+        assert!(app.host.for_app() && !fx.host.for_app());
+        assert!(app.host.holds().is_empty(), "the kept holds are not read");
         app.host.add_hold("dev-mac", &id).unwrap();
         app.host.release_hold("dev-mac", &id).unwrap();
         app.host.add_hold("dev-mac", &id).unwrap();
         assert_eq!(app.host.holds().len(), 1);
-        assert_eq!(std::fs::read(&file).unwrap(), before, "nor written");
+        assert_eq!(kept(), before, "nor written");
     }
 }

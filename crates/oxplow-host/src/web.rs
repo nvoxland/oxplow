@@ -385,7 +385,7 @@ mod tests {
             std::fs::write(ui.path().parent().unwrap().join("secret.txt"), "no").ok();
             let access = crate::access::Access::new(
                 HOST_TOKEN.into(),
-                crate::devices::Devices::open(&fx.home()).unwrap(),
+                crate::devices::Devices::new(fx.db.clone()),
                 Duration::from_millis(10),
             );
             let app = app(ServeConfig {
@@ -1116,7 +1116,7 @@ mod tests {
             host: fx.host.clone(),
             access: crate::access::Access::new(
                 HOST_TOKEN.into(),
-                crate::devices::Devices::open(&fx.home()).unwrap(),
+                crate::devices::Devices::new(fx.db.clone()),
                 Duration::from_millis(10),
             ),
             listener: crate::access::Listener::Loopback,

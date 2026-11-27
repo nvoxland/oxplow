@@ -86,3 +86,55 @@ fn the_cli_pairs_a_device_lists_it_and_stops_a_headless_host() {
     }
     assert!(!socket.exists(), "the socket went with it");
 }
+
+/// The CLI's projects: in `host.db` when no host runs, through the host
+/// (which holds `host.db`) when one does; the same list either way.
+#[test]
+fn the_cli_adds_lists_and_removes_projects_with_or_without_a_host() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let folder = |name: &str| {
+        let dir = work.path().join(name);
+        std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
+        dir.to_string_lossy().into_owned()
+    };
+    let id_of = |said: &str| said.split_whitespace().next().unwrap().to_string();
+
+    let (ok, said) = cli(home.path(), &["project", "add", &folder("alpha")]);
+    assert!(ok && said.contains("alpha"), "{said}");
+    let alpha = id_of(&said);
+
+    let mut host = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
+        .args(["serve"])
+        .env("OXPLOW_HOME", home.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(host.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    assert!(line.contains("listening on"), "{line}");
+
+    let (ok, said) = cli(home.path(), &["project", "add", &folder("beta")]);
+    assert!(ok && said.contains("beta"), "{said}");
+    let beta = id_of(&said);
+    let (ok, said) = cli(home.path(), &["project", "list"]);
+    assert!(
+        ok && said.contains(&alpha) && said.contains(&beta),
+        "{said}"
+    );
+    let (ok, said) = cli(home.path(), &["project", "remove", &alpha]);
+    assert!(ok && said.contains(&alpha), "{said}");
+    let (ok, said) = cli(home.path(), &["project", "remove", &alpha]);
+    assert!(!ok && said.contains("no project"), "{said}");
+
+    host.kill().unwrap();
+    host.wait().unwrap();
+    let (ok, said) = cli(home.path(), &["project", "list"]);
+    assert!(
+        ok && !said.contains(&alpha) && said.contains(&beta),
+        "{said}"
+    );
+}
