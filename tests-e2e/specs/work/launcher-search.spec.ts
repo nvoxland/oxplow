@@ -40,6 +40,9 @@ test("a page added while the window is open is in the launcher", async ({ page, 
     "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_oxplow_task }\nview: { from: items, viz: table }\n",
   );
   await deploy(daemon, "wombat");
+  // The launcher shows what the search index holds; the index follows the
+  // new generation a moment after it is active.
+  await searchable(daemon, "wombat tasks", "page");
   await expect(async () => {
     await searchLauncher(page, "Wombat Tasks");
     await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat Tasks" })).toHaveCount(1, {

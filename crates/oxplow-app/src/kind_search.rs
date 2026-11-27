@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oxplow_db::search_store::EntryKey;
+use oxplow_db::search_store::{EntryKey, EntryText};
 use oxplow_db::Database;
 use oxplow_domain::DomainError;
 
@@ -70,6 +70,9 @@ pub(crate) struct SearchableKind {
     shipped: bool,
     /// Its view has a `stream_id` column: each hit is that stream's.
     streamed: bool,
+    /// Its view has a `name` column: what a person types for a row, when
+    /// it isn't the title.
+    named: bool,
     /// The resource as declared: a row's `ref` is one of its URIs.
     decl: oxplow_domain::uri::resources::ResourceDecl,
     /// Its view has a `version` column: a recompute is planned from it.
@@ -204,7 +207,7 @@ const RESTATE_ATTEMPTS: usize = 5;
 struct Prepared {
     versions: BTreeMap<EntryKey, String>,
     plan: oxplow_db::search_store::RestatePlan,
-    texts: BTreeMap<EntryKey, (String, String)>,
+    texts: BTreeMap<EntryKey, EntryText>,
     /// Only the rows past a watermark were read: what isn't in `versions`
     /// is not gone, so nothing is removed.
     partial: bool,
@@ -218,7 +221,7 @@ impl Prepared {
     /// Write the plan in `tx`. False: the stored entries moved since it was
     /// made and a text it needs was not read; read again.
     fn commit(&self, tx: &rusqlite::Connection, kind: &str) -> Result<bool, DomainError> {
-        let mut plan = oxplow_db::search_store::plan_restate_tx(tx, kind, &self.versions)?;
+        let mut plan = oxplow_db::search_store::plan_restate_tx(tx, kind, None, &self.versions)?;
         if self.partial {
             plan.remove.clear();
         }
@@ -300,6 +303,15 @@ impl Feed<'_> {
         }
     }
 
+    /// A row's name: its view's `name`, when it has one; else its title.
+    fn name(&self) -> &'static str {
+        if self.spec.named {
+            "CAST(name AS TEXT)"
+        } else {
+            "CAST(title AS TEXT)"
+        }
+    }
+
     fn view(&self) -> String {
         format!("\"{}\"", self.spec.view.replace('"', "\"\""))
     }
@@ -313,13 +325,14 @@ impl Feed<'_> {
         }
     }
 
-    /// `(ref, stream)` of a row as an entry key: its URI, when it is one
-    /// of the resource's and holds for its params — else nothing a hit
+    /// `(ref, stream)` of a row as an entry key: its URI, canonical and
+    /// with its view (a page's section is the page showing it), when it is
+    /// one of the resource's and holds for its params — else nothing a hit
     /// could open.
     fn key(&self, reference: Option<String>, stream: Option<String>) -> Option<EntryKey> {
         let uri = oxplow_domain::uri::build::parse_resource(&reference?, self.kind).ok()?;
         self.resources.validate(&uri).ok()?;
-        Some((uri.identity(), stream))
+        Some((uri.to_string(), stream))
     }
 
     fn body(&self, body: Option<String>) -> String {
@@ -334,6 +347,22 @@ impl Feed<'_> {
         body
     }
 
+    /// A row's text: named by its `name` when its view has that column (a
+    /// NULL there is no name: nothing a person types for it), else by its
+    /// title.
+    fn text(&self, name: Option<String>, title: Option<String>, body: Option<String>) -> EntryText {
+        let title = title.unwrap_or_default();
+        EntryText {
+            name: if self.spec.named {
+                name.unwrap_or_default()
+            } else {
+                title.clone()
+            },
+            title,
+            body: self.body(body),
+        }
+    }
+
     fn warn_bounds(&self, rows: usize, skipped: usize) {
         if !self.spec.shipped && rows > MAX_ROWS {
             tracing::warn!(kind = %self.kind, view = %self.spec.view, "more than {MAX_ROWS} rows; the rest aren't searchable");
@@ -346,9 +375,10 @@ impl Feed<'_> {
     /// Every row's text, compared by its hash.
     fn prepare_by_text(&self, since: Option<i64>) -> Result<Prepared, DomainError> {
         let sql = format!(
-            "SELECT CAST(uri AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {}, {} FROM {}{}{}",
+            "SELECT CAST(uri AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {}, {}, {} FROM {}{}{}",
             self.stream(),
             self.seq(),
+            self.name(),
             self.view(),
             self.past(since),
             self.limit()
@@ -360,29 +390,38 @@ impl Feed<'_> {
             Option<String>,
             Option<String>,
             Option<i64>,
+            Option<String>,
         );
         let rows: Vec<Row> = st
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
             })
             .map_err(oxplow_db::map_sql_err)?
             .collect::<rusqlite::Result<_>>()
             .map_err(oxplow_db::map_sql_err)?;
         let total = rows.len();
         let max_seq = rows.iter().filter_map(|r| r.4).max();
-        let mut entries: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
+        let mut entries: BTreeMap<EntryKey, EntryText> = BTreeMap::new();
         let mut skipped = 0usize;
-        for (reference, title, body, stream, _) in rows.into_iter().take(self.bound()) {
+        for (reference, title, body, stream, _, name) in rows.into_iter().take(self.bound()) {
             match self.key(reference, stream) {
                 Some(key) => {
-                    entries.insert(key, (title.unwrap_or_default(), self.body(body)));
+                    entries.insert(key, self.text(name, title, body));
                 }
                 None => skipped += 1,
             }
         }
         self.warn_bounds(total, skipped);
         let versions = oxplow_db::search_store::entry_versions(&entries);
-        let mut plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let mut plan =
+            oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, None, &versions)?;
         let partial = since.is_some();
         if partial {
             plan.remove.clear();
@@ -427,25 +466,27 @@ impl Feed<'_> {
             }
         }
         self.warn_bounds(total, skipped);
-        let mut plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let mut plan =
+            oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, None, &versions)?;
         let partial = since.is_some();
         if partial {
             plan.remove.clear();
         }
-        let mut texts: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
+        let mut texts: BTreeMap<EntryKey, EntryText> = BTreeMap::new();
         for chunk in plan.write.chunks(TEXT_CHUNK) {
             let refs: Vec<String> = chunk.iter().map(|((id, _), ..)| id.clone()).collect();
             let sql = format!(
-                "SELECT CAST(uri AS TEXT), {}, CAST(title AS TEXT), CAST(body AS TEXT) \
+                "SELECT CAST(uri AS TEXT), {}, CAST(title AS TEXT), CAST(body AS TEXT), {} \
                  FROM {} WHERE uri IN ({})",
                 self.stream(),
+                self.name(),
                 self.view(),
                 vec!["?"; refs.len()].join(", ")
             );
             let mut st = self.tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
             let found = st
                 .query_map(rusqlite::params_from_iter(&refs), |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
                 })
                 .map_err(oxplow_db::map_sql_err)?
                 .collect::<rusqlite::Result<
@@ -454,12 +495,13 @@ impl Feed<'_> {
                         Option<String>,
                         Option<String>,
                         Option<String>,
+                        Option<String>,
                     )>,
                 >>()
                 .map_err(oxplow_db::map_sql_err)?;
-            for (reference, stream, title, body) in found {
+            for (reference, stream, title, body, name) in found {
                 if let Some(key) = self.key(reference, stream) {
-                    texts.insert(key, (title.unwrap_or_default(), self.body(body)));
+                    texts.insert(key, self.text(name, title, body));
                 }
             }
         }
@@ -505,6 +547,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         bool,
         bool,
         bool,
+        bool,
     );
     // The extensions that ship with oxplow, as a JSON list for the query.
     let shipped = serde_json::to_string(
@@ -524,7 +567,8 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                             EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'version'), \
                             k.params, k.additional, \
                             EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'seq'), \
-                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'stream_id') \
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'stream_id'), \
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'name') \
                      FROM resource k WHERE k.searchable IS NOT NULL ORDER BY k.resource",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
@@ -540,6 +584,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                         r.get(6)?,
                         r.get(7)?,
                         r.get(8)?,
+                        r.get(9)?,
                     ))
                 })
                 .map_err(oxplow_db::map_sql_err)?
@@ -556,7 +601,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
         .filter_map(
-            |(kind, view, shipped, sql, versioned, params, additional, seq, streamed)| {
+            |(kind, view, shipped, sql, versioned, params, additional, seq, streamed, named)| {
                 let tables = tables.get(&view)?.clone();
                 let decl = oxplow_domain::uri::resources::ResourceDecl {
                     params: serde_json::from_str(&params).ok()?,
@@ -571,6 +616,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                         tables,
                         shipped,
                         streamed,
+                        named,
                         versioned,
                         incremental: seq && shipped,
                         decl,
@@ -638,7 +684,7 @@ impl Assets {
                     !keep.contains(kind) && kind.as_str() != oxplow_domain::uri::resources::FILE
                 });
                 for kind in gone {
-                    oxplow_db::search_store::restate_kind_tx(tx, kind, &BTreeMap::new())?;
+                    oxplow_db::search_store::restate_kind_tx(tx, kind, None, &BTreeMap::new())?;
                     for table in ["asset_state", "asset_failure"] {
                         tx.execute(
                             &format!("DELETE FROM {table} WHERE asset = ?1"),
@@ -826,6 +872,52 @@ resources:
             .await
             .unwrap();
         assert_eq!(hit[0].stream_id.as_deref(), Some("1"), "{hit:?}");
+    }
+
+    /// A searchable view with a `name` column names each entry by it: the
+    /// name, not the longer title, is what a typed query starts.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_searchable_views_name_is_what_a_query_matches_first() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        acme(&root, "    searchable: found\n");
+        let manifest = root.join(".oxplow/extensions/acme/extension.yaml");
+        let text = std::fs::read_to_string(&manifest).unwrap().replace(
+            "      - { name: body, type: TEXT, doc: Its description. }\n",
+            "      - { name: body, type: TEXT, doc: Its description. }\n      - { name: name, type: TEXT, doc: Its name. }\n",
+        );
+        std::fs::write(&manifest, text).unwrap();
+        write(
+            &root,
+            ".oxplow/extensions/acme/datasets/found.sql",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, CAST('PR ' || n || ': ' || title AS TEXT) AS title, body, title AS name FROM ref('pr')",
+        );
+        rows(
+            &root,
+            r#"[{"n": "12", "title": "Widget frobnicator", "body": "Adds the frobnication of widgets."}]"#,
+        );
+        declare_entities(svc).await;
+        collect(svc).await;
+        crate::test_fixtures::activate_with_problems(svc).await;
+        let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
+        crate::datasets_changed::spawn(
+            svc.db.clone(),
+            Arc::new(crate::datasets_changed::DatasetWatermarks::default()),
+            svc.events.clone(),
+            assets.clone(),
+            svc.event_pump.clone(),
+            crate::pages::open_runs::PageRuns::default(),
+            svc.stopping(),
+        );
+        assert_eq!(found(svc, "widget", &["12"]).await.len(), 1);
+        let hit = svc
+            .search_store
+            .search("widget frob", None, &[], 10)
+            .await
+            .unwrap();
+        assert_eq!(hit[0].tier, 1, "the name starts with the query: {hit:?}");
+        assert_eq!(hit[0].title, "PR 12: Widget frobnicator");
     }
 
     /// P9.D3: a searchable kind's dataset rows are in the site-wide index
@@ -1241,6 +1333,91 @@ mod core_tests {
             .await
             .unwrap()
             .result
+    }
+
+    /// A page whose view is a switch is found by each of its other
+    /// sections too, by name ("Manage services: Integrations"), its hit
+    /// opening on that section.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pages_sections_are_found_by_name() {
+        let (svc, _dir) = services().await;
+        crate::test_fixtures::activate(&svc).await;
+        change_loop(&svc);
+        let hit = || {
+            let svc = svc.clone();
+            async move {
+                svc.search_store
+                    .search("integrations", None, &["oxplow/page".to_string()], 10)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|h| h.title == "Manage services: Integrations")
+            }
+        };
+        eventually("the section is found", || async { hit().await.is_some() }).await;
+        let hit = hit().await.unwrap();
+        assert_eq!(
+            hit.uri,
+            "oxplow:oxplow/page?page=management#area=integrations"
+        );
+        assert_eq!(hit.tier, 2, "{hit:?}");
+    }
+
+    /// A command is named by its label, which ranks first; one with no
+    /// label (not run from the app) has no name, and is found only by its
+    /// bus id and text.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_command_is_named_by_its_label() {
+        let (svc, _dir) = services().await;
+        crate::test_fixtures::activate(&svc).await;
+        change_loop(&svc);
+        let tier = |q: &'static str, uri: &'static str| {
+            let svc = svc.clone();
+            async move {
+                svc.search_store
+                    .search(q, None, &["oxplow/command".to_string()], 50)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|h| h.uri == uri)
+                    .map(|h| h.tier)
+            }
+        };
+        let labelled = "oxplow:oxplow/command?command=oxplow.page.draft_with_agent";
+        eventually("the command is found by its label", || async {
+            tier("new page with", labelled).await == Some(1)
+        })
+        .await;
+        let unlabelled = "oxplow:oxplow/command?command=oxplow.agent.draft";
+        assert_eq!(tier("oxplow.agent.draft", unlabelled).await, Some(0));
+        assert_eq!(tier("agent", unlabelled).await, Some(4), "no name to match");
+    }
+
+    /// A page an extension adds while oxplow runs is found once its
+    /// generation is active.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_added_while_running_is_found() {
+        let (svc, _dir) = services().await;
+        crate::test_fixtures::activate(&svc).await;
+        change_loop(&svc);
+        let root = svc.layout.project_dir.clone();
+        let dir = root.join(".oxplow/extensions/wombat");
+        std::fs::create_dir_all(dir.join("pages")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: wombat\nintent:\n  purpose: Wombat tasks.\n  origin: null\n  examples: []\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("pages/wombats.yaml"),
+            "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT 1 AS n }\nview: { from: items, viz: table }\n",
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        eventually("the new page is found", || {
+            found(&svc, "wombat tasks", None, "oxplow/page")
+        })
+        .await;
     }
 
     /// Knowledge pages (oxwiki, the extension): found when written by

@@ -51,6 +51,7 @@ pub mod provider_collector_store;
 pub mod replaceable_store;
 pub mod request_analysis_store;
 pub mod resource_store;
+pub mod search_rank;
 pub mod search_store;
 pub mod semantic_layer;
 pub mod snapshot_tree;

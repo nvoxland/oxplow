@@ -941,12 +941,13 @@ datasets:
     - { not_null: uri }
     - { unique: uri }
 - name: search_command
-  version: 1
+  version: 2
   description: "What site search indexes for each command `v_contribution` lists: the `command` kind's index is restated from these rows when they change."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/command?command=<id>`: what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "Its bus id." }
-    - { name: "body", type: "TEXT", doc: "Its summary and extension." }
+    - { name: "title", type: "TEXT", doc: "Its label, else its bus id." }
+    - { name: "name", type: "TEXT", doc: "What a person types for it: its label; NULL for a command with none, which then ranks only by its title and body. (v2)" }
+    - { name: "body", type: "TEXT", doc: "Its bus id, summary, group, keywords and extension." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: commands belong to the project." }
   tests:
     - { not_null: uri }
@@ -1073,11 +1074,11 @@ datasets:
     - { not_null: uri }
     - { unique: uri }
 - name: search_page
-  version: 1
-  description: "What site search indexes for each page the launcher lists: the `page` kind's index is restated from these rows when they change. Hidden pages (opened from elsewhere) are left out."
+  version: 2
+  description: "What site search indexes for each page the launcher lists, and each section such a page shows by a switch (`v_page_section`): the `page` kind's index is restated from these rows when they change. Hidden pages (opened from elsewhere) are left out."
   fields:
-    - { name: "uri", type: "TEXT", doc: "The page's URI (`v_page.uri`): what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "The page's title." }
+    - { name: "uri", type: "TEXT", doc: "The page's URI (`v_page.uri`), or a section's (`v_page_section.uri`): what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The page's title; a section's is `<page>: <section>`." }
     - { name: "body", type: "TEXT", doc: "Its description and launcher keywords." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: pages belong to the project." }
   tests:
@@ -1581,7 +1582,7 @@ datasets:
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 13
+  version: 14
   key: [uri]
   description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the dataset that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   fields:
@@ -1601,6 +1602,8 @@ datasets:
     - { name: "file", type: "TEXT", doc: "The file it's declared in, inside its extension: `extension.yaml`, a page's `pages/<slug>.yaml`, a dataset's SQL. Join it to the extension (`v_extension`) for where that runs; never a machine path." }
     - { name: "line", type: "INTEGER", doc: "Its entry's line there; NULL for a contribution that is a whole file (a page, a dataset's SQL)." }
     - { name: "description", type: "TEXT", doc: "One sentence saying what it is, a collector's `doc:`, or the `description:` of a resource, a dimension or an implementation (the same text as on `v_collector`, `v_resource`, `v_dimension` and `v_capability_provider`); NULL for a kind whose declaration has none." }
+    - { name: "label", type: "TEXT", doc: "What a person calls it in the app: a command's `ui.label`; NULL for a contribution with none. (v14)" }
+    - { name: "keywords", type: "TEXT", doc: "Other words a person may look for it by, space-separated: a command's `ui.group` and `ui.keywords`; NULL when none. (v14)" }
   tests:
     - { not_null: uri }
 - name: page
@@ -1653,6 +1656,16 @@ datasets:
     - { name: "label", type: "TEXT", doc: "What the control says; NULL for the name." }
     - { name: "default", type: "TEXT", doc: "Its default, as JSON; NULL for none." }
     - { name: "options", type: "TEXT", doc: "The values a choice takes, as a JSON array of `{value, label}`; `[]` when fixed by a loader (`options_from`) or not a choice." }
+- name: page_section
+  version: 1
+  key: [page_uri, position]
+  description: "Each section a page shows by a switch param (`switch:` in its view), beside the one it opens on: what the launcher and search list as `<page>: <section>`, opening the page on it. Restated with each extension generation."
+  fields:
+    - { name: "page_uri", type: "TEXT", doc: "The page (`v_page.uri`)." }
+    - { name: "position", type: "INTEGER", doc: "Its place among the page's sections, from 1." }
+    - { name: "section", type: "TEXT", doc: "The section's id: the switch param's value that shows it." }
+    - { name: "title", type: "TEXT", doc: "`<page title>: <section title>`." }
+    - { name: "uri", type: "TEXT", doc: "The page's URI showing it (`oxplow:oxplow/page?page=management#area=integrations`)." }
 - name: extension
   version: 8
   key: [uri]

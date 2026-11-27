@@ -708,6 +708,12 @@ pub struct Descriptor {
     /// One sentence saying what it is, for the kinds whose declaration
     /// carries one (a collector's `doc:`); `None` otherwise.
     pub description: Option<String>,
+    /// What a person calls it in the app (a command's `ui.label`), when
+    /// that isn't its id.
+    pub label: Option<String>,
+    /// Other words a person may look for it by (a command's `ui.group`
+    /// and `ui.keywords`).
+    pub keywords: Vec<String>,
     pub source: DeclaredAt,
 }
 
@@ -725,6 +731,8 @@ impl Descriptor {
             order_level: None,
             global: None,
             description: None,
+            label: None,
+            keywords: Vec::new(),
             source,
         }
     }

@@ -2292,6 +2292,16 @@ export type Descriptor = {
 	 *  carries one (a collector's `doc:`); `None` otherwise.
 	 */
 	description: string | null,
+	/**
+	 *  What a person calls it in the app (a command's `ui.label`), when
+	 *  that isn't its id.
+	 */
+	label: string | null,
+	/**
+	 *  Other words a person may look for it by (a command's `ui.group`
+	 *  and `ui.keywords`).
+	 */
+	keywords: string[],
 	source: DeclaredAt,
 };
 
@@ -6187,8 +6197,9 @@ export type ScopedPanelLayout = {
  *  One ranked search result: the URI it found
  *  (`oxplow:oxplow/task?id=tsk7&provider=oxtask`), which the caller
  *  opens the way it opens any URI, and its resource. `stream_id` is `None`
- *  for project-global entities (knowledge pages); `score` is the BM25 score
- *  (lower = better match).
+ *  for project-global entities (knowledge pages). `tier` is how it matched
+ *  ([`crate::search_rank`]: 0 exact … 5 only in the body); `score` is its
+ *  BM25 score when its text matched (lower = better), else 0.
  */
 export type SearchHit = {
 	resource: string,
@@ -6196,6 +6207,7 @@ export type SearchHit = {
 	stream_id: string | null,
 	title: string,
 	snippet: string,
+	tier: number,
 	score: number | null,
 };
 

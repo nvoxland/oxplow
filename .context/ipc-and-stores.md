@@ -828,16 +828,51 @@ the flow above.
 ## Search index (read dataset + indexer)
 
 The `search` command/tool is a read over `SqliteSearchStore`
-(`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
-per-domain store. It is **fed**, not written by its callers. Tasks,
-thread notes and knowledge pages are searchable resources derived from a dataset
-(`v_search_<kind>`): an asset per kind (`kind_search.rs`)
-restates the kind whole when a table behind its dataset commits — a move, a
-soft delete, a thread delete included — writing nothing when the rows are
-unchanged. File contents come from snapshot blobs, so the `search.index`
-pump consumer indexes them on `snapshot.taken` (durable, redelivered after
-a crash). Nothing reaches the index on the in-memory bus. Archiving a
-stream purges its file rows (`purge_stream_files`). See
+(`crates/oxplow-db/src/search_store.rs`) — one index for every kind, not a
+per-domain store. It is **fed**, not written by its callers.
+
+- **One entry, two indexes.** `search_entry` holds an entry's identity
+  (resource, URI with its view, stream, version). `search_fts(title, body)`
+  holds its words (BM25, porter stemming, prefix index). `search_name(name)`
+  is a trigram index of what a person types for it: a file's name, a page's
+  title, a command's label. Trigrams find a word *inside* a name (`View` in
+  `MarkdownView.tsx`).
+- **One ranking, in the backend.** `search` finds candidates in both
+  indexes and ranks every candidate on one scale
+  (`crates/oxplow-db/src/search_rank.rs`). The tiers are: exact name, title
+  or id; the name starts with the query; each word starts a word of the
+  name (camelCase humps count, and a word may run on: `openoverlay`); each
+  word is inside the name (3 characters or more); each word starts a word
+  of the title (a file's folders); body only (BM25). Inside a tier the
+  shorter name comes first. There is no subsequence matching. Each hit
+  carries its `tier`. The launcher and the agent's `oxplow_search` get the
+  same order; the launcher only draws it.
+- **One write contract: restate.** Every kind is restated to the entries
+  it has now (`restate_kind_tx`, or `plan_restate_tx` + `apply_restate_tx`),
+  and only what differs is written. A kind from a dataset
+  (`v_search_<kind>`; tasks, knowledge, pages and their switch sections,
+  commands, threads, …) is restated whole by its asset (`kind_search.rs`)
+  when a table behind its dataset commits. A feed view may give a `name`
+  column (NULL: no name, as for a command with no label, which then ranks
+  only by its title and body); else the entry is named by its title. The
+  name index serves every query word, so a 1–2 character query still
+  finds the names it starts, prefix matches first. **Files** come from
+  snapshot blobs, so the `search.index` pump consumer (`indexer.rs`)
+  restates **one stream's files to its working tree** (the walk `v_file`
+  lists, through the stream's filter) on each `snapshot.taken`, and once
+  per stream at boot. Every file is an entry, found by its name. Its body
+  comes from the stream's snapshot tree, when that holds the file (a
+  worktree stream's holds only what it touched), the content policy keeps
+  bytes and the file is not too large, binary or minified. Each file is
+  versioned by its blob (or as name-only), so only changed files are read;
+  blobs are read off the async workers, and each write chunk plans again
+  in its own transaction. An archived stream is skipped.
+- **Scope.** Only files belong to a stream. A search for a stream returns
+  that stream's files and every other entry (tasks, knowledge, threads,
+  pages, commands), whatever stream it is in. Archiving a stream
+  restates its files to none (`purge_stream_files`).
+
+Nothing reaches the index on the in-memory bus. See
 [resources.md](./resources.md) "Where URIs are stored" (the search index). One operation on
 both doors: the IPC `search` runs the agent's `oxplow.search.find` as the
 person ("A read on both front doors").

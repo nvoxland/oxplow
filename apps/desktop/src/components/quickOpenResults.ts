@@ -1,7 +1,5 @@
-import { fuzzyMatches } from "../fuzzy-match.js";
-import { commandUri, fileUri, keyOf, pageUri } from "../uri/uri.js";
+import { commandUri, keyOf } from "../uri/uri.js";
 import type { SearchHit } from "../api.js";
-import type { WorkspaceIndexedFile } from "../workspaceFiles.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
@@ -28,7 +26,9 @@ export interface CommandEntry {
 export type QuickOpenResult =
   | { kind: "page"; entry: PageDirectoryEntry }
   | { kind: "command"; entry: CommandEntry }
-  | { kind: "file"; file: WorkspaceIndexedFile }
+  /** A file of the current stream, by its path (and where its contents
+   *  matched, when they did). */
+  | { kind: "file"; path: string; snippet: string }
   | { kind: "hit"; hit: SearchHit };
 
 /// The commands search offers: those that can run now — one that can't
@@ -39,169 +39,46 @@ export function searchableCommands(entries: CommandEntry[]): CommandEntry[] {
   return entries.filter((e) => e.enabled !== false);
 }
 
-/// Body-search hits merged into the quick-open list after the filename
-/// matches. File-kind hits whose path already matched by filename are
-/// dropped (they'd be duplicate rows); everything else keeps the
-/// backend's BM25 order.
-export function dedupeSiteHits(
-  hits: SearchHit[],
-  matchedFilePaths: ReadonlySet<string>,
-): SearchHit[] {
-  return hits.filter((h) => !(h.resource === "oxplow/file" && matchedFilePaths.has(keyOf(h.uri) ?? "")));
-}
-
-/// Split a query on whitespace and require each token to fuzzy-match
-/// independently — so "thread new" finds "Tasks › New Thread" just as
-/// well as "new thread". Within a token the subsequence match stays
-/// order-sensitive.
-function matchesAllTokens(haystack: string, tokens: string[]): boolean {
-  return tokens.every((tok) => fuzzyMatches(haystack, tok));
-}
-
-/// Whether `token` starts a word of `text` (words split on anything but
-/// letters and digits).
-function startsAWord(text: string, token: string): boolean {
-  return text.split(/[^\p{L}\p{N}]+/u).some((w) => w.startsWith(token));
-}
-
-/// How well a page matches `tokens` — lower is better — or null when it
-/// doesn't: every token starting a word of its title, then its
-/// title as a subsequence, then its id, then its keywords, where each token
-/// must start a word (a description is long enough to hold any short
-/// subsequence: "todo" was found in "Planning"'s).
-export function pageRank(entry: PageDirectoryEntry, tokens: string[]): number | null {
-  const label = entry.label.toLowerCase();
-  if (tokens.every((t) => startsAWord(label, t))) return 0;
-  if (matchesAllTokens(label, tokens)) return 1;
-  if (matchesAllTokens(entry.id.toLowerCase(), tokens)) return 2;
-  const keywords = entry.keywords?.toLowerCase();
-  if (keywords && tokens.every((t) => startsAWord(keywords, t))) return 3;
-  return null;
-}
-
-/// Does a result's displayed identity exactly equal the query (case-
-/// insensitive)? Such a result is floated above every fuzzy section — the
-/// "type the thing, jump to it" affordance. the task-id case falls
-/// out for free: query `tsk42` === the task hit's `ref_id`.
-function isExactMatch(r: QuickOpenResult, q: string): boolean {
-  switch (r.kind) {
-    case "page":
-      return r.entry.label.toLowerCase() === q || r.entry.id.toLowerCase() === q;
-    case "command":
-      return r.entry.label.toLowerCase() === q;
-    case "file": {
-      const base = r.file.path.split("/").pop() ?? r.file.path;
-      return base.toLowerCase() === q || r.file.path.toLowerCase() === q;
-    }
-    case "hit":
-      return r.hit.title.toLowerCase() === q || (keyOf(r.hit.uri) ?? "").toLowerCase() === q;
-  }
-}
-
-/// Stable identity of a result, so exact matches floated to the top
-/// aren't also shown again in their capped section below.
-function resultKey(r: QuickOpenResult): string {
-  switch (r.kind) {
-    case "page":
-      return pageUri(r.entry.id);
-    case "command":
-      return commandUri(r.entry.id);
-    case "file":
-      return fileUri(r.file.path);
-    case "hit":
-      return `hit:${r.hit.uri}:${r.hit.stream_id ?? ""}`;
-  }
-}
-
-/// Per-section row caps: the launcher shows at most this many file-path
-/// and body-hit rows so a broad query can't flood the list. Overflow is
-/// reported via `QuickOpenBuild.truncated`.
-const MAX_FILE_ROWS = 80;
-const MAX_HIT_ROWS = 30;
-
-export interface QuickOpenBuild {
-  results: QuickOpenResult[];
-  /// Count of matches dropped by the per-section caps — drives the
-  /// "+N more — refine your search" footer so a missing result reads as
-  /// "narrow the query," not "not found."
-  truncated: number;
-}
-
-/// Build the ordered launcher result list — the single source of truth
-/// for what the one search shows. Empty query = launcher mode (pages
-/// only, in their fixed category-grouped order). With a query: exact
-/// matches first (see `isExactMatch`), then pages, commands, files, and
-/// body hits. Pages and commands are small curated lists, so they rank
-/// above file-path/body noise; a "git" / "files" search shouldn't scroll
-/// past matching file paths to reach the page. Body hits come last
-/// (already BM25-ranked), minus file hits whose path matched by name
-/// above, and minus file hits from other streams (project-wide search
-/// returns every stream's files, but another worktree's aren't openable
-/// here — tasks/knowledge pages/notes stay project-wide).
+/// Build the ordered launcher result list — what the one search shows.
+/// Empty query = launcher mode (pages only, in their fixed
+/// category-grouped order). With a query, the backend's search ranked
+/// everything — pages, commands, files of this stream, tasks, knowledge,
+/// … — on one scale (`search_rank`): its order is kept, each hit drawn
+/// as its kind's row. A page hit is the directory's page (its badge, its
+/// ref); a command hit runs the offer it names, and is left out when
+/// nothing here offers it or it can't run now (`searchableCommands`).
 export function buildQuickOpenResults(input: {
   query: string;
   /** The page directory; null while the extensions load — then nothing
    *  shows, so a quick Enter can't take a hit over the page it names. */
   pages: PageDirectoryEntry[] | null;
   commands: CommandEntry[];
-  files: WorkspaceIndexedFile[];
   siteHits: SearchHit[];
-  currentStreamId?: string | null;
-}): QuickOpenBuild {
-  const q = input.query.trim().toLowerCase();
-  if (input.pages === null) return { results: [], truncated: 0 };
-  if (!q) {
-    return { results: input.pages.map((entry) => ({ kind: "page" as const, entry })), truncated: 0 };
+}): QuickOpenResult[] {
+  if (input.pages === null) return [];
+  if (!input.query.trim()) {
+    return input.pages.map((entry) => ({ kind: "page" as const, entry }));
   }
-  const tokens = q.split(/\s+/).filter(Boolean);
-  // Full (uncapped) matched sets. Pages also match their optional
-  // `keywords` so e.g. the Work page (label "Work") is still found by
-  // typing "dashboard"; the best title match ranks first (`pageRank`).
-  const matchedPages: QuickOpenResult[] = input.pages
-    .map((entry, at) => ({ entry, at, rank: pageRank(entry, tokens) }))
-    .filter((m): m is { entry: PageDirectoryEntry; at: number; rank: number } => m.rank !== null)
-    .sort((a, b) => a.rank - b.rank || a.at - b.at)
-    .map(({ entry }) => ({ kind: "page", entry }));
-  const matchedCommands: QuickOpenResult[] = input.commands
-    .filter((entry) => matchesAllTokens(entry.searchKey, tokens))
-    .map((entry) => ({ kind: "command", entry }));
-  const matchedFilesAll = input.files.filter((file) => matchesAllTokens(file.path.toLowerCase(), tokens));
-  const matchedPathsAll = new Set(matchedFilesAll.map((f) => f.path));
-  // Keep file hits only from the current stream (+ global); tasks/knowledge/
-  // notes are project-wide. A null/undefined stream disables
-  // the filter (keep everything).
-  const streamScopedHits =
-    input.currentStreamId == null
-      ? input.siteHits
-      : input.siteHits.filter(
-          (h) => h.resource !== "oxplow/file" || h.stream_id == null || h.stream_id === input.currentStreamId,
-        );
-  const dedupedHits = dedupeSiteHits(streamScopedHits, matchedPathsAll);
-  const fileResultsAll: QuickOpenResult[] = matchedFilesAll.map((file) => ({ kind: "file", file }));
-  const hitResultsAll: QuickOpenResult[] = dedupedHits.map((hit) => ({ kind: "hit", hit }));
-
-  // Exact-identity matches float to the very top — computed over the FULL
-  // (uncapped) set so an exact filename/id match ranked past a section cap
-  // still surfaces ("type the thing, jump to it" must never lose to a cap).
-  const everything = [...matchedPages, ...matchedCommands, ...fileResultsAll, ...hitResultsAll];
-  const exact = everything.filter((r) => isExactMatch(r, q));
-  const floated = new Set(exact.map(resultKey));
-  const notFloated = (r: QuickOpenResult) => !floated.has(resultKey(r));
-
-  // The remaining sections; caps apply to what's left after floating, so a
-  // floated item never counts against (or hides behind) the cap.
-  const restFiles = fileResultsAll.filter(notFloated);
-  const restHits = hitResultsAll.filter(notFloated);
-  const results = [
-    ...exact,
-    ...matchedPages.filter(notFloated),
-    ...matchedCommands.filter(notFloated),
-    ...restFiles.slice(0, MAX_FILE_ROWS),
-    ...restHits.slice(0, MAX_HIT_ROWS),
-  ];
-  const truncated =
-    Math.max(0, restFiles.length - MAX_FILE_ROWS) + Math.max(0, restHits.length - MAX_HIT_ROWS);
-  return { results, truncated };
+  const pages = new Map(input.pages.map((entry) => [entry.ref.id, entry]));
+  const commands = new Map(searchableCommands(input.commands).map((entry) => [commandUri(entry.id), entry]));
+  return input.siteHits.flatMap((hit): QuickOpenResult[] => {
+    switch (hit.resource) {
+      case "oxplow/page": {
+        const entry = pages.get(hit.uri);
+        return [entry ? { kind: "page", entry } : { kind: "hit", hit }];
+      }
+      case "oxplow/command": {
+        const entry = commands.get(hit.uri);
+        return entry ? [{ kind: "command", entry }] : [];
+      }
+      case "oxplow/file": {
+        const path = keyOf(hit.uri);
+        return [path ? { kind: "file", path, snippet: hit.snippet } : { kind: "hit", hit }];
+      }
+      default:
+        return [{ kind: "hit", hit }];
+    }
+  });
 }
 
 /// The launcher's collapsible sections: the static page categories plus

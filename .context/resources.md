@@ -296,7 +296,8 @@ graph writer and the link checker never drift. The desktop's
 - **The search index**: `search_entry.kind` is the resource and `uri`
   the URI; `kind_search` keeps one index per searchable resource (an
   asset `search:<resource>`), the `search.index` consumer the files.
-  A hit is `{ resource, uri, stream_id, title, snippet, score }`.
+  A hit is `{ resource, uri, stream_id, title, snippet, tier, score }`,
+  ranked on one scale by name and text (`search_rank`).
 - **Everything else** stores the URI string where it stored the old ref:
   every dataset's `uri` column, `task.uri` / `parent_uri`, links,
   bookmarks, page

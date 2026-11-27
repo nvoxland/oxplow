@@ -1142,25 +1142,21 @@ its right-click menu.
   Do **not** add a new modal/overlay for discovery, and don't re-add
   alias shortcuts; extend the launcher. See
   `.context/pages-and-tabs.md` → "One Search".
-- **Launcher search behavior (the pass).** The launcher searches
-  the **whole project** for tasks/knowledge pages/notes (cross-stream), but
-  scopes file-body hits to the current stream — another worktree's files
-  aren't openable here. Implemented as `searchSite(q, null)` +
-  a client-side file-hit stream filter in `buildQuickOpenResults`
-  (`quickOpenResults.ts`); filename matches already come from the
-  current stream's `v_file` (read once, re-read when what it read changes). An **exact-identity match** — a
-  task id like `tsk42`, or a page/file/knowledge page name equal to the query —
-  floats to the very top, above the fuzzy pages/commands sections
-  (`isExactMatch`). Task ids are searchable because `index_task`
-  (`crates/oxplow-app/src/indexer.rs`) folds the id into the FTS body
-  (the id is otherwise a non-searchable routing key). The backend body
-  search fires only at **≥2 chars** (`MIN_BODY_QUERY_LEN`); a 1-char
-  query filters the in-memory pages/commands/files without a round-trip.
+- **Launcher search behavior (the pass).** One search, ranked in the
+  backend: `searchSite(q, stream.id)` from the first character (a 60 ms
+  pause). The backend ranks pages and their switch sections, commands,
+  this stream's files, tasks, knowledge and every searchable kind on one
+  scale (`search_rank`: exact name or id, then the name starts with the
+  query, then words starting words of the name, then words inside it,
+  then the title, then the body). Files are the current stream's; tasks
+  and knowledge belong to the project. The launcher keeps the order and
+  only draws each hit as its kind's row (`buildQuickOpenResults`): a
+  page hit is the directory's page, a command hit runs its offer and is
+  left out when it can't run here. "No matches." shows only once the
+  search for the query has answered.
   Keyboard: ↑/↓ move the cursor (scrolled into view), **Tab/Shift+Tab
   jump between sections** (`nextSectionIndex` — category headers in the
-  start menu, result groups while searching), Home/End → first/last row.
-  A section that hit its row cap shows a muted "+N more" footer
-  (`QuickOpenBuild.truncated`).
+  start menu, runs of one kind while searching), Home/End → first/last row.
 - **The launcher is the main keyboard lever — keep it populated.** Every
   command the bus offers a person that can run now flows into the
   launcher's typed results (`searchableCommands` over the offers), and

@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { keyOf, keyedUri, knowledgeUri } from "../uri/uri.js";
-import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
+import { commandUri, keyedUri, knowledgeUri } from "../uri/uri.js";
+import type { SearchHit } from "../api.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 import type { PageCategory } from "./RailHud/sections.js";
 import {
   buildLauncherTree,
   buildQuickOpenResults,
   buildRecentEntries,
-  dedupeSiteHits,
   searchableCommands,
   type CommandEntry,
   nextSectionIndex,
@@ -24,6 +23,7 @@ function hit(kind: string, refId: string): SearchHit {
     stream_id: null,
     title: refId,
     snippet: "…",
+    tier: 5,
     score: -1,
   };
 }
@@ -32,36 +32,9 @@ function page(id: string, label: string, category: PageCategory = "Work"): PageD
   return { id, label, category, ref: { id, kind: id, payload: null } as PageDirectoryEntry["ref"] };
 }
 
-function file(path: string): WorkspaceIndexedFile {
-  return { path, status: "clean" } as WorkspaceIndexedFile;
-}
-
 function command(id: string, label: string, enabled = true): CommandEntry {
   return { id, group: "Git", label, enabled, run: () => {}, searchKey: `git ${label}`.toLowerCase() };
 }
-
-describe("dedupeSiteHits", () => {
-  test("keeps body hits for pages and non-matching files", () => {
-    const out = dedupeSiteHits(
-      [hit("knowledge", "architecture-overview"), hit("file", "src/other.rs"), hit("task", "12")],
-      new Set(["src/main.rs"]),
-    );
-    expect(out.map((h) => keyOf(h.uri))).toEqual(["architecture-overview", "src/other.rs", "12"]);
-  });
-
-  test("drops file hits whose path already matched by filename", () => {
-    const out = dedupeSiteHits(
-      [hit("file", "src/main.rs"), hit("knowledge", "w")],
-      new Set(["src/main.rs"]),
-    );
-    expect(out.map((h) => keyOf(h.uri))).toEqual(["w"]);
-  });
-
-  test("non-file kinds are never deduped against paths", () => {
-    const out = dedupeSiteHits([hit("knowledge", "src/main.rs")], new Set(["src/main.rs"]));
-    expect(out).toHaveLength(1);
-  });
-});
 
 describe("searchableCommands", () => {
   test("keeps only the commands that can run now", () => {
@@ -71,126 +44,51 @@ describe("searchableCommands", () => {
 });
 
 describe("buildQuickOpenResults", () => {
-  const pages = [page("git-dashboard", "Git"), page("files", "Files")];
-  const commands = [command("git.commit", "Commit Changes…")];
-  const files = [file("src/git.rs"), file("README.md")];
+  const pages = [page("oxplow:oxplow/page?page=git", "Git"), page("oxplow:oxplow/page?page=files", "Files")];
+  const commands = [command("git.commit", "Commit Changes…"), command("git.pull", "Pull", false)];
+  const commandHit = (id: string): SearchHit => ({ ...hit("command", id), uri: commandUri(id) });
+  const pageHit = (uri: string): SearchHit => ({ ...hit("page", uri), uri });
 
   // A search hit answering before the pages load would be the first row,
   // and Enter would take it in place of the page the query names.
   test("until the pages have loaded, a query has no results to take", () => {
-    const out = buildQuickOpenResults({ query: "Files", pages: null, commands, files, siteHits: [hit("page", "files")] });
-    expect(out.results).toEqual([]);
+    const out = buildQuickOpenResults({ query: "Files", pages: null, commands, siteHits: [pageHit("oxplow:oxplow/page?page=files")] });
+    expect(out).toEqual([]);
   });
 
   test("empty query is launcher mode — pages only, in given order", () => {
-    const out = buildQuickOpenResults({ query: "", pages, commands, files, siteHits: [] });
-    expect(out.results.map((r) => r.kind)).toEqual(["page", "page"]);
-    expect(out.results.map((r) => (r.kind === "page" ? r.entry.id : ""))).toEqual(["git-dashboard", "files"]);
-    expect(out.truncated).toBe(0);
+    const out = buildQuickOpenResults({ query: "", pages, commands, siteHits: [] });
+    expect(out.map((r) => (r.kind === "page" ? r.entry.label : ""))).toEqual(["Git", "Files"]);
   });
 
-  test("query ranks pages → commands → files → body hits", () => {
+  // The backend ranks everything on one scale: the launcher keeps its
+  // order, drawing each hit as its kind's row.
+  test("keeps the backend's order, each hit drawn as its kind's row", () => {
     const out = buildQuickOpenResults({
       query: "git",
       pages,
       commands,
-      files,
-      siteHits: [hit("knowledge", "git-notes")],
+      siteHits: [hit("file", "src/git.rs"), pageHit("oxplow:oxplow/page?page=git"), commandHit("git.commit"), hit("knowledge", "git-notes")],
     });
-    // "git" matches the Git page (label/id), the Git ▸ Commit command,
-    // the src/git.rs file path, and the knowledge body hit — in that order.
-    // (The "Git" page label also equals the query, so the exact-match
-    // hoist keeps it first — where it already was.)
-    expect(out.results.map((r) => r.kind)).toEqual(["page", "command", "file", "hit"]);
+    expect(out.map((r) => r.kind)).toEqual(["file", "page", "command", "hit"]);
+    expect(out[0]).toMatchObject({ kind: "file", path: "src/git.rs" });
+    expect(out[1]).toMatchObject({ kind: "page", entry: { label: "Git" } });
+    expect(out[2]).toMatchObject({ kind: "command", entry: { id: "git.commit" } });
   });
 
-  test("multi-token query matches group+label of a command in any order", () => {
-    const out = buildQuickOpenResults({ query: "commit git", pages, commands, files, siteHits: [] });
-    expect(out.results.some((r) => r.kind === "command" && r.entry.id === "git.commit")).toBe(true);
-  });
-
-  test("an exact task-id match is hoisted to the very top", () => {
+  test("a command that can't run here is left out", () => {
     const out = buildQuickOpenResults({
-      query: "tsk30",
+      query: "pull",
       pages,
       commands,
-      files,
-      siteHits: [hit("knowledge", "w"), hit("task", "tsk30")],
+      siteHits: [commandHit("git.pull"), commandHit("not.offered"), hit("task", "tsk1")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/task", uri: keyedUri("oxplow/task", "tsk30") } });
+    expect(out.map((r) => r.kind)).toEqual(["hit"]);
   });
 
-  test("an exact content match floats above a fuzzy page/file match", () => {
-    // "gt" fuzzy-matches the "Git" page and src/git.rs, but exactly
-    // matches the knowledge hit titled "gt" — the exact hit wins.
-    const out = buildQuickOpenResults({
-      query: "gt",
-      pages,
-      commands,
-      files,
-      siteHits: [hit("knowledge", "gt")],
-    });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: knowledgeUri("oxwiki", "gt") } });
-    expect(out.results.some((r) => r.kind === "page")).toBe(true);
-  });
-
-  test("file hits from other streams are dropped; current-stream + global kept", () => {
-    const fileHit = (refId: string, streamId: string | null): SearchHit => ({ ...hit("file", refId), stream_id: streamId });
-    const out = buildQuickOpenResults({
-      query: "rs",
-      pages,
-      commands,
-      files: [],
-      siteHits: [fileHit("a.rs", "str1"), fileHit("b.rs", "str2"), fileHit("c.rs", null)],
-      currentStreamId: "str1",
-    });
-    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [keyOf(r.hit.uri)] : []));
-    expect(hitIds).toEqual(["a.rs", "c.rs"]); // b.rs (str2) dropped, global c.rs kept
-  });
-
-  test("truncated reports matches dropped by the file/hit caps", () => {
-    const manyFiles = Array.from({ length: 85 }, (_, i) => file(`src/f${i}.ts`));
-    const manyHits = Array.from({ length: 35 }, (_, i) => hit("knowledge", `w${i}`));
-    const out = buildQuickOpenResults({
-      query: "ts",
-      pages,
-      commands,
-      files: manyFiles,
-      siteHits: manyHits,
-    });
-    // 85 files → 80 shown (5 dropped); 35 hits → 30 shown (5 dropped).
-    expect(out.truncated).toBe(10);
-  });
-
-  test("floats an exact match even when it ranks past the section cap", () => {
-    // 35 hits; the one titled exactly "meeting" sits past the 30-hit cap.
-    const hits = Array.from({ length: 35 }, (_, i) => hit("knowledge", i === 33 ? "meeting" : `w${i}`));
-    const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
-    // Pre-fix this exact hit was sliced away before the float ran.
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: knowledgeUri("oxwiki", "meeting") } });
-  });
-
-  // "todo" ranked Planning and two other pages
-  // first — t…o…d…o appears in order somewhere in their long descriptions.
-  // A keyword matches at a word's start; a title match ranks first.
-  test("a title match ranks first, and keywords match whole words", () => {
-    const planning: PageDirectoryEntry = {
-      ...page("oxplow:oxplow/page?page=a/planning", "Planning"),
-      keywords: "page oxplow-bundled planning what to do next, sorted by the oldest first",
-    };
-    const todos: PageDirectoryEntry = { ...page("oxplow:oxplow/page?page=t/todos", "TODO comments"), keywords: "page todo-watch todos every comment" };
-    const symbols: PageDirectoryEntry = { ...page("symbols", "Symbols"), keywords: "outline go to definition" };
-    const stale: PageDirectoryEntry = { ...page("oxplow:oxplow/page?page=b/stale", "Stale Work"), keywords: "page review todo items left open" };
-    const out = buildQuickOpenResults({ query: "todo", pages: [planning, symbols, stale, todos], commands: [], files: [], siteHits: [] });
-    const ids = out.results.filter((r) => r.kind === "page").map((r) => (r.kind === "page" ? r.entry.id : ""));
-    expect(ids).toEqual(["oxplow:oxplow/page?page=t/todos", "oxplow:oxplow/page?page=b/stale"]);
-  });
-
-  test("a page is found by its keywords, not just label/id", () => {
-    const tasksPage: PageDirectoryEntry = { ...page("tasks", "Tasks"), keywords: "dashboard" };
-    const out = buildQuickOpenResults({ query: "dashboard", pages: [tasksPage], commands, files: [], siteHits: [] });
-    // "dashboard" matches neither label ("Tasks") nor id ("tasks") — only the keyword.
-    expect(out.results.some((r) => r.kind === "page" && r.entry.id === "tasks")).toBe(true);
+  test("a page the launcher doesn't list is still a hit", () => {
+    const out = buildQuickOpenResults({ query: "x", pages, commands, siteHits: [pageHit("oxplow:oxplow/page?page=hidden")] });
+    expect(out.map((r) => r.kind)).toEqual(["hit"]);
   });
 });
 
@@ -255,7 +153,7 @@ describe("nextSectionIndex", () => {
     cat: (c: string): LauncherNavRow => ({ kind: "category", category: c as PageCategory, expanded: false }),
     page: (id: string): LauncherNavRow => ({ kind: "page", entry: page(id, id) }),
     command: (): LauncherNavRow => ({ kind: "command", entry: cmd }),
-    file: (p: string): LauncherNavRow => ({ kind: "file", file: file(p) }),
+    file: (p: string): LauncherNavRow => ({ kind: "file", path: p, snippet: "" }),
     hit: (id: string): LauncherNavRow => ({ kind: "hit", hit: hit("knowledge", id) }),
   };
 
