@@ -132,12 +132,21 @@ The app's host is a child of the app, as a daemon is a child of the host
   `{ allowOtherDevices, address, port, names, tlsCert, tlsKey }`. The app
   reads it when it starts its host and passes `--public-bind <address>` (an
   IP of this Mac's) and `--device-port <port>`, an
-  `--allow-host` for the address and each name (the Devices page's form
-  offers the Mac's own `<local hostname>.local`, `network::local_name`:
-  `scutil --get LocalHostName` on macOS, `hostname` elsewhere; the address
-  is one of this Mac's private ones), and a certificate of the
-  person's own when given (else the host issues its own; private names
-  only). **The port** other devices come in on is the app's own
+  `--allow-host` for the address and each other name the person gives (a
+  name their own DNS or VPN gives the Mac; the address is one of this Mac's
+  private ones), and a certificate of the person's own when given (else the
+  host issues its own; private names only). **With its own certificate the
+  host adds the Mac's `<local hostname>.local` itself** (`network::with_local_name`
+  over `network::local_name`: `scutil --get LocalHostName` on macOS,
+  `hostname` elsewhere; a public name is left out), to the certificate and
+  the names it answers to, and reports the names with its listener
+  (`PublicListener::Listening { url, names }`). A `.local` name is mDNS:
+  the devices answer for themselves, so it works only where the network
+  passes multicast (not on guest Wi-Fi or with client isolation) and the
+  device asks (iPads do, Android varies). The Devices page therefore leads
+  with the address and offers the name as also working on many home
+  networks (`v_host_settings.open_on_device`, v3: the running host's, the
+  address first). **The port** other devices come in on is the app's own
   `--device-port <port>` (`oxplow --device-port 7401 .`), else
   `OXPLOW_DEVICE_PORT`, else the saved `port`, else 7400
   (`settings::device_port`; the Devices page says when the flag or the environment

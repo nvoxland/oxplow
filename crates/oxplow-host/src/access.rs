@@ -65,12 +65,15 @@ pub enum PublicListener {
     #[default]
     Off,
     Listening {
+        /// The listener's address (`https://<ip>:<port>`).
         url: String,
+        /// The names it answers to besides the address (this machine's
+        /// `.local` name among them), on the same port.
+        #[serde(default)]
+        names: Vec<String>,
     },
     /// Asked for, and left out: the bind or the certificate failed.
-    Failed {
-        error: String,
-    },
+    Failed { error: String },
 }
 
 /// What a wrong pairing code costs.

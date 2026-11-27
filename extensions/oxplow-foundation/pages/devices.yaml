@@ -21,6 +21,8 @@ loaders:
           WHEN NOT hosted THEN coalesce('**The host does not answer.** ' || problem,
                                         '**No host runs for this oxplow**, so no device can reach it.')
           WHEN listening IS NOT NULL THEN 'On: a device opens **' || listening || '**.' ||
+            coalesce((SELECT ' On many home networks **' || value || '** works too, and keeps working when the address changes.'
+                      FROM json_each(open_on_device) WHERE key = 1), '') ||
             CASE WHEN allow_other_devices AND NOT applied THEN ' Your changes apply the next time oxplow starts.'
                  WHEN NOT allow_other_devices AND NOT applied THEN ' Off the next time oxplow starts.' ELSE '' END ||
             CASE port_from WHEN 'flag' THEN ' (Port ' || port || ' is set by `--device-port`.)'
@@ -44,9 +46,6 @@ loaders:
       SELECT value, value AS label FROM v_host_settings, json_each(v_host_settings.addresses)
       UNION SELECT address, address || ' (not on this computer now)' FROM v_host_settings
         WHERE address <> '' AND NOT EXISTS (SELECT 1 FROM json_each(v_host_settings.addresses) WHERE value = address)
-  # A name a device may use: this computer's own .local name.
-  name_choices:
-    sql: "SELECT local_name AS value, local_name AS label FROM v_host_settings WHERE local_name IS NOT NULL"
   # How a device connects, while the host listens for other devices: trust
   # this computer once, then pair with a code.
   connect:
@@ -107,8 +106,8 @@ view:
           help: Leave it empty for 7400.
           visible_if: { allow_other_devices: true }
         - name: names
-          label: Also reach it by name (optional)
-          help: This computer's .local name is offered. A device that can't find the name uses the address.
+          label: Other names your network gives this computer (optional)
+          help: One per line, such as a name your own DNS or VPN gives it. Its .local name is added on its own.
           visible_if: { allow_other_devices: true }
         - name: tls_cert
           label: Your own certificate (optional)
@@ -119,7 +118,6 @@ view:
           visible_if: { allow_other_devices: true }
         choices:
           address: oxplow/devices#address_choices
-          names: { from: oxplow/devices#name_choices, open: true }
     - id: status
       title: Status
       hide_title: true

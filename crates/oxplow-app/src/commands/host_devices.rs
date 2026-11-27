@@ -223,11 +223,7 @@ pub async fn read(home: &Path) -> HostRead {
         opt_text(saved.tls_cert.as_ref().map(|p| p.display().to_string())),
         opt_text(saved.tls_key.as_ref().map(|p| p.display().to_string())),
         flag(hosted && applied(&saved, port.map(|p| p.port), &public)),
-        json_cell(
-            &port
-                .map(|p| saved.open_on_device(p.port))
-                .unwrap_or_default(),
-        ),
+        json_cell(&open_on_device(&public)),
         json_cell(&addresses),
         opt_text(oxplow_host_access::network::local_name()),
         flag(saved.tls_cert.is_none() && oxplow_host_access::root_path(home).is_file()),
@@ -241,10 +237,34 @@ pub async fn read(home: &Path) -> HostRead {
             .and_then(|p| p["expires_at"].as_i64())
             .map(SqlCell::Int)
             .unwrap_or(SqlCell::Null(())),
-        // The host's own listener for other devices, as it runs now.
-        opt_text((public["state"].as_str() == Some("listening")).then(|| public["url"].as_str().unwrap_or_default().to_string())),
+        // The host's own listener for other devices, as it runs now: its
+        // address.
+        opt_text(open_on_device(&public).into_iter().next()),
     ];
     HostRead { devices, settings }
+}
+
+/// What a device opens, from the host's listener for other devices as it
+/// runs (`/host/status` `public`): its address, then each name it answers
+/// to (this computer's `.local` name among them, which works where the
+/// network passes it), on its port. None while it doesn't listen. Pure.
+pub fn open_on_device(public: &Value) -> Vec<String> {
+    if public["state"].as_str() != Some("listening") {
+        return Vec::new();
+    }
+    let Some(url) = public["url"].as_str() else {
+        return Vec::new();
+    };
+    let url = url.trim_end_matches('/');
+    let port = url.rsplit_once(':').map(|(_, p)| p).unwrap_or_default();
+    let names = public["names"].as_array().into_iter().flatten();
+    std::iter::once(format!("{url}/"))
+        .chain(
+            names
+                .filter_map(Value::as_str)
+                .map(|n| format!("https://{n}:{port}/")),
+        )
+        .collect()
 }
 
 /// Whether the host runs with `settings` now: its listener for other
@@ -672,6 +692,26 @@ mod tests {
             Some(7401),
             "unchanged"
         );
+    }
+
+    #[test]
+    fn a_device_opens_the_address_first_then_each_name_on_its_port() {
+        let listening = json!({
+            "state": "listening",
+            "url": "https://192.168.1.20:7400",
+            "names": ["studio.local"],
+        });
+        assert_eq!(
+            super::open_on_device(&listening),
+            ["https://192.168.1.20:7400/", "https://studio.local:7400/"]
+        );
+        assert_eq!(
+            super::open_on_device(
+                &json!({ "state": "listening", "url": "https://[fd7a::1]:7401" })
+            ),
+            ["https://[fd7a::1]:7401/"]
+        );
+        assert!(super::open_on_device(&json!({ "state": "off" })).is_empty());
     }
 
     #[test]

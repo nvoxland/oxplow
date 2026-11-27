@@ -63,6 +63,20 @@ pub fn local_name() -> Option<String> {
     local_name_from(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// `names` with this computer's own name (`local`, [`local_name`]) added,
+/// as a host with its own certificate answers to it without being told: once,
+/// and only a private name (the host's own certificate covers no other).
+/// A device that cannot resolve it uses the address. Pure.
+pub fn with_local_name(names: &[String], local: Option<&str>) -> Vec<String> {
+    let mut all = names.to_vec();
+    if let Some(local) = local.filter(|l| is_private_name(l)) {
+        if !all.iter().any(|n| n.trim().eq_ignore_ascii_case(local)) {
+            all.push(local.to_string());
+        }
+    }
+    all
+}
+
 /// `raw` (a hostname as the system gives it) as a `.local` name: trimmed,
 /// lower case, `.local` added to a bare name; none when blank. A name that
 /// has a domain already keeps it. Pure.
@@ -81,6 +95,27 @@ pub fn local_name_from(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn this_computers_own_name_joins_the_names_once_and_only_when_private() {
+        let given = vec!["mac.lan".to_string()];
+        assert_eq!(
+            with_local_name(&given, Some("studio.local")),
+            ["mac.lan", "studio.local"]
+        );
+        // Already there (in any case): once.
+        assert_eq!(
+            with_local_name(&["Studio.local".to_string()], Some("studio.local")),
+            ["Studio.local"]
+        );
+        // A hostname with a public domain is no name the host's own
+        // certificate may cover: left out.
+        assert_eq!(
+            with_local_name(&given, Some("box.example.com")),
+            ["mac.lan"]
+        );
+        assert_eq!(with_local_name(&given, None), ["mac.lan"]);
+    }
 
     #[test]
     fn a_hostname_is_named_on_the_local_network_as_dot_local() {

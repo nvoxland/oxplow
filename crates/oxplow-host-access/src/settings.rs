@@ -101,8 +101,10 @@ pub struct HostSettings {
     /// Where other devices reach this machine: an IP address of its own
     /// (`100.101.102.103`). The port is `port`.
     pub address: String,
-    /// Names a device may use in its address bar besides the address
-    /// (`studio.local`). With the host's own certificate, private names only.
+    /// Other names a device may use in its address bar besides the address,
+    /// ones the person's network gives this machine (`mac.tailnet.ts.net`).
+    /// With the host's own certificate, private names only; its own `.local`
+    /// name the host adds itself (`network::with_local_name`).
     pub names: Vec<String>,
     /// A certificate of the person's own (PEM, signed by any CA) in place of
     /// the host's.
@@ -159,33 +161,6 @@ impl HostSettings {
     pub fn device_port(&self) -> Result<DevicePort, SettingsError> {
         let env = std::env::var(PORT_ENV).ok();
         device_port(PORT_FLAG.get().copied(), env.as_deref(), self.port)
-    }
-
-    /// The addresses a device opens on `port` (the one in force): each
-    /// name (else the address) with the port, over HTTPS (other devices
-    /// come in over HTTPS only). None while other devices are off. Pure.
-    pub fn open_on_device(&self, port: u16) -> Vec<String> {
-        if !self.allow_other_devices {
-            return Vec::new();
-        }
-        let Ok(ip) = self.address.trim().parse::<std::net::IpAddr>() else {
-            return Vec::new();
-        };
-        let names: Vec<String> = self
-            .names
-            .iter()
-            .map(|n| n.trim().to_string())
-            .filter(|n| !n.is_empty())
-            .collect();
-        let hosts = if names.is_empty() {
-            vec![ip.to_string()]
-        } else {
-            names
-        };
-        hosts
-            .into_iter()
-            .map(|h| format!("https://{h}:{port}/"))
-            .collect()
     }
 
     /// The `serve` flags these settings add, on the port in force: none
@@ -293,31 +268,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(args[3], "8443");
-    }
-
-    #[test]
-    fn a_device_opens_each_name_with_the_port_over_https() {
-        let on = HostSettings {
-            allow_other_devices: true,
-            address: "100.101.102.103".into(),
-            names: vec!["mac.tailnet.ts.net".into()],
-            ..Default::default()
-        };
-        assert_eq!(
-            on.open_on_device(7400),
-            ["https://mac.tailnet.ts.net:7400/"]
-        );
-        assert_eq!(
-            on.open_on_device(7401),
-            ["https://mac.tailnet.ts.net:7401/"],
-            "the port in force"
-        );
-        let own = HostSettings {
-            names: vec![],
-            ..on
-        };
-        assert_eq!(own.open_on_device(7400), ["https://100.101.102.103:7400/"]);
-        assert!(HostSettings::default().open_on_device(7400).is_empty());
     }
 
     /// The port other devices come in on: the app's or host's flag, else

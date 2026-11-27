@@ -221,6 +221,23 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         (Some(cert), Some(key)) => Some((cert, key)),
         _ => fail("--tls-cert and --tls-key go together"),
     };
+    // With its own certificate the host answers to this machine's `.local`
+    // name too, unasked: where the network passes it, a device may open
+    // that, and it outlasts an address that changes.
+    let allow_hosts = if public_bind.is_some() && own_cert.is_none() {
+        oxplow_host_access::network::with_local_name(
+            &allow_hosts,
+            oxplow_host_access::network::local_name().as_deref(),
+        )
+    } else {
+        allow_hosts
+    };
+    // The names a device may open besides the address.
+    let device_names: Vec<String> = allow_hosts
+        .iter()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty() && h.parse::<std::net::IpAddr>().is_err())
+        .collect();
     let tls = public_bind.map(|addr| match &own_cert {
         Some((cert, key)) => oxplow_host::tls::acceptor(cert, key)
             .map(|a| (a, None))
@@ -393,6 +410,7 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                     *access.public.lock().unwrap_or_else(|e| e.into_inner()) =
                         oxplow_host::access::PublicListener::Listening {
                             url: format!("{}://{at}", scheme.as_str()),
+                            names: device_names.clone(),
                         };
                     tracing::info!(%at, scheme = scheme.as_str(), "listening for other devices");
                     let public_app = oxplow_host::web::app(config(scheme, Listener::Public));
