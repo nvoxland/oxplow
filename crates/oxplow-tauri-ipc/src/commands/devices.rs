@@ -63,37 +63,6 @@ pub struct RenameDevice {
     pub name: String,
 }
 
-/// The addresses a device opens for `settings` on `port` (the one in
-/// force): each name (else the address) with the port, over HTTPS. Pure.
-pub fn open_on_device(
-    settings: &oxplow_host_access::settings::HostSettings,
-    port: u16,
-) -> Vec<String> {
-    if !settings.allow_other_devices {
-        return Vec::new();
-    }
-    let Ok(ip) = settings.address.trim().parse::<std::net::IpAddr>() else {
-        return Vec::new();
-    };
-    // Other devices come in over HTTPS only.
-    let scheme = "https";
-    let names: Vec<String> = settings
-        .names
-        .iter()
-        .map(|n| n.trim().to_string())
-        .filter(|n| !n.is_empty())
-        .collect();
-    let hosts = if names.is_empty() {
-        vec![ip.to_string()]
-    } else {
-        names
-    };
-    hosts
-        .into_iter()
-        .map(|h| format!("{scheme}://{h}:{port}/"))
-        .collect()
-}
-
 fn shell(app: &tauri::AppHandle) -> tauri::State<'_, ShellWindows> {
     app.state::<ShellWindows>()
 }
@@ -161,7 +130,7 @@ pub async fn host_devices(
         this_device,
         devices,
         open_on_device: port
-            .map(|p| open_on_device(&settings, p.port))
+            .map(|p| settings.open_on_device(p.port))
             .unwrap_or_default(),
         port,
         port_problem,
@@ -261,43 +230,4 @@ pub async fn host_addresses() -> Result<HostAddresses, IpcError> {
 #[specta::specta]
 pub async fn host_root_certificate() -> Result<Option<String>, IpcError> {
     Ok(std::fs::read_to_string(oxplow_host_access::root_path(&config_dir()?)).ok())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use oxplow_host_access::settings::HostSettings;
-
-    #[test]
-    fn a_device_opens_each_name_with_the_port_over_https() {
-        let on = HostSettings {
-            allow_other_devices: true,
-            address: "100.101.102.103".into(),
-            names: vec!["mac.tailnet.ts.net".into()],
-            tls_cert: Some("/c.pem".into()),
-            tls_key: Some("/k.pem".into()),
-            port: None,
-        };
-        assert_eq!(
-            open_on_device(&on, 7400),
-            ["https://mac.tailnet.ts.net:7400/"]
-        );
-        assert_eq!(
-            open_on_device(&on, 7401),
-            ["https://mac.tailnet.ts.net:7401/"],
-            "the port in force"
-        );
-        let own = HostSettings {
-            names: vec![],
-            tls_cert: None,
-            tls_key: None,
-            ..on.clone()
-        };
-        assert_eq!(
-            open_on_device(&own, 7400),
-            ["https://100.101.102.103:7400/"],
-            "always HTTPS"
-        );
-        assert!(open_on_device(&HostSettings::default(), 7400).is_empty());
-    }
 }

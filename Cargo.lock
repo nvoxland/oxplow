@@ -4866,6 +4866,7 @@ dependencies = [
  "oxplow-git",
  "oxplow-harness-fake",
  "oxplow-harnesses",
+ "oxplow-host-access",
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",

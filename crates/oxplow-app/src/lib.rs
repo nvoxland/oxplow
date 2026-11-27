@@ -1730,6 +1730,7 @@ impl Services {
             .chain(commands::effect::ops(services_slot.clone()))
             .chain(commands::delivery::ops(services_slot.clone()))
             .chain(commands::ai_settings::ops(services_slot.clone()))
+            .chain(commands::host_devices::ops(services_slot.clone()))
             .chain(commands::credentials::ops(services_slot.clone()))
             .chain(commands::provider_instances::ops(services_slot.clone()))
             .chain([commands::lsp::restart_op(services_slot.clone())])
@@ -2388,6 +2389,14 @@ mod tests {
                 "oxplow.git.publish",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
+                // The host's own state (its paired devices, pairing codes,
+                // `host-settings.json`), over its owner socket
+                // (`commands/host_devices`): a person's only.
+                "oxplow.host.devices",
+                "oxplow.host.pair",
+                "oxplow.host.remove_device",
+                "oxplow.host.rename_device",
+                "oxplow.host.set_settings",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",

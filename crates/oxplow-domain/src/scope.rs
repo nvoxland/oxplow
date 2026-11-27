@@ -293,6 +293,20 @@ pub const SCOPES: &[Scope] = &[
         summary: "Dismiss a hint oxplow showed.",
     },
     Scope {
+        id: "host.manage",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Pair a device with this computer's host, rename or remove one, or change whether and how other devices reach it (a person's only).",
+    },
+    Scope {
+        id: "host.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read the host's paired devices, the pairing code in force and the settings that let other devices in (a person's only).",
+    },
+    Scope {
         id: "jobs.manage",
         access: Access::Write,
         host: Host::Daemon,

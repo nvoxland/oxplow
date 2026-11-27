@@ -1048,6 +1048,34 @@ commands:
     scope: ai.test
     op: test_provider
     example: {"id": "anthropic", "model": "claude-haiku-5-5"}
+  # host.read / host.manage — the host's devices (the Devices page); a
+  # person's only.
+  - name: host.devices
+    summary: "The host's paired devices (which are connected), the pairing code in force, and the settings that let other devices in: allowed or not, applied or not, the address, port and names, the addresses a device opens. `hosted: false` when no host started this oxplow. A person's only."
+    scope: host.read
+    op: devices
+    example: {}
+  - name: host.pair
+    summary: "Make a pairing code: a device types it at this computer's address to pair. Good once, for ten minutes. A person's only."
+    scope: host.manage
+    op: pair
+    example: {}
+  - name: host.rename_device
+    summary: "Rename a paired device. A person's only."
+    scope: host.manage
+    op: rename_device
+    example: {"id": "dev-1", "name": "Kitchen tablet"}
+  - name: host.remove_device
+    summary: "Remove a paired device: its token stops working and it is disconnected at once. A person's only."
+    scope: host.manage
+    op: remove_device
+    confirm: destructive
+    example: {"id": "dev-1"}
+  - name: host.set_settings
+    summary: "Whether and how other devices reach this computer: allowed, the address (one of its private IPs), the port (none: 7400), names a device may use, and a certificate of your own. Applies at the next start. A person's only."
+    scope: host.manage
+    op: set_settings
+    example: {"allow_other_devices": true, "address": "192.168.1.20", "names": ["studio.local"]}
   # bookmarks.write — the person's navigation.
   - name: bookmark.set
     summary: "Bookmark a page at a visibility scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
