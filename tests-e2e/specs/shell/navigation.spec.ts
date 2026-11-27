@@ -2,7 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { fileTask, run } from "../../support/daemon.js";
+import { fileTask, run, type Daemon } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
 import { navigate, open, shown, load, reload, taskIdOf, panelsReady, tabOf, tabsWith } from "../../support/ui.js";
@@ -10,7 +10,7 @@ import { navigate, open, shown, load, reload, taskIdOf, panelsReady, tabOf, tabs
 const overviewTitle = (page: import("@playwright/test").Page) => page.getByTestId("page-nav-title").filter({ visible: true });
 
 /// An item the test extension's overview lists, each title a link to its page.
-async function item(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
+async function item(daemon: Daemon & { thread: string }, title: string) {
   const created = await fileTask(daemon, title);
   return created.result.uri;
 }

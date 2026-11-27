@@ -5,7 +5,6 @@ import type {
   TabReport,
   TabReportAnswer,
   TabSave,
-  HostAddresses,
   OtherDeviceTabs,
   TabSession,
   QueuedTab,
@@ -740,36 +739,6 @@ export async function gitRevert(streamId: string, rev: string, confirmed: boolea
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   const ctx = unwrap(await commands.getWorkspaceContext());
   return { vcsEnabled: ctx.vcs_enabled };
-}
-
-// ---- The Devices window (the app's own host, as its owner) ----
-
-export async function hostDevices(): Promise<import("./tauri-bridge/generated/bindings.js").DevicesView> {
-  return unwrap(await commands.hostDevices());
-}
-
-export async function hostPairingCode(): Promise<import("./tauri-bridge/generated/bindings.js").PairingCodeView> {
-  return unwrap(await commands.hostPairingCode());
-}
-
-export async function hostRenameDevice(id: string, name: string): Promise<void> {
-  unwrap(await commands.hostRenameDevice({ id, name }));
-}
-
-export async function hostRemoveDevice(id: string): Promise<void> {
-  unwrap(await commands.hostRemoveDevice(id));
-}
-
-/// Keep "Allow other devices"; it applies at the next app start.
-export async function setHostSettings(
-  settings: import("./tauri-bridge/generated/bindings.js").HostSettings,
-): Promise<void> {
-  unwrap(await commands.setHostSettings(settings));
-}
-
-/// This Mac's addresses on private networks, to choose where devices reach it.
-export async function hostAddresses(): Promise<HostAddresses> {
-  return unwrap(await commands.hostAddresses());
 }
 
 // ---- Hosts on other machines (the launcher) ----

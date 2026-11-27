@@ -206,7 +206,7 @@ Two things it does **not** move:
 
 Each home's app listens for other devices on its own port: `oxplow
 --device-port 7401 .`, `OXPLOW_DEVICE_PORT=7401 bun run run:dev`, or the
-port in Devices…, in that order (default 7400). Two apps on one machine
+port on the Devices page, in that order (default 7400). Two apps on one machine
 that both allow other devices need two ports.
 
 #### The instance lock is per project, not per home

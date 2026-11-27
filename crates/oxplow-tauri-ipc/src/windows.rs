@@ -275,8 +275,6 @@ pub struct ShellWindows {
     /// The app's host once started; started again at the next open if it
     /// has ended (crashed).
     host: Mutex<Option<oxplow_host::client::OwnHost>>,
-    /// The "Allow other devices" settings the running host started with.
-    started_with: Mutex<Option<oxplow_host_access::settings::HostSettings>>,
     /// The global restore set, or `None` when the config dir can't be
     /// resolved (then the session simply isn't persisted).
     session: Option<oxplow_config::SessionProjects>,
@@ -319,7 +317,6 @@ impl Default for ShellWindows {
         Self {
             registry: WindowRegistry::default(),
             host: Mutex::new(None),
-            started_with: Mutex::new(None),
             session: oxplow_config::global_config_dir()
                 .map(|d| oxplow_config::SessionProjects::new(d.join("session.json"))),
             device: oxplow_config::global_config_dir().and_then(|d| {
@@ -454,12 +451,11 @@ impl ShellWindows {
             .map_err(|e| e.to_string())?;
         let client = own.client.clone();
         *slot = Some(own);
-        *self.started_with.lock().unwrap_or_else(|e| e.into_inner()) = Some(settings);
         Ok(client)
     }
 
-    /// The app's host, started if it is not running (the Devices window, or
-    /// "Allow other devices" at launch). **Blocking** while it starts.
+    /// The app's host, started if it is not running ("Allow other devices"
+    /// at launch, a window's open). **Blocking** while it starts.
     pub fn host_client(&self) -> Result<oxplow_host::client::HostClient, String> {
         self.host()
     }
@@ -474,18 +470,6 @@ impl ShellWindows {
         };
         let own = slot.as_mut()?;
         (!own.ended()).then(|| own.client.clone())
-    }
-
-    /// Whether the running host started with `settings` (a change applies
-    /// at the next start).
-    pub fn settings_applied(&self, settings: &oxplow_host_access::settings::HostSettings) -> bool {
-        self.running_host().is_some()
-            && self
-                .started_with
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .as_ref()
-                == Some(settings)
     }
 
     /// This install's device (the Mac app is one device).

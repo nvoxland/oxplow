@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 
-import { isolated } from "./daemon.js";
+import { isolated, type Calls } from "./daemon.js";
 
 export type Host = {
   /** Where the host listens (`http://127.0.0.1:<port>`). */
@@ -26,6 +26,9 @@ export type Host = {
   devices(): Promise<Array<{ id: string; name: string; kind: string }>>;
   /** Remove a paired device, as its owner. */
   removeDevice(id: string): Promise<void>;
+  /** Where `project`'s calls go through the host, as its owner: for
+   *  `open(page, …)` on a host-served window. */
+  project(project: string): Calls;
   /** The host's status: who is connected now. */
   status(): Promise<{ connected: Array<{ device: string; name: string }> }>;
   stop(): Promise<void>;
@@ -123,6 +126,9 @@ export async function startHost(): Promise<Host> {
       },
       async removeDevice(id) {
         await call("DELETE", `/host/devices/${id}`);
+      },
+      project(project) {
+        return { base: `${base}/p/${project}`, token };
       },
       async status() {
         return (await call("GET", "/host/status")) as { connected: Array<{ device: string; name: string }> };

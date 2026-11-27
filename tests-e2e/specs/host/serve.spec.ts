@@ -5,7 +5,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { startHost, type Host } from "../../support/host.js";
-import { loadScreen } from "../../support/ui.js";
+import { loadScreen, open, shown } from "../../support/ui.js";
 
 let host: Host;
 test.beforeAll(async () => {
@@ -69,6 +69,23 @@ test("a device its owner removes is asked to pair again", async ({ page }) => {
   const phone = (await host.devices()).find((d) => d.name === "Phone")!;
   await host.removeDevice(phone.id);
   await expect(page.getByTestId("pair-screen")).toBeVisible();
+});
+
+// The Devices page is a project's: its daemon talks to the host as its
+// owner. It lists this device as connected and makes a pairing code.
+test("the Devices page shows this device and makes a pairing code", async ({ page }) => {
+  test.setTimeout(240_000);
+  const id = host.addProject("delta");
+  await pair(page, "Kitchen");
+  await page.getByTestId(`host-project-open-${id}`).click();
+  await expect(page.getByTestId("rail-hud")).toBeVisible({ timeout: 180_000 });
+  await open(page, host.project(id), "oxplow:oxplow/page?page=devices");
+  const devices = shown(page, "page=devices");
+  await expect(devices.getByText("Kitchen")).toBeVisible();
+  await expect(devices.getByText("Connected")).toBeVisible();
+  await expect(devices.getByText("No code now. Pair a Device makes one.")).toBeVisible();
+  await devices.getByTestId("viz-action-pair-device").click();
+  await expect(devices.getByText(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/)).toBeVisible();
 });
 
 test("a project that is not held has no daemon to reach", async () => {

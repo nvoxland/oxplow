@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { createProject, desktopBridge, listRecentProjects, openProject, removeRecentProject } from "../api.js";
-import { DEVICES_MENU_ID, DevicesSlideover } from "../host/DevicesSlideover.js";
+import { DEVICES_MENU_ID } from "../menuBar.js";
 import { RemoteHostsSection } from "./RemoteHostsSection.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
@@ -59,14 +59,15 @@ export function Launcher() {
 
   useEffect(reload, [reload]);
 
-  // Oxplow ▸ Devices…: pairing works with no project open.
-  const [devicesOpen, setDevicesOpen] = useState(false);
+  // Oxplow ▸ Devices…: a page of a project (its daemon talks to the
+  // host), so here it says to open one.
+  const [devicesAsked, setDevicesAsked] = useState(false);
   useEffect(() => {
     // The launcher's menu is the app menu alone; registering it makes this
     // window the one a menu item (Devices…) goes to while it is in front.
     void desktopBridge().setNativeMenu([]);
     return desktopBridge().onMenuCommand((id) => {
-      if (id === DEVICES_MENU_ID) setDevicesOpen(true);
+      if (id === DEVICES_MENU_ID) setDevicesAsked(true);
     });
   }, []);
 
@@ -124,13 +125,17 @@ export function Launcher() {
 
   return (
     <div data-testid="launcher" style={rootStyle}>
-      <DevicesSlideover open={devicesOpen} onClose={() => setDevicesOpen(false)} />
       <div style={cardStyle}>
         <header style={{ marginBottom: 20 }}>
           <h1 style={titleStyle}>Oxplow</h1>
           <p style={subtitleStyle}>Open a project to get started.</p>
         </header>
 
+        {devicesAsked ? (
+          <p data-testid="launcher-devices" role="status" style={subtitleStyle}>
+            Devices is a page of any project: open one, then choose Oxplow ▸ Devices… (or Settings ▸ Devices).
+          </p>
+        ) : null}
         {error ? (
           <div data-testid="launcher-error" style={errorStyle}>
             {error}

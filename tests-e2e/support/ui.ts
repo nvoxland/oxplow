@@ -1,7 +1,7 @@
 // Moves a person makes in the shell, shared by specs.
 import { expect, type Locator, type Page } from "@playwright/test";
 
-import { run, type Daemon } from "./daemon.js";
+import { run, type Calls, type Daemon } from "./daemon.js";
 
 /** The shown tab's body: the one locator for what the window is showing now.
  *  Every tab's body stays in the DOM, hidden when not shown, and the New
@@ -110,7 +110,7 @@ export async function reload(page: Page): Promise<void> {
 
 /** Send the window to `uri` with the bus command `oxplow.window.navigate`
  *  (`extra`: `new_tab`, `replace`), once the window is ready for it. */
-export async function navigate(page: Page, daemon: Daemon, uri: string, extra: Record<string, unknown> = {}): Promise<void> {
+export async function navigate(page: Page, daemon: Calls, uri: string, extra: Record<string, unknown> = {}): Promise<void> {
   await windowReady(page);
   await run(daemon, "oxplow.window.navigate", { uri, ...extra });
 }
@@ -120,7 +120,7 @@ export async function navigate(page: Page, daemon: Daemon, uri: string, extra: R
  *  the shown tab holds the page. Not through the launcher: typing into it is
  *  the slowest and most focus-sensitive path, and only the launcher's own
  *  specs are about it. */
-export async function open(page: Page, daemon: Daemon, uri: string, extra: Record<string, unknown> = {}): Promise<void> {
+export async function open(page: Page, daemon: Calls, uri: string, extra: Record<string, unknown> = {}): Promise<void> {
   await navigate(page, daemon, uri, extra);
   await expect(shown(page, uri.split("#")[0])).toHaveCount(1);
 }

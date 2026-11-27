@@ -649,6 +649,8 @@ hand), which language servers run and whose binary is on disk
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
 repo), every setting's effective value (`v_config_value`), the files of a filesystem (`v_file`: the stream's worktree by default), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
+host's paired devices and this computer's standing with it (`v_host_device`,
+`v_host_settings`: read from the host as its owner, following `HostChanged`), the
 registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares), the
 repository's working copies (`v_vcs_workspace`; one whose folder is gone
 is left out, and each that no stream uses carries its head commit's subject

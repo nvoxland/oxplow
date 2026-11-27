@@ -16,11 +16,10 @@ import {
   runCommand,
   type SqlCell,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, DEVICES_MENU_ID, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
 import { GoMenuFeed } from "./components/Panels/GoMenuFeed.js";
 import { RailMenuFeed, type RailMenu } from "./components/Panels/RailMenuFeed.js";
 import { Navigator } from "./components/Navigator.js";
-import { DEVICES_MENU_ID, DevicesSlideover } from "./host/DevicesSlideover.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Dock } from "./components/Dock/Dock.js";
 import { TitleBar } from "./components/TitleBar.js";
@@ -94,7 +93,6 @@ export function App() {
   );
   const [error, setError] = useState<string | null>(null);
   // Oxplow ▸ Devices… (the app menu; the shell handles its id).
-  const [devicesOpen, setDevicesOpen] = useState(false);
   // Markdown reads `[[<store>:<id>]]` for the stores of every shared model:
   // know them from the start.
   useEffect(() => {
@@ -537,7 +535,7 @@ export function App() {
   useEffect(() => {
     return desktopBridge().onMenuCommand((commandId: string) => {
       if (commandId === DEVICES_MENU_ID) {
-        setDevicesOpen(true);
+        handleOpenPage(pageTabRef("devices"));
         return;
       }
       // Dynamic "Open Recent ▸ <project>" entries aren't menu items:
@@ -737,7 +735,6 @@ export function App() {
       {shell === "tablet" ? (
         <>
           {errorBar}
-          <DevicesSlideover open={devicesOpen} onClose={() => setDevicesOpen(false)} />
           <TabletShell win={shellWindow} />
         </>
       ) : (
@@ -755,7 +752,6 @@ export function App() {
         onOpenSearch={() => setQuickOpenVisible(true)}
       />
       {errorBar}
-      <DevicesSlideover open={devicesOpen} onClose={() => setDevicesOpen(false)} />
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <Navigator
           streams={streams}

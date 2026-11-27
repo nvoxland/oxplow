@@ -4,7 +4,7 @@
 `OXPLOW_HOME`. It holds no project state. It keeps a registry of projects and
 the holds devices have on them, and it runs one `oxplow-daemon` per held
 project. Built so far: the core, routing, the served UI, the Mac app's own
-host, HTTPS, pairing, the Mac app's Devices window, and the app using a host on
+host, HTTPS, pairing, the Devices page, and the app using a host on
 another machine.
 
 There are two kinds of host, and no host ever stops because nothing is held
@@ -101,33 +101,45 @@ The app's host is a child of the app, as a daemon is a child of the host
 - **Quit** drops the lifeline and waits for nothing: the host stops its daemons
   and ends. Nothing is released first. The windows to reopen are the app's own
   `session.json`, as before.
-- **Devices window** (Oxplow ▸ Devices…, in a project window or the
-  launcher; `host/DevicesSlideover.tsx`): Pair a Device shows a code, its
-  countdown and the address to open on the device, and how a device trusts
-  the host's own certificate the first time; the paired devices
-  (rename in place, Remove after a confirm, a dot when connected); "Allow
-  other devices". Its calls are Tauri shell commands (`commands/devices.rs`)
-  to the app's own host client as its owner: no page calls `/host/*`, so the
-  host answers no CORS there.
+- **The Devices page** (foundation's `oxplow/devices`; Oxplow ▸ Devices…
+  opens it in the front project window, Settings links it; in the launcher,
+  with no project, the menu item says to open one). It is an ordinary page,
+  so it works on every client: the tablet, a browser on a headless host.
+  **A daemon talks to its host as owner**: the host starts it with its own
+  environment (`OXPLOW_HOME`), so the daemon opens the home's owner socket
+  (`host.sock`, mode 0600) through `oxplow_host_access::owner` (the crate
+  both sides use; `oxplow-host` depends on `oxplow-app`, so a daemon cannot
+  use the host's crate). It reads the live datasets `v_host_device` (the
+  paired devices, which are connected) and `v_host_settings` (one row: the
+  saved settings, the port in force and where it came from, whether the
+  host runs with them — its own listener checked against them — the
+  addresses a device opens, this machine's private addresses and `.local`
+  name, whether there is a root to trust, the pairing code in force from
+  `GET /host/pairing`); a daemon no host started reads `hosted = 0`. It
+  writes with `oxplow.host.pair`, `rename_device`, `remove_device`
+  (confirm) and `set_settings` (`commands/host_devices.rs`), a person's
+  only (an agent, an effect or a job is refused), each posting `HostChanged`
+  so the datasets are read again. The datasets are as readable as any: an
+  agent on this machine could reach `host.sock` from its shell anyway
+  (owner and device are roles, not a wall).
 - **Allow other devices** is the shell's own file in the home,
-  `host-settings.json` (`oxplow_host::settings`, beside `device.json`):
+  `host-settings.json` (`oxplow_host_access::settings`, beside `device.json`):
   `{ allowOtherDevices, address, port, names, tlsCert, tlsKey }`. The app
   reads it when it starts its host and passes `--public-bind <address>` (an
   IP of this Mac's) and `--device-port <port>`, an
-  `--allow-host` for the address and each name (Devices… offers the Mac's
-  own `<local hostname>.local`, `certs::local_name`: `scutil --get
-  LocalHostName` on macOS, `hostname` elsewhere, as *Use <name>*; the
-  address is picked from a list of this Mac's private ones, not a native
-  select), and a certificate of the
+  `--allow-host` for the address and each name (the Devices page's form
+  offers the Mac's own `<local hostname>.local`, `network::local_name`:
+  `scutil --get LocalHostName` on macOS, `hostname` elsewhere; the address
+  is one of this Mac's private ones), and a certificate of the
   person's own when given (else the host issues its own; private names
   only). **The port** other devices come in on is the app's own
   `--device-port <port>` (`oxplow --device-port 7401 .`), else
   `OXPLOW_DEVICE_PORT`, else the saved `port`, else 7400
-  (`settings::device_port`; Devices… says when the flag or the environment
+  (`settings::device_port`; the Devices page says when the flag or the environment
   overrides the setting). It stays fixed across starts, since a browser's
   origin holds its token. Never every network by default: the person picks one of this Mac's
-  private addresses (`host_addresses`, `certs::private_addresses`). A change
-  applies at the next app start (the window says whether the host runs with
+  private addresses (`network::private_addresses`). A change
+  applies at the next app start (the page says whether the host runs with
   it). On, the host starts with the app, not at the first open.
 - **Quit asks first** when another device has a window open (`/host/status`
   `connected`): "<names> are using Oxplow on this computer. Quitting stops
@@ -181,7 +193,7 @@ windows, where no certificate is needed).
   refused, saying to give a certificate of your own. A device trusts the root
   once: `GET /host/ca.pem` (no token; a root is public) answers it as
   `oxplow-root.crt`, `application/x-x509-ca-cert`, which a phone offers to
-  install. The pair screen links it, and the Devices window says the steps.
+  install. The pair screen links it, and the Devices page says the steps.
 - **A certificate of your own** (`--tls-cert`, `--tls-key`, PEM, signed by any
   CA) takes its place; `/host/ca.pem` then answers 404.
 

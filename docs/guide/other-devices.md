@@ -12,12 +12,12 @@ so is a private network such as Tailscale or WireGuard.
 
 ## Use your Mac from a tablet
 
-1. On the Mac, choose **Oxplow ▸ Devices…**.
+1. On the Mac, open a project and choose **Oxplow ▸ Devices…** (or
+   Settings ▸ Devices): the Devices page.
 2. Under **Allow other devices**, turn it on and pick the Mac's address
-   (the one on your home network, say `192.168.1.20`) from the list. To
-   open it by name instead, choose **Use <your Mac>.local** under *Also
-   reach this Mac by name*; a device that cannot find the name uses the
-   address. The port is 7400
+   (the one on your home network, say `192.168.1.20`). To open it by name
+   instead, add your Mac's `.local` name under *Names* (it is offered); a
+   device that cannot find the name uses the address. The port is 7400
    unless you set another. **Save**, then quit Oxplow and open it again:
    the settings apply at the next start. (`oxplow --device-port <port>` or
    `OXPLOW_DEVICE_PORT` set the port for one run, over the setting.)
@@ -43,8 +43,9 @@ or another device has it open.
 device is using it, Quit asks first and names it. The tablet says Oxplow
 was quit, and connects again when Oxplow starts.
 
-Devices… also lists the paired devices: rename one in place, or
-**Remove** it (it must pair again).
+The Devices page also lists the paired devices and which are connected:
+**Rename…** one, or **Remove** it (it must pair again). It works from the
+tablet too.
 
 ## Run Oxplow on a server
 

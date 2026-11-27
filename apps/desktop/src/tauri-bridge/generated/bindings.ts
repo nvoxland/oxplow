@@ -820,19 +820,6 @@ export const commands = {
 	 *  `~/.local/bin`.
 	 */
 	installCli: () => typedError<InstalledCli, IpcError_Serialize>(__TAURI_INVOKE("install_cli")),
-	hostDevices: () => typedError<DevicesView, IpcError_Serialize>(__TAURI_INVOKE("host_devices")),
-	hostPairingCode: () => typedError<PairingCodeView, IpcError_Serialize>(__TAURI_INVOKE("host_pairing_code")),
-	hostRenameDevice: (rename: RenameDevice) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("host_rename_device", { rename })),
-	hostRemoveDevice: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("host_remove_device", { id })),
-	/**  Keep "Allow other devices"; it applies at the next app start. */
-	setHostSettings: (settings: HostSettings) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_host_settings", { settings })),
-	hostAddresses: () => typedError<HostAddresses, IpcError_Serialize>(__TAURI_INVOKE("host_addresses")),
-	/**
-	 *  The home's own root certificate (PEM), for the person to get onto a
-	 *  device that cannot download it from the host; `None` before the host
-	 *  first made one.
-	 */
-	hostRootCertificate: () => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("host_root_certificate")),
 	/**  Pair this Mac with a host on another machine. */
 	connectHost: (connect: ConnectHost) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("connect_host", { connect })),
 	/**  Each paired host, with its projects (or why it did not answer). */
@@ -2308,46 +2295,6 @@ export type Descriptor = {
 	source: DeclaredAt,
 };
 
-/**  The port other devices come in on, and where it came from. */
-export type DevicePort = {
-	port: number,
-	from: PortFrom,
-};
-
-export type DeviceView = {
-	id: string,
-	name: string,
-	/**  `desktop`, `tablet` or `phone`. */
-	kind: string,
-	/**  Seconds since the Unix epoch. */
-	pairedAt: number,
-	/**  It has a window open on this host now. */
-	connected: boolean,
-};
-
-export type DevicesView = {
-	/**  This Mac's own name, as other devices see it. */
-	thisDevice: string,
-	devices: DeviceView[],
-	/**  "Allow other devices", as saved. */
-	settings: HostSettings,
-	/**  Whether the host runs with them now (they apply at the next start). */
-	settingsApplied: boolean,
-	/**  The addresses a device opens: `https://<name>:<port>/`. */
-	openOnDevice: string[],
-	/**
-	 *  The port other devices come in on and where it came from (the app's
-	 *  `--device-port` or `OXPLOW_DEVICE_PORT` win over the setting); none
-	 *  when the one given is no port (`port_problem` says).
-	 */
-	port: DevicePort | null,
-	portProblem: string | null,
-	/**  Where the host listens for other devices now, or why it cannot. */
-	public: PublicListener | null,
-	/**  Why the host did not answer: the settings still show, to fix. */
-	hostError: string | null,
-};
-
 /**  One problem. */
 export type Diagnostic = {
 	severity: Severity,
@@ -3582,46 +3529,11 @@ export type HookKind =
 "post_compact";
 
 /**
- *  What the settings offer: this machine's addresses on private networks
- *  (`oxplow_host_access::network::private_addresses`) and the name it answers to on
- *  its local network (`<local hostname>.local`).
- */
-export type HostAddresses = {
-	ips: string[],
-	localName: string | null,
-};
-
-/**
  *  The host a stream's worktree is on. Every stream is on the local machine
  *  today ([`HostId::LOCAL`]); naming it keeps "local" from being assumed
  *  silently where a worktree path is reached (`WorktreeRoot::local_path`).
  */
 export type HostId = string;
-
-export type HostSettings = {
-	allowOtherDevices?: boolean,
-	/**
-	 *  Where other devices reach this machine: an IP address of its own
-	 *  (`100.101.102.103`). The port is `port`.
-	 */
-	address?: string,
-	/**
-	 *  Names a device may use in its address bar besides the address
-	 *  (`studio.local`). With the host's own certificate, private names only.
-	 */
-	names?: string[],
-	/**
-	 *  A certificate of the person's own (PEM, signed by any CA) in place of
-	 *  the host's.
-	 */
-	tlsCert?: string | null,
-	tlsKey?: string | null,
-	/**
-	 *  The port other devices come in on; none is [`DEFAULT_PORT`]. A
-	 *  `--device-port` flag or `OXPLOW_DEVICE_PORT` wins over it.
-	 */
-	port?: number | null,
-};
 
 /**  One implementation as the extension declares it. */
 export type ImplementationDecl = {
@@ -5682,12 +5594,6 @@ export type Page_Serialize = {
 	origin: PageProvenance,
 };
 
-export type PairingCodeView = {
-	/**  `ABCD-EFGH`. */
-	code: string,
-	expiresInSeconds: number,
-};
-
 /**
  *  A choice param of the body, as the panel's header toggle offers it: its
  *  options and the value in force.
@@ -5850,18 +5756,6 @@ export type PointOffer = {
 	commands: PointCommand[],
 };
 
-/**
- *  Where the port for other devices came from, for the Devices window to say
- *  (a flag or the environment wins over what it saves).
- */
-export type PortFrom =
-/**  `--device-port` on the app's or the host's command line. */
-"flag" |
-/**  `OXPLOW_DEVICE_PORT`. */
-"env" |
-/**  The saved setting. */
-"saved" | "default";
-
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
 
@@ -5949,13 +5843,6 @@ export type PublicContracts = {
 	 */
 	withheld?: Withheld[],
 };
-
-/**  The state of the listener for other devices (`serve --public-bind`). */
-export type PublicListener =
-/**  None was asked for: this machine only. */
-{ state: "off" } | { state: "listening"; url: string } |
-/**  Asked for, and left out: the bind or the certificate failed. */
-{ state: "failed"; error: string };
 
 /**  A tab waiting for a device: its row, the page, and the thread it opens in. */
 export type QueuedTab = {
@@ -6057,11 +5944,6 @@ export type RemoteProjectView = {
 	/**  How many devices hold it now. */
 	holds: number,
 	heldByYou: boolean,
-};
-
-export type RenameDevice = {
-	id: string,
-	name: string,
 };
 
 /**  A page that can draw a URI. */

@@ -542,14 +542,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("setup_project", "a person confirms a project's first-run setup"),
     ui("install_cli", "a person puts the oxplow command on their PATH"),
     ui("abort_setup", "a person declines a project's first-run setup"),
-    // ---- the Mac app's own host: other devices and hosts on other computers ----
-    ui("host_devices", "the Devices slideover lists this host's paired devices"),
-    ui("host_pairing_code", "the Devices slideover's Pair a Device code"),
-    ui("host_rename_device", "the Devices slideover renames a paired device"),
-    ui("host_remove_device", "the Devices slideover removes a paired device"),
-    ui("set_host_settings", "the Devices slideover's Allow other devices settings"),
-    ui("host_addresses", "the Devices slideover's addresses to listen on"),
-    ui("host_root_certificate", "the Devices slideover's certificate for a device to trust"),
+    // ---- hosts on other computers (the launcher) ----
     ui("connect_host", "the launcher connects to a host on another computer"),
     ui("remote_hosts", "the launcher lists the hosts on other computers and their projects"),
     ui("open_remote_project", "the launcher opens a project of a host on another computer"),
