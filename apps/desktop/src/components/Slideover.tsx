@@ -61,10 +61,12 @@ export function Slideover({
   useEffect(() => {
     if (!open) return;
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
+      if (event.key !== "Escape") return;
+      // Escape closes the topmost layer only: an open menu (it closes
+      // itself) or what inside handled it already (a field's own Escape).
+      if (event.defaultPrevented || document.querySelector("[data-oxplow-menu]")) return;
+      event.preventDefault();
+      onClose();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);

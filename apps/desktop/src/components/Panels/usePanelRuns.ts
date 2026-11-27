@@ -99,6 +99,10 @@ export function useExtensionPanelRuns(
     if (shownScope.current !== scopeKey) {
       shownScope.current = scopeKey;
       setState({});
+    } else {
+      // The same panels re-run (a pick, a redeploy): what they show stays,
+      // but a part a panel no longer has goes.
+      setState((s) => keepDeclaredParts(s, panels));
     }
     for (const p of panels) {
       const parts: [Part, string | null][] = [
@@ -120,7 +124,9 @@ export function useExtensionPanelRuns(
         });
         const take = () => {
           const { runId, run, panel: view } = handle.get();
-          setState((s) => ({ ...s, [p.id]: { ...s[p.id], [part]: run ? { runId, run, view } : null } }));
+          // Not run yet: what the part showed stays until its run comes.
+          if (!run) return;
+          setState((s) => ({ ...s, [p.id]: { ...s[p.id], [part]: { runId, run, view } } }));
         };
         take();
         const off = handle.subscribe(take);
@@ -149,4 +155,20 @@ export function useExtensionPanelRuns(
     }
     return out;
   }, [panels, state]);
+}
+
+/** `state` with only the parts each panel still declares (a redeploy that
+ *  drops a panel's badge takes the shown badge away). */
+function keepDeclaredParts(
+  state: Record<string, Partial<Record<Part, OpenPanelRun | null>>>,
+  panels: readonly ExtensionPanel[],
+): Record<string, Partial<Record<Part, OpenPanelRun | null>>> {
+  const out: Record<string, Partial<Record<Part, OpenPanelRun | null>>> = {};
+  for (const p of panels) {
+    const shown = state[p.id];
+    if (!shown) continue;
+    const declared: Record<Part, string | null> = { body: p.body, collapsed: p.collapsed, badge: p.badge, count: p.count };
+    out[p.id] = Object.fromEntries(Object.entries(shown).filter(([part]) => declared[part as Part])) as Partial<Record<Part, OpenPanelRun | null>>;
+  }
+  return out;
 }

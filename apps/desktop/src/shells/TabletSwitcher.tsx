@@ -9,7 +9,7 @@ import { Slideover } from "../components/Slideover.js";
 import { useRowContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
 import type { HostProject } from "../host/hostApi.js";
 import { STATE_WORDS } from "../host/HostHome.js";
-import type { useStreamThreadMenus } from "../window/useStreamThreadMenus.js";
+import { markColour, type useStreamThreadMenus } from "../window/useStreamThreadMenus.js";
 import type { ShellWindow } from "./shellWindow.js";
 
 /** The host this page came from, for its project list: absent in the Mac
@@ -62,22 +62,12 @@ export function TabletSwitcher({
               ))}
               {menus.pendingNewThreadFor === s.id ? (
                 <li style={{ ...rowBase, paddingLeft: 28 }}>
-                  <InlineEdit
-                    value=""
-                    startEditing
-                    placeholder="New thread title"
+                  <NewThreadField
                     testId={`switcher-new-thread-input-${s.id}`}
-                    ariaLabel="New thread title"
-                    onCommit={(title) => {
-                      const t = title.trim();
-                      if (!t) return menus.setPendingNewThreadFor(null);
-                      // Made, it is listed under its stream: a tap selects it,
-                      // as in the desktop's Navigator.
-                      void win.createThread(s.id, t).then((made) => {
-                        if (made) menus.setPendingNewThreadFor(null);
-                      });
-                    }}
-                    onCancel={() => menus.setPendingNewThreadFor(null)}
+                    // Made, it is listed under its stream: a tap selects it,
+                    // as in the desktop's Navigator.
+                    onSubmit={(title) => win.createThread(s.id, title)}
+                    onEnd={() => menus.setPendingNewThreadFor(null)}
                   />
                 </li>
               ) : (
@@ -91,7 +81,8 @@ export function TabletSwitcher({
           </li>
         ))}
       </ul>
-      <button
+      {/* A stream is a worktree: only where git is on. */}
+      {win.vcsEnabled ? <button
         type="button"
         style={addButton}
         data-testid="switcher-new-stream"
@@ -101,7 +92,7 @@ export function TabletSwitcher({
         }}
       >
         + New stream…
-      </button>
+      </button> : null}
     </Slideover>
   );
 }
@@ -145,13 +136,71 @@ function ThreadRow({ stream, thread, win, menus, onDone }: { stream: Stream; thr
       }}
       status={win.agentStatuses[thread.id]}
       question={win.agentQuestions[thread.id]}
-      label={renaming ? <Rename value={thread.title} onCommit={(t) => win.renameThread(thread.id, t)} onEnd={() => menus.setRenaming(null)} /> : <span>{thread.title}</span>}
+      label={
+        renaming ? (
+          <Rename value={thread.title} onCommit={(t) => win.renameThread(thread.id, t)} onEnd={() => menus.setRenaming(null)} />
+        ) : (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {/* Its mark (Mark with…), as its tab's corner fold on the desktop. */}
+            {thread.mark ? <span aria-label={`Marked ${thread.mark}`} data-testid={`switcher-thread-mark-${thread.id}`} style={{ width: 10, height: 10, borderRadius: 2, background: markColour(thread.mark) }} /> : null}
+            {thread.title}
+          </span>
+        )
+      }
     />
   );
 }
 
-/** A stream's or thread's name being renamed: Enter keeps it, Escape or an
- *  unchanged name drops it. */
+/** A new thread's title: Enter makes it (a failure keeps the field and its
+ *  text), Escape or leaving it empty drops it. A blur with text keeps it,
+ *  so a tap elsewhere (the panel's ×) never makes a thread. Its keys are its
+ *  own: Escape closes the field, not the switcher. */
+function NewThreadField({ testId, onSubmit, onEnd }: { testId: string; onSubmit(title: string): Promise<boolean>; onEnd(): void }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      style={{ flex: 1, display: "flex" }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const title = value.trim();
+        if (!title) return onEnd();
+        setBusy(true);
+        try {
+          if (await onSubmit(title)) onEnd();
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        autoFocus
+        data-testid={testId}
+        aria-label="New thread title"
+        placeholder="New thread title"
+        value={value}
+        disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => {
+          if (!value.trim()) onEnd();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            e.nativeEvent.stopImmediatePropagation();
+            onEnd();
+          }
+        }}
+        style={fieldStyle}
+      />
+    </form>
+  );
+}
+
+/** A stream's or thread's name being renamed: Enter keeps a new name;
+ *  Escape, or Enter on an unchanged one, ends the rename (`InlineEdit`
+ *  calls its cancel). */
 function Rename({ value, onCommit, onEnd }: { value: string; onCommit(next: string): void | Promise<void>; onEnd(): void }) {
   return (
     // Its keys and clicks are the field's, not the row's (Enter would
@@ -243,7 +292,13 @@ function Projects({ host, open }: { host: SwitcherHost; open: boolean }) {
   };
   return (
     <>
-      <h2 style={heading}>Projects</h2>
+      <h2 style={heading}>
+        Projects{" "}
+        {/* The host's home: release a project, forget this device. */}
+        <button type="button" data-testid="switcher-host-home" style={linkButton} onClick={() => host.go("/")}>
+          All projects…
+        </button>
+      </h2>
       {error ? (
         <div role="alert" data-testid="switcher-projects-error" style={{ color: "var(--danger)", padding: "4px 0" }}>
           {error}
@@ -276,6 +331,17 @@ function Projects({ host, open }: { host: SwitcherHost; open: boolean }) {
   );
 }
 
+const fieldStyle: CSSProperties = {
+  flex: 1,
+  minHeight: "var(--control-height)",
+  background: "var(--surface-card)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 4,
+  padding: "0 var(--space-2)",
+  fontSize: "var(--text-sm)",
+};
+const linkButton: CSSProperties = { background: "transparent", border: "none", color: "var(--accent)", fontSize: "var(--text-xs)", textTransform: "none", padding: 0, cursor: "pointer" };
 const heading: CSSProperties = { fontSize: "var(--text-xs)", textTransform: "uppercase", color: "var(--text-secondary)", margin: "var(--space-4) 0 var(--space-1)" };
 const list: CSSProperties = { listStyle: "none", margin: 0, padding: 0 };
 const rowBase: CSSProperties = {

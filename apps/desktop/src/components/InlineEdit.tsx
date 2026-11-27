@@ -78,7 +78,10 @@ export function InlineEdit({
       return;
     }
     setEditing(false);
+    // Unchanged is nothing to keep: a cancel, so a flow that opened the
+    // field (a rename) ends.
     if (trimmed !== value) onCommit(trimmed);
+    else onCancel?.();
   }
 
   function cancel() {

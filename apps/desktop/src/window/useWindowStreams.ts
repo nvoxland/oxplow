@@ -184,12 +184,12 @@ export function useWindowStreams({ setError, setDaemonUnavailable }: WindowStrea
     }
   }
 
-  async function handleCreateThread(title: string): Promise<boolean> {
-    if (!stream) return false;
+  /** Make a thread in `streamId` (any stream, not only the shown one). */
+  async function handleCreateThread(streamId: string, title: string): Promise<boolean> {
     // It opens on the session picker: a thread names no agent.
     const ran = await runForPerson("New thread", async () => {
-      const { state: next } = await createThread(stream.id, title);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
+      const { state: next } = await createThread(streamId, title);
+      setThreadStates((prev) => ({ ...prev, [streamId]: next }));
     });
     return ran.ok;
   }

@@ -1,8 +1,9 @@
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Menu as MenuGlyph, Search, X } from "lucide-react";
 
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
+import { BranchChip } from "../components/TitleBar.js";
 import { buildTabMenu } from "../components/CenterTabs/tabMenu.js";
 import { moveToIndex } from "../components/CenterTabs/centerTabsReorder.js";
 import type { MenuItem } from "../menu.js";
@@ -40,7 +41,11 @@ function pageHost(): SwitcherHost | null {
  * surfaces only. It draws the window's model (`ShellWindow`) as the desktop
  * layout does; what it does not draw yet is listed in `shellContract.ts`.
  */
-export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host?: SwitcherHost | null }) {
+export function TabletShell({ win, host: given }: { win: ShellWindow; host?: SwitcherHost | null }) {
+  // The page's host, made once: a new object each render would read the
+  // projects again on every render while the switcher is open.
+  const [pageHostOnce] = useState(pageHost);
+  const host = given === undefined ? pageHostOnce : given;
   const [switching, setSwitching] = useState(false);
   const commands = useContextMenu();
   // The stream and thread menus and their flows: this shell has no
@@ -59,6 +64,8 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
     reveal: () => setSwitching(true),
   });
   const shown = win.tabs.filter((t) => !t.hidden);
+  // Other threads whose agent waits on the person: the switcher shows which.
+  const waitingElsewhere = Object.entries(win.agentStatuses).filter(([id, status]) => status === "awaiting" && id !== win.selectedThread?.id).length;
   const active = win.tabs.find((t) => t.id === win.activeTabId) ?? shown[0] ?? null;
   const bulkClosable = shown.map((t) => ({ id: t.id, closable: t.closable && !t.pinned }));
   return (
@@ -67,7 +74,13 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
         <button type="button" data-testid="tablet-context" style={contextButton} title="Projects, streams and threads" aria-haspopup="dialog" onClick={() => setSwitching(true)}>
           <span style={{ fontWeight: 600 }}>{win.stream?.title ?? "…"}</span>
           {win.selectedThread ? <span style={{ color: "var(--text-secondary)" }}>› {win.selectedThread.title}</span> : null}
+          {waitingElsewhere > 0 ? (
+            <span data-testid="tablet-context-waiting" className="ox-badge" title={`${waitingElsewhere} other thread${waitingElsewhere === 1 ? "" : "s"} waiting on you`}>
+              {waitingElsewhere} waiting
+            </span>
+          ) : null}
         </button>
+        {win.stream ? <BranchChip stream={win.stream} vcsEnabled={win.vcsEnabled} /> : null}
         <div role="tablist" aria-label="Tabs" data-testid="tablet-tabs" style={strip}>
           {shown.map((tab) => (
             <TabletTab
@@ -114,7 +127,6 @@ export function TabletShell({ win, host = pageHost() }: { win: ShellWindow; host
       </div>
       <div data-testid="tablet-tray" style={trayLine}>
         {win.tray}
-        {win.statusBar}
       </div>
       <TabletSwitcher
         open={switching}
@@ -154,8 +166,14 @@ function withMoves(items: MenuItem[] | Promise<MenuItem[]>, tab: WindowTab, show
  *  (or the Menu key) opens the window's tab menu. */
 function TabletTab({ tab, active, menu, onActivate, onClose }: { tab: WindowTab; active: boolean; menu(): MenuItems; onActivate(): void; onClose(): void }) {
   const { menu: menuNode, openAt: _openAt, ...menuHandlers } = useRowContextMenu(menu, tab.label);
+  // The shown tab is in view: a portrait strip fits few.
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [active]);
   return (
     <div
+      ref={ref}
       role="tab"
       tabIndex={0}
       aria-selected={active}
@@ -170,7 +188,9 @@ function TabletTab({ tab, active, menu, onActivate, onClose }: { tab: WindowTab;
         {tab.dirty ? "● " : ""}
         {tab.label}
       </span>
-      {tab.closable && !tab.pinned ? (
+      {/* An agent session's tab too (pinned, closable): its × closes the
+          session, as the desktop strip's does. */}
+      {tab.closable ? (
         <button
           type="button"
           className="ox-icon-button"

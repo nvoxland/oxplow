@@ -34,8 +34,9 @@ const HOST_API = { listProjects, setHold, forgetDevice };
 
 /** The host's home (`/`) on a device: pair first, then the host's projects.
  *  Open holds the project for this device (its daemon starts, and runs while
- *  any device holds it) and goes to its page; Close lets go of it. The tablet
- *  shell replaces this page. `api` and `go` are a test's stand-ins. */
+ *  any device holds it) and goes to its page; Close lets go of it. A
+ *  project's page lists the projects too (the tablet's switcher), and links
+ *  back here to let go. `api` and `go` are a test's stand-ins. */
 export function HostHome({
   api = HOST_API,
   go = (path: string) => window.location.assign(path),

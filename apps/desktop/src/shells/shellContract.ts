@@ -30,6 +30,8 @@ export const SHELL_CONTRIBUTIONS = [
   "git dialogs",
   /** What runs in the background (the status bar). */
   "background tasks",
+  /** The stream's branch and the branch picker. */
+  "branch",
 ] as const;
 
 export type ShellContribution = (typeof SHELL_CONTRIBUTIONS)[number];
@@ -49,6 +51,7 @@ export const SHELL_PLACES: Record<ShellKind, Record<ShellContribution, string | 
     "tab order": "CenterTabs (drag)",
     "git dialogs": "GitDialogs over the center column",
     "background tasks": "StatusBar in the dock",
+    branch: "TitleBar BranchChip",
   },
   tablet: {
     tabs: "tablet-tabs",
@@ -62,5 +65,6 @@ export const SHELL_PLACES: Record<ShellKind, Record<ShellContribution, string | 
     "tab order": "tablet-tabs (Move Left / Move Right)",
     "git dialogs": "GitDialogs over the page",
     "background tasks": "StatusBar in the tray",
+    branch: "BranchChip on the top line",
   },
 };

@@ -150,3 +150,40 @@ test("a panel opens a run per part, the body with the picks", async () => {
   view.unmount();
   cleanup();
 });
+
+// A pick of a choice re-runs the panel's parts: what they show stays until
+// the new runs come, so the header (its toggles) never empties.
+test("a choice pick keeps the shown body until the new run comes", async () => {
+  let release: (() => void) | null = null;
+  const { runs } = fakePageRunsBy((key) =>
+    key.panel?.choices && Object.keys(key.panel.choices).length > 0
+      ? new Promise<PageRun>((r) => (release = () => r(runOf("x/body", 5))))
+      : runOf("x/body", 2),
+  );
+  const panels = [panel("project")];
+  const view = renderHook(
+    ({ choices }: { choices: Record<string, Record<string, string>> }) => useExtensionPanelRuns(panels, "str2", null, choices, runs),
+    { initialProps: { choices: {} } },
+  );
+  await waitFor(() => expect(view.result.current["x/p"]?.body).not.toBeNull());
+  view.rerender({ choices: { "x/p": { mode: "top" } } });
+  await new Promise((r) => setTimeout(r, 20));
+  expect(view.result.current["x/p"]?.body).not.toBeNull();
+  release!();
+  view.unmount();
+  cleanup();
+});
+
+// A part the panel no longer has (its page dropped on a redeploy) goes.
+test("a part the panel no longer has goes", async () => {
+  const { runs } = fakePageRunsBy((key) => runOf(key.page));
+  const view = renderHook(
+    ({ panels }: { panels: ExtensionPanel[] }) => useExtensionPanelRuns(panels, "str2", null, undefined, runs),
+    { initialProps: { panels: [panel("project", { badge: "x/badge" })] } },
+  );
+  await waitFor(() => expect(view.result.current["x/p"]?.badge).not.toBeNull());
+  view.rerender({ panels: [panel("project")] });
+  await waitFor(() => expect(view.result.current["x/p"]?.badge).toBeNull());
+  view.unmount();
+  cleanup();
+});

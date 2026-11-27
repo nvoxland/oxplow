@@ -22,7 +22,8 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
   const noop = () => {};
   return {
     streams: [],
-    stream: { id: "str1", title: "Main" } as unknown as Stream,
+    stream: { id: "str1", title: "Main", branch: "main" } as unknown as Stream,
+    vcsEnabled: true,
     threadStates: {},
     selectedThread: { id: "thr1", title: "Writer" } as unknown as Thread,
     streamStatuses: {},
@@ -38,7 +39,7 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
     openStreamSettings: noop,
     openThreadSettings: noop,
     openNewStream: noop,
-    tabs: [tab("session", { pinned: true, closable: false, agentStatus: "working" }), tab("a"), tab("b")],
+    tabs: [tab("session", { pinned: true, agentStatus: "working" }), tab("a"), tab("b")],
     activeTabId: "a",
     activateTab: (id) => log.push(`activate ${id}`),
     closeTab: (id) => log.push(`close ${id}`),
@@ -58,19 +59,20 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
 
 test("the context line names the stream and thread; the page is the active tab's", () => {
   const view = render(<TabletShell win={win()} />);
+  expect(view.getByTestId("tablet-shell").textContent).toContain("main");
   expect(view.getByTestId("tablet-context").textContent).toContain("Main");
   expect(view.getByTestId("tablet-context").textContent).toContain("Writer");
   expect(view.getByTestId("center-tab-body-a").style.display).toBe("flex");
   expect(view.queryByTestId("center-tab-body-b")).toBeNull();
 });
 
-test("a tap shows a tab, its × closes it; a pinned session has no ×", () => {
+test("a tap shows a tab, its × closes it, an agent session's too", () => {
   const w = win();
   const view = render(<TabletShell win={w} />);
   fireEvent.click(view.getByTestId("tablet-tab-b"));
   fireEvent.click(view.getByTestId("tablet-tab-close-a"));
-  expect(view.queryByTestId("tablet-tab-close-session")).toBeNull();
-  expect(w.log).toEqual(["activate b", "close a"]);
+  fireEvent.click(view.getByTestId("tablet-tab-close-session"));
+  expect(w.log).toEqual(["activate b", "close a", "close session"]);
 });
 
 test("a tab's menu is the window's tab menu", () => {
@@ -95,8 +97,12 @@ test("a tab's menu moves it left or right", () => {
 test("the git dialogs and the status bar are drawn", () => {
   const view = render(<TabletShell win={win()} />);
   expect(view.getByTestId("the-git-dialogs")).not.toBeNull();
-  expect(view.getByTestId("the-status-bar")).not.toBeNull();
   expect(view.getByTestId("the-aside")).not.toBeNull();
+});
+
+test("the context line counts the other threads waiting on the person", () => {
+  const view = render(<TabletShell win={win({ agentStatuses: { thr1: "awaiting", thr2: "awaiting", thr3: "working" } })} />);
+  expect(view.getByTestId("tablet-context-waiting").textContent).toBe("1 waiting");
 });
 
 test("search and the tray are drawn", () => {

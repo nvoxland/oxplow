@@ -29,6 +29,12 @@ mock.module("../api.js", () => ({
     threadsOf[streamId] = { ...threadsOf[streamId], selectedThreadId: threadId };
     return threadsOf[streamId];
   },
+  createThread: async (streamId: string, title: string) => {
+    calls.push(`create ${streamId} ${title}`);
+    const made = thread(`new-${title}`);
+    threadsOf[streamId] = { ...threadsOf[streamId]!, threads: [...threadsOf[streamId]!.threads, made] };
+    return { state: threadsOf[streamId] };
+  },
   onRemoteReconnect: (handler: () => void) => {
     reconnect = handler;
     return () => {
@@ -87,4 +93,15 @@ test("a reconnect loads the window's state again", async () => {
   threadsOf.s1 = { selectedThreadId: "t9", threads: [thread("t1"), thread("t9")] };
   act(() => reconnect!());
   await waitFor(() => expect(hook.result.current.selectedThread?.id).toBe("t9"));
+});
+
+// A thread is made in the stream it is asked for, whatever stream is shown
+// (the switcher lists "+ New thread" under every stream).
+test("a new thread is made in the stream named, not the one shown", async () => {
+  const { hook } = setup();
+  await waitFor(() => expect(hook.result.current.stream?.id).toBe("s1"));
+  await act(async () => void (await hook.result.current.createThread("s2", "Plan")));
+  expect(calls).toContain("create s2 Plan");
+  expect(hook.result.current.threadStates.s2?.threads).toHaveLength(3);
+  expect(hook.result.current.stream?.id).toBe("s1");
 });

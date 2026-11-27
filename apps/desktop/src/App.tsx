@@ -132,12 +132,14 @@ export function App() {
   const [quickOpenQuery, setQuickOpenQuery] = useState("");
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
-  // macOS uses the native top-of-screen menu bar (driven by the
+  // The Mac app uses the native top-of-screen menu bar (driven by the
   // renderer through `setNativeMenu`, built in
-  // src-tauri/.../commands/menu.rs); the in-window Menubar would
-  // duplicate it, so it only renders off-Mac.
-  const isMac = typeof navigator !== "undefined"
-    && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+  // src-tauri/.../commands/menu.rs) and floats its traffic lights over the
+  // title bar; the in-window Menubar would duplicate it. A browser (on an
+  // iPad or a Mac too) has no native menu: it gets the in-window one.
+  const nativeMenu = shellAvailable()
+    && typeof navigator !== "undefined"
+    && /Mac/.test(navigator.platform || navigator.userAgent || "");
 
 
   useEffect(() => {
@@ -643,6 +645,7 @@ export function App() {
   const shellWindow: ShellWindow = {
     streams,
     stream,
+    vcsEnabled: workspaceContext.vcsEnabled,
     threadStates,
     selectedThread,
     streamStatuses,
@@ -650,10 +653,8 @@ export function App() {
     agentQuestions,
     switchStream: handleSwitch,
     selectThread: handleSelectThread,
-    createThread: async (streamId, title) => {
-      if (streamId !== stream?.id) await handleSwitch(streamId);
-      return handleCreateThread(title);
-    },
+    // Made where it is listed; a tap on it selects it.
+    createThread: handleCreateThread,
     renameStream: handleRenameStreamById,
     renameThread: handleRenameThreadById,
     markThread: handleMarkThread,
@@ -670,11 +671,12 @@ export function App() {
     openSearch: () => setQuickOpenVisible(true),
     // View is the rail's panels; a shell with no rail draws its own.
     menu: [
-      ...shellMenu(menuGroups.filter((g) => g.id !== "view")),
+      // View is the panels' on and off: the tray shows the ones turned on.
+      ...shellMenu(menuGroups),
       ...(layouts.length > 0 ? [{ id: "shell.menu.layout", label: "Layout", enabled: true, submenu: layouts }] : []),
     ],
     continueFrom: async () => (selectedThreadId ? continueItems(await listOtherDeviceTabs(selectedThreadId), handleOpenPage) : []),
-    tray: <PanelTray dock={<Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />} streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+    tray: <PanelTray status={<StatusBar />} streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
     aside: <PinnedPanel streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
     gitDialogs: stream ? (
       <GitDialogs
@@ -740,12 +742,12 @@ export function App() {
           webview reaches the top edge: the title bar is the window's top,
           its empty space drags it and its start leaves room for the
           floating traffic lights. Elsewhere it sits under the menu bar. */}
-      {!isMac ? <Menubar groups={withLayouts(menuGroups, layouts)} /> : null}
+      {!nativeMenu ? <Menubar groups={withLayouts(menuGroups, layouts)} /> : null}
       <TitleBar
         stream={stream}
         thread={selectedThread ? { id: selectedThread.id, title: selectedThread.title } : null}
         vcsEnabled={workspaceContext.vcsEnabled}
-        leftInset={isMac ? 78 : 10}
+        leftInset={nativeMenu ? 78 : 10}
         onOpenSearch={() => setQuickOpenVisible(true)}
       />
       {errorBar}
@@ -760,10 +762,7 @@ export function App() {
           agentQuestions={agentQuestions}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
-          onCreateThread={async (streamId, title) => {
-            if (streamId !== stream?.id) await handleSwitch(streamId);
-            return handleCreateThread(title);
-          }}
+          onCreateThread={handleCreateThread}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}
           onRenameThread={handleRenameThreadById}

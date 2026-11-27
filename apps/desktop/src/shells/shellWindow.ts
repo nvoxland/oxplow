@@ -16,6 +16,8 @@ import type { WindowTab } from "../window/windowTab.js";
 export interface ShellWindow {
   streams: Stream[];
   stream: Stream | null;
+  /** Git is on in this workspace (the branch picker, new streams). */
+  vcsEnabled: boolean;
   threadStates: Record<string, ThreadState>;
   selectedThread: Thread | null;
   streamStatuses: Record<string, AgentStatusDotState>;
@@ -48,13 +50,14 @@ export interface ShellWindow {
   /** Continue from <device>: one item per other device with pages open in
    *  the shown thread, read as the menu opens (`continueItems`). */
   continueFrom(): Promise<MenuItem[]>;
-  /** The window's panels as a tray (`PanelTray`: the rail's panels, then
-   *  the dock), for a shell with no rail. */
+  /** The window's panels as a tray (`PanelTray`: the dock, holding the
+   *  rail's panels and the status bar), for a shell with no rail. */
   tray: ReactNode;
   /** The panel the device pinned beside the page (`PinnedPanel`). */
   aside: ReactNode;
   /** Git ▸'s dialogs (Compare with…, Rollback…), docked over the page. */
   gitDialogs: ReactNode;
-  /** What runs in the background (`StatusBar`). */
+  /** What runs in the background (`StatusBar`): the desktop's dock holds
+   *  it; the tablet's tray has its own. */
   statusBar: ReactNode;
 }

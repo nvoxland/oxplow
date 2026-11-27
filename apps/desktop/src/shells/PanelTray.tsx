@@ -13,6 +13,7 @@ import { useExtensions } from "../extensionsStore.js";
 import { ICONS, iconFor } from "../icons.js";
 import { useAppPreference } from "../prefs/remembered.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { Dock } from "../components/Dock/Dock.js";
 import { useState } from "react";
 
 const NO_RUNS: PanelRuns = { body: null, badge: null, collapsed: null, count: null, choices: [] };
@@ -47,13 +48,20 @@ export function usePinnedPanel(): [string | null, (id: string | null) => void] {
   return useAppPreference<string | null>("tablet.pinnedPanel", null);
 }
 
-/** The tablet's tray: a button per rail panel (its icon, its name, its
- *  count), then the dock's bar (`dock`: Alerts, Context, the extensions'
- *  dock panels). A tap opens the panel as a sheet. */
-export function PanelTray({ dock, streamId, onOpenPage }: { dock: ReactNode; streamId: string | null; onOpenPage(ref: TabRef): void }) {
+/** The tablet's tray: the dock (its bar: Alerts, Context, the extensions'
+ *  dock panels; its panel opens above at the window's width), holding a
+ *  button per rail panel (its icon, its name, its count) and what runs in
+ *  the background (`status`), as the desktop's dock holds its status bar. A
+ *  tap on a panel opens it as a sheet. */
+export function PanelTray({ status, streamId, onOpenPage }: { status: ReactNode; streamId: string | null; onOpenPage(ref: TabRef): void }) {
   const { panels, choose } = useTrayPanels();
   const [pinned, setPinned] = usePinnedPanel();
-  return <PanelTrayView panels={panels} choose={choose} pinned={pinned} setPinned={setPinned} dock={dock} streamId={streamId} onOpenPage={onOpenPage} />;
+  return (
+    <Dock streamId={streamId} onOpenPage={onOpenPage}>
+      <PanelTrayView panels={panels} choose={choose} pinned={pinned} setPinned={setPinned} streamId={streamId} onOpenPage={onOpenPage} />
+      {status}
+    </Dock>
+  );
 }
 
 /** The tray drawn from its panels; exported for tests. */
@@ -62,7 +70,6 @@ export function PanelTrayView({
   choose,
   pinned,
   setPinned,
-  dock,
   streamId,
   onOpenPage,
 }: {
@@ -70,7 +77,6 @@ export function PanelTrayView({
   choose(panelId: string, param: string, value: string): void;
   pinned: string | null;
   setPinned(id: string | null): void;
-  dock: ReactNode;
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
@@ -101,7 +107,6 @@ export function PanelTrayView({
           );
         })}
       </div>
-      <div style={{ marginLeft: "auto" }}>{dock}</div>
       {open ? (
         <Slideover
           open

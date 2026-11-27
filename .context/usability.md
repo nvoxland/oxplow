@@ -755,6 +755,10 @@ the editor has its touch bar). A long press on a link opens it in a new tab,
 as its right-click does. A menu draws `data-oxplow-menu` on its root, so the
 hold's hint bubble gives way to it.
 
+**Escape closes the topmost layer only.** A menu closes itself; a field
+that takes Escape (an inline title) prevents its default; a `Slideover`
+under them closes on Escape only when neither did (`Slideover.tsx`).
+
 **Nothing is only on hover.** Where there is no hover (`@media (hover:
 none)`), what a rule shows on hover is always shown: one block in
 `apps/desktop/index.html` next to the hover rules (the blame and link
@@ -1060,7 +1064,8 @@ its right-click menu.
 - **The native menu is renderer-driven.** `App.tsx` pushes the menu
   snapshot to `set_native_menu` (built in
   `crates/oxplow-tauri-ipc/src/commands/menu.rs`); macOS shows the
-  native bar, off-Mac falls back to the in-window `Menubar`. (There is
+  native bar; everywhere else (another OS, or any browser: one on an iPad
+  or a Mac has no native menu) draws the in-window `Menubar`. (There is
   no `isElectron` gate any more — that was dead post-Tauri code.) The
   builder supports **nested submenus** via `MenuItemSnapshot.submenu`;
   dynamic entries (e.g. File ▸ Open Recent ▸ `<project>`, built by

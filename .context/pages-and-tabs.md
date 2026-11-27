@@ -120,8 +120,10 @@ page's `?shell=desktop|tablet` or the window context's `shell`), then the
 device's own choice (the `shell` app preference, per device), then its
 kind: a desktop gets `desktop`; a tablet, and a phone until it has its own
 shell, get `tablet` once that shell is complete (`shellComplete`: no gap in
-the contract below), `desktop` until then, so no device lands in a shell
-that hides a feature.
+the contract below), `desktop` until then. The contract is a hand-kept list
+of what a shell draws: complete means every listed contribution has a
+place, not that the tablet does all the desktop does (it cannot drag tabs
+or order panels, for one).
 
 - **`desktop`** is `App.tsx`'s own layout: menu bar, title bar, Navigator,
   rail, `CenterTabs`, dock.
@@ -139,9 +141,15 @@ that hides a feature.
   is listed; a tap selects it, as in the Navigator), Remove… (the shared
   `RemoveStreamDialog`). New Thread… from anywhere opens it on the field.
   The top line's ☰ (`tablet-menu`) holds the menu bar's commands (Save,
-  Find, the extensions' `ui.menu` ones) as File ▸ and Edit ▸ (`shellMenu`:
-  the OS's own edit items left out). View is not there: it is the rail's
-  panels, and this shell has its tray.
+  Find, the extensions' `ui.menu` ones) as File ▸, Edit ▸ and View ▸
+  (`shellMenu`: the OS's own edit items left out; View turns panels on and
+  off, and the tray shows the ones on). The top line also has the
+  stream's branch (`BranchChip`) and, when other threads' agents wait on the
+  person, how many (`tablet-context-waiting`). The switcher's projects link
+  to the host's home (All projects…), where a project is let go and the
+  device forgotten; a marked thread shows its mark; + New stream… is there
+  only with git on; the new-thread field is made only by Enter, and its
+  Escape closes it alone.
   The ☰ also has **Continue from ▸ <device>** when another device has pages
   open in the shown thread (`window/continueFrom.ts`, read as the menu
   opens): it opens that device's page tabs here, its shown one last. The
@@ -164,7 +172,8 @@ threads and their operations, the shown thread's tabs, `closeTab` (a file's
 tab closes its file, a diff's its diff, a session's the session),
 `reorderTabs`, opening a page and search, the menu bar's commands, the tray,
 the Git dialogs and the status bar. A tablet tab's menu also has Move Left
-and Move Right (no drag on a finger). Tablet bodies are keyed by stream, as
+and Move Right (no drag on a finger), an agent session's tab its × (it
+closes the session, as on the desktop). Tablet bodies are keyed by stream, as
 the desktop's strip is. The dock's panel opens over the column a shell
 marks `data-dock-column`. Both shells draw tab bodies through
 `TabBodies` (`components/CenterTabs/TabBodies.tsx`: mounted when first

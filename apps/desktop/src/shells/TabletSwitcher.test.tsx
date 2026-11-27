@@ -19,6 +19,7 @@ function win(log: string[]): ShellWindow {
   return {
     streams: [MAIN, SIDE],
     stream: MAIN,
+    vcsEnabled: true,
     threadStates: STATES,
     selectedThread: WRITER,
     streamStatuses: {},
@@ -73,8 +74,25 @@ test("New Thread from anywhere opens the switcher with the inline title field", 
   act(() => requestNewThread("str2"));
   const field = await view.findByTestId("switcher-new-thread-input-str2");
   fireEvent.change(field, { target: { value: "Plan" } });
-  fireEvent.keyDown(field, { key: "Enter" });
+  fireEvent.submit(field.closest("form")!);
   await waitFor(() => expect(log).toEqual(["create str2 Plan"]));
+  await waitFor(() => expect(view.queryByTestId("switcher-new-thread-input-str2")).toBeNull());
+});
+
+// A blur with text keeps the field (a tap on the panel's × makes no thread);
+// Escape drops it and leaves the switcher open.
+test("the new thread field is made only by Enter; Escape closes only the field", async () => {
+  const log: string[] = [];
+  const view = render(<TabletShell win={win(log)} />);
+  act(() => requestNewThread("str2"));
+  const field = await view.findByTestId("switcher-new-thread-input-str2");
+  fireEvent.change(field, { target: { value: "Plan" } });
+  fireEvent.blur(field);
+  expect(view.getByTestId("switcher-new-thread-input-str2")).not.toBeNull();
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(view.queryByTestId("switcher-new-thread-input-str2")).toBeNull();
+  expect(view.getByTestId("tablet-switcher")).not.toBeNull();
+  expect(log).toEqual([]);
 });
 
 test("Rename from a thread's menu is an inline field", async () => {

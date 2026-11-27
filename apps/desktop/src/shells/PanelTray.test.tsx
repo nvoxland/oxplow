@@ -23,7 +23,6 @@ function view(over: { pinned?: string | null } = {}) {
       choose={() => {}}
       pinned={over.pinned ?? null}
       setPinned={(id) => pins.push(id)}
-      dock={<div data-testid="the-dock" />}
       streamId={null}
       onOpenPage={() => {}}
     />,
@@ -32,12 +31,11 @@ function view(over: { pinned?: string | null } = {}) {
 }
 
 // The tray: each rail panel by name and count, in the rail's order, then the dock.
-test("the tray lists the rail's panels with their counts, then the dock", () => {
+test("the tray lists the rail's panels with their counts", () => {
   const { v } = view();
   const names = Array.from(v.getByTestId("tablet-panels").querySelectorAll("button")).map((b) => b.textContent);
   expect(names).toEqual(["Waiting on you3", "Work"]);
   expect(v.getByTestId("tablet-panel-count-x/waiting").textContent).toBe("3");
-  expect(v.getByTestId("the-dock")).not.toBeNull();
 });
 
 // A tap opens the panel as a sheet; its pin keeps it beside the page.
