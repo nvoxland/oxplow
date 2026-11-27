@@ -14,9 +14,10 @@ test("a session's tab closes the session at once, and Undo brings it back", asyn
   await closeTab(page, id);
   await expect(tabOf(page, id)).not.toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
-  // The start's own toast is still up: the latest toast is the close's only
-  // once its run has come back, and its Undo is the one to take.
-  await expect(page.getByTestId("undo-toast")).toContainText("Close");
-  await page.getByTestId("undo-toast-undo").click();
+  // Other toasts may be up (the start's own, a project's language-pack
+  // suggestion): the close's is the one whose Undo to take.
+  const closed = page.getByTestId("undo-toast").filter({ hasText: "Close" });
+  await expect(closed).toBeVisible();
+  await closed.getByTestId("undo-toast-undo").click();
   await expect(tabOf(page, id)).toBeVisible();
 });
