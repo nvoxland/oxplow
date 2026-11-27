@@ -25,6 +25,10 @@ fn main() {
     }
 
     init_tracing();
+    // The port other devices come in on, when the command line names it.
+    if let Some(port) = launch_args().device_port {
+        oxplow_host::settings::set_port_flag(port);
+    }
 
     // `generate_context!` embeds the Info.plist and may expand only
     // once per binary.
@@ -167,7 +171,10 @@ fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
         Some("--help" | "-h") => Some(
             "oxplow — opens the Oxplow app\n\n\
              Usage:\n  \
-             oxplow [--init]                        open the app (--init: set up this dir as a project)\n  \
+             oxplow [<dir>] [--init] [--device-port <port>]\n  \
+             \x20                                      open the app (--init: set up <dir> as a project;\n  \
+             \x20                                      --device-port: the port other devices use, over\n  \
+             \x20                                      OXPLOW_DEVICE_PORT and the Devices setting)\n  \
              oxplow extension <new|check|test> ...  the extension SDK\n  \
              oxplow host <serve|project> ...        a headless host (a server): runs until stopped\n  \
              oxplow component-harness <url>         a component harness's page (extension test opens it)\n  \
@@ -219,10 +226,60 @@ fn run_host(args: &[String]) -> ! {
     std::process::exit(1);
 }
 
-/// `--init`: create `.oxplow/` for a fresh project dir and boot straight
-/// in, instead of showing the setup-confirmation screen.
+/// The app's own command line (after the subcommands it hands off).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppArgs {
+    /// The project folder: the first argument that is no flag.
+    project: Option<String>,
+    /// `--init`: create `.oxplow/` for a fresh project dir and boot straight
+    /// in, instead of showing the setup-confirmation screen.
+    init: bool,
+    /// `--device-port <port>`: the port other devices come in on, over
+    /// `OXPLOW_DEVICE_PORT` and the saved setting.
+    device_port: Option<u16>,
+}
+
+/// Read the app's command line. Pure over `args` (without the program).
+fn app_args(args: impl Iterator<Item = String>) -> Result<AppArgs, String> {
+    let mut out = AppArgs {
+        project: None,
+        init: false,
+        device_port: None,
+    };
+    let mut it = args;
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--init" => out.init = true,
+            "--device-port" => {
+                let text = it.next().ok_or("--device-port needs a port")?;
+                out.device_port =
+                    Some(oxplow_host::settings::parse_port(&text).map_err(|e| e.to_string())?);
+            }
+            // A flag of the OS's (macOS's `-psn_…`) is no folder.
+            flag if flag.starts_with('-') => {}
+            folder => {
+                if out.project.is_none() {
+                    out.project = Some(folder.to_string());
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The app's command line, read once; a bad one ends the launch with why.
+fn launch_args() -> &'static AppArgs {
+    static ARGS: std::sync::OnceLock<AppArgs> = std::sync::OnceLock::new();
+    ARGS.get_or_init(|| {
+        app_args(std::env::args().skip(1)).unwrap_or_else(|e| {
+            eprintln!("oxplow: {e}");
+            std::process::exit(2);
+        })
+    })
+}
+
 fn init_flag() -> bool {
-    std::env::args().skip(1).any(|a| a == "--init")
+    launch_args().init
 }
 
 /// What the shell shows when it starts.
@@ -244,11 +301,8 @@ enum Startup {
 /// launcher rather than silently adopting whatever directory it was
 /// started from.
 fn resolve_project_dir() -> Option<PathBuf> {
-    if let Some(arg) = std::env::args().nth(1) {
-        // Skip flag-like args (e.g. macOS may pass `-psn_…`).
-        if !arg.starts_with('-') {
-            return Some(absolutize_project_dir(PathBuf::from(arg)));
-        }
+    if let Some(arg) = &launch_args().project {
+        return Some(absolutize_project_dir(PathBuf::from(arg)));
     }
     std::env::var_os("OXPLOW_PROJECT_DIR")
         .map(PathBuf::from)
@@ -632,6 +686,40 @@ mod tests {
         assert_eq!(harness(&["component-harness"]), None);
         assert_eq!(harness(&["extension", "test"]), None);
         assert_eq!(harness(&[]), None);
+    }
+
+    /// The app's own command line: a project folder, `--init`, and
+    /// `--device-port <port>` (the port other devices come in on, over the
+    /// saved setting), in any order; macOS's `-psn_…` is no folder.
+    #[test]
+    fn the_app_reads_its_folder_init_and_device_port() {
+        let args = |a: &[&str]| app_args(a.iter().map(|s| s.to_string()));
+        assert_eq!(
+            args(&["."]),
+            Ok(AppArgs {
+                project: Some(".".into()),
+                init: false,
+                device_port: None
+            })
+        );
+        assert_eq!(
+            args(&["--device-port", "7401", "/p", "--init"]),
+            Ok(AppArgs {
+                project: Some("/p".into()),
+                init: true,
+                device_port: Some(7401)
+            })
+        );
+        assert_eq!(
+            args(&["-psn_0_123"]),
+            Ok(AppArgs {
+                project: None,
+                init: false,
+                device_port: None
+            })
+        );
+        assert!(args(&["--device-port"]).is_err());
+        assert!(args(&["--device-port", "nope", "."]).is_err());
     }
 
     #[test]

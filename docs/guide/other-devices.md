@@ -14,8 +14,10 @@ so is a private network such as Tailscale or WireGuard.
 
 1. On the Mac, choose **Oxplow ▸ Devices…**.
 2. Under **Allow other devices**, turn it on and pick the Mac's address
-   (the one on your home network, say `192.168.1.20`). **Save**, then quit
-   Oxplow and open it again: the settings apply at the next start.
+   (the one on your home network, say `192.168.1.20`). The port is 7400
+   unless you set another. **Save**, then quit Oxplow and open it again:
+   the settings apply at the next start. (`oxplow --device-port <port>` or
+   `OXPLOW_DEVICE_PORT` set the port for one run, over the setting.)
 3. The first time on a tablet, make it trust the Mac. Open
    `https://192.168.1.20:7400/host/ca.pem` there (past the browser's
    warning) and install it:
@@ -48,8 +50,11 @@ already an Oxplow project (it has a `.oxplow/` folder):
 
 ```bash
 oxplow host project add ~/src/myproject
-oxplow host serve --bind 127.0.0.1:7400 --public-bind <private-address>:7400
+oxplow host serve --bind 127.0.0.1:7400 --public-bind <private-address>
 ```
+
+Other devices come in on port 7400; `--device-port <port>` or
+`OXPLOW_DEVICE_PORT` choose another.
 
 It makes its own certificate as the Mac does; a device trusts it once from
 `https://<private-address>:7400/host/ca.pem`. For a name that is not on a

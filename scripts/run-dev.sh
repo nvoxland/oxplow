@@ -5,6 +5,7 @@
 #   bun run run:dev                 # this checkout, as the project
 #   bun run run:dev ~/src/other     # another project
 #   bun run run:dev --no-deploy     # build and run; deploy nothing
+#   bun run run:dev --device-port 7401   # other devices' port, over the setting
 #
 # 1. Refuses while oxplow holds the project (its instance lock), or a
 #    headless host runs for this home, before the build: the deploy needs
@@ -26,9 +27,17 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 deploy=1
 project=""
-for arg in "$@"; do
+app_flags=""
+while [ $# -gt 0 ]; do
+  arg="$1"
+  shift
   case "$arg" in
     --no-deploy) deploy=0 ;;
+    --device-port)
+      [ $# -gt 0 ] || { echo "run-dev: --device-port needs a port" >&2; exit 2; }
+      app_flags="--device-port $1"
+      shift
+      ;;
     -h | --help)
       sed -n '2,/^set -e/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0
@@ -69,4 +78,5 @@ if [ "$deploy" = 1 ]; then
 fi
 
 echo "run-dev: starting oxplow on $project" >&2
-exec "$repo/target/debug/oxplow" "$project"
+# shellcheck disable=SC2086 # the flags are words
+exec "$repo/target/debug/oxplow" $app_flags "$project"

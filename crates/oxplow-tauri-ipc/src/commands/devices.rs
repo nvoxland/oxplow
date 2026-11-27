@@ -36,6 +36,11 @@ pub struct DevicesView {
     pub settings_applied: bool,
     /// The addresses a device opens: `https://<name>:<port>/`.
     pub open_on_device: Vec<String>,
+    /// The port other devices come in on and where it came from (the app's
+    /// `--device-port` or `OXPLOW_DEVICE_PORT` win over the setting); none
+    /// when the one given is no port (`port_problem` says).
+    pub port: Option<oxplow_host::settings::DevicePort>,
+    pub port_problem: Option<String>,
     /// Where the host listens for other devices now, or why it cannot.
     pub public: Option<oxplow_host::access::PublicListener>,
     /// Why the host did not answer: the settings still show, to fix.
@@ -58,21 +63,13 @@ pub struct RenameDevice {
     pub name: String,
 }
 
-/// The addresses a device opens for `settings`: each name (else the
-/// address) with the port, `https` when there is a certificate. Pure.
-pub fn open_on_device(settings: &oxplow_host::settings::HostSettings) -> Vec<String> {
+/// The addresses a device opens for `settings` on `port` (the one in
+/// force): each name (else the address) with the port, over HTTPS. Pure.
+pub fn open_on_device(settings: &oxplow_host::settings::HostSettings, port: u16) -> Vec<String> {
     if !settings.allow_other_devices {
         return Vec::new();
     }
-    let Ok(args) = settings.serve_args() else {
-        return Vec::new();
-    };
-    let Some(bind) = args
-        .iter()
-        .position(|a| a == "--public-bind")
-        .and_then(|i| args.get(i + 1))
-        .and_then(|b| b.parse::<std::net::SocketAddr>().ok())
-    else {
+    let Ok(ip) = settings.address.trim().parse::<std::net::IpAddr>() else {
         return Vec::new();
     };
     // Other devices come in over HTTPS only.
@@ -84,13 +81,13 @@ pub fn open_on_device(settings: &oxplow_host::settings::HostSettings) -> Vec<Str
         .filter(|n| !n.is_empty())
         .collect();
     let hosts = if names.is_empty() {
-        vec![bind.ip().to_string()]
+        vec![ip.to_string()]
     } else {
         names
     };
     hosts
         .into_iter()
-        .map(|h| format!("{scheme}://{h}:{}/", bind.port()))
+        .map(|h| format!("{scheme}://{h}:{port}/"))
         .collect()
 }
 
@@ -153,10 +150,18 @@ pub async fn host_devices(
             paired_at: i64::try_from(d.paired_at).unwrap_or(i64::MAX),
         })
         .collect();
+    let (port, port_problem) = match settings.device_port() {
+        Ok(p) => (Some(p), None),
+        Err(e) => (None, Some(e.to_string())),
+    };
     Ok(DevicesView {
         this_device,
         devices,
-        open_on_device: open_on_device(&settings),
+        open_on_device: port
+            .map(|p| open_on_device(&settings, p.port))
+            .unwrap_or_default(),
+        port,
+        port_problem,
         // Applied: the host started with them and, when they let other
         // devices in, it listens for them.
         settings_applied: shell(&app).settings_applied(&settings)
@@ -257,8 +262,17 @@ mod tests {
             names: vec!["mac.tailnet.ts.net".into()],
             tls_cert: Some("/c.pem".into()),
             tls_key: Some("/k.pem".into()),
+            port: None,
         };
-        assert_eq!(open_on_device(&on), ["https://mac.tailnet.ts.net:7400/"]);
+        assert_eq!(
+            open_on_device(&on, 7400),
+            ["https://mac.tailnet.ts.net:7400/"]
+        );
+        assert_eq!(
+            open_on_device(&on, 7401),
+            ["https://mac.tailnet.ts.net:7401/"],
+            "the port in force"
+        );
         let own = HostSettings {
             names: vec![],
             tls_cert: None,
@@ -266,10 +280,10 @@ mod tests {
             ..on.clone()
         };
         assert_eq!(
-            open_on_device(&own),
+            open_on_device(&own, 7400),
             ["https://100.101.102.103:7400/"],
             "always HTTPS"
         );
-        assert!(open_on_device(&HostSettings::default()).is_empty());
+        assert!(open_on_device(&HostSettings::default(), 7400).is_empty());
     }
 }

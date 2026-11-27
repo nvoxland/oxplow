@@ -7,7 +7,7 @@ afterEach(() => cleanup());
 
 function fake(over: Partial<DevicesView> = {}) {
   const calls: string[] = [];
-  let settings: HostSettings = { allowOtherDevices: false, address: "", names: [], tlsCert: null, tlsKey: null };
+  let settings: HostSettings = { allowOtherDevices: false, address: "", names: [], tlsCert: null, tlsKey: null, port: null };
   const api: DevicesApi = {
     hostDevices: async () => ({
       thisDevice: "Studio",
@@ -15,6 +15,8 @@ function fake(over: Partial<DevicesView> = {}) {
       settings,
       settingsApplied: false,
       openOnDevice: ["https://mac.ts.net:7400/"],
+      port: { port: 7400, from: "default" },
+      portProblem: null,
       public: { state: "off" },
       hostError: null,
       ...over,
@@ -72,13 +74,13 @@ test("the settings save only when changed", async () => {
   fireEvent.click(save);
   await waitFor(() => expect(calls.some((c) => c.startsWith("save "))).toBe(true));
   const saved = JSON.parse(calls.find((c) => c.startsWith("save "))!.slice(5)) as HostSettings;
-  expect(saved).toEqual({ allowOtherDevices: true, address: "192.168.1.20", names: [], tlsCert: null, tlsKey: null });
+  expect(saved).toEqual({ allowOtherDevices: true, address: "192.168.1.20", names: [], tlsCert: null, tlsKey: null, port: null });
 });
 
 // With the host's own certificate, the window says how a device trusts it.
 test("a device is told how to trust the Mac", async () => {
   const { api } = fake({
-    settings: { allowOtherDevices: true, address: "192.168.1.20", names: [], tlsCert: null, tlsKey: null },
+    settings: { allowOtherDevices: true, address: "192.168.1.20", names: [], tlsCert: null, tlsKey: null, port: null },
     openOnDevice: ["https://192.168.1.20:7400/"],
   });
   render(<DevicesSlideover open onClose={() => {}} api={api} />);
@@ -112,4 +114,26 @@ test("a countdown reads as minutes and seconds", () => {
   expect(countdown(600)).toBe("10:00");
   expect(countdown(61.9)).toBe("1:01");
   expect(countdown(-3)).toBe("0:00");
+});
+
+// The port is a setting too; a flag or the environment overrides it, and
+// the window says which.
+test("the port is saved with the settings, and an override is said", async () => {
+  const { api, calls } = fake();
+  render(<DevicesSlideover open onClose={() => {}} api={api} />);
+  fireEvent.click(await screen.findByTestId("devices-allow"));
+  await screen.findByRole("option", { name: "192.168.1.20" });
+  fireEvent.change(screen.getByTestId("devices-address"), { target: { value: "192.168.1.20" } });
+  fireEvent.change(screen.getByTestId("devices-port"), { target: { value: "seventy" } });
+  expect(screen.getByTestId("devices-port-bad")).toBeTruthy();
+  expect((screen.getByTestId("devices-save") as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByTestId("devices-port"), { target: { value: "7401" } });
+  fireEvent.click(screen.getByTestId("devices-save"));
+  await waitFor(() => expect(calls.some((c) => c.startsWith("save "))).toBe(true));
+  expect((JSON.parse(calls.find((c) => c.startsWith("save "))!.slice(5)) as HostSettings).port).toBe(7401);
+  cleanup();
+  const env = fake({ port: { port: 7500, from: "env" } });
+  render(<DevicesSlideover open onClose={() => {}} api={env.api} />);
+  expect((await screen.findByTestId("devices-port-override")).textContent).toContain("OXPLOW_DEVICE_PORT");
+  expect(screen.getByTestId("devices-port-override").textContent).toContain("7500");
 });

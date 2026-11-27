@@ -1,6 +1,6 @@
 //! `oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]
 //!   [--allow-host <name>]… [--daemon <path>] [--for-app]
-//!   [--public-bind <addr> [--tls-cert <pem> --tls-key <pem>]]`
+//!   [--public-bind <ip> [--device-port <port>] [--tls-cert <pem> --tls-key <pem>]]`
 //! `oxplow-host project <add <dir> | list | remove <id>>`
 //!
 //! A headless host (no `--for-app`) runs until it is stopped: a signal or
@@ -25,7 +25,8 @@ fn usage() -> ! {
         "usage: oxplow-host serve [--bind 127.0.0.1:0] [--token-stdin] [--ui <dir>]\n\
          \x20                        [--allow-host <name>]... [--daemon <path>]\n\
          \x20                        [--for-app]\n\
-         \x20                        [--public-bind <addr> [--tls-cert <pem> --tls-key <pem>]]\n\
+         \x20                        [--public-bind <ip> [--device-port <port>]\n\
+         \x20                         [--tls-cert <pem> --tls-key <pem>]]\n\
          \x20      oxplow-host project add <dir>\n\
          \x20      oxplow-host project list\n\
          \x20      oxplow-host project remove <id>\n\
@@ -39,8 +40,9 @@ fn usage() -> ! {
          --for-app makes it the Mac app's host: stdin after the token is its\n\
          lifeline, and it ends with the app. Without it the host is headless\n\
          and runs until it is stopped. --public-bind listens a second time, for\n\
-         other devices (HTTPS with --tls-cert and --tls-key); --bind stays for\n\
-         this machine."
+         other devices (HTTPS, with the home's own certificate or --tls-cert and\n\
+         --tls-key), on --device-port, else OXPLOW_DEVICE_PORT, else 7400; --bind\n\
+         stays for this machine."
     );
     std::process::exit(2);
 }
@@ -126,6 +128,7 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
     let mut daemon: Option<PathBuf> = None;
     let mut for_app = false;
     let mut public_bind: Option<String> = None;
+    let mut device_port_flag: Option<u16> = None;
     let mut tls_cert: Option<PathBuf> = None;
     let mut tls_key: Option<PathBuf> = None;
     let mut it = rest.iter();
@@ -136,6 +139,14 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             "--for-app" => for_app = true,
             "--public-bind" => {
                 public_bind = Some(it.next().map(|s| s.to_string()).unwrap_or_else(|| usage()))
+            }
+            "--device-port" => {
+                // 0 is a free port, as with --bind (a test's).
+                let text = it.next().unwrap_or_else(|| usage());
+                device_port_flag =
+                    Some(text.parse::<u16>().unwrap_or_else(|_| {
+                        fail(format!("--device-port: \"{text}\" is not a port"))
+                    }));
             }
             "--tls-cert" => {
                 tls_cert = Some(
@@ -179,10 +190,22 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         fail("--bind is for this machine (a loopback address); other devices come in on --public-bind");
     }
 
+    // Other devices' listener: an address of this machine's, on the port
+    // `--device-port` names, else `OXPLOW_DEVICE_PORT`, else 7400.
     let public_bind: Option<SocketAddr> = public_bind.map(|b| {
-        b.parse()
-            .unwrap_or_else(|e| fail(format!("invalid --public-bind address: {e}")))
+        let ip: std::net::IpAddr = b.parse().unwrap_or_else(|e| {
+            fail(format!(
+                "invalid --public-bind address (an IP address; the port is --device-port): {e}"
+            ))
+        });
+        let env = std::env::var(oxplow_host::settings::PORT_ENV).ok();
+        let port = oxplow_host::settings::device_port(device_port_flag, env.as_deref(), None)
+            .unwrap_or_else(|e| fail(e.to_string()));
+        SocketAddr::new(ip, port.port)
     });
+    if device_port_flag.is_some() && public_bind.is_none() {
+        fail("--device-port is for --public-bind");
+    }
     // Other devices come in over HTTPS only: with the certificate given
     // (signed by any CA), else one the home's own root issues for this
     // listener (`certs.rs`; a device trusts that root once). One that cannot

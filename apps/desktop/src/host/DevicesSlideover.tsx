@@ -36,12 +36,13 @@ const DEVICES_API: DevicesApi = {
 };
 
 /** The form's fields, as typed: names one per comma, paths as text. */
-type Draft = { allow: boolean; address: string; names: string; cert: string; key: string };
+type Draft = { allow: boolean; address: string; port: string; names: string; cert: string; key: string };
 
 function draftOf(s: HostSettings): Draft {
   return {
     allow: s.allowOtherDevices ?? false,
     address: s.address ?? "",
+    port: s.port === null || s.port === undefined ? "" : String(s.port),
     names: (s.names ?? []).join(", "),
     cert: s.tlsCert ?? "",
     key: s.tlsKey ?? "",
@@ -59,8 +60,25 @@ function settingsOf(d: Draft): HostSettings {
       .filter((n) => n.length > 0),
     tlsCert: path(d.cert),
     tlsKey: path(d.key),
+    // Blank is the default port; the host refuses one that is no port.
+    port: d.port.trim() === "" ? null : Number(d.port.trim()),
   };
 }
+
+/** Whether the port field holds something that is no port (blank is the
+ *  default). */
+function portBad(text: string): boolean {
+  const t = text.trim();
+  if (t === "") return false;
+  const n = Number(t);
+  return !Number.isInteger(n) || n < 1 || n > 65535;
+}
+
+/** Where an override of the port comes from, in the person's words. */
+const OVERRIDE: Record<string, string> = {
+  flag: "the app's --device-port",
+  env: "OXPLOW_DEVICE_PORT",
+};
 
 const same = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -304,6 +322,31 @@ export function DevicesSlideover({
             </select>
           </label>
           <label style={fieldStyle}>
+            Port (blank: 7400)
+            <input
+              data-testid="devices-port"
+              inputMode="numeric"
+              value={draft.port}
+              placeholder="7400"
+              onChange={(e) => set({ port: e.target.value })}
+            />
+          </label>
+          {portBad(draft.port) ? (
+            <p data-testid="devices-port-bad" role="alert" style={mutedStyle}>
+              A port is a number from 1 to 65535.
+            </p>
+          ) : null}
+          {view?.port && OVERRIDE[view.port.from] ? (
+            <p data-testid="devices-port-override" style={mutedStyle}>
+              Port {view.port.port} is set by {OVERRIDE[view.port.from]}, over this setting.
+            </p>
+          ) : null}
+          {view?.portProblem ? (
+            <p data-testid="devices-port-problem" role="alert" style={mutedStyle}>
+              {view.portProblem}
+            </p>
+          ) : null}
+          <label style={fieldStyle}>
             Other names a device may use (comma between; optional)
             <input
               data-testid="devices-names"
@@ -333,7 +376,7 @@ export function DevicesSlideover({
               : "These apply the next time Oxplow starts (quit and open it again)."}
           </p>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" data-testid="devices-save" disabled={!changed}>
+            <button type="submit" data-testid="devices-save" disabled={!changed || portBad(draft.port)}>
               Save
             </button>
             <button type="button" data-testid="devices-discard" disabled={!changed} onClick={() => setDraft(saved)}>

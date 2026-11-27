@@ -2312,6 +2312,12 @@ export type Descriptor = {
 	source: DeclaredAt,
 };
 
+/**  The port other devices come in on, and where it came from. */
+export type DevicePort = {
+	port: number,
+	from: PortFrom,
+};
+
 export type DeviceView = {
 	id: string,
 	name: string,
@@ -2333,6 +2339,13 @@ export type DevicesView = {
 	settingsApplied: boolean,
 	/**  The addresses a device opens: `https://<name>:<port>/`. */
 	openOnDevice: string[],
+	/**
+	 *  The port other devices come in on and where it came from (the app's
+	 *  `--device-port` or `OXPLOW_DEVICE_PORT` win over the setting); none
+	 *  when the one given is no port (`port_problem` says).
+	 */
+	port: DevicePort | null,
+	portProblem: string | null,
 	/**  Where the host listens for other devices now, or why it cannot. */
 	public: PublicListener | null,
 	/**  Why the host did not answer: the settings still show, to fix. */
@@ -3582,8 +3595,8 @@ export type HostId = string;
 export type HostSettings = {
 	allowOtherDevices?: boolean,
 	/**
-	 *  Where other devices reach this machine: `100.101.102.103:7400`, or a
-	 *  bare address (the default port is added).
+	 *  Where other devices reach this machine: an IP address of its own
+	 *  (`100.101.102.103`). The port is `port`.
 	 */
 	address?: string,
 	/**
@@ -3597,6 +3610,11 @@ export type HostSettings = {
 	 */
 	tlsCert?: string | null,
 	tlsKey?: string | null,
+	/**
+	 *  The port other devices come in on; none is [`DEFAULT_PORT`]. A
+	 *  `--device-port` flag or `OXPLOW_DEVICE_PORT` wins over it.
+	 */
+	port?: number | null,
 };
 
 /**  One implementation as the extension declares it. */
@@ -5819,6 +5837,18 @@ export type PointOffer = {
 	/**  By extension, then command id. */
 	commands: PointCommand[],
 };
+
+/**
+ *  Where the port for other devices came from, for the Devices window to say
+ *  (a flag or the environment wins over what it saves).
+ */
+export type PortFrom =
+/**  `--device-port` on the app's or the host's command line. */
+"flag" |
+/**  `OXPLOW_DEVICE_PORT`. */
+"env" |
+/**  The saved setting. */
+"saved" | "default";
 
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;

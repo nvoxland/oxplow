@@ -24,7 +24,9 @@ fn other_devices_reach_the_host_over_https_and_this_machine_over_http() {
             "serve",
             "--token-stdin",
             "--public-bind",
-            "127.0.0.1:0",
+            "127.0.0.1",
+            "--device-port",
+            "0",
             "--tls-cert",
         ])
         .arg(testdata("localhost-cert.pem"))
@@ -90,7 +92,14 @@ fn other_devices_reach_the_host_over_https_and_this_machine_over_http() {
 fn a_bad_certificate_leaves_other_devices_out_and_says_why() {
     let home = tempfile::tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
-        .args(["serve", "--token-stdin", "--public-bind", "127.0.0.1:0"])
+        .args([
+            "serve",
+            "--token-stdin",
+            "--public-bind",
+            "127.0.0.1",
+            "--device-port",
+            "0",
+        ])
         .args([
             "--tls-cert",
             "/nowhere/cert.pem",
@@ -141,7 +150,14 @@ fn a_bad_certificate_leaves_other_devices_out_and_says_why() {
 fn with_no_certificate_the_host_issues_its_own_and_offers_its_root() {
     let home = tempfile::tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
-        .args(["serve", "--token-stdin", "--public-bind", "127.0.0.1:0"])
+        .args([
+            "serve",
+            "--token-stdin",
+            "--public-bind",
+            "127.0.0.1",
+            "--device-port",
+            "0",
+        ])
         .env("OXPLOW_HOME", home.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

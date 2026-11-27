@@ -202,6 +202,13 @@ Two things it does **not** move:
 - **Tauri's `app_config_dir()`** (webview storage, etc.) still uses the
   platform location.
 
+#### Two apps and the tablet's port
+
+Each home's app listens for other devices on its own port: `oxplow
+--device-port 7401 .`, `OXPLOW_DEVICE_PORT=7401 bun run run:dev`, or the
+port in Devices…, in that order (default 7400). Two apps on one machine
+that both allow other devices need two ports.
+
 #### The instance lock is per project, not per home
 
 `OXPLOW_HOME` separates global config; it does not let two builds hold
@@ -240,7 +247,8 @@ cargo build -p oxplow-host -p oxplow-daemon && bun run --cwd apps/desktop build
 ```
 
 Open `http://127.0.0.1:7400/`, type the code, and Open the project. On a
-server, add `--public-bind <private-address>:7400`: other devices come in
+server, add `--public-bind <private-address>` (port 7400, or `--device-port
+<port>` / `OXPLOW_DEVICE_PORT`): other devices come in
 over HTTPS with the host's own certificate for that address (a browser there
 trusts `/host/ca.pem` once; `--tls-cert`/`--tls-key` give one of your own),
 and pair from the other machine's browser. `oxplow-host stop` ends it; `oxplow-host devices` lists

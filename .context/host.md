@@ -72,8 +72,9 @@ or nobody is connected:
   `--allow-host <name>` (repeatable), `--daemon <path>` (another daemon
   binary, as `BinaryDaemon`: the browser suite runs `oxplow-daemon-sim`) and
   `--for-app` (the app's host: needs `--token-stdin`; stdin after the token
-  line is its lifeline), and `--public-bind <addr>` with `--tls-cert <pem>
-  --tls-key <pem>` (see "HTTPS").
+  line is its lifeline), and `--public-bind <ip>` with `--device-port
+  <port>` (else `OXPLOW_DEVICE_PORT`, else 7400; 0 is a free port, a
+  test's) and `--tls-cert <pem> --tls-key <pem>` (see "HTTPS").
 - **Logs:** stderr and `<global_config_dir>/logs/host.<date>.log`, daily, a
   week kept. Stdout carries only the `oxplow-host listening on <url>` line (and
   a generated token).
@@ -110,12 +111,17 @@ The app's host is a child of the app, as a daemon is a child of the host
   host answers no CORS there.
 - **Allow other devices** is the shell's own file in the home,
   `host-settings.json` (`oxplow_host::settings`, beside `device.json`):
-  `{ allowOtherDevices, address, names, tlsCert, tlsKey }`. The app reads it
-  when it starts its host and passes `--public-bind <address>` (port 7400 when
-  none is given: fixed, since a browser's origin holds its token), an
+  `{ allowOtherDevices, address, port, names, tlsCert, tlsKey }`. The app
+  reads it when it starts its host and passes `--public-bind <address>` (an
+  IP of this Mac's) and `--device-port <port>`, an
   `--allow-host` for the address and each name, and a certificate of the
   person's own when given (else the host issues its own; private names
-  only). Never every network by default: the person picks one of this Mac's
+  only). **The port** other devices come in on is the app's own
+  `--device-port <port>` (`oxplow --device-port 7401 .`), else
+  `OXPLOW_DEVICE_PORT`, else the saved `port`, else 7400
+  (`settings::device_port`; Devices… says when the flag or the environment
+  overrides the setting). It stays fixed across starts, since a browser's
+  origin holds its token. Never every network by default: the person picks one of this Mac's
   private addresses (`host_addresses`, `certs::private_addresses`). A change
   applies at the next app start (the window says whether the host runs with
   it). On, the host starts with the app, not at the first open.
@@ -252,7 +258,7 @@ Without it a page whose name flips to this machine (DNS rebinding) could call
 the host as a same-origin page and act with a token kept there. `--bind` is
 loopback only (the owner's token is good there; `serve` refuses another
 address); other devices come in on `--public-bind`: `oxplow-host serve
---public-bind 100.101.102.103:7400 --allow-host mac.tailnet.ts.net`.
+--public-bind 100.101.102.103 --device-port 7400 --allow-host mac.tailnet.ts.net`.
 
 ## Routing: `/p/<project>/…`
 
