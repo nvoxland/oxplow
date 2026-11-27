@@ -13,7 +13,6 @@ use oxplow_ai::secrets::SecretStore;
 use serde::{Deserialize, Serialize};
 
 use crate::client::{ClientError, HostClient};
-use crate::devices::PairedDevice;
 
 /// A host this app paired with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -84,46 +83,34 @@ fn save(config_dir: &Path, hosts: Vec<RemoteHost>) -> std::io::Result<()> {
     oxplow_config::write_atomic(&path(config_dir), &bytes)
 }
 
-/// Pair this app with the host at `address` using `code`, as a desktop named
-/// `name`; keep its token in `secrets` and the host in the home.
-pub async fn pair(
+/// Ask the host at `address` to pair this app, as a desktop named `name`:
+/// its origin, and the ask (the code for the person to type there, with
+/// `oxplow host pair <code>` or its Devices page).
+pub async fn ask(address: &str, name: &str) -> Result<(String, crate::client::PairAsk), String> {
+    let origin = origin_of(address)?;
+    let ask = crate::client::ask_to_pair(&origin, name, "desktop").await?;
+    Ok((origin, ask))
+}
+
+/// Collect the ask `request` at `origin`: once the person approved it
+/// there, keep its token in `secrets` and the host in the home, and answer
+/// it; none while it still waits; an error once it ended.
+pub async fn collect(
     config_dir: &Path,
     secrets: &dyn SecretStore,
-    address: &str,
-    code: &str,
-    name: &str,
-) -> Result<RemoteHost, String> {
-    let origin = origin_of(address)?;
-    let answer = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?
-        .post(format!("{origin}/host/pair"))
-        .json(&serde_json::json!({ "code": code.trim(), "name": name, "kind": "desktop" }))
-        .send()
-        .await
-        .map_err(|e| format!("{origin} did not answer: {e}"))?;
-    if !answer.status().is_success() {
-        let body: serde_json::Value = answer.json().await.unwrap_or_default();
-        return Err(body["error"]
-            .as_str()
-            .unwrap_or("the host refused the code")
-            .to_string());
-    }
-    #[derive(Deserialize)]
-    struct Paired {
-        device: PairedDevice,
-        token: String,
-    }
-    let paired: Paired = answer.json().await.map_err(|e| e.to_string())?;
+    origin: &str,
+    request: &str,
+) -> Result<Option<RemoteHost>, String> {
+    let Some((device, token)) = crate::client::collect_pairing(origin, request).await? else {
+        return Ok(None);
+    };
     secrets
-        .set(&account(&origin), &paired.token)
+        .set(&account(origin), &token)
         .map_err(|e| format!("could not keep the host's token: {e}"))?;
     let host = RemoteHost {
-        origin: origin.clone(),
-        device_id: paired.device.id.to_string(),
-        device_name: paired.device.name,
+        origin: origin.to_string(),
+        device_id: device.id.to_string(),
+        device_name: device.name,
     };
     let mut hosts: Vec<RemoteHost> = list(config_dir)
         .into_iter()
@@ -131,7 +118,7 @@ pub async fn pair(
         .collect();
     hosts.push(host.clone());
     save(config_dir, hosts).map_err(|e| e.to_string())?;
-    Ok(host)
+    Ok(Some(host))
 }
 
 /// The client for a paired host, with its token from `secrets`.
@@ -206,14 +193,24 @@ mod tests {
         let fx = Fixture::new(RUNS);
         let url = crate::client::tests::run_host(&fx, "owner").await;
         let owner = HostClient::new(&url, "owner");
-        let (code, _) = owner.pairing_code().await.unwrap();
         let home = tempfile::tempdir().unwrap();
         let secrets = MemorySecrets::default();
 
-        let wrong = pair(home.path(), &secrets, &url, "WRON-GCOD", "Studio").await;
-        assert!(wrong.unwrap_err().contains("wrong"));
-        let host = pair(home.path(), &secrets, &url, &code, "Studio")
+        let (origin, asked) = ask(&url, "Studio").await.unwrap();
+        assert_eq!(origin, url);
+        let waiting = collect(home.path(), &secrets, &url, &asked.request);
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), waiting)
+                .await
+                .ok(),
+            None,
+            "it waits for the person there"
+        );
+        assert!(list(home.path()).is_empty());
+        owner.approve_pairing(&asked.code).await.unwrap();
+        let host = collect(home.path(), &secrets, &url, &asked.request)
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(host.origin, url);
         assert_eq!(list(home.path()), vec![host.clone()]);

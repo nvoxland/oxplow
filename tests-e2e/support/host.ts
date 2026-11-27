@@ -20,8 +20,9 @@ export type Host = {
   addProject(name: string): string;
   /** Hold `project` for a device and wait until its daemon runs. */
   hold(project: string, device?: string): Promise<void>;
-  /** A pairing code, as the owner makes one (Devices… on the Mac). */
-  pairingCode(): Promise<string>;
+  /** Pair the device that shows `code`, as the owner types it (the
+   *  Devices page on the Mac, `oxplow host pair <code>`). */
+  approve(code: string): Promise<void>;
   /** The paired devices. */
   devices(): Promise<Array<{ id: string; name: string; kind: string }>>;
   /** Remove a paired device, as its owner. */
@@ -136,8 +137,8 @@ export async function startHost(options: HostOptions = {}): Promise<Host> {
           await new Promise((r) => setTimeout(r, 200));
         }
       },
-      async pairingCode() {
-        return ((await call("POST", "/host/pairing")) as { code: string }).code;
+      async approve(code) {
+        await call("POST", "/host/pair/approve", { code });
       },
       async devices() {
         return (await call("GET", "/host/devices")) as Array<{ id: string; name: string; kind: string }>;

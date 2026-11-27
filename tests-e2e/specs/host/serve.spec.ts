@@ -15,12 +15,14 @@ test.afterAll(async () => {
   await host?.stop();
 });
 
-/** Pair `page` at the host's home with a code the owner made. */
+/** Pair `page` at the host's home: it asks as `name` and shows a code,
+ *  which the owner types. */
 async function pair(page: Page, name: string) {
   await loadScreen(page, `${host.base}/`, "pair-screen");
-  await page.getByTestId("pair-code").fill(await host.pairingCode());
   await page.getByTestId("pair-name").fill(name);
   await page.getByTestId("pair-name").press("Enter");
+  const code = (await page.getByTestId("pair-shown-code").textContent())!;
+  await host.approve(code);
   await expect(page.getByTestId("host-home")).toBeVisible();
 }
 
@@ -83,24 +85,24 @@ test("the Devices page shows this device and makes a pairing code", async ({ pag
   const devices = shown(page, "page=devices");
   await expect(devices.getByText("Kitchen")).toBeVisible();
   await expect(devices.getByText("Connected")).toBeVisible();
-  // The host listens for other devices: the page says where, and pairing is offered.
+  // The host listens for other devices: the page says where, and offers
+  // to pair one by the code it shows.
   await expect(devices.getByText(/^On: a device opens/)).toBeVisible();
-  await expect(devices.getByText("None yet")).toBeVisible();
-  await devices.getByTestId("viz-action-pair-device").click();
-  const shownCode = devices.getByText(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/);
-  await expect(shownCode).toBeVisible();
 
-  // Another device pairs with that code, on its own: the open page shows
-  // it with no reload, and the code is used up.
-  const code = (await shownCode.textContent())!;
-  const paired = await fetch(`${host.base}/host/pair`, {
+  // Another device asks on its own: the open page says it waits (no
+  // reload); typing its code pairs it, and it is listed.
+  const asked = await fetch(`${host.base}/host/pair`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, name: "Garage tablet", kind: "tablet" }),
+    body: JSON.stringify({ name: "Garage tablet", kind: "tablet" }),
   });
-  expect(paired.status).toBe(200);
-  await expect(devices.getByText("Garage tablet")).toBeVisible();
-  await expect(devices.getByText("None yet")).toBeVisible();
+  const { code } = (await asked.json()) as { code: string };
+  await expect(devices.getByText(/Waiting: Garage tablet/)).toBeVisible();
+  const pairForm = devices.locator('[data-node="pair"]');
+  await pairForm.getByLabel("The code the device shows").fill(code);
+  await pairForm.getByTestId("viz-form-fields-submit").click();
+  await expect(devices.getByRole("cell", { name: "Garage tablet" })).toBeVisible();
+  await expect(devices.getByText(/Waiting: Garage tablet/)).toHaveCount(0);
 });
 
 test("a project that is not held has no daemon to reach", async () => {

@@ -69,8 +69,9 @@ or nobody is connected:
   registered; 400 for a folder that is not a project), `POST|DELETE
   /host/holds` (JSON `{ device, project }`; each answers the project's view;
   404 for an unknown project, 400 for no device), `POST /host/shutdown` (202;
-  the host stops, its daemons with it), `POST /host/pairing`, `POST
-  /host/pair`, `GET /host/devices`, `PATCH|DELETE /host/devices/<id>`, `GET
+  the host stops, its daemons with it), `POST /host/pair`, `GET
+  /host/pair/<request>`, `POST /host/pair/approve`, `GET
+  /host/pair/waiting` (see "Pairing"), `GET /host/devices`, `PATCH|DELETE /host/devices/<id>`, `GET
   /host/me`, `DELETE /host/me`, and the socket `GET /host/events` (`?token=`;
   the projects, as `GET /host/projects` answers them for this caller, when it
   opens and after each change of a hold or a daemon's state, `Host::watch`; a
@@ -126,8 +127,8 @@ The app's host is a child of the app, as a daemon is a child of the host
   saved settings, the port in force and where it came from, the flags of
   the host's run over them, why they cannot be in force, the addresses a
   device opens, this machine's private addresses and `.local`
-  name, whether there is a root to trust, the pairing code in force from
-  `GET /host/pairing`, and `listening`: where the host listens for other
+  name, whether there is a root to trust, the devices waiting to pair
+  (`waiting`, from `GET /host/pair/waiting`), and `listening`: where the host listens for other
   devices as it runs); a daemon no host started reads `hosted = 0`. The
   page leads with the checkbox; its status line shows only what the
   checkbox doesn't say (on and where, a problem, the flags in force), and
@@ -208,8 +209,10 @@ The app's host is a child of the app, as a daemon is a child of the host
   (it says so); use another `OXPLOW_HOME`, or connect to it as below.
 - **Other computers** (the launcher's section; `oxplow_host::remote`,
   `commands/remote_hosts.rs`): the app pairs with a host on another machine
-  as a `desktop` device, with its address (`https` unless it says `http`) and
-  a code from `oxplow host pair` there. The device token is in the keychain
+  as a `desktop` device, with its address (`https` unless it says `http`):
+  the launcher asks there (`ask_host`), shows the code, and waits
+  (`collect_host`) while the person there types it with `oxplow host pair
+  <code>` or its Devices page. The device token is in the keychain
   (account `oxplow-host:<origin>`; the shell's dev build is signed for it,
   DEV.md "Sign dev builds"), the host in `remote-hosts.json` (origin, the id
   and name the host gave this Mac). The launcher lists each host's projects
@@ -268,31 +271,46 @@ a terminal on the host's machine.
   token, or a headless host's. It is good only on the loopback listener
   (`--bind`) and on the **owner socket**, `host.sock` in the home (mode 0600;
   every request there is the owner, by the file's mode). The CLI uses the
-  socket: `oxplow-host pair` (or `oxplow host pair`) prints a code, `devices
-  [remove <id>]`, `status`, `stop`.
+  socket: `oxplow-host pair` (or `oxplow host pair`) lists who waits to pair,
+  `pair <code>` pairs the device showing it, `devices [remove <id>]`,
+  `status`, `stop`.
 - **A device** holds the token it got at pairing, good on every listener.
   `host.db`'s `device` table keeps `{ id, name, kind, paired_at,
   token_sha256 }` (`devices.rs`): only a hash, so the file never holds a
   token, and a request's token is found by its hash.
 
-Routes by role: owner only: `POST /host/pairing`, `GET /host/devices`,
+Routes by role: owner only: `POST /host/pair/approve`, `GET
+/host/pair/waiting`, `GET /host/devices`,
 `PATCH|DELETE /host/devices/<id>`, `POST /host/projects`, `DELETE
 /host/projects/<id>`, `POST /host/shutdown`. Owner or device: `GET /host/status`, `GET /host/projects`,
 `POST|DELETE /host/holds` (a device's hold is always its own), `GET /host/me`
 (`{ owner, device, build }`), `DELETE /host/me` (a device forgets itself).
-Anyone who reaches the host: `POST /host/pair`.
+Anyone who reaches the host: `POST /host/pair`, `GET /host/pair/<request>`.
 
-- **A code** (`POST /host/pairing`, owner) is 8 characters with no
-  look-alikes (`23456789ABCDEFGHJKMNPQRSTUVWXYZ`), shown `ABCD-EFGH`, good once
-  for 10 minutes, kept in memory.
-- **`POST /host/pair` `{ code, name, kind }`** answers `{ device, token }`:
-  the host makes the device's id (a device never chooses one). It takes only
-  `Content-Type: application/json`, and an `Origin` that is the host's own
-  when it names one: a page on another site cannot send it without a
-  preflight, and no `/host/*` route answers one. A wrong code costs a second,
-  each its own (`WRONG_CODE_WAIT`), nothing held meanwhile: a connection
-  gets 600 tries in a code's 10 minutes against 31^8 codes, and a flood of
-  wrong codes delays no other device and never the owner making one.
+- **Pairing goes from the device** (`devices.rs` `PairRequests`, in memory):
+  the new device asks and shows a code; the owner types that code on the
+  computer (the Devices page, `oxplow host pair <code>`), and only then is
+  the device paired. A code someone else sees lets nobody in, and nothing a
+  device sends can be guessed right, so there is no wrong-code wait.
+- **`POST /host/pair` `{ name, kind }`** answers `{ request, code,
+  expires_in }`: the code (8 characters with no look-alikes,
+  `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, shown `ABCD-EFGH`) for the device to
+  show, and the request, the ask's secret. An ask waits 10 minutes; at most
+  8 wait at once (`429` after). It takes only `Content-Type:
+  application/json`, and an `Origin` that is the host's own when it names
+  one: a page on another site cannot send it without a preflight, and no
+  `/host/*` route answers one.
+- **`GET /host/pair/waiting`** (owner) lists `{ name, kind }` of each device
+  waiting, never its code: typing the code the device shows is the owner's
+  proof it is that one.
+- **`POST /host/pair/approve` `{ code }`** (owner; any case, the dash or
+  none) pairs the waiting device with that code under the name it asked
+  for, and answers its record; `404` when no device waits with it. The host
+  makes the device's id (a device never chooses one).
+- **`GET /host/pair/<request>`** is the device collecting its ask: it waits
+  up to 20 s for the owner (on `Access::changes`), answers `{ device, token
+  }` once approved (handed over once), `202` while still waiting (the page
+  asks again), `404` once the ask ended.
 - **Who a device is** comes from its record: on `ipc/…` the host replaces
   `Oxplow-Device`; the socket's query is rebuilt from its parsed pairs, with
   only `connection` (the page load) as sent and `device`, `name`, `kind`

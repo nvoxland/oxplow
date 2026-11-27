@@ -33,19 +33,36 @@ async function refusal(answer: Response): Promise<HostRefusal> {
   return new HostRefusal(body?.error ?? `the host answered ${answer.status}`, answer.status);
 }
 
-/** Pair this device with `code` (as the owner shows it, any case). */
-export async function pairDevice(
+/** This device's ask to pair: the code it shows for the owner to type, and
+ *  the ask's secret, which collects its token once they did. */
+export type PairAsk = { request: string; code: string; expires_in: number };
+
+/** Ask the host to pair this device, as `name` (a `kind`). */
+export async function askToPair(
   host: string,
-  code: string,
   name: string,
   kind: DeviceKind,
   doFetch: Fetch = fetch,
-): Promise<{ device: PairedDevice; token: string }> {
+): Promise<PairAsk> {
   const answer = await doFetch(`${host}/host/pair`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: code.trim(), name: name.trim(), kind }),
+    body: JSON.stringify({ name: name.trim(), kind }),
   });
+  if (!answer.ok) throw await refusal(answer);
+  return (await answer.json()) as PairAsk;
+}
+
+/** Collect an ask: the device and its token once the owner typed its code,
+ *  `null` while they have not (the host waits a while first); a refusal
+ *  once it ended. */
+export async function collectPairing(
+  host: string,
+  request: string,
+  doFetch: Fetch = fetch,
+): Promise<{ device: PairedDevice; token: string } | null> {
+  const answer = await doFetch(`${host}/host/pair/${encodeURIComponent(request)}`);
+  if (answer.status === 202) return null;
   if (!answer.ok) throw await refusal(answer);
   return (await answer.json()) as { device: PairedDevice; token: string };
 }

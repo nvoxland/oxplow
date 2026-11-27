@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getDevice } from "../device.js";
 import { shellStorage } from "../shellStorage.js";
 import { hostOrigin, keepHostToken } from "../tauri-bridge/transport.js";
-import { pairDevice, type DeviceKind } from "./hostApi.js";
+import { askToPair, collectPairing, type DeviceKind, type PairAsk } from "./hostApi.js";
 import {
   cardStyle,
   errorStyle,
@@ -17,40 +17,76 @@ import {
 
 const DEFAULT_NAME: Record<DeviceKind, string> = { desktop: "Browser", tablet: "Tablet", phone: "Phone" };
 
+/** The pause between two asks whether the owner typed the code. */
+const COLLECT_PAUSE_MS = 500;
+
 /** Before anything else on a page the host served, when this browser has no
- *  token for the host: type the code the host's owner shows (Oxplow ▸
- *  Devices… on the Mac, or `oxplow host pair`) and a name for this device.
- *  The host makes the device's id and token; the page keeps both and loads
- *  again. `pair` and `done` are a test's stand-ins. */
+ *  token for the host: this device asks to pair, with a name, and shows the
+ *  code the host gives it. The owner types that code on the computer
+ *  (Oxplow ▸ Devices…, or `oxplow host pair <code>`); only then is this
+ *  device paired, and it keeps the id and token the host made and loads
+ *  again. `ask`, `collect`, `pause` and `done` are a test's stand-ins. */
 export function PairScreen({
-  pair = pairDevice,
+  ask = askToPair,
+  collect = collectPairing,
+  pause = COLLECT_PAUSE_MS,
   done = () => window.location.reload(),
 }: {
-  pair?: typeof pairDevice;
+  ask?: typeof askToPair;
+  collect?: typeof collectPairing;
+  pause?: number;
   done?: () => void;
 }) {
   const kind = getDevice().kind;
-  const [code, setCode] = useState("");
   const [name, setName] = useState(DEFAULT_NAME[kind]);
-  const [pairing, setPairing] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [asked, setAsked] = useState<PairAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const host = hostOrigin() ?? "";
 
   const submit = async () => {
-    if (pairing || code.trim().length === 0) return;
-    setPairing(true);
+    if (asking || name.trim().length === 0) return;
+    setAsking(true);
     setError(null);
     try {
-      const paired = await pair(host, code, name, kind);
-      keepHostToken(paired.token);
-      // The host's id for this device, so the daemon knows it as the host does.
-      shellStorage.setItem("oxplow.device", paired.device.id);
-      done();
+      setAsked(await ask(host, name, kind));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setPairing(false);
+    } finally {
+      setAsking(false);
     }
   };
+
+  // Wait for the owner: each collect waits a while at the host; ask again
+  // until paired or the ask ended.
+  useEffect(() => {
+    if (!asked) return;
+    let live = true;
+    void (async () => {
+      try {
+        for (;;) {
+          const paired = await collect(host, asked.request);
+          if (!live) return;
+          if (paired) {
+            keepHostToken(paired.token);
+            // The host's id for this device, so the daemon knows it as the host does.
+            shellStorage.setItem("oxplow.device", paired.device.id);
+            done();
+            return;
+          }
+          await new Promise((r) => setTimeout(r, pause));
+          if (!live) return;
+        }
+      } catch (e) {
+        if (!live) return;
+        setAsked(null);
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [asked, collect, done, host, pause]);
 
   return (
     <div data-testid="pair-screen" style={rootStyle}>
@@ -58,48 +94,49 @@ export function PairScreen({
         <header style={{ marginBottom: 20 }}>
           <h1 style={titleStyle}>Pair this device</h1>
           <p style={subtitleStyle}>
-            On the computer that runs Oxplow, choose Oxplow ▸ Devices… ▸ Pair a Device (or run{" "}
-            <code>oxplow host pair</code>), then type the code it shows.
+            {asked
+              ? "On the computer that runs Oxplow, open Oxplow ▸ Devices… and type this code (or run oxplow host pair with it):"
+              : "Name this device, then ask: it shows a code to type on the computer that runs Oxplow."}
           </p>
         </header>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-          style={{ ...formStyle, flexDirection: "column", alignItems: "stretch" }}
-        >
-          <input
-            data-testid="pair-code"
-            aria-label="Pairing code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="ABCD-EFGH"
-            autoFocus
-            autoComplete="one-time-code"
-            autoCapitalize="characters"
-            spellCheck={false}
-            disabled={pairing}
-            style={inputStyle}
-          />
-          <input
-            data-testid="pair-name"
-            aria-label="This device's name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="This device's name"
-            disabled={pairing}
-            style={inputStyle}
-          />
-          <button
-            type="submit"
-            data-testid="pair-submit"
-            disabled={pairing || code.trim().length === 0}
-            style={primaryButtonStyle}
+        {asked ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <div
+              data-testid="pair-shown-code"
+              style={{ fontSize: "var(--text-xl)", fontWeight: 600, letterSpacing: "0.12em", fontFamily: "var(--font-mono)" }}
+            >
+              {asked.code}
+            </div>
+            <div style={subtitleStyle}>Waiting for it there… The code lasts ten minutes.</div>
+          </div>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+            style={{ ...formStyle, flexDirection: "column", alignItems: "stretch" }}
           >
-            {pairing ? "Pairing…" : "Pair"}
-          </button>
-        </form>
+            <input
+              data-testid="pair-name"
+              aria-label="This device's name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="This device's name"
+              autoFocus
+              disabled={asking}
+              style={inputStyle}
+            />
+            <button
+              type="submit"
+              data-testid="pair-submit"
+              disabled={asking || name.trim().length === 0}
+              style={primaryButtonStyle}
+            >
+              {asking ? "Asking…" : "Show a Code"}
+            </button>
+          </form>
+        )}
         <p style={{ ...subtitleStyle, marginTop: 16 }} data-testid="pair-trust">
           Did the browser warn about this page? Make this device trust the computer once:{" "}
           <a href={`${host}/host/ca.pem`} download="oxplow-root.crt">

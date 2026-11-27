@@ -405,12 +405,8 @@ mod tests {
             .unwrap();
             std::fs::write(ui.path().join("assets/app.js"), "console.log(1)").unwrap();
             std::fs::write(ui.path().parent().unwrap().join("secret.txt"), "no").ok();
-            let access = crate::access::Access::new(
-                HOST_TOKEN.into(),
-                fx.db.clone(),
-                Default::default(),
-                Duration::from_millis(10),
-            );
+            let access =
+                crate::access::Access::new(HOST_TOKEN.into(), fx.db.clone(), Default::default());
             let app = app(ServeConfig {
                 host: fx.host.clone(),
                 access: access.clone(),
@@ -1141,7 +1137,6 @@ mod tests {
                 HOST_TOKEN.into(),
                 fx.db.clone(),
                 Default::default(),
-                Duration::from_millis(10),
             ),
             listener: crate::access::Listener::Loopback,
             ui_dir: None,

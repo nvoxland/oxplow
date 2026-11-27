@@ -243,10 +243,10 @@ desk) runs oxplow, and the browser suite's host specs do the same
 cargo build -p oxplow-host -p oxplow-daemon && bun run --cwd apps/desktop build
 ./target/debug/oxplow-host project add .                 # register the project
 ./target/debug/oxplow-host serve --bind 127.0.0.1:7400   # runs until stopped; prints its token
-./target/debug/oxplow-host pair                          # in another terminal: a pairing code
 ```
 
-Open `http://127.0.0.1:7400/`, type the code, and Open the project. On a
+Open `http://127.0.0.1:7400/` and choose Show a Code; in another terminal,
+`./target/debug/oxplow-host pair <that code>`. Then Open the project. On a
 server, `./target/debug/oxplow-host settings set allow=on
 address=<private-address>` (port 7400, or `port=<port>`; it applies at once
 on a running host), or `--public-bind <private-address>` on `serve` for

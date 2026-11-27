@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { HostRefusal, listProjects, pairDevice, setHold } from "./hostApi.js";
+import { askToPair, collectPairing, HostRefusal, listProjects, setHold } from "./hostApi.js";
 
 type Call = { url: string; init?: RequestInit };
 
@@ -10,28 +10,37 @@ function fakeFetch(answer: { status: number; body: unknown }, calls: Call[]): ty
   }) as unknown as typeof fetch;
 }
 
-// Pairing sends JSON (the host refuses anything else) with the code as
-// typed, and answers the device and its token.
-test("pairing sends the code as JSON and answers the device", async () => {
+// Asking to pair sends JSON (the host refuses anything else) with this
+// device's name and kind, and answers the code to show and the ask's secret.
+test("asking to pair sends the name as JSON and answers the code to show", async () => {
   const calls: Call[] = [];
-  const paired = await pairDevice(
+  const asked = await askToPair(
     "https://mac.ts.net:7400",
-    " abcd-efgh ",
-    "Tab S9",
+    " Tab S9 ",
     "tablet",
-    fakeFetch({ status: 200, body: { device: { id: "dev-1", name: "Tab S9", kind: "tablet" }, token: "t" } }, calls),
+    fakeFetch({ status: 200, body: { request: "secret", code: "ABCD-EFGH", expires_in: 600 } }, calls),
   );
-  expect(paired.token).toBe("t");
+  expect(asked).toEqual({ request: "secret", code: "ABCD-EFGH", expires_in: 600 });
   expect(calls[0]!.url).toBe("https://mac.ts.net:7400/host/pair");
   expect((calls[0]!.init!.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
-  expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ code: "abcd-efgh", name: "Tab S9", kind: "tablet" });
+  expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ name: "Tab S9", kind: "tablet" });
 });
 
-test("a refusal carries the host's own words", async () => {
-  const wrong = pairDevice("h", "x", "n", "tablet", fakeFetch({ status: 401, body: { error: "that code is wrong" } }, []));
-  await expect(wrong).rejects.toThrow("that code is wrong");
-  const status = await wrong.catch((e: unknown) => (e instanceof HostRefusal ? e.status : null));
-  expect(status).toBe(401);
+// Collecting the ask: none while the owner has not typed the code (202),
+// the device and its token once they did, the host's words once it ended.
+test("collecting an ask waits, then answers the device, or says it ended", async () => {
+  const calls: Call[] = [];
+  expect(await collectPairing("h", "secret", fakeFetch({ status: 202, body: { waiting: true } }, calls))).toBeNull();
+  expect(calls[0]!.url).toBe("h/host/pair/secret");
+  const paired = await collectPairing(
+    "h",
+    "secret",
+    fakeFetch({ status: 200, body: { device: { id: "dev-1", name: "Tab S9", kind: "tablet" }, token: "t" } }, []),
+  );
+  expect(paired?.token).toBe("t");
+  const ended = collectPairing("h", "secret", fakeFetch({ status: 404, body: { error: "this ask to pair ended" } }, []));
+  await expect(ended).rejects.toThrow("ended");
+  expect(await ended.catch((e: unknown) => (e instanceof HostRefusal ? e.status : null))).toBe(404);
 });
 
 test("projects and holds carry the device's token", async () => {

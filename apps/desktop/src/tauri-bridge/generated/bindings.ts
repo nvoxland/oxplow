@@ -820,8 +820,17 @@ export const commands = {
 	 *  `~/.local/bin`.
 	 */
 	installCli: () => typedError<InstalledCli, IpcError_Serialize>(__TAURI_INVOKE("install_cli")),
-	/**  Pair this Mac with a host on another machine. */
-	connectHost: (connect: ConnectHost) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("connect_host", { connect })),
+	/**
+	 *  Ask a host on another computer (`server.tailnet.ts.net:7400`,
+	 *  `https://…`) to pair this Mac: the code to type there.
+	 */
+	askHost: (address: string) => typedError<HostAsk, IpcError_Serialize>(__TAURI_INVOKE("ask_host", { address })),
+	/**
+	 *  Wait (a while) for the person at that host to type the code: `true`
+	 *  once they did (this Mac is paired, its token kept), `false` while it
+	 *  still waits; an error once the ask ended.
+	 */
+	collectHost: (origin: string, request: string) => typedError<boolean, IpcError_Serialize>(__TAURI_INVOKE("collect_host", { origin, request })),
 	/**  Each paired host, with its projects (or why it did not answer). */
 	remoteHosts: () => typedError<RemoteHostView[], IpcError_Serialize>(__TAURI_INVOKE("remote_hosts")),
 	/**
@@ -1970,12 +1979,6 @@ export type ConfigurationFile_Serialize = {
 export type Confirm = "never" | "always" |
 /**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
-
-export type ConnectHost = {
-	/**  `server.tailnet.ts.net:7400`, `https://…`. */
-	address: string,
-	code: string,
-};
 
 /**  One key of a point's context. */
 export type ContextKey = {
@@ -3537,6 +3540,23 @@ export type HookKind =
  *  Codex's `contextCompaction` item, from the chat host).
  */
 "post_compact";
+
+/**
+ *  This Mac's ask to pair with a host on another computer: the code for
+ *  the person there to type, and what collects the answer.
+ */
+export type HostAsk = {
+	origin: string,
+	/**  The ask's secret: what `collect_host` takes. */
+	request: string,
+	/**
+	 *  `ABCD-EFGH`: typed there (`oxplow host pair <code>`, or its Devices
+	 *  page).
+	 */
+	code: string,
+	/**  Seconds it waits. */
+	expiresIn: number,
+};
 
 /**
  *  The host a stream's worktree is on. Every stream is on the local machine

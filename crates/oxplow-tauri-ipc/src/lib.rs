@@ -43,9 +43,10 @@ pub const OXPLOW_EVENT_CHANNEL: &str = oxplow_app::event_channels::OXPLOW;
 pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "abort_setup",
     "answer_oauth_redirect",
+    "ask_host",
     "await_oauth_redirect",
     "clipboard_read_text",
-    "connect_host",
+    "collect_host",
     "create_project",
     "forget_remote_host",
     "install_cli",
@@ -259,7 +260,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::install_cli::install_cli,
             // the Devices window
             // hosts on other machines
-            commands::remote_hosts::connect_host,
+            commands::remote_hosts::ask_host,
+            commands::remote_hosts::collect_host,
             commands::remote_hosts::remote_hosts,
             commands::remote_hosts::open_remote_project,
             commands::remote_hosts::forget_remote_host,

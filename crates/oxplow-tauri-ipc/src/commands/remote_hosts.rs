@@ -1,9 +1,10 @@
-//! The launcher's hosts on other machines: connect this Mac to a headless
-//! host (`oxplow host serve` on a server) with a pairing code, list each
+//! The launcher's hosts on other machines: pair this Mac with a headless
+//! host (`oxplow host serve` on a server: this Mac asks and shows a code,
+//! the person there types it), list each
 //! one's projects, open one, forget one (`oxplow_host::remote`,
 //! `.context/host.md` "The Mac app").
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use specta::Type;
 use tauri::Manager;
 
@@ -38,12 +39,20 @@ pub struct RemoteHostView {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Type)]
+/// This Mac's ask to pair with a host on another computer: the code for
+/// the person there to type, and what collects the answer.
+#[derive(Clone, Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectHost {
-    /// `server.tailnet.ts.net:7400`, `https://…`.
-    pub address: String,
+pub struct HostAsk {
+    pub origin: String,
+    /// The ask's secret: what `collect_host` takes.
+    pub request: String,
+    /// `ABCD-EFGH`: typed there (`oxplow host pair <code>`, or its Devices
+    /// page).
     pub code: String,
+    /// Seconds it waits.
+    #[specta(type = oxplow_domain::JsNumber)]
+    pub expires_in: i64,
 }
 
 fn config_dir() -> Result<std::path::PathBuf, IpcError> {
@@ -51,29 +60,51 @@ fn config_dir() -> Result<std::path::PathBuf, IpcError> {
         .ok_or_else(|| IpcError::internal("no config folder for this user; set OXPLOW_HOME"))
 }
 
-/// Pair this Mac with a host on another machine.
+/// Ask a host on another computer (`server.tailnet.ts.net:7400`,
+/// `https://…`) to pair this Mac: the code to type there.
 #[tauri::command]
 #[specta::specta]
-pub async fn connect_host(
+pub async fn ask_host(
     window: tauri::Window,
     app: tauri::AppHandle,
-    connect: ConnectHost,
-) -> Result<(), IpcError> {
+    address: String,
+) -> Result<HostAsk, IpcError> {
     super::local_window_only(&window)?;
     let name = app
         .state::<ShellWindows>()
         .device()
         .map(|d| d.name.clone())
         .unwrap_or_else(|| "Mac".into());
-    oxplow_host::remote::pair(
+    let (origin, ask) = oxplow_host::remote::ask(&address, &name)
+        .await
+        .map_err(IpcError::invalid)?;
+    Ok(HostAsk {
+        origin,
+        request: ask.request,
+        code: ask.code,
+        expires_in: ask.expires_in as i64,
+    })
+}
+
+/// Wait (a while) for the person at that host to type the code: `true`
+/// once they did (this Mac is paired, its token kept), `false` while it
+/// still waits; an error once the ask ended.
+#[tauri::command]
+#[specta::specta]
+pub async fn collect_host(
+    window: tauri::Window,
+    origin: String,
+    request: String,
+) -> Result<bool, IpcError> {
+    super::local_window_only(&window)?;
+    oxplow_host::remote::collect(
         &config_dir()?,
         &oxplow_ai::secrets::KeychainSecrets,
-        &connect.address,
-        &connect.code,
-        &name,
+        &origin,
+        &request,
     )
     .await
-    .map(|_| ())
+    .map(|host| host.is_some())
     .map_err(IpcError::invalid)
 }
 

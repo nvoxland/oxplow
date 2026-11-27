@@ -1051,10 +1051,10 @@ commands:
   # host.manage — the host's devices (the Devices page; it reads
   # v_host_device and v_host_settings); a person's only.
   - name: host.pair
-    summary: "Make a pairing code: a device types it at this computer's address to pair. Good once, for ten minutes. A person's only."
+    summary: "Pair the device that shows this code: a new device opens this computer's address and shows one. A person's only."
     scope: host.manage
     op: pair
-    example: {}
+    example: {"code": "ABCD-EFGH"}
   - name: host.rename_device
     summary: "Rename a paired device. A person's only."
     scope: host.manage

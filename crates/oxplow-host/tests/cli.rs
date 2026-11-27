@@ -1,6 +1,6 @@
 //! A headless host prints its owner token once and keeps it nowhere: the CLI
 //! reaches it over the owner socket (`host.sock`, mode 0600) to make a
-//! pairing code, list devices and stop it.
+//! device (the code it shows), list devices and stop it.
 
 // Terse unwraps are the assertion style in test crates.
 #![allow(clippy::unwrap_used)]
@@ -51,18 +51,12 @@ fn the_cli_pairs_a_device_lists_it_and_stops_a_headless_host() {
     let mode = std::fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "only this user");
 
-    let (ok, said) = cli(home.path(), &["pair"]);
-    assert!(ok, "{said}");
-    let code = said
-        .split_whitespace()
-        .find(|w| w.len() == 9 && w.as_bytes()[4] == b'-')
-        .unwrap()
-        .to_string();
+    // A phone asks and shows its code; the owner types it here.
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let paired: serde_json::Value = rt.block_on(async {
+    let asked: serde_json::Value = rt.block_on(async {
         reqwest::Client::new()
             .post(format!("{base}/host/pair"))
-            .json(&serde_json::json!({ "code": code, "name": "Phone", "kind": "phone" }))
+            .json(&serde_json::json!({ "name": "Phone", "kind": "phone" }))
             .send()
             .await
             .unwrap()
@@ -70,7 +64,18 @@ fn the_cli_pairs_a_device_lists_it_and_stops_a_headless_host() {
             .await
             .unwrap()
     });
-    let id = paired["device"]["id"].as_str().unwrap();
+    let (ok, said) = cli(home.path(), &["pair"]);
+    assert!(ok && said.contains("Phone"), "who waits: {said}");
+    let (ok, said) = cli(home.path(), &["pair", "AAAA-AAAA"]);
+    assert!(!ok && said.contains("no device is waiting"), "{said}");
+    let (ok, said) = cli(home.path(), &["pair", asked["code"].as_str().unwrap()]);
+    assert!(ok && said.contains("Phone"), "{said}");
+    let id = said
+        .split_whitespace()
+        .find(|w| w.starts_with("dev-"))
+        .unwrap()
+        .to_string();
+    let id = id.as_str();
     let (ok, said) = cli(home.path(), &["devices"]);
     assert!(ok && said.contains(id) && said.contains("Phone"), "{said}");
 

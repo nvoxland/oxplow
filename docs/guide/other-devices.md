@@ -32,9 +32,10 @@ so is a private network such as Tailscale or WireGuard.
 
    The certificate can vouch only for addresses and names on private
    networks, never for a real website.
-4. Choose **Pair a Device** on the Mac. On the tablet, open
-   `https://192.168.1.20:7400/` and type the code. It is good once, for
-   ten minutes.
+4. On the tablet, open `https://192.168.1.20:7400/`, name it, and choose
+   **Show a Code**. Type that code on the Mac, under **Connect a device**
+   on the Devices page. The tablet then goes on by itself. A code lasts ten
+   minutes.
 
 The tablet then lists the projects; **Open** one to use it. Closing a
 project on the tablet lets go of it there; it keeps running while the Mac
@@ -71,15 +72,17 @@ private network, give a certificate of your own (`tls-cert=`, `tls-key=`,
 signed by any CA) and the name (`names=<name>`).
 
 This host runs until you stop it (`oxplow host stop`). Run it under
-systemd or tmux to keep it past your SSH session. `oxplow host pair`
-prints a pairing code; `oxplow host devices` lists the paired devices.
+systemd or tmux to keep it past your SSH session. `oxplow host pair
+<code>` pairs a device by the code it shows (`oxplow host pair` alone lists
+who is waiting); `oxplow host devices` lists the paired devices.
 To build it yourself, see
 [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md) "Run
 headless".
 
-From a browser, open `https://<private-address>:7400/` and type the code. From
-the Mac app, the launcher's **Other computers** takes the server's
-address and a code, then lists its projects to open. Over an SSH tunnel
+From a browser, open `https://<private-address>:7400/`, choose **Show a
+Code**, and run `oxplow host pair <that code>` on the server. From the Mac
+app, the launcher's **Other computers** takes the server's address and
+shows a code to run there the same way, then lists its projects to open. Over an SSH tunnel
 instead (`ssh -L 7400:127.0.0.1:7400 server`, the host on
 `--bind 127.0.0.1:7400`), the address is `http://127.0.0.1:7400`. A project there
 runs there: quitting the Mac app leaves it running, and its window comes

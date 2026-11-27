@@ -18,12 +18,14 @@ test.afterAll(async () => {
   await host?.stop();
 });
 
-/** Pair `page` at the host's home with a code the owner made. */
+/** Pair `page` at the host's home: it asks as `name` and shows a code,
+ *  which the owner types. */
 async function pair(page: Page, name: string) {
   await loadScreen(page, `${host.base}/`, "pair-screen");
-  await page.getByTestId("pair-code").fill(await host.pairingCode());
   await page.getByTestId("pair-name").fill(name);
   await page.getByTestId("pair-name").press("Enter");
+  const code = (await page.getByTestId("pair-shown-code").textContent())!;
+  await host.approve(code);
   await expect(page.getByTestId("host-home")).toBeVisible();
 }
 
@@ -38,11 +40,11 @@ test("other devices turn on and off from the Devices page, with no restart", asy
   await expect(devices.getByText("Turn on other devices first.")).toBeVisible();
 
   const allow = devices.getByLabel("Let other devices use oxplow on this computer");
-  const save = devices.getByTestId("viz-form-fields-submit");
+  const save = devices.locator('[data-node="settings"]').getByTestId("viz-form-fields-submit");
   await allow.check();
   await save.click();
   await expect(devices.getByText(/^On: a device opens https:\/\/127\.0\.0\.1:\d+\//)).toBeVisible();
-  await expect(devices.getByTestId("viz-action-pair-device")).toBeVisible();
+  await expect(devices.getByLabel("The code the device shows")).toBeVisible();
   const status = async () => ((await host.status()) as unknown as { public: { state: string } }).public.state;
   expect(await status()).toBe("listening");
 

@@ -9,8 +9,9 @@
 //!   and `v_host_settings` (one row: the saved settings, the port in force
 //!   and the flags of the host's run over them, the addresses a device
 //!   opens, this machine's private addresses and `.local` name, whether
-//!   there is a root to trust, the code in force), from [`read`].
-//! - Write: `oxplow.host.pair`, `rename_device`, `remove_device`,
+//!   there is a root to trust, who waits to pair), from [`read`].
+//! - Write: `oxplow.host.pair` (the code a device shows: it is paired),
+//!   `rename_device`, `remove_device`,
 //!   `set_settings`; each posts `HostChanged`, so the datasets are read
 //!   again. So does a change the host makes itself (a pairing finished on
 //!   the device, a device connecting): [`watch_host`] waits on the host's
@@ -46,7 +47,10 @@ pub const SET_SETTINGS: &str = "oxplow.host.set_settings";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct NoInput {}
+pub struct PairInput {
+    /// The code the device shows (`ABCD-EFGH`; any case, the dash or none).
+    pub code: String,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -150,7 +154,7 @@ pub async fn read(home: &Path) -> HostRead {
     let mut hosted = false;
     let mut problem: Option<String> = None;
     let mut devices = Vec::new();
-    let mut pairing: Option<Value> = None;
+    let mut waiting = Value::Array(Vec::new());
     let mut public = Value::Null;
     match call(home.to_path_buf(), "GET", "/host/status".into(), None).await {
         Ok(status) => {
@@ -189,10 +193,11 @@ pub async fn read(home: &Path) -> HostRead {
                 }
                 Err(e) => problem = Some(e.to_string()),
             }
-            pairing = call(home.to_path_buf(), "GET", "/host/pairing".into(), None)
-                .await
-                .ok()
-                .filter(|v| !v.is_null());
+            if let Ok(list) =
+                call(home.to_path_buf(), "GET", "/host/pair/waiting".into(), None).await
+            {
+                waiting = list;
+            }
             match call(home.to_path_buf(), "GET", "/host/settings".into(), None).await {
                 Ok(view) => {
                     saved = serde_json::from_value(view["saved"].clone()).unwrap_or_default();
@@ -249,16 +254,8 @@ pub async fn read(home: &Path) -> HostRead {
             in_force.as_ref().is_some_and(|e| e.tls_cert.is_none())
                 && oxplow_host_access::root_path(home).is_file(),
         ),
-        opt_text(
-            pairing
-                .as_ref()
-                .and_then(|p| p["code"].as_str().map(str::to_string)),
-        ),
-        pairing
-            .as_ref()
-            .and_then(|p| p["expires_at"].as_i64())
-            .map(SqlCell::Int)
-            .unwrap_or(SqlCell::Null(())),
+        // The devices waiting for the owner to type their codes.
+        json_cell(&waiting),
         // The host's own listener for other devices, as it runs now: its
         // address.
         opt_text(open_on_device(&public).into_iter().next()),
@@ -360,17 +357,33 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
         Op::new(
             "host.manage",
             "pair",
-            schema::<NoInput>(),
+            schema::<PairInput>(),
             false,
             Handler::External(Arc::new(move |invocation: Invocation, input| {
                 let services = services.clone();
                 Box::pin(async move {
                     person_only(invocation.actor(), "Pairing a device")?;
-                    let _: NoInput = parse(input)?;
-                    let code = call(home(&services)?, "POST", "/host/pairing".into(), None)
-                        .await
-                        .map_err(host_error)?;
-                    Ok(output(&services, code))
+                    let input: PairInput = parse(input)?;
+                    let code = input.code.trim().to_string();
+                    if code.is_empty() {
+                        return Err(super::util::invalid(
+                            "/code",
+                            "type the code the device shows",
+                        ));
+                    }
+                    let body = json!({ "code": code });
+                    let device = call(
+                        home(&services)?,
+                        "POST",
+                        "/host/pair/approve".into(),
+                        Some(body),
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        OwnerCallError::Refused(words) => super::util::invalid("/code", words),
+                        other => host_error(other),
+                    })?;
+                    Ok(output(&services, device))
                 })
             })),
         )
@@ -587,13 +600,16 @@ mod tests {
                     { "id": "dev-2", "name": "Phone", "kind": "phone", "paired_at": 200 }
                 ]),
             ),
-            ("GET", "/host/pairing") => (
+            ("GET", "/host/pair/waiting") => {
+                (200, json!([{ "name": "Garage tablet", "kind": "tablet" }]))
+            }
+            ("POST", "/host/pair/approve") if body.to_uppercase().contains("WXYZ-2345") => (
                 200,
-                json!({ "code": "ABCD-EFGH", "expires_in": 600, "expires_at": 1 }),
+                json!({ "id": "dev-3", "name": "Garage tablet", "kind": "tablet", "paired_at": 3 }),
             ),
-            ("POST", "/host/pairing") => (
-                200,
-                json!({ "code": "WXYZ-2345", "expires_in": 600, "expires_at": 2 }),
+            ("POST", "/host/pair/approve") => (
+                404,
+                json!({ "error": "no device is waiting with that code; check the code its screen shows" }),
             ),
             ("PATCH", "/host/devices/dev-1") => (200, json!({ "id": "dev-1", "name": "Kitchen" })),
             ("DELETE", "/host/devices/dev-9") => (404, json!({ "error": "no device dev-9" })),
@@ -638,8 +654,8 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let home = fx.svc.global_config_dir.clone();
         std::fs::create_dir_all(&home).unwrap();
-        let alone = rows(&fx, "SELECT hosted, pairing_code FROM v_host_settings").await;
-        assert_eq!(alone, [json!({ "hosted": 0, "pairing_code": null })]);
+        let alone = rows(&fx, "SELECT hosted, waiting FROM v_host_settings").await;
+        assert_eq!(alone, [json!({ "hosted": 0, "waiting": "[]" })]);
         assert!(rows(&fx, "SELECT * FROM v_host_device").await.is_empty());
 
         let seen = stand_in(&home, host_answers);
@@ -657,7 +673,7 @@ mod tests {
         );
         let standing = rows(
             &fx,
-            "SELECT hosted, address, port, port_from, overrides, port_problem, pairing_code, pairing_until FROM v_host_settings",
+            "SELECT hosted, address, port, port_from, overrides, port_problem, waiting FROM v_host_settings",
         )
         .await;
         assert_eq!(
@@ -666,7 +682,7 @@ mod tests {
                 "hosted": 1, "address": "192.168.1.20", "port": 7500, "port_from": "flag",
                 "overrides": "[\"--device-port\"]",
                 "port_problem": "bind 192.168.1.20:7500 failed: in use",
-                "pairing_code": "ABCD-EFGH", "pairing_until": 1
+                "waiting": "[{\"name\":\"Garage tablet\",\"kind\":\"tablet\"}]"
             })]
         );
         assert!(seen
@@ -686,8 +702,17 @@ mod tests {
         let seen = stand_in(&home, host_answers);
         let me = Actor::Human;
         assert_eq!(
-            run(&fx, &me, super::PAIR, json!({})).await.unwrap()["code"],
-            "WXYZ-2345"
+            run(&fx, &me, super::PAIR, json!({ "code": " wxyz-2345 " }))
+                .await
+                .unwrap()["name"],
+            "Garage tablet"
+        );
+        let wrong = run(&fx, &me, super::PAIR, json!({ "code": "AAAA-AAAA" }))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&wrong, CommandError::Invalid { field: Some(f), message } if f == "/code" && message.contains("no device is waiting")),
+            "{wrong:?}"
         );
         assert_eq!(
             run(
@@ -732,7 +757,7 @@ mod tests {
         };
         for actor in [&agent, &page] {
             for (name, input) in [
-                (super::PAIR, json!({})),
+                (super::PAIR, json!({ "code": "WXYZ-2345" })),
                 (super::REMOVE_DEVICE, json!({ "id": "dev-1" })),
             ] {
                 let refused = run(&fx, actor, name, input).await.unwrap_err();

@@ -292,12 +292,7 @@ mod tests {
     }
 
     fn server(fx: &crate::host::tests::Fixture) -> (Arc<PublicServer>, Arc<Access>, AllowedHosts) {
-        let access = Access::new(
-            "owner".into(),
-            fx.db.clone(),
-            Default::default(),
-            Duration::from_millis(10),
-        );
+        let access = Access::new("owner".into(), fx.db.clone(), Default::default());
         let allowed = AllowedHosts::default();
         let home = fx.dir.path().join("home");
         let server = PublicServer::new(

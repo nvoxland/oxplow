@@ -1,9 +1,9 @@
 //! The host's HTTP API under `/host/…`. Which caller may use a route
 //! (`crate::access`):
 //!
-//! - owner only: `POST /host/pairing` (a code for a device), `GET
-//!   /host/pairing` (the code in force, or `null`), `GET
-//!   /host/devices`, `PATCH /host/devices/<id>` `{ name }`, `DELETE
+//! - owner only: `POST /host/pair/approve` `{ code }` (pair the device
+//!   showing that code), `GET /host/pair/waiting` (who waits to pair, never
+//!   their codes), `GET /host/devices`, `PATCH /host/devices/<id>` `{ name }`, `DELETE
 //!   /host/devices/<id>`, `POST /host/projects` `{ path }` (register a folder,
 //!   or find it registered), `POST /host/shutdown`;
 //! - owner or device: `GET /host/status` (version, pid, projects, connected
@@ -13,11 +13,13 @@
 //!   forgets itself);
 //! - owner or device, as a socket: `GET /host/events` (the projects, sent
 //!   again at each change);
-//! - anyone who reaches the host: `POST /host/pair` `{ code, name, kind }`
-//!   answers `{ device, token }`. It must be JSON (so a page elsewhere
-//!   cannot send it without a preflight, and no route here answers one) and
-//!   same-origin when it says an origin. A wrong code costs a wait, one
-//!   attempt at a time.
+//! - anyone who reaches the host: `POST /host/pair` `{ name, kind }` asks
+//!   to pair and answers `{ request, code, expires_in }`: the device shows
+//!   the code for the owner to type, and keeps the request, its secret. It
+//!   must be JSON (so a page elsewhere cannot send it without a preflight,
+//!   and no route here answers one) and same-origin when it says an origin.
+//!   `GET /host/pair/<request>` waits (a while) for the owner and answers
+//!   `{ device, token }` once approved (`202` still waiting, `404` ended).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,7 +34,7 @@ use oxplow_domain::{DeviceId, DeviceKind};
 use serde::{Deserialize, Serialize};
 
 use crate::access::{Access, Caller, Connected, Listener};
-use crate::devices::{show_code, DevicesError, PairedDevice};
+use crate::devices::{Collect, DevicesError, PairedDevice};
 use crate::host::{Host, HostError, ProjectView};
 use crate::web::refuse;
 
@@ -83,9 +85,23 @@ struct HoldRequest {
 
 #[derive(Deserialize)]
 struct PairRequest {
-    code: String,
     name: String,
     kind: DeviceKind,
+}
+
+#[derive(Deserialize)]
+struct Approve {
+    code: String,
+}
+
+#[derive(Serialize)]
+struct Asked {
+    /// The ask's secret: what collects the key once approved.
+    request: String,
+    /// What the device shows for the owner to type (`ABCD-EFGH`).
+    code: String,
+    /// Seconds it waits for the owner.
+    expires_in: u64,
 }
 
 #[derive(Deserialize)]
@@ -97,31 +113,6 @@ struct Rename {
 struct Paired {
     device: PairedDevice,
     token: String,
-}
-
-#[derive(Serialize)]
-struct Code {
-    /// As people read it: `ABCD-EFGH`.
-    code: String,
-    /// Seconds it is good for.
-    expires_in: u64,
-    /// When it ends, in Unix milliseconds (a page shows the time).
-    expires_at: u64,
-}
-
-impl Code {
-    fn of(code: &str, ends: Instant, now: Instant) -> Code {
-        let left = ends.saturating_duration_since(now);
-        let unix_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        Code {
-            code: show_code(code),
-            expires_in: left.as_secs(),
-            expires_at: unix_ms + left.as_millis() as u64,
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -149,8 +140,10 @@ pub fn router(cfg: ApiConfig) -> Router {
         .route("/host/changes", get(changes))
         .route("/host/holds", post(hold).delete(release))
         .route("/host/shutdown", post(shutdown))
-        .route("/host/pairing", get(pairing_now).post(pairing))
         .route("/host/pair", post(pair))
+        .route("/host/pair/approve", post(approve_pairing))
+        .route("/host/pair/waiting", get(waiting_to_pair))
+        .route("/host/pair/{request}", get(collect_pairing))
         .route("/host/devices", get(devices))
         .route(
             "/host/devices/{id}",
@@ -502,34 +495,6 @@ async fn release(
     )
 }
 
-async fn pairing(State(s): State<ApiState>, headers: HeaderMap) -> Response {
-    check!(owner(&s, &headers));
-    let now = Instant::now();
-    let (code, expires) = s
-        .access
-        .pairing
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .new_code(now);
-    tracing::info!("a pairing code was made");
-    s.access.changed();
-    Json(Code::of(&code, expires, now)).into_response()
-}
-
-/// `GET /host/pairing`: the code in force, for the owner to show again (a
-/// page that reloads), or `null`.
-async fn pairing_now(State(s): State<ApiState>, headers: HeaderMap) -> Response {
-    check!(owner(&s, &headers));
-    let now = Instant::now();
-    let current = s
-        .access
-        .pairing
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .current(now);
-    Json(current.map(|(code, ends)| Code::of(&code, ends, now))).into_response()
-}
-
 /// Whether `headers` say a JSON body and, if they name an origin, this
 /// host's own.
 fn pair_request_ok(headers: &HeaderMap) -> bool {
@@ -552,6 +517,8 @@ fn pair_request_ok(headers: &HeaderMap) -> bool {
     json && same_origin
 }
 
+/// A device asks to pair: it shows the code it gets for the owner to type,
+/// and keeps the request to collect its key.
 async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::Bytes) -> Response {
     if !pair_request_ok(&headers) {
         return refuse(
@@ -560,35 +527,111 @@ async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::
         );
     }
     let Ok(req) = serde_json::from_slice::<PairRequest>(&bytes) else {
-        return refuse(
-            StatusCode::BAD_REQUEST,
-            "pairing needs { code, name, kind }",
-        );
+        return refuse(StatusCode::BAD_REQUEST, "pairing needs { name, kind }");
     };
-    // Each wrong code costs its own wait; nothing is held meanwhile, so a
-    // flood of them delays nobody else (600 tries a code's ten minutes per
-    // connection, against 31^8 codes).
-    let good = s
+    let asked = s
         .access
         .pairing
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .take(&req.code, Instant::now());
-    if !good {
-        tokio::time::sleep(s.access.wrong_code_wait).await;
-        return refuse(
-            StatusCode::UNAUTHORIZED,
-            "that code is wrong or has expired; ask for a new one",
-        );
+        .ask(&req.name, req.kind, Instant::now());
+    match asked {
+        Ok(ask) => {
+            tracing::info!(name = %req.name, "a device asks to pair");
+            s.access.changed();
+            Json(Asked {
+                request: ask.request,
+                code: ask.code,
+                expires_in: crate::devices::ASK_LIFETIME.as_secs(),
+            })
+            .into_response()
+        }
+        Err(e) => refuse(StatusCode::TOO_MANY_REQUESTS, &e.to_string()),
     }
-    match s.access.devices.pair(&req.name, req.kind) {
-        Ok((device, token)) => {
+}
+
+/// How long a device collecting its ask waits for the owner before it is
+/// told to ask again.
+const COLLECT_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The device collects its ask (its secret is the proof): `{ device, token
+/// }` once the owner approved it, else after a while `202` (still waiting),
+/// or `404` (ended, or collected already).
+async fn collect_pairing(State(s): State<ApiState>, Path(request): Path<String>) -> Response {
+    let mut changes = s.access.changes();
+    let until = Instant::now() + COLLECT_WAIT;
+    loop {
+        changes.borrow_and_update();
+        let found = s
+            .access
+            .pairing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .collect(&request, Instant::now());
+        match found {
+            Collect::Paired(device, token) => {
+                return Json(Paired { device, token }).into_response()
+            }
+            Collect::Gone => {
+                return refuse(
+                    StatusCode::NOT_FOUND,
+                    "this ask to pair ended (after ten minutes); ask again",
+                )
+            }
+            Collect::Waiting => {}
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({ "waiting": true })),
+            )
+                .into_response();
+        }
+        let _ = tokio::time::timeout(left, changes.changed()).await;
+    }
+}
+
+/// The owner typed the code a device shows: that device is paired.
+async fn approve_pairing(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> Response {
+    check!(owner(&s, &headers));
+    let req: Approve = check!(body(&bytes));
+    let approved = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .approve(&req.code, Instant::now(), |name, kind| {
+            s.access.devices.pair(name, kind)
+        });
+    match approved {
+        Ok(Some(device)) => {
             tracing::info!(device = %device.id, name = %device.name, "a device paired");
             s.access.changed();
-            Json(Paired { device, token }).into_response()
+            Json(device).into_response()
         }
+        Ok(None) => refuse(
+            StatusCode::NOT_FOUND,
+            "no device is waiting with that code; check the code its screen shows",
+        ),
         Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
+}
+
+/// Who waits to pair now (never their codes).
+async fn waiting_to_pair(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    let waiting = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .waiting(Instant::now());
+    Json(waiting).into_response()
 }
 
 async fn devices(State(s): State<ApiState>, headers: HeaderMap) -> Response {
@@ -673,7 +716,6 @@ mod tests {
     use super::*;
     use crate::host::tests::{Fixture, RUNS};
     use serde_json::json;
-    use std::time::Instant;
 
     const TOKEN: &str = "host-secret";
 
@@ -687,12 +729,7 @@ mod tests {
     /// The API on a loopback listener and a public one, sharing one
     /// `Access` (as `serve` runs them).
     async fn api(fx: &Fixture) -> Api {
-        let access = Access::new(
-            TOKEN.into(),
-            fx.db.clone(),
-            Default::default(),
-            std::time::Duration::from_millis(200),
-        );
+        let access = Access::new(TOKEN.into(), fx.db.clone(), Default::default());
         let stop = Arc::new(tokio::sync::Notify::new());
         let mut urls = Vec::new();
         for listener in [Listener::Loopback, Listener::Public] {
@@ -719,37 +756,61 @@ mod tests {
         api(fx).await.url
     }
 
-    async fn code(api: &Api) -> String {
-        let code: serde_json::Value = reqwest::Client::new()
-            .post(format!("{}/host/pairing", api.url))
-            .bearer_auth(TOKEN)
+    /// A device asks to pair at `url` as `name`: its secret ask and the
+    /// code it shows.
+    async fn ask(url: &str, name: &str) -> (String, String) {
+        let asked: serde_json::Value = reqwest::Client::new()
+            .post(format!("{url}/host/pair"))
+            .json(&json!({ "name": name, "kind": "tablet" }))
             .send()
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        code["code"].as_str().unwrap().to_string()
+        (
+            asked["request"].as_str().unwrap().to_string(),
+            asked["code"].as_str().unwrap().to_string(),
+        )
     }
 
-    async fn pair(url: &str, code: &str) -> reqwest::Response {
+    /// The owner types `code`.
+    async fn approve(api: &Api, code: &str) -> reqwest::Response {
         reqwest::Client::new()
-            .post(format!("{url}/host/pair"))
-            .json(&json!({ "code": code, "name": "Tab S9", "kind": "tablet" }))
+            .post(format!("{}/host/pair/approve", api.url))
+            .bearer_auth(TOKEN)
+            .json(&json!({ "code": code }))
             .send()
             .await
             .unwrap()
     }
 
-    /// The code in force reads back for the owner (a page shows it), with
-    /// when it ends; none before one is made, and a device may not read it.
+    /// The device collects its ask.
+    async fn collect(url: &str, request: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .get(format!("{url}/host/pair/{request}"))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// A tablet paired over the public listener, as the owner approves it:
+    /// `{ device, token }`.
+    async fn paired(api: &Api) -> serde_json::Value {
+        let (request, code) = ask(&api.public, "Tab S9").await;
+        assert_eq!(approve(api, &code).await.status(), 200);
+        collect(&api.public, &request).await.json().await.unwrap()
+    }
+
+    /// The owner sees who waits to pair (never their codes); a device may
+    /// not, and a code nobody shows approves nothing.
     #[tokio::test]
-    async fn the_code_in_force_reads_back_for_the_owner() {
+    async fn the_owner_sees_who_waits_and_approves_only_a_code_a_device_shows() {
         let fx = Fixture::new(RUNS);
         let api = api(&fx).await;
-        let read = || async {
+        let waiting = || async {
             reqwest::Client::new()
-                .get(format!("{}/host/pairing", api.url))
+                .get(format!("{}/host/pair/waiting", api.url))
                 .bearer_auth(TOKEN)
                 .send()
                 .await
@@ -758,39 +819,55 @@ mod tests {
                 .await
                 .unwrap()
         };
-        assert_eq!(read().await, serde_json::Value::Null);
-        let made = code(&api).await;
-        let now = read().await;
-        assert_eq!(now["code"], made);
-        let ends = now["expires_at"].as_u64().unwrap();
-        let unix_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        assert_eq!(waiting().await, json!([]));
+        let (_, code) = ask(&api.public, "Garage tablet").await;
+        let now = waiting().await;
+        assert_eq!(now, json!([{ "name": "Garage tablet", "kind": "tablet" }]));
         assert!(
-            ends > unix_ms && ends <= unix_ms + 10 * 60 * 1000 + 1000,
-            "{ends} vs {unix_ms}"
+            !now.to_string().contains(&code),
+            "the owner types it, never reads it"
         );
+        assert_eq!(approve(&api, "AAAA-AAAA").await.status(), 404);
         let refused = reqwest::Client::new()
-            .get(format!("{}/host/pairing", api.url))
+            .get(format!("{}/host/pair/waiting", api.url))
             .send()
             .await
             .unwrap();
         assert_eq!(refused.status(), 401);
     }
 
-    /// A tablet pairs over the public listener with a code the owner made,
-    /// and its token then works there; the owner's does not.
+    /// A tablet asks over the public listener and waits; once the owner
+    /// types its code it collects its key (once), which then works there;
+    /// the owner's does not.
     #[tokio::test]
-    async fn a_device_pairs_with_the_owners_code_and_is_known_by_its_token() {
+    async fn a_device_pairs_once_the_owner_types_its_code() {
         let fx = Fixture::new(RUNS);
         let api = api(&fx).await;
-        let code = code(&api).await;
+        let (request, code) = ask(&api.public, "Tab S9").await;
         assert_eq!(code.len(), 9, "ABCD-EFGH: {code}");
-        let paired: serde_json::Value = pair(&api.public, &code).await.json().await.unwrap();
+        // A device waiting on its ask hears as soon as it is approved.
+        let waiting = tokio::spawn({
+            let url = api.public.clone();
+            let request = request.clone();
+            async move {
+                collect(&url, &request)
+                    .await
+                    .json::<serde_json::Value>()
+                    .await
+                    .unwrap()
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished(), "it waits for the owner");
+        let approved: serde_json::Value = approve(&api, &code).await.json().await.unwrap();
+        assert_eq!(approved["name"], "Tab S9");
+        let paired = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .expect("told once approved")
+            .unwrap();
         let token = paired["token"].as_str().unwrap();
+        assert_eq!(paired["device"]["id"], approved["id"]);
         assert!(paired["device"]["id"].as_str().unwrap().starts_with("dev-"));
-        assert_eq!(paired["device"]["name"], "Tab S9");
 
         let http = reqwest::Client::new();
         let me: serde_json::Value = http
@@ -816,8 +893,13 @@ mod tests {
             "the owner token is for loopback only"
         );
         assert_eq!(
-            pair(&api.public, &code).await.status(),
-            401,
+            collect(&api.public, &request).await.status(),
+            404,
+            "the key is handed over once"
+        );
+        assert_eq!(
+            approve(&api, &code).await.status(),
+            404,
             "a code is good once"
         );
     }
@@ -826,15 +908,12 @@ mod tests {
     async fn a_device_may_not_do_what_only_the_owner_may() {
         let fx = Fixture::new(RUNS);
         let api = api(&fx).await;
-        let paired: serde_json::Value = pair(&api.public, &code(&api).await)
-            .await
-            .json()
-            .await
-            .unwrap();
+        let paired = paired(&api).await;
         let token = paired["token"].as_str().unwrap().to_string();
         let http = reqwest::Client::new();
         for (method, path) in [
-            (reqwest::Method::POST, "/host/pairing"),
+            (reqwest::Method::POST, "/host/pair/approve"),
+            (reqwest::Method::GET, "/host/pair/waiting"),
             (reqwest::Method::GET, "/host/devices"),
             (reqwest::Method::POST, "/host/shutdown"),
         ] {
@@ -864,11 +943,7 @@ mod tests {
         let alpha = fx.project("alpha");
         fx.project("beta");
         let api = api(&fx).await;
-        let paired: serde_json::Value = pair(&api.public, &code(&api).await)
-            .await
-            .json()
-            .await
-            .unwrap();
+        let paired = paired(&api).await;
         let token = paired["token"].as_str().unwrap();
         let http = reqwest::Client::new();
         http.post(format!("{}/host/holds", api.public))
@@ -906,11 +981,7 @@ mod tests {
         let fx = Fixture::new(RUNS);
         let id = fx.project("alpha");
         let api = api(&fx).await;
-        let paired: serde_json::Value = pair(&api.public, &code(&api).await)
-            .await
-            .json()
-            .await
-            .unwrap();
+        let paired = paired(&api).await;
         let token = paired["token"].as_str().unwrap();
         reqwest::Client::new()
             .post(format!("{}/host/holds", api.public))
@@ -934,11 +1005,7 @@ mod tests {
         let http = reqwest::Client::new();
         let mut tokens = Vec::new();
         for _ in 0..2 {
-            let paired: serde_json::Value = pair(&api.public, &code(&api).await)
-                .await
-                .json()
-                .await
-                .unwrap();
+            let paired = paired(&api).await;
             tokens.push((
                 paired["device"]["id"].as_str().unwrap().to_string(),
                 paired["token"].as_str().unwrap().to_string(),
@@ -985,8 +1052,7 @@ mod tests {
     async fn pairing_takes_json_from_the_hosts_own_page_only() {
         let fx = Fixture::new(RUNS);
         let api = api(&fx).await;
-        let code = code(&api).await;
-        let body = json!({ "code": code, "name": "x", "kind": "tablet" }).to_string();
+        let body = json!({ "name": "x", "kind": "tablet" }).to_string();
         let http = reqwest::Client::new();
         let form = http
             .post(format!("{}/host/pair", api.public))
@@ -1014,46 +1080,7 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(own.status(), 200, "the code was still good");
-    }
-
-    /// A wrong code costs a wait, each its own: a flood of wrong codes holds
-    /// up neither another device's attempt nor the owner making a code.
-    #[tokio::test]
-    async fn a_wrong_code_costs_a_wait() {
-        let fx = Fixture::new(RUNS);
-        let api = api(&fx).await;
-        let started = Instant::now();
-        let (a, b, made) = tokio::join!(
-            pair(&api.public, "AAAA-AAAA"),
-            pair(&api.public, "BBBB-BBBB"),
-            async {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                let asked = Instant::now();
-                code(&api).await;
-                asked.elapsed()
-            }
-        );
-        assert!(
-            made < std::time::Duration::from_millis(150),
-            "the owner waited {made:?}"
-        );
-        assert_eq!(
-            (a.status(), b.status()),
-            (
-                reqwest::StatusCode::UNAUTHORIZED,
-                reqwest::StatusCode::UNAUTHORIZED
-            )
-        );
-        let took = started.elapsed();
-        assert!(
-            took >= std::time::Duration::from_millis(200),
-            "a wrong code waits: {took:?}"
-        );
-        assert!(
-            took < std::time::Duration::from_millis(390),
-            "two wrong codes wait side by side, not in turn: {took:?}"
-        );
+        assert_eq!(own.status(), 200, "its own page may ask");
     }
 
     /// The next text frame's JSON.
@@ -1125,7 +1152,8 @@ mod tests {
             (reqwest::Method::DELETE, "/host/holds"),
             (reqwest::Method::POST, "/host/projects"),
             (reqwest::Method::POST, "/host/shutdown"),
-            (reqwest::Method::POST, "/host/pairing"),
+            (reqwest::Method::POST, "/host/pair/approve"),
+            (reqwest::Method::GET, "/host/pair/waiting"),
             (reqwest::Method::GET, "/host/devices"),
             (reqwest::Method::GET, "/host/me"),
             (reqwest::Method::DELETE, "/host/me"),
@@ -1269,10 +1297,10 @@ mod tests {
         let waiting = tokio::spawn(seen(Some(now)));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert!(!waiting.is_finished(), "nothing changed yet");
-        code(&api).await;
+        ask(&api.public, "Garage tablet").await;
         let moved = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
             .await
-            .expect("told of the new code")
+            .expect("told of the device waiting")
             .unwrap();
         assert!(moved > now);
         assert_eq!(seen(Some(now)).await, moved, "behind: told at once");

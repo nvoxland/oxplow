@@ -12,7 +12,7 @@ expect:
     connect:
       rows:
         - { text: "Turn on other devices first." }
-    pairing:
+    pair:
       rows: []
     devices:
       rows: []

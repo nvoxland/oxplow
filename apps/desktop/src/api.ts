@@ -743,9 +743,16 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext> {
 
 // ---- Hosts on other machines (the launcher) ----
 
-/// Pair this Mac with a host on another machine (`oxplow host pair` there).
-export async function connectHost(address: string, code: string): Promise<void> {
-  unwrap(await commands.connectHost({ address, code }));
+/// Ask a host on another machine to pair this Mac: the code for the person
+/// there to type (`oxplow host pair <code>`, or its Devices page).
+export async function askHost(address: string): Promise<import("./tauri-bridge/generated/bindings.js").HostAsk> {
+  return unwrap(await commands.askHost(address));
+}
+
+/// Wait (a while) for the person there to type the code: `true` once paired,
+/// `false` while it still waits; throws once the ask ended.
+export async function collectHost(origin: string, request: string): Promise<boolean> {
+  return unwrap(await commands.collectHost(origin, request));
 }
 
 export async function remoteHosts(): Promise<import("./tauri-bridge/generated/bindings.js").RemoteHostView[]> {

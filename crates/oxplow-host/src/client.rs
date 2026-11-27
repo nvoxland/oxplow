@@ -291,17 +291,20 @@ impl HostClient {
         Ok(())
     }
 
-    /// A pairing code for a device (`ABCD-EFGH`) and the seconds it is good.
-    pub async fn pairing_code(&self) -> Result<(String, u64), ClientError> {
-        let answer: serde_json::Value = self
-            .send(self.http.post(self.url("/host/pairing")))
+    /// Pair the device that shows `code` (the owner typed it).
+    pub async fn approve_pairing(
+        &self,
+        code: &str,
+    ) -> Result<crate::devices::PairedDevice, ClientError> {
+        Ok(self
+            .send(
+                self.http
+                    .post(self.url("/host/pair/approve"))
+                    .json(&serde_json::json!({ "code": code })),
+            )
             .await?
             .json()
-            .await?;
-        Ok((
-            answer["code"].as_str().unwrap_or_default().to_string(),
-            answer["expires_in"].as_u64().unwrap_or_default(),
-        ))
+            .await?)
     }
 
     pub async fn devices(&self) -> Result<Vec<crate::devices::PairedDevice>, ClientError> {
@@ -411,6 +414,71 @@ impl HostClient {
     }
 }
 
+/// A device's ask to pair with a host: the code it shows for the owner to
+/// type, and its secret request, which collects its key.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct PairAsk {
+    pub request: String,
+    pub code: String,
+    pub expires_in: u64,
+}
+
+fn pairing_http() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        // A collect waits for the owner (20 s at most).
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// The host's words for a refusal.
+async fn refusal(answer: reqwest::Response, otherwise: &str) -> String {
+    let body: serde_json::Value = answer.json().await.unwrap_or_default();
+    body["error"].as_str().unwrap_or(otherwise).to_string()
+}
+
+/// Ask the host at `origin` to pair this device, as `name` (a `kind`:
+/// `desktop`, `tablet`, `phone`).
+pub async fn ask_to_pair(origin: &str, name: &str, kind: &str) -> Result<PairAsk, String> {
+    let answer = pairing_http()?
+        .post(format!("{origin}/host/pair"))
+        .json(&serde_json::json!({ "name": name, "kind": kind }))
+        .send()
+        .await
+        .map_err(|e| format!("{origin} did not answer: {e}"))?;
+    if !answer.status().is_success() {
+        return Err(refusal(answer, "the host would not take the ask").await);
+    }
+    answer.json().await.map_err(|e| e.to_string())
+}
+
+/// Collect an ask: the device and its token once the owner approved it,
+/// none while it still waits (after a while), an error once it ended.
+pub async fn collect_pairing(
+    origin: &str,
+    request: &str,
+) -> Result<Option<(crate::devices::PairedDevice, String)>, String> {
+    let answer = pairing_http()?
+        .get(format!("{origin}/host/pair/{request}"))
+        .send()
+        .await
+        .map_err(|e| format!("{origin} did not answer: {e}"))?;
+    if answer.status() == reqwest::StatusCode::ACCEPTED {
+        return Ok(None);
+    }
+    if !answer.status().is_success() {
+        return Err(refusal(answer, "the ask ended; ask again").await);
+    }
+    #[derive(serde::Deserialize)]
+    struct Paired {
+        device: crate::devices::PairedDevice,
+        token: String,
+    }
+    let paired: Paired = answer.json().await.map_err(|e| e.to_string())?;
+    Ok(Some((paired.device, paired.token)))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -426,12 +494,7 @@ pub(crate) mod tests {
         let stop = Arc::new(tokio::sync::Notify::new());
         let app = crate::web::app(crate::web::ServeConfig {
             host: fx.host.clone(),
-            access: crate::access::Access::new(
-                token.into(),
-                fx.db.clone(),
-                Default::default(),
-                Duration::from_millis(10),
-            ),
+            access: crate::access::Access::new(token.into(), fx.db.clone(), Default::default()),
             listener: crate::access::Listener::Loopback,
             ui_dir: None,
             allow_hosts: Default::default(),
@@ -448,26 +511,29 @@ pub(crate) mod tests {
         url
     }
 
-    /// The Devices window's calls: a code, the paired devices, a rename, a
-    /// removal, and who is connected.
+    /// A device asks and waits; the owner types the code it shows; the
+    /// device collects its key. Then the owner's calls: the paired devices,
+    /// a rename, a removal, and who is connected.
     #[tokio::test]
-    async fn the_owner_makes_a_code_and_keeps_the_devices() {
+    async fn a_device_asks_the_owner_approves_and_keeps_the_devices() {
         let fx = Fixture::new(RUNS);
         let url = run_host(&fx, TOKEN).await;
         let client = HostClient::new(&url, TOKEN);
-        let (code, expires_in) = client.pairing_code().await.unwrap();
-        assert_eq!(code.len(), 9, "{code}");
-        assert!(expires_in > 500, "{expires_in}");
-        let paired: serde_json::Value = reqwest::Client::new()
-            .post(format!("{url}/host/pair"))
-            .json(&serde_json::json!({ "code": code, "name": "Tab", "kind": "tablet" }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        let id = paired["device"]["id"].as_str().unwrap();
+        let ask = ask_to_pair(&url, "Tab", "tablet").await.unwrap();
+        assert_eq!(ask.code.len(), 9, "{}", ask.code);
+        assert!(ask.expires_in > 500, "{}", ask.expires_in);
+        let wrong = client.approve_pairing("AAAA-AAAA").await.unwrap_err();
+        assert!(
+            wrong.to_string().contains("no device is waiting"),
+            "{wrong}"
+        );
+        let approved = client.approve_pairing(&ask.code).await.unwrap();
+        assert_eq!(approved.name, "Tab");
+        let (device, token) = collect_pairing(&url, &ask.request).await.unwrap().unwrap();
+        assert_eq!(device, approved);
+        assert!(!token.is_empty());
+        assert!(collect_pairing(&url, &ask.request).await.is_err(), "once");
+        let id = device.id.as_str();
         assert_eq!(client.devices().await.unwrap()[0].name, "Tab");
         assert_eq!(
             client.rename_device(id, "Kitchen").await.unwrap().name,

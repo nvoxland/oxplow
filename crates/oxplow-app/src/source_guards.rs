@@ -112,7 +112,9 @@ fn production_part(text: &str) -> &str {
         let mut rest = text[start + "#[cfg(test)]".len()..].trim_start();
         // Other attributes may stand between (`#[cfg(unix)]`).
         while rest.starts_with("#[") {
-            rest = rest.find(']').map_or("", |end| rest[end + 1..].trim_start());
+            rest = rest
+                .find(']')
+                .map_or("", |end| rest[end + 1..].trim_start());
         }
         if rest.starts_with("mod tests") || rest.starts_with("pub(crate) mod tests") {
             return &text[..start];

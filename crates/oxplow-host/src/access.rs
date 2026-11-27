@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use oxplow_domain::{DeviceId, DeviceKind};
 use serde::Serialize;
 
-use crate::devices::{Devices, PairedDevice, Pairing};
+use crate::devices::{Devices, PairRequests, PairedDevice};
 
 /// The close code a page's socket gets when the host ends (the app quit).
 pub const HOST_ENDING_CLOSE_CODE: u16 = 4002;
@@ -48,14 +48,10 @@ pub enum Caller {
 pub struct Access {
     owner_token: String,
     pub devices: Devices,
-    /// The codes the owner made; never held across a wait, so making one
-    /// never waits behind someone guessing.
-    pub pairing: Mutex<Pairing>,
+    /// The devices asking to pair, until the owner types their codes.
+    pub pairing: Mutex<PairRequests>,
 
     pub tunnels: Tunnels,
-    /// What a wrong code costs, one attempt at a time: a code's 10 minutes
-    /// then allow 600 guesses of 31^8.
-    pub wrong_code_wait: std::time::Duration,
     /// The listener for other devices: listening where, or why not.
     pub public: Mutex<PublicListener>,
     /// "Allow other devices": saved, and what this run's flags put over it.
@@ -88,16 +84,11 @@ pub enum PublicListener {
     Failed { error: String },
 }
 
-/// What a wrong pairing code costs.
-pub const WRONG_CODE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
-
 impl Access {
-    /// `wrong_code_wait` is [`WRONG_CODE_WAIT`] but in a test.
     pub fn new(
         owner_token: String,
         db: Arc<crate::db::HostDb>,
         overrides: oxplow_host_access::settings::Overrides,
-        wrong_code_wait: std::time::Duration,
     ) -> Arc<Self> {
         Arc::new(Self {
             owner_token,
@@ -105,9 +96,8 @@ impl Access {
             other_devices: crate::other_devices::OtherDevices::new(db, overrides),
             public_server: std::sync::OnceLock::new(),
             changes: tokio::sync::watch::channel(0).0,
-            pairing: Mutex::new(Pairing::default()),
+            pairing: Mutex::new(PairRequests::default()),
             tunnels: Tunnels::default(),
-            wrong_code_wait,
             public: Mutex::new(PublicListener::Off),
         })
     }
@@ -267,12 +257,7 @@ mod tests {
         let db = crate::db::HostDb::open(home.path()).unwrap();
         (
             home,
-            Access::new(
-                "owner-secret".into(),
-                db,
-                Default::default(),
-                WRONG_CODE_WAIT,
-            ),
+            Access::new("owner-secret".into(), db, Default::default()),
         )
     }
 

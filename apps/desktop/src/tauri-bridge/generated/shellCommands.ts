@@ -8,9 +8,10 @@
 export const SHELL_COMMANDS = [
   "abort_setup",
   "answer_oauth_redirect",
+  "ask_host",
   "await_oauth_redirect",
   "clipboard_read_text",
-  "connect_host",
+  "collect_host",
   "create_project",
   "forget_remote_host",
   "install_cli",

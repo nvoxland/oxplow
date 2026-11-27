@@ -32,7 +32,7 @@ fn usage() -> ! {
          \x20      oxplow-host project remove <id>\n\
          \x20      oxplow-host settings [set allow=on|off address=<ip> port=<port>\n\
          \x20                        names=<a,b> tls-cert=<pem> tls-key=<pem>]\n\
-         \x20      oxplow-host pair | devices [remove <id>] | status | stop\n\
+         \x20      oxplow-host pair [<code>] | devices [remove <id>] | status | stop\n\
          \n\
          One host runs per OXPLOW_HOME. --token-stdin reads the host token from\n\
          the first line of stdin; otherwise a fresh one is generated and printed.\n\
@@ -211,12 +211,38 @@ fn main() {
             set_settings(&config_dir, changes);
         }
         ["pair"] => {
-            let code = owner_call(&config_dir, "POST", "/host/pairing");
-            println!(
-                "pairing code: {}  (good for {} minutes, once)",
-                code["code"].as_str().unwrap_or("?"),
-                code["expires_in"].as_u64().unwrap_or(0) / 60
-            );
+            let waiting = owner_call(&config_dir, "GET", "/host/pair/waiting");
+            let waiting = waiting.as_array().cloned().unwrap_or_default();
+            if waiting.is_empty() {
+                println!("no device is waiting to pair: open this host's address on it");
+            }
+            for w in &waiting {
+                println!(
+                    "waiting: {}  ({})",
+                    w["name"].as_str().unwrap_or("?"),
+                    w["kind"].as_str().unwrap_or("?")
+                );
+            }
+            if !waiting.is_empty() {
+                println!("pair one with: oxplow host pair <the code it shows>");
+            }
+        }
+        ["pair", code] => {
+            let body = serde_json::json!({ "code": code });
+            match oxplow_host_access::owner::owner_call(
+                &config_dir,
+                "POST",
+                "/host/pair/approve",
+                Some(&body),
+            ) {
+                Ok(d) => println!(
+                    "paired {}  {}  {}",
+                    d["id"].as_str().unwrap_or("?"),
+                    d["kind"].as_str().unwrap_or("?"),
+                    d["name"].as_str().unwrap_or("?")
+                ),
+                Err(e) => fail(e),
+            }
         }
         ["devices"] => {
             let devices = owner_call(&config_dir, "GET", "/host/devices");
@@ -391,12 +417,7 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 HoldsKept::InFile
             };
             let host = Host::open(db.clone(), supervisor, kept).unwrap_or_else(|e| fail(e));
-            let access = oxplow_host::access::Access::new(
-                token.clone(),
-                db.clone(),
-                overrides,
-                oxplow_host::access::WRONG_CODE_WAIT,
-            );
+            let access = oxplow_host::access::Access::new(token.clone(), db.clone(), overrides);
             use oxplow_host::access::Listener;
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
@@ -443,9 +464,9 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             };
             let app =
                 oxplow_host::web::app(config(oxplow_host::web::Scheme::Http, Listener::Loopback));
-            // The CLI's way in (`oxplow host pair`): the owner, by the file's
+            // The CLI's way in (`oxplow host pair <code>`): the owner, by the file's
             // mode. A headless host's owner token is printed once and kept
-            // nowhere, so this is how it makes a pairing code.
+            // nowhere, so this is how it pairs a device.
             #[cfg(unix)]
             let owner_socket = owner_socket(
                 config_dir,

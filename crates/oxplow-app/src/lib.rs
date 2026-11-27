@@ -2389,7 +2389,7 @@ mod tests {
                 "oxplow.git.publish",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
-                // The host's own state (its paired devices, pairing codes,
+                // The host's own state (its paired devices, devices asking to pair,
                 // "Allow other devices"), over its owner socket
                 // (`commands/host_devices`): a person's only.
                 "oxplow.host.pair",

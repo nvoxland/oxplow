@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { connectHost, forgetRemoteHost, openRemoteProject, remoteHosts } from "../api.js";
+import { askHost, collectHost, forgetRemoteHost, openRemoteProject, remoteHosts } from "../api.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
-import type { RemoteHostView } from "../tauri-bridge/generated/bindings.js";
+import type { HostAsk, RemoteHostView } from "../tauri-bridge/generated/bindings.js";
 import {
   emptyStyle,
   errorStyle,
@@ -18,21 +18,26 @@ import {
 
 export type RemoteHostsApi = {
   remoteHosts: typeof remoteHosts;
-  connectHost: typeof connectHost;
+  askHost: typeof askHost;
+  collectHost: typeof collectHost;
   openRemoteProject: typeof openRemoteProject;
   forgetRemoteHost: typeof forgetRemoteHost;
 };
 
-const REMOTE_HOSTS_API: RemoteHostsApi = { remoteHosts, connectHost, openRemoteProject, forgetRemoteHost };
+const REMOTE_HOSTS_API: RemoteHostsApi = { remoteHosts, askHost, collectHost, openRemoteProject, forgetRemoteHost };
+
+/** The pause between two asks whether the person there typed the code. */
+export const COLLECT_PAUSE_MS = 500;
 
 /** The launcher's hosts on other computers (a headless host on a server,
- *  `oxplow host serve`): connect with its address and a code from `oxplow
- *  host pair` there, then open its projects here. A project there runs
+ *  `oxplow host serve`): connect with its address, and type the code this
+ *  Mac shows there (`oxplow host pair <code>`), then open its projects here. A project there runs
  *  there: quitting here leaves it running. */
 export function RemoteHostsSection({ api = REMOTE_HOSTS_API }: { api?: RemoteHostsApi }) {
   const [hosts, setHosts] = useState<RemoteHostView[]>([]);
   const [address, setAddress] = useState("");
-  const [code, setCode] = useState("");
+  /** This Mac's ask, while it waits for the person there to type its code. */
+  const [asking, setAsking] = useState<HostAsk | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +52,33 @@ export function RemoteHostsSection({ api = REMOTE_HOSTS_API }: { api?: RemoteHos
   useEffect(() => {
     void read();
   }, [read]);
+
+  // Wait for the person there to type the code: each collect waits a
+  // while; ask again until paired, ended, or cancelled.
+  useEffect(() => {
+    if (!asking) return;
+    let live = true;
+    void (async () => {
+      try {
+        while (live && !(await api.collectHost(asking.origin, asking.request))) {
+          // Still waiting (the host waits a while each time): ask again,
+          // never in a tight loop.
+          await new Promise((r) => setTimeout(r, COLLECT_PAUSE_MS));
+        }
+        if (!live) return;
+        setAsking(null);
+        setAddress("");
+        await read();
+      } catch (e) {
+        if (!live) return;
+        setAsking(null);
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [asking, api, read]);
 
   const run = async (f: () => Promise<unknown>) => {
     setBusy(true);
@@ -103,51 +135,57 @@ export function RemoteHostsSection({ api = REMOTE_HOSTS_API }: { api?: RemoteHos
           </div>
         ))
       )}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (address.trim() === "" || code.trim() === "") return;
-          void run(async () => {
-            await api.connectHost(address, code);
-            setAddress("");
-            setCode("");
-          });
-        }}
-        style={formStyle}
-      >
-        <input
-          data-testid="remote-host-address"
-          aria-label="The host's address"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder="server.tailnet.ts.net:7400"
-          spellCheck={false}
-          disabled={busy}
-          style={inputStyle}
-        />
-        <input
-          data-testid="remote-host-code"
-          aria-label="Pairing code"
-          value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
-          placeholder="ABCD-EFGH"
-          spellCheck={false}
-          autoComplete="off"
-          disabled={busy}
-          style={inputStyle}
-        />
-        <button
-          type="submit"
-          data-testid="remote-host-connect"
-          disabled={busy || address.trim() === "" || code.trim() === ""}
-          style={primaryButtonStyle}
+      {asking ? (
+        <div data-testid="remote-host-ask" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div>
+            On {asking.origin.replace(/^https?:\/\//, "")}, run{" "}
+            <code>oxplow host pair {asking.code}</code> (or type the code in its Devices page):
+          </div>
+          <div
+            data-testid="remote-host-ask-code"
+            style={{ fontSize: "var(--text-xl)", fontWeight: 600, letterSpacing: "0.1em", fontFamily: "var(--font-mono)" }}
+          >
+            {asking.code}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={hintStyle}>Waiting for it there…</span>
+            <button type="button" data-testid="remote-host-ask-cancel" onClick={() => setAsking(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (address.trim() === "") return;
+            void run(async () => setAsking(await api.askHost(address)));
+          }}
+          style={formStyle}
         >
-          {busy ? "Connecting…" : "Connect"}
-        </button>
-      </form>
+          <input
+            data-testid="remote-host-address"
+            aria-label="The host's address"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="server.tailnet.ts.net:7400"
+            spellCheck={false}
+            disabled={busy}
+            style={inputStyle}
+          />
+          <button
+            type="submit"
+            data-testid="remote-host-connect"
+            disabled={busy || address.trim() === ""}
+            style={primaryButtonStyle}
+          >
+            {busy ? "Connecting…" : "Connect"}
+          </button>
+        </form>
+      )}
       <p style={hintStyle}>
-        On the other computer run <code>oxplow host serve</code> and <code>oxplow host pair</code>, then
-        type its address and the code here.
+        On the other computer run <code>oxplow host serve</code>, then type its address here: this Mac
+        shows a code to type there.
       </p>
       {error ? (
         <div data-testid="remote-host-error" role="alert" style={errorStyle}>

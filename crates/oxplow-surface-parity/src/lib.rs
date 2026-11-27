@@ -543,7 +543,8 @@ pub const MANIFEST: &[Capability] = &[
     ui("install_cli", "a person puts the oxplow command on their PATH"),
     ui("abort_setup", "a person declines a project's first-run setup"),
     // ---- hosts on other computers (the launcher) ----
-    ui("connect_host", "the launcher connects to a host on another computer"),
+    ui("ask_host", "the launcher asks a host on another computer to pair this Mac"),
+    ui("collect_host", "the launcher waits for that host's person to type the code"),
     ui("remote_hosts", "the launcher lists the hosts on other computers and their projects"),
     ui("open_remote_project", "the launcher opens a project of a host on another computer"),
     ui("forget_remote_host", "the launcher forgets a host on another computer"),

@@ -61,19 +61,18 @@ loaders:
             ' under Settings ▸ General ▸ About ▸ Certificate Trust Settings. It vouches only for addresses on' ||
             ' your own networks, never for a real website.'
           ELSE 'This computer uses a certificate of your own: a device that trusts its CA needs nothing more.' END ||
-          char(10) || '2. **Pair it.** Choose **Pair a Device** below, then on the device open **' ||
-          listening || '** and type the code.'
+          char(10) || '2. **Pair it.** On the device, open **' || listening ||
+          '**: it shows a code. Type that code here.' ||
+          coalesce((SELECT char(10) || char(10) || 'Waiting: ' ||
+                           group_concat('**' || json_extract(value, '$.name') || '**', ', ') || '.'
+                    FROM json_each(waiting) HAVING count(*) > 0), '')
       END AS text
       FROM v_host_settings
-  # The code in force, while other devices can come in (none while they
-  # can't: no code, no button).
-  pairing:
+  # The code a device shows, typed here: only while other devices can come
+  # in (none while they can't: no field, no button).
+  pair:
     sql: |
-      SELECT coalesce(pairing_code, 'None yet') AS code,
-             CASE WHEN pairing_code IS NULL THEN '' ELSE strftime('%H:%M', pairing_until / 1000, 'unixepoch', 'localtime') END AS until,
-             1 AS can_pair
-      FROM v_host_settings
-      WHERE listening IS NOT NULL
+      SELECT '' AS code FROM v_host_settings WHERE listening IS NOT NULL
   devices:
     sql: |
       SELECT id, name,
@@ -123,20 +122,16 @@ view:
       from: connect
       empty: ''
     - id: pair
-      title: Pairing code
+      title: Pair
       hide_title: true
-      viz: detail
-      from: pairing
-      columns:
-      - { key: code, label: Code }
-      - { key: until, label: Good until }
+      viz: form
+      from: pair
       empty: ''
-      actions:
-      - id: pair-device
-        label: Pair a Device
+      form:
         command: oxplow.host.pair
-        prominent: true
-        when: can_pair
+        then: stay
+        fields:
+        - { name: code, label: The code the device shows }
   - id: devices
     title: Paired devices
     viz: table
