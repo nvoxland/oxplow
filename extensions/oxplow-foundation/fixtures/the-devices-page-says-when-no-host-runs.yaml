@@ -1,13 +1,17 @@
 # A throwaway oxplow runs with no host, as a daemon run alone does: the
-# Devices page says no device can reach it, lists no device, and its
-# settings form starts from what is saved (nothing: other devices off).
+# Devices page says no device can reach it, how to connect one waits on
+# turning it on, no device is listed, and its settings form starts from what
+# is saved (nothing: other devices off).
 when: { page: oxplow/devices, params: {} }
 expect:
   label: Devices
   loaders:
-    standing:
+    status:
       rows:
-        - { other_devices: "No host runs for this oxplow, so no device can reach it.", open_at: null, port: "7400" }
+        - { text: "**No host runs for this oxplow**, so no device can reach it." }
+    connect:
+      rows:
+        - { text: "Turn on other devices above first (it applies at the next start)." }
     pairing:
       rows: []
     devices:

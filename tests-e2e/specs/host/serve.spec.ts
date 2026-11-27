@@ -83,7 +83,7 @@ test("the Devices page shows this device and makes a pairing code", async ({ pag
   const devices = shown(page, "page=devices");
   await expect(devices.getByText("Kitchen")).toBeVisible();
   await expect(devices.getByText("Connected")).toBeVisible();
-  await expect(devices.getByText("No code now. Pair a Device makes one.")).toBeVisible();
+  await expect(devices.getByText("No code now.")).toBeVisible();
   await devices.getByTestId("viz-action-pair-device").click();
   await expect(devices.getByText(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/)).toBeVisible();
 });
