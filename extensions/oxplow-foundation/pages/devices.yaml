@@ -10,21 +10,26 @@ answers:
 - question: May other devices reach this computer, and at which address?
   params: {}
 loaders:
-  # Where things stand, in a sentence or two (v_host_settings: one row).
+  # Where things stand, when it says more than the checkbox does: on (and
+  # the address a device opens; `listening` is the host as it runs, a
+  # headless host's from its flags), on after the next start, or a
+  # problem. Nothing while it is plainly off.
   status:
     sql: |
-      SELECT CASE
-        WHEN NOT hosted THEN coalesce('**The host does not answer.** ' || problem,
-                                      '**No host runs for this oxplow**, so no device can reach it.')
-        WHEN NOT allow_other_devices THEN '**Off.** Only this computer uses oxplow. Turn it on below.'
-        WHEN port IS NULL THEN '**The port is not one.** ' || port_problem
-        WHEN applied THEN '**On.** A device opens ' ||
-          coalesce((SELECT group_concat('**' || value || '**', ' or ') FROM json_each(open_on_device)), '') || '.' ||
-          CASE port_from WHEN 'flag' THEN ' (Port ' || port || ' is set by `--device-port`.)'
-                         WHEN 'env' THEN ' (Port ' || port || ' is set by `OXPLOW_DEVICE_PORT`.)' ELSE '' END
-        ELSE '**On after the next start.** Quit oxplow and open it again to use these settings.'
-      END AS text
-      FROM v_host_settings
+      SELECT text FROM (
+        SELECT CASE
+          WHEN NOT hosted THEN coalesce('**The host does not answer.** ' || problem,
+                                        '**No host runs for this oxplow**, so no device can reach it.')
+          WHEN listening IS NOT NULL THEN 'On: a device opens **' || listening || '**.' ||
+            CASE WHEN allow_other_devices AND NOT applied THEN ' Your changes apply the next time oxplow starts.'
+                 WHEN NOT allow_other_devices AND NOT applied THEN ' Off the next time oxplow starts.' ELSE '' END ||
+            CASE port_from WHEN 'flag' THEN ' (Port ' || port || ' is set by `--device-port`.)'
+                           WHEN 'env' THEN ' (Port ' || port || ' is set by `OXPLOW_DEVICE_PORT`.)' ELSE '' END
+          WHEN port IS NULL THEN '**The port is not one.** ' || port_problem
+          WHEN allow_other_devices THEN '**On after the next start.** Quit oxplow and open it again to use these settings.'
+        END AS text
+        FROM v_host_settings
+      ) WHERE text IS NOT NULL
   # The saved settings, as the form edits them (names one per line).
   settings:
     sql: |
@@ -42,32 +47,34 @@ loaders:
   # A name a device may use: this computer's own .local name.
   name_choices:
     sql: "SELECT local_name AS value, local_name AS label FROM v_host_settings WHERE local_name IS NOT NULL"
-  # How a device connects: trust this computer once, then pair with a code.
+  # How a device connects, while the host listens for other devices: trust
+  # this computer once, then pair with a code.
   connect:
     sql: |
       SELECT CASE
-        WHEN NOT hosted OR NOT allow_other_devices OR NOT applied OR port IS NULL THEN
-          'Turn on other devices above first (it applies at the next start).'
+        WHEN listening IS NULL THEN 'Turn on other devices first.'
         ELSE
           '1. **Once per device, trust this computer.** ' ||
           CASE WHEN root_certificate THEN
-            'On the device, open **' || (SELECT value FROM json_each(open_on_device) LIMIT 1) || 'host/ca.pem**' ||
+            'On the device, open **' || listening || 'host/ca.pem**' ||
             ' (go past the browser''s warning) and install it — on Android under Settings ▸ Security ▸ More ▸' ||
             ' Install a certificate ▸ CA certificate; on an iPad install the downloaded profile, then turn it on' ||
             ' under Settings ▸ General ▸ About ▸ Certificate Trust Settings. It vouches only for addresses on' ||
             ' your own networks, never for a real website.'
           ELSE 'This computer uses a certificate of your own: a device that trusts its CA needs nothing more.' END ||
           char(10) || '2. **Pair it.** Choose **Pair a Device** below, then on the device open **' ||
-          (SELECT value FROM json_each(open_on_device) LIMIT 1) || '** and type the code.'
+          listening || '** and type the code.'
       END AS text
       FROM v_host_settings
-  # The code in force, while there is one.
+  # The code in force, while other devices can come in (none while they
+  # can't: no code, no button).
   pairing:
     sql: |
-      SELECT pairing_code AS code,
-             strftime('%H:%M', pairing_until / 1000, 'unixepoch', 'localtime') AS until
+      SELECT coalesce(pairing_code, 'None yet') AS code,
+             CASE WHEN pairing_code IS NULL THEN '' ELSE strftime('%H:%M', pairing_until / 1000, 'unixepoch', 'localtime') END AS until,
+             1 AS can_pair
       FROM v_host_settings
-      WHERE pairing_code IS NOT NULL
+      WHERE listening IS NOT NULL
   devices:
     sql: |
       SELECT id, name,
@@ -81,12 +88,6 @@ view:
   - id: other-devices
     title: Other devices
     stack:
-    - id: status
-      title: Status
-      hide_title: true
-      viz: markdown
-      from: status
-      empty: ''
     - id: settings
       title: Settings
       hide_title: true
@@ -119,6 +120,12 @@ view:
         choices:
           address: oxplow/devices#address_choices
           names: { from: oxplow/devices#name_choices, open: true }
+    - id: status
+      title: Status
+      hide_title: true
+      viz: markdown
+      from: status
+      empty: ''
   - id: connect
     title: Connect a device
     stack:
@@ -136,12 +143,13 @@ view:
       columns:
       - { key: code, label: Code }
       - { key: until, label: Good until }
-      empty: No code now.
+      empty: ''
       actions:
       - id: pair-device
         label: Pair a Device
         command: oxplow.host.pair
         prominent: true
+        when: can_pair
   - id: devices
     title: Paired devices
     viz: table

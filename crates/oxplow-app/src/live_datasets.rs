@@ -183,6 +183,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "root_certificate",
             "pairing_code",
             "pairing_until",
+            "listening",
         ],
         "file" => &[
             "filesystem",

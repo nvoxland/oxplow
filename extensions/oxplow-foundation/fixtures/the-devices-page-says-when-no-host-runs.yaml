@@ -11,7 +11,7 @@ expect:
         - { text: "**No host runs for this oxplow**, so no device can reach it." }
     connect:
       rows:
-        - { text: "Turn on other devices above first (it applies at the next start)." }
+        - { text: "Turn on other devices first." }
     pairing:
       rows: []
     devices:

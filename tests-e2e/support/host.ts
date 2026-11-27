@@ -45,7 +45,10 @@ export async function startHost(): Promise<Host> {
   const env = isolated(dir, harnessFake);
   for (const d of [env.HOME!, env.OXPLOW_HOME!]) mkdirSync(d, { recursive: true });
   const token = randomUUID();
-  const child: ChildProcess = spawn(bin, ["serve", "--bind", "127.0.0.1:0", "--token-stdin", "--daemon", daemon, "--ui", DIST], {
+  // A listener for other devices too (HTTPS, on any free port), as a host
+  // that lets them in has: the Devices page offers pairing only then.
+  const args = ["serve", "--bind", "127.0.0.1:0", "--token-stdin", "--public-bind", "127.0.0.1", "--device-port", "0"];
+  const child: ChildProcess = spawn(bin, [...args, "--daemon", daemon, "--ui", DIST], {
     env,
     stdio: ["pipe", "pipe", "inherit"],
     // Its own group: the daemons it starts end with it.

@@ -6,5 +6,6 @@ SELECT CAST(NULL AS INTEGER) AS hosted, CAST(NULL AS TEXT) AS problem,
        CAST(NULL AS TEXT) AS tls_key, CAST(NULL AS INTEGER) AS applied,
        CAST(NULL AS TEXT) AS open_on_device, CAST(NULL AS TEXT) AS addresses,
        CAST(NULL AS TEXT) AS local_name, CAST(NULL AS INTEGER) AS root_certificate,
-       CAST(NULL AS TEXT) AS pairing_code, CAST(NULL AS INTEGER) AS pairing_until
+       CAST(NULL AS TEXT) AS pairing_code, CAST(NULL AS INTEGER) AS pairing_until,
+       CAST(NULL AS TEXT) AS listening
 WHERE 0

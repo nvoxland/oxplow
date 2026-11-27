@@ -241,6 +241,8 @@ pub async fn read(home: &Path) -> HostRead {
             .and_then(|p| p["expires_at"].as_i64())
             .map(SqlCell::Int)
             .unwrap_or(SqlCell::Null(())),
+        // The host's own listener for other devices, as it runs now.
+        opt_text((public["state"].as_str() == Some("listening")).then(|| public["url"].as_str().unwrap_or_default().to_string())),
     ];
     HostRead { devices, settings }
 }

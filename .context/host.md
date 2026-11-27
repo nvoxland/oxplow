@@ -115,7 +115,12 @@ The app's host is a child of the app, as a daemon is a child of the host
   host runs with them — its own listener checked against them — the
   addresses a device opens, this machine's private addresses and `.local`
   name, whether there is a root to trust, the pairing code in force from
-  `GET /host/pairing`); a daemon no host started reads `hosted = 0`. It
+  `GET /host/pairing`, and `listening`: where the host listens for other
+  devices as it runs, a headless host's from its flags); a daemon no host
+  started reads `hosted = 0`. The page leads with the checkbox; its status
+  line shows only what the checkbox doesn't say (on and where, after the
+  next start, a problem), and Connect a device offers pairing only while
+  the host listens for other devices. It
   writes with `oxplow.host.pair`, `rename_device`, `remove_device`
   (confirm) and `set_settings` (`commands/host_devices.rs`), a person's
   only (an agent, an effect or a job is refused), each posting `HostChanged`

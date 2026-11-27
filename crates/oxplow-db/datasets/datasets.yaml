@@ -1815,7 +1815,7 @@ datasets:
     - { name: "paired_at", type: "INT", doc: "When it paired, in Unix milliseconds." }
     - { name: "connected", type: "INT", doc: "1 while it has a page of this host open." }
 - name: host_settings
-  version: 1
+  version: 2
   key: [hosted]
   description: "This computer's host and whether other devices may reach it, as one row: the saved settings (`host-settings.json`, written by `oxplow.host.set_settings`), the port in force and where it came from, whether the host runs with them now, the addresses a device opens, and the pairing code in force. Read live; `hosted = 0` when no host started this oxplow."
   fields:
@@ -1837,6 +1837,7 @@ datasets:
     - { name: "root_certificate", type: "INT", doc: "1 when a device has the host's own root to trust (`/host/ca.pem`); 0 with a certificate of the person's own." }
     - { name: "pairing_code", type: "TEXT", doc: "The pairing code in force (`ABCD-EFGH`), good once; NULL when none." }
     - { name: "pairing_until", type: "INT", doc: "When it ends, in Unix milliseconds." }
+    - { name: "listening", type: "TEXT", doc: "Where the host listens for other devices now (`https://…`), as it runs, whatever the saved settings say (a headless host takes flags); NULL when it doesn't. (v2)" }
 - name: agent_harness
   version: 3
   key: [id]
