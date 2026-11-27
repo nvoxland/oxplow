@@ -114,7 +114,11 @@ The app's host is a child of the app, as a daemon is a child of the host
   `{ allowOtherDevices, address, port, names, tlsCert, tlsKey }`. The app
   reads it when it starts its host and passes `--public-bind <address>` (an
   IP of this Mac's) and `--device-port <port>`, an
-  `--allow-host` for the address and each name, and a certificate of the
+  `--allow-host` for the address and each name (Devices… offers the Mac's
+  own `<local hostname>.local`, `certs::local_name`: `scutil --get
+  LocalHostName` on macOS, `hostname` elsewhere, as *Use <name>*; the
+  address is picked from a list of this Mac's private ones, not a native
+  select), and a certificate of the
   person's own when given (else the host issues its own; private names
   only). **The port** other devices come in on is the app's own
   `--device-port <port>` (`oxplow --device-port 7401 .`), else

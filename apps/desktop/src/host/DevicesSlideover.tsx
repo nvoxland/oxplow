@@ -65,6 +65,14 @@ function settingsOf(d: Draft): HostSettings {
   };
 }
 
+/** The names in the names field, one per comma. */
+function namesOf(text: string): string[] {
+  return text
+    .split(",")
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0);
+}
+
 /** Whether the port field holds something that is no port (blank is the
  *  default). */
 function portBad(text: string): boolean {
@@ -109,6 +117,7 @@ export function DevicesSlideover({
   const [saved, setSaved] = useState<Draft | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [addresses, setAddresses] = useState<string[]>([]);
+  const [localName, setLocalName] = useState<string | null>(null);
 
   const read = useCallback(async () => {
     try {
@@ -128,7 +137,10 @@ export function DevicesSlideover({
     void read();
     void api
       .hostAddresses()
-      .then(setAddresses)
+      .then((a) => {
+        setAddresses(a.ips);
+        setLocalName(a.localName);
+      })
       .catch(() => setAddresses([]));
   }, [open, read, api]);
 
@@ -306,21 +318,22 @@ export function DevicesSlideover({
             />{" "}
             Other devices may reach this Mac
           </label>
-          <label style={fieldStyle}>
-            This Mac's address for them
-            <select
-              data-testid="devices-address"
-              value={draft.address}
-              onChange={(e) => set({ address: e.target.value })}
-            >
-              <option value="">Choose one…</option>
-              {[...new Set([...(draft.address ? [draft.address] : []), ...addresses])].map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </label>
+          <fieldset role="radiogroup" aria-label="This Mac's address for them" style={choicesStyle}>
+            <legend style={{ padding: 0 }}>This Mac's address for them</legend>
+            {[...new Set([...(draft.address ? [draft.address] : []), ...addresses])].map((a) => (
+              <label key={a} style={choiceStyle}>
+                <input
+                  type="radio"
+                  name="devices-address"
+                  data-testid={`devices-address-${a}`}
+                  checked={draft.address === a}
+                  onChange={() => set({ address: a })}
+                />{" "}
+                {a}
+              </label>
+            ))}
+            {addresses.length === 0 && !draft.address ? <span style={mutedStyle}>This Mac is on no private network.</span> : null}
+          </fieldset>
           <label style={fieldStyle}>
             Port (blank: 7400)
             <input
@@ -347,14 +360,28 @@ export function DevicesSlideover({
             </p>
           ) : null}
           <label style={fieldStyle}>
-            Other names a device may use (comma between; optional)
+            Also reach this Mac by name (optional; comma between)
             <input
               data-testid="devices-names"
               value={draft.names}
-              placeholder="studio.local"
+              placeholder={localName ?? "studio.local"}
               onChange={(e) => set({ names: e.target.value })}
             />
           </label>
+          {localName && !namesOf(draft.names).includes(localName) ? (
+            <button
+              type="button"
+              data-testid="devices-use-local-name"
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => set({ names: [...namesOf(draft.names), localName].join(", ") })}
+            >
+              Use {localName}
+            </button>
+          ) : null}
+          <p style={mutedStyle}>
+            A device on the same network can open this Mac by its name on the network (its
+            .local name) instead of its address; a device that cannot find it uses the address.
+          </p>
           <details data-testid="devices-own-cert" open={draft.cert !== "" || draft.key !== ""}>
             <summary style={mutedStyle}>Use your own certificate</summary>
             <p style={mutedStyle}>
@@ -408,3 +435,5 @@ const codeStyle: React.CSSProperties = {
 const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "6px 0" };
 const dotStyle: React.CSSProperties = { width: 8, height: 8, borderRadius: 4, flex: "none" };
 const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 };
+const choicesStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2, border: "none", padding: 0, margin: "0 0 10px" };
+const choiceStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, minHeight: "var(--control-height)" };

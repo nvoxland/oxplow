@@ -239,9 +239,53 @@ pub fn private_addresses() -> Vec<IpAddr> {
     ips
 }
 
+/// The name this machine answers to on its local network: its local
+/// hostname with `.local` (macOS's System Settings ▸ General ▸ Sharing ▸
+/// Local hostname; elsewhere the hostname), the name a device on the same
+/// network may reach it by. None when it has none.
+pub fn local_name() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let raw = std::process::Command::new("scutil")
+        .args(["--get", "LocalHostName"])
+        .output();
+    #[cfg(not(target_os = "macos"))]
+    let raw = std::process::Command::new("hostname").output();
+    let out = raw.ok().filter(|o| o.status.success())?;
+    local_name_from(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `raw` (a hostname as the system gives it) as a `.local` name: trimmed,
+/// lower case, `.local` added to a bare name; none when blank. A name that
+/// has a domain already keeps it. Pure.
+pub fn local_name_from(raw: &str) -> Option<String> {
+    let name = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    if name.is_empty() {
+        return None;
+    }
+    Some(if name.contains('.') {
+        name
+    } else {
+        format!("{name}.local")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hostname_is_named_on_the_local_network_as_dot_local() {
+        assert_eq!(
+            local_name_from("Nathans-MacBook-Pro\n"),
+            Some("nathans-macbook-pro.local".into())
+        );
+        assert_eq!(local_name_from("studio.local"), Some("studio.local".into()));
+        assert_eq!(local_name_from("  \n"), None);
+        assert!(
+            is_private_name(&local_name_from("studio").unwrap()),
+            "the host's own certificate covers it"
+        );
+    }
 
     #[test]
     fn private_means_the_ranges_a_home_or_a_tailnet_uses() {

@@ -229,15 +229,26 @@ pub async fn set_host_settings(
     settings.save(&config_dir()?).map_err(IpcError::invalid)
 }
 
-/// This machine's addresses on private networks, for the settings to pick
-/// from (`oxplow_host::certs::private_addresses`).
+/// What the settings offer: this machine's addresses on private networks
+/// (`oxplow_host::certs::private_addresses`) and the name it answers to on
+/// its local network (`<local hostname>.local`).
+#[derive(Clone, Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HostAddresses {
+    pub ips: Vec<String>,
+    pub local_name: Option<String>,
+}
+
 #[tauri::command]
 #[specta::specta]
-pub async fn host_addresses() -> Result<Vec<String>, IpcError> {
-    Ok(oxplow_host::certs::private_addresses()
-        .into_iter()
-        .map(|ip| ip.to_string())
-        .collect())
+pub async fn host_addresses() -> Result<HostAddresses, IpcError> {
+    Ok(HostAddresses {
+        ips: oxplow_host::certs::private_addresses()
+            .into_iter()
+            .map(|ip| ip.to_string())
+            .collect(),
+        local_name: oxplow_host::certs::local_name(),
+    })
 }
 
 /// The home's own root certificate (PEM), for the person to get onto a

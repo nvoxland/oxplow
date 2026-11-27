@@ -826,11 +826,7 @@ export const commands = {
 	hostRemoveDevice: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("host_remove_device", { id })),
 	/**  Keep "Allow other devices"; it applies at the next app start. */
 	setHostSettings: (settings: HostSettings) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_host_settings", { settings })),
-	/**
-	 *  This machine's addresses on private networks, for the settings to pick
-	 *  from (`oxplow_host::certs::private_addresses`).
-	 */
-	hostAddresses: () => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("host_addresses")),
+	hostAddresses: () => typedError<HostAddresses, IpcError_Serialize>(__TAURI_INVOKE("host_addresses")),
 	/**
 	 *  The home's own root certificate (PEM), for the person to get onto a
 	 *  device that cannot download it from the host; `None` before the host
@@ -3584,6 +3580,16 @@ export type HookKind =
  *  Codex's `contextCompaction` item, from the chat host).
  */
 "post_compact";
+
+/**
+ *  What the settings offer: this machine's addresses on private networks
+ *  (`oxplow_host::certs::private_addresses`) and the name it answers to on
+ *  its local network (`<local hostname>.local`).
+ */
+export type HostAddresses = {
+	ips: string[],
+	localName: string | null,
+};
 
 /**
  *  The host a stream's worktree is on. Every stream is on the local machine

@@ -5,6 +5,7 @@ import type {
   TabReport,
   TabReportAnswer,
   TabSave,
+  HostAddresses,
   OtherDeviceTabs,
   TabSession,
   QueuedTab,
@@ -767,7 +768,7 @@ export async function setHostSettings(
 }
 
 /// This Mac's addresses on private networks, to choose where devices reach it.
-export async function hostAddresses(): Promise<string[]> {
+export async function hostAddresses(): Promise<HostAddresses> {
   return unwrap(await commands.hostAddresses());
 }
 

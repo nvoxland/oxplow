@@ -14,7 +14,10 @@ so is a private network such as Tailscale or WireGuard.
 
 1. On the Mac, choose **Oxplow ▸ Devices…**.
 2. Under **Allow other devices**, turn it on and pick the Mac's address
-   (the one on your home network, say `192.168.1.20`). The port is 7400
+   (the one on your home network, say `192.168.1.20`) from the list. To
+   open it by name instead, choose **Use <your Mac>.local** under *Also
+   reach this Mac by name*; a device that cannot find the name uses the
+   address. The port is 7400
    unless you set another. **Save**, then quit Oxplow and open it again:
    the settings apply at the next start. (`oxplow --device-port <port>` or
    `OXPLOW_DEVICE_PORT` set the port for one run, over the setting.)

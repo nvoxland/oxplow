@@ -32,7 +32,7 @@ function fake(over: Partial<DevicesView> = {}) {
       calls.push(`save ${JSON.stringify(next)}`);
       settings = next;
     },
-    hostAddresses: async () => ["192.168.1.20", "100.64.0.1"],
+    hostAddresses: async () => ({ ips: ["192.168.1.20", "100.64.0.1"], localName: "studio.local" }),
   };
   return { api, calls };
 }
@@ -68,8 +68,7 @@ test("the settings save only when changed", async () => {
   const save = (await screen.findByTestId("devices-save")) as HTMLButtonElement;
   expect(save.disabled).toBe(true);
   fireEvent.click(screen.getByTestId("devices-allow"));
-  await screen.findByRole("option", { name: "192.168.1.20" });
-  fireEvent.change(screen.getByTestId("devices-address"), { target: { value: "192.168.1.20" } });
+  fireEvent.click(await screen.findByTestId("devices-address-192.168.1.20"));
   expect(save.disabled).toBe(false);
   fireEvent.click(save);
   await waitFor(() => expect(calls.some((c) => c.startsWith("save "))).toBe(true));
@@ -122,8 +121,7 @@ test("the port is saved with the settings, and an override is said", async () =>
   const { api, calls } = fake();
   render(<DevicesSlideover open onClose={() => {}} api={api} />);
   fireEvent.click(await screen.findByTestId("devices-allow"));
-  await screen.findByRole("option", { name: "192.168.1.20" });
-  fireEvent.change(screen.getByTestId("devices-address"), { target: { value: "192.168.1.20" } });
+  fireEvent.click(await screen.findByTestId("devices-address-192.168.1.20"));
   fireEvent.change(screen.getByTestId("devices-port"), { target: { value: "seventy" } });
   expect(screen.getByTestId("devices-port-bad")).toBeTruthy();
   expect((screen.getByTestId("devices-save") as HTMLButtonElement).disabled).toBe(true);
@@ -136,4 +134,23 @@ test("the port is saved with the settings, and an override is said", async () =>
   render(<DevicesSlideover open onClose={() => {}} api={env.api} />);
   expect((await screen.findByTestId("devices-port-override")).textContent).toContain("OXPLOW_DEVICE_PORT");
   expect(screen.getByTestId("devices-port-override").textContent).toContain("7500");
+});
+
+// The address is one of this Mac's, picked from a short list; the Mac's
+// name on the network is offered for the names a device may use.
+test("an address is picked from the list, and the Mac's .local name is offered", async () => {
+  const { api, calls } = fake();
+  render(<DevicesSlideover open onClose={() => {}} api={api} />);
+  fireEvent.click(await screen.findByTestId("devices-allow"));
+  const choice = await screen.findByTestId("devices-address-100.64.0.1");
+  expect(choice.getAttribute("type")).toBe("radio");
+  fireEvent.click(choice);
+  fireEvent.click(screen.getByTestId("devices-use-local-name"));
+  expect((screen.getByTestId("devices-names") as HTMLInputElement).value).toBe("studio.local");
+  expect(screen.queryByTestId("devices-use-local-name")).toBeNull();
+  fireEvent.click(screen.getByTestId("devices-save"));
+  await waitFor(() => expect(calls.some((c) => c.startsWith("save "))).toBe(true));
+  const saved = JSON.parse(calls.find((c) => c.startsWith("save "))!.slice(5)) as HostSettings;
+  expect(saved.address).toBe("100.64.0.1");
+  expect(saved.names).toEqual(["studio.local"]);
 });
