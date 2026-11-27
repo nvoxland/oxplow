@@ -45,7 +45,7 @@ const server: RemoteHostView = {
 // until the person there types it, then lists the host.
 test("connecting shows the code to type on that computer and waits for it", async () => {
   const { api, calls } = fake([], [false, true]);
-  render(<RemoteHostsSection api={api} />);
+  render(<RemoteHostsSection api={api} pause={0} />);
   fireEvent.change(screen.getByTestId("remote-host-address"), { target: { value: "server.ts.net:7400" } });
   fireEvent.submit(screen.getByTestId("remote-host-address").closest("form")!);
   expect((await screen.findByTestId("remote-host-ask-code")).textContent).toBe("ABCD-EFGH");
@@ -62,7 +62,7 @@ test("connecting shows the code to type on that computer and waits for it", asyn
 // An ask that ended (ten minutes) says so; Cancel stops waiting.
 test("an ask that ended says so, and one can be cancelled", async () => {
   const ended = fake([], [new Error("this ask to pair ended (after ten minutes); ask again")]);
-  render(<RemoteHostsSection api={ended.api} />);
+  render(<RemoteHostsSection api={ended.api} pause={0} />);
   fireEvent.change(screen.getByTestId("remote-host-address"), { target: { value: "s:7400" } });
   fireEvent.submit(screen.getByTestId("remote-host-address").closest("form")!);
   expect((await screen.findByTestId("remote-host-error")).textContent).toContain("ended");
@@ -70,7 +70,7 @@ test("an ask that ended says so, and one can be cancelled", async () => {
   cleanup();
 
   const waiting = fake([], []);
-  render(<RemoteHostsSection api={waiting.api} />);
+  render(<RemoteHostsSection api={waiting.api} pause={0} />);
   fireEvent.change(screen.getByTestId("remote-host-address"), { target: { value: "s:7400" } });
   fireEvent.submit(screen.getByTestId("remote-host-address").closest("form")!);
   fireEvent.click(await screen.findByTestId("remote-host-ask-cancel"));
@@ -79,7 +79,7 @@ test("an ask that ended says so, and one can be cancelled", async () => {
 
 test("a host's projects open here, and another version is said", async () => {
   const { api, calls } = fake([server]);
-  render(<RemoteHostsSection api={api} />);
+  render(<RemoteHostsSection api={api} pause={0} />);
   fireEvent.click(await screen.findByTestId("remote-project-open-prj-1"));
   await waitFor(() => expect(calls.filter((c) => c !== "list")).toEqual(["open https://server.ts.net:7400 prj-1 true"]));
   expect(screen.getByTestId(`remote-host-${server.origin}`).textContent).toContain("another version");
