@@ -235,9 +235,10 @@ function TabletTab({ tab, active, menu, onActivate, onClose }: { tab: WindowTab;
         {tab.dirty ? "● " : ""}
         {tab.label}
       </span>
-      {/* An agent session's tab too (pinned, closable): its × closes the
-          session, as the desktop strip's does. */}
-      {tab.closable ? (
+      {/* Only the shown tab has its × (an agent session's too: it closes the
+          session): a tap on another tab only shows it, where a short tab's
+          × would take the tap. Its menu has Close. */}
+      {tab.closable && active ? (
         <button
           type="button"
           className="ox-icon-button"

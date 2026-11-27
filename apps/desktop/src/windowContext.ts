@@ -8,6 +8,8 @@ export type WindowContext = {
   /// The daemon's UI token (only this window's renderer gets it).
   token?: string | null;
   kind: string;
+  /// Which shell draws the window, overriding the device's choice (a test's).
+  shell?: string;
   projectDir: string | null;
   /// The host's id for the project, when a host served this page
   /// (`/p/<project>/`); the shell names a project by its folder instead.

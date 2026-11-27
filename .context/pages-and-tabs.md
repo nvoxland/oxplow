@@ -183,8 +183,10 @@ threads and their operations, the shown thread's tabs, `closeTab` (a file's
 tab closes its file, a diff's its diff, a session's the session),
 `reorderTabs`, opening a page and search, the menu bar's commands, the tray,
 the Git dialogs and the status bar. A tablet tab's menu also has Move Left
-and Move Right (no drag on a finger), an agent session's tab its × (it
-closes the session, as on the desktop). Tablet bodies are keyed by stream, as
+and Move Right (no drag on a finger). Only the shown tab has its × (an
+agent session's closes the session, as on the desktop): a tap on another
+tab only shows it, where a short tab's × would take the tap; its menu has
+Close. Tablet bodies are keyed by stream, as
 the desktop's strip is. The dock's panel opens over the column a shell
 marks `data-dock-column`. Both shells draw tab bodies through
 `TabBodies` (`components/CenterTabs/TabBodies.tsx`: mounted when first

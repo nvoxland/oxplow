@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { expectNoHorizontalOverflow, open, shown, load, tabsWith } from "../../support/ui.js";
+import { expectNoHorizontalOverflow, open, shown, load, tabsWith, tabUri } from "../../support/ui.js";
 
 // Definition is a display mode of a page's YAML file: Definition in About this page opens
 // the page's running copy drawn as Definition, and the Text view (the raw
@@ -97,7 +97,7 @@ test("Definition of a page whose file is open in the Text view is another tab: b
   // The page file's tabs, by id: the file's own (the display mode is the tab's state, not part of its id).
   const fileTabs = tabsWith(page, "oxplow:", { contains: "numbat.yaml" });
   await expect(fileTabs).toHaveCount(1);
-  await expect(fileTabs.first()).toHaveAttribute("data-testid", /center-tab-oxplow:oxplow\/file\?/);
+  expect(await tabUri(fileTabs)).toMatch(/^oxplow:oxplow\/file\?/);
 
   // The same page's Definition again: a Definition tab of its own, the Text view tab stays.
   await openDefinition();

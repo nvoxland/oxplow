@@ -87,18 +87,19 @@ function guard(page: Page): () => void {
  *  `token`: `window.__OXPLOW__`, set before any script runs, in the top frame
  *  only (a component's frame never sees the token), as the shell injects it
  *  (`windows.rs`). The transport's one read path (`resolveEndpoint`). */
-export async function connectContext(context: BrowserContext, base: string, token: string): Promise<void> {
+export async function connectContext(context: BrowserContext, base: string, token: string, shell?: string): Promise<void> {
   await context.addInitScript(
-    ({ base, token }) => {
+    ({ base, token, shell }) => {
       if (window.top !== window) return;
       (window as unknown as { __OXPLOW__: unknown }).__OXPLOW__ = Object.freeze({
         kind: "project",
         base,
         token,
         projectDir: null,
+        ...(shell ? { shell } : {}),
       });
     },
-    { base, token },
+    { base, token, shell },
   );
 }
 
@@ -209,7 +210,9 @@ export const test = base.extend<{ daemon: Workspace }, { daemons: Daemons }>({
   ],
   // The window's context says where its daemon is, as the shell's does.
   context: async ({ context, daemon }, use) => {
-    await connectContext(context, daemon.base, daemon.token);
+    // The tablet form factors draw the tablet shell (the window context's `shell`).
+    const tablet = ["tablet", "tablet-portrait"].includes(test.info().project.name);
+    await connectContext(context, daemon.base, daemon.token, tablet ? "tablet" : undefined);
     await use(context);
   },
   page: async ({ page }, use) => {

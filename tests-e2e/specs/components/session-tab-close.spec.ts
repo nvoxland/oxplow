@@ -14,10 +14,11 @@ test("a session's tab closes the session at once, and Undo brings it back", asyn
   await closeTab(page, id);
   await expect(tabOf(page, id)).not.toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
-  // Other toasts may be up (the start's own, a project's language-pack
-  // suggestion): the close's is the one whose Undo to take.
-  const closed = page.getByTestId("undo-toast").filter({ hasText: "Close" });
+  // Other toasts may be up or come after (the start's own, a project's
+  // language-pack suggestion), and only the newest is `undo-toast`: the
+  // close's is found by its words, and its Undo taken.
+  const closed = page.locator("[data-toast-id]").filter({ hasText: "Close" });
   await expect(closed).toBeVisible();
-  await closed.getByTestId("undo-toast-undo").click();
+  await closed.getByRole("button", { name: "Undo" }).click();
   await expect(tabOf(page, id)).toBeVisible();
 });

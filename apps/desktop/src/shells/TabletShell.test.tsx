@@ -68,13 +68,21 @@ test("the context line names the stream and thread; the page is the active tab's
   expect(view.queryByTestId("center-tab-body-b")).toBeNull();
 });
 
-test("a tap shows a tab, its × closes it, an agent session's too", () => {
+// Only the shown tab has its ×: a tap on another tab only shows it (a
+// short tab's × would take the tap). Its menu still has Close.
+test("a tap shows a tab; only the shown tab has a ×, which closes it", () => {
   const w = win();
   const view = render(<TabletShell win={w} />);
+  expect(view.queryByTestId("tablet-tab-close-b")).toBeNull();
+  expect(view.queryByTestId("tablet-tab-close-session")).toBeNull();
   fireEvent.click(view.getByTestId("tablet-tab-b"));
   fireEvent.click(view.getByTestId("tablet-tab-close-a"));
-  fireEvent.click(view.getByTestId("tablet-tab-close-session"));
-  expect(w.log).toEqual(["activate b", "close a", "close session"]);
+  expect(w.log).toEqual(["activate b", "close a"]);
+  cleanup();
+  const s = win({ activeTabId: "session" });
+  const v2 = render(<TabletShell win={s} />);
+  fireEvent.click(v2.getByTestId("tablet-tab-close-session"));
+  expect(s.log).toEqual(["close session"]);
 });
 
 test("a tab's menu is the window's tab menu", () => {
