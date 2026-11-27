@@ -8,7 +8,7 @@
 // (no Tauri host — Playwright-driven UX testing, a served `dist/`) the
 // picker can't open, so it resolves to `null` instead of throwing.
 
-import { open as tauriOpen } from "@tauri-apps/plugin-dialog";
+import { message as tauriMessage, open as tauriOpen } from "@tauri-apps/plugin-dialog";
 import { shellAvailable } from "./transport";
 
 /// Open the native single-folder picker. Resolves with the selected
@@ -18,4 +18,13 @@ export async function pickFolder(title: string): Promise<string | null> {
   if (!shellAvailable()) return null;
   const selected = await tauriOpen({ directory: true, multiple: false, title });
   return typeof selected === "string" ? selected : null;
+}
+
+/// The OS's alert with `title`, `text` and an OK, for a menu item that can't
+/// act where it was chosen (the app menu's items exist only in the app). In a
+/// plain browser there is no app menu, so nothing asks for one: it shows
+/// nothing.
+export async function showNotice(title: string, text: string): Promise<void> {
+  if (!shellAvailable()) return;
+  await tauriMessage(text, { title, kind: "info" });
 }

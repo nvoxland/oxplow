@@ -103,7 +103,7 @@ The app's host is a child of the app, as a daemon is a child of the host
   `session.json`, as before.
 - **The Devices page** (foundation's `oxplow/devices`; Oxplow ▸ Devices…
   opens it in the front project window, Settings links it; in the launcher,
-  with no project, the menu item says to open one). It is an ordinary page,
+  with no project, an alert says to open one: `nativeDialog.showNotice`). It is an ordinary page,
   so it works on every client: the tablet, a browser on a headless host.
   **A daemon talks to its host as owner**: the host starts it with its own
   environment (`OXPLOW_HOME`), so the daemon opens the home's owner socket

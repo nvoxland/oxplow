@@ -4,7 +4,7 @@ import { createProject, desktopBridge, listRecentProjects, openProject, removeRe
 import { DEVICES_MENU_ID } from "../menuBar.js";
 import { RemoteHostsSection } from "./RemoteHostsSection.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
-import { pickFolder } from "../tauri-bridge/nativeDialog.js";
+import { pickFolder, showNotice } from "../tauri-bridge/nativeDialog.js";
 import { useRowContextMenu } from "../components/useRowContextMenu.js";
 import { formatRelativeSeconds } from "../components/format.js";
 import { logUi } from "../logger.js";
@@ -60,14 +60,18 @@ export function Launcher() {
   useEffect(reload, [reload]);
 
   // Oxplow ▸ Devices…: a page of a project (its daemon talks to the
-  // host), so here it says to open one.
-  const [devicesAsked, setDevicesAsked] = useState(false);
+  // host), so here an alert says to open one.
   useEffect(() => {
     // The launcher's menu is the app menu alone; registering it makes this
     // window the one a menu item (Devices…) goes to while it is in front.
     void desktopBridge().setNativeMenu([]);
     return desktopBridge().onMenuCommand((id) => {
-      if (id === DEVICES_MENU_ID) setDevicesAsked(true);
+      if (id === DEVICES_MENU_ID) {
+        void showNotice(
+          "Devices",
+          "Devices is part of a project. Open a project, then choose Oxplow ▸ Devices… (or Settings ▸ Devices).",
+        );
+      }
     });
   }, []);
 
@@ -131,11 +135,6 @@ export function Launcher() {
           <p style={subtitleStyle}>Open a project to get started.</p>
         </header>
 
-        {devicesAsked ? (
-          <p data-testid="launcher-devices" role="status" style={subtitleStyle}>
-            Devices is a page of any project: open one, then choose Oxplow ▸ Devices… (or Settings ▸ Devices).
-          </p>
-        ) : null}
         {error ? (
           <div data-testid="launcher-error" style={errorStyle}>
             {error}

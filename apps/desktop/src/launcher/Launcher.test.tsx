@@ -14,12 +14,15 @@ import { fireEvent } from "@testing-library/react";
 const realTransport = { ...(await import("../tauri-bridge/transport.js")) }; // a copy: `mock.module` patches a loaded module in place
 const realBindings = { ...(await import("../tauri-bridge/generated/bindings.js")) }; // a copy: `mock.module` patches a loaded module in place
 const realDialog = { ...(await import("../tauri-bridge/nativeDialog.js")) }; // a copy: `mock.module` patches a loaded module in place
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 
 const created: string[] = [];
 const opened: [string, boolean][] = [];
 let picked: string | null = "/tmp/some-folder";
+const notices: string[] = [];
+let menuCommand: ((id: string) => void) | null = null;
 
 mock.module("../tauri-bridge/transport.js", () => ({
   ...realTransport,
@@ -29,6 +32,19 @@ mock.module("../tauri-bridge/transport.js", () => ({
 mock.module("../tauri-bridge/nativeDialog.js", () => ({
   ...realDialog,
   pickFolder: async () => picked,
+  showNotice: async (title: string, text: string) => void notices.push(`${title}: ${text}`),
+}));
+
+mock.module("../api.js", () => ({
+  ...realApi,
+  desktopBridge: () => ({
+    ...realApi.desktopBridge(),
+    setNativeMenu: async () => {},
+    onMenuCommand: (cb: (id: string) => void) => {
+      menuCommand = cb;
+      return () => {};
+    },
+  }),
 }));
 
 mock.module("../tauri-bridge/generated/bindings.js", () => ({
@@ -91,6 +107,18 @@ test("a cancelled folder picker is a no-op on both doors", async () => {
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../tauri-bridge/transport.js", () => realTransport);
+  mock.module("../api.js", () => realApi);
   mock.module("../tauri-bridge/nativeDialog.js", () => realDialog);
   mock.module("../tauri-bridge/generated/bindings.js", () => realBindings);
+});
+
+// Oxplow ▸ Devices… in the launcher: Devices is a page of a project, so an
+// alert says so (nothing is fitted into the launcher).
+test("Devices… in the launcher says to open a project", async () => {
+  const { getByTestId } = render(<Launcher />);
+  await waitFor(() => getByTestId("launcher-empty"));
+  await waitFor(() => expect(menuCommand).not.toBeNull());
+  menuCommand!("app.devices");
+  await waitFor(() => expect(notices.length).toBe(1));
+  expect(notices[0]).toContain("Open a project");
 });
