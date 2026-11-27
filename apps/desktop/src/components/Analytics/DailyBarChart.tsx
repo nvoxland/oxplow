@@ -59,7 +59,7 @@ export function DailyBarChart({
           />
         ))}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 10, color: "var(--text-muted)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
         <span>{rows[0]?.label}</span>
         <span>{rows[rows.length - 1]?.label}</span>
       </div>

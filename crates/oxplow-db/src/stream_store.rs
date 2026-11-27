@@ -210,12 +210,17 @@ impl StreamStore for SqliteStreamStore {
             .await
     }
 
-    async fn current_id(&self) -> Result<Option<StreamId>, DomainError> {
+    async fn current_id(
+        &self,
+        device: &oxplow_domain::DeviceId,
+    ) -> Result<Option<StreamId>, DomainError> {
+        let device = device.as_str().to_string();
         self.db
             .call(move |conn| {
-                let mut stmt =
-                    conn.prepare("SELECT current_stream_id FROM runtime_state WHERE id = 1")?;
-                let mut rows = stmt.query_map([], |r| r.get::<_, Option<i64>>(0))?;
+                let mut stmt = conn.prepare(
+                    "SELECT current_stream_id FROM device_view_state WHERE device_id = ?1",
+                )?;
+                let mut rows = stmt.query_map([device], |r| r.get::<_, Option<i64>>(0))?;
                 match rows.next() {
                     Some(Ok(Some(s))) => Ok(Some(StreamId::new(s))),
                     Some(Ok(None)) => Ok(None),
@@ -226,15 +231,21 @@ impl StreamStore for SqliteStreamStore {
             .await
     }
 
-    async fn set_current(&self, id: Option<&StreamId>) -> Result<(), DomainError> {
+    async fn set_current(
+        &self,
+        device: &oxplow_domain::DeviceId,
+        id: Option<&StreamId>,
+    ) -> Result<(), DomainError> {
         let id = id.cloned();
+        let device = device.as_str().to_string();
         // A write transaction, so a switch the person makes goes ahead of
         // the background's writers instead of queueing behind them.
         self.db
             .transaction(move |tx| {
                 tx.execute(
-                    "UPDATE runtime_state SET current_stream_id = ?1 WHERE id = 1",
-                    params![id.as_ref().map(|s| s.value())],
+                    "INSERT INTO device_view_state (device_id, current_stream_id) VALUES (?1, ?2)
+                     ON CONFLICT(device_id) DO UPDATE SET current_stream_id = excluded.current_stream_id",
+                    params![device, id.as_ref().map(|s| s.value())],
                 )
                 .map_err(crate::database::map_sql_err)?;
                 Ok(())
@@ -385,11 +396,17 @@ mod tests {
         let store = SqliteStreamStore::new(Database::in_memory());
         let s = primary();
         store.upsert(&s).await.unwrap();
-        assert_eq!(store.current_id().await.unwrap(), None);
-        store.set_current(Some(&s.id)).await.unwrap();
-        assert_eq!(store.current_id().await.unwrap(), Some(s.id));
-        store.set_current(None).await.unwrap();
-        assert_eq!(store.current_id().await.unwrap(), None);
+        let (mac, tablet) = (
+            oxplow_domain::DeviceId::generate(),
+            oxplow_domain::DeviceId::generate(),
+        );
+        assert_eq!(store.current_id(&mac).await.unwrap(), None);
+        store.set_current(&mac, Some(&s.id)).await.unwrap();
+        assert_eq!(store.current_id(&mac).await.unwrap(), Some(s.id));
+        // Each device's current stream is its own.
+        assert_eq!(store.current_id(&tablet).await.unwrap(), None);
+        store.set_current(&mac, None).await.unwrap();
+        assert_eq!(store.current_id(&mac).await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -397,9 +414,10 @@ mod tests {
         let store = SqliteStreamStore::new(Database::in_memory());
         let s = primary();
         store.upsert(&s).await.unwrap();
-        store.set_current(Some(&s.id)).await.unwrap();
+        let mac = oxplow_domain::DeviceId::generate();
+        store.set_current(&mac, Some(&s.id)).await.unwrap();
         store.delete(&s.id).await.unwrap();
-        assert_eq!(store.current_id().await.unwrap(), None);
+        assert_eq!(store.current_id(&mac).await.unwrap(), None);
     }
 
     #[tokio::test]

@@ -32,6 +32,20 @@ describe("nextBannerState", () => {
     expect(nextBannerState("refused", "up")).toBe("refused");
   });
 
+  // The app that runs the host quit: its own words, until the host is back.
+  test("other devices turned off says so, and their return is a restore", () => {
+    expect(nextBannerState("hidden", "closed")).toBe("closed");
+    expect(nextBannerState("closed", "down")).toBe("closed");
+    expect(nextBannerState("closed", "up")).toBe("restored");
+  });
+
+  test("a host that ended says so, and its return is a restore", () => {
+    expect(nextBannerState("hidden", "ended")).toBe("ended");
+    expect(nextBannerState("down", "ended")).toBe("ended");
+    expect(nextBannerState("ended", "down")).toBe("ended");
+    expect(nextBannerState("ended", "up")).toBe("restored");
+  });
+
   test("flap sequence lands on restored", () => {
     const events: Array<"up" | "down"> = ["up", "down", "up", "down", "up"];
     const final = events.reduce<BannerState>((s, e) => nextBannerState(s, e), "hidden");

@@ -5,7 +5,9 @@
 /// and nothing about a session. What the person types comes out through
 /// `onData` / `onBinary`, a fit through `onResize`; `onOpened` hands the
 /// opened terminal to whoever writes to it (`useTerminalSession`).
-import { useEffect, useRef, type MouseEvent } from "react";
+import { installTouchScroll, wheelAction } from "./touchScroll.js";
+import { useCallback, useEffect, useRef, type MouseEvent } from "react";
+import { gridFontSize, gridScale, type Grid } from "../components/terminalSession.js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
@@ -24,6 +26,7 @@ import type { MenuItem } from "../menu.js";
 import { followRuleLink, linkRefOf, openInBrowser, openInForPath, openInForRef, withLinkOffers } from "../openIn.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import { isMacPlatform } from "../keybindings.js";
+import { copyText, readText } from "../clipboard.js";
 
 /** The terminal's font size, px: its cells are measured in it. */
 const TERMINAL_FONT_SIZE = 13;
@@ -105,7 +108,7 @@ async function readClipboard(): Promise<string> {
     }
   }
   try {
-    return await navigator.clipboard.readText();
+    return (await readText()) ?? "";
   } catch {
     return "";
   }
@@ -117,13 +120,19 @@ export interface TerminalSurfaceProps {
   /** The terminal's URI: what its menu's Add to Context names. */
   uri: string;
   /** The terminal opened at a real size: write to it, and open the
-   *  session at its `cols` × `rows`. */
-  onOpened(term: Terminal): void;
-  /** What the person typed (`input`), or binary input. */
-  onData(data: string): void;
+   *  session at the `pane`'s room, in cells. */
+  onOpened(term: Terminal, pane: Grid): void;
+  /** What xterm sent (`input`), or binary input. `typed` is whether a
+   *  person made it (a key, a paste, the IME): xterm's answers to a
+   *  program's queries and its focus reports reach `onData` too. */
+  onData(data: string, typed: boolean): void;
   onBinary(data: string): void;
-  /** It fit to a new size. */
+  /** The pane measured a new size (the cells it has room for). */
   onResize(cols: number, rows: number): void;
+  /** The terminal's grid, as the client typing into it set it: the pane
+   *  draws it, in a smaller font when it has less room; null follows the
+   *  pane. */
+  grid?: Grid | null;
   /** Plain Escape: Claude Code cancels its turn on it without a Stop
    *  hook, so the host records the interrupt. The byte still goes. */
   onInterrupt?(): void;
@@ -141,6 +150,7 @@ export interface TerminalSurfaceProps {
 export function TerminalSurface({
   shown,
   uri,
+  grid = null,
   onOpened,
   onData,
   onBinary,
@@ -153,6 +163,37 @@ export function TerminalSurface({
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  // The cells the pane has room for, and the grid it draws: the terminal's
+  // own (another client may own its size), scaled down to fit.
+  const paneRef = useRef<Grid | null>(null);
+  const gridRef = useRef<Grid | null>(grid);
+  gridRef.current = grid;
+  const applyGrid = useCallback(() => {
+    const term = termRef.current;
+    const pane = paneRef.current;
+    const target = gridRef.current ?? pane;
+    if (!term || !pane || !target) return;
+    if (term.cols !== target.cols || term.rows !== target.rows) term.resize(target.cols, target.rows);
+    // Smaller cells, not a scaled picture: xterm finds the cell under the
+    // pointer from its own measure, which a transform makes wrong. At the
+    // smallest readable font the rest is clipped (the notice offers Fit).
+    const size = gridFontSize(TERMINAL_FONT_SIZE, gridScale(pane, target));
+    if (term.options.fontSize !== size) term.options.fontSize = size;
+  }, []);
+  useEffect(applyGrid, [grid?.cols, grid?.rows, applyGrid]);
+  // A paste is the person's: it takes the terminal's size like a key.
+  const pasteTyped = useCallback((term: Terminal, text: string) => {
+    typedRef.current.depth++;
+    try {
+      term.paste(text);
+    } finally {
+      typedRef.current.depth--;
+    }
+  }, []);
+  // Whether the input xterm is sending now is a person's: set around a key,
+  // a paste or an IME commit, and for the tick after (xterm sends a commit
+  // from a timer).
+  const typedRef = useRef({ depth: 0, until: 0 });
   const menu = useContextMenu();
   // The link under the pointer (the link providers' hover / leave): the
   // right-click menu's Open In ▸ is for it.
@@ -165,7 +206,7 @@ export function TerminalSurface({
       id,
       label,
       enabled: true,
-      run: () => void navigator.clipboard.writeText(text).catch(() => {}),
+      run: () => void copyText(text),
     });
     if (link.kind === "url") {
       const elsewhere = openInForRef(link.url);
@@ -191,11 +232,11 @@ export function TerminalSurface({
         mac: isMacPlatform(),
         ...(what?.around ? { around: what.around } : {}),
         uri,
-        copy: (text) => void navigator.clipboard.writeText(text).catch(() => {}),
+        copy: (text) => void copyText(text),
         paste: () =>
           void readClipboard()
             .then((text) => {
-              if (text) term.paste(text);
+              if (text) pasteTyped(term, text);
             })
             .catch((error) => logUi("warn", "terminal paste: clipboard read failed", { error: String(error) })),
         add: (what) => void addToContext(what),
@@ -221,7 +262,7 @@ export function TerminalSurface({
     return subscribeAgentInput((text) => {
       const term = termRef.current;
       if (!term) return;
-      term.paste(text);
+      pasteTyped(term, text);
       term.focus();
     });
   }, [shown]);
@@ -253,6 +294,18 @@ export function TerminalSurface({
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // The room the pane has in cells of the base font: the size it asks the
+    // terminal for, whatever smaller font the grid is drawn in now.
+    const measurePane = () => {
+      const drawn = term.options.fontSize;
+      if (drawn === TERMINAL_FONT_SIZE) return fit.proposeDimensions();
+      term.options.fontSize = TERMINAL_FONT_SIZE;
+      try {
+        return fit.proposeDimensions();
+      } finally {
+        term.options.fontSize = drawn;
+      }
+    };
 
     // A web URL: a click opens the browser. Registered first, so a path
     // inside a URL (`?next=/a/b.ts`) is the URL's, not a link of its own.
@@ -291,7 +344,7 @@ export function TerminalSurface({
         event.preventDefault();
         void readClipboard()
           .then((text) => {
-            if (text) term.paste(text);
+            if (text) pasteTyped(term, text);
           })
           .catch((error) => logUi("warn", "terminal paste: clipboard read failed", { error: String(error) }));
         return false;
@@ -299,7 +352,7 @@ export function TerminalSurface({
       // Shift+Enter: ESC+CR, a newline to Claude Code's input, not a submit.
       if (event.key === "Enter" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
-        props.current.onData("\x1b\r");
+        props.current.onData("\x1b\r", true);
         return false;
       }
       if (shouldHandleTerminalPageKey(event)) {
@@ -328,11 +381,57 @@ export function TerminalSurface({
     };
     host.addEventListener("mousemove", keepSelection, true);
     host.addEventListener("mousedown", keepSelection, true);
+    // A finger's drag scrolls as a wheel does (`touchScroll.ts`).
+    // xterm takes a wheel only from the pointer, so this does what its wheel
+    // does in each mode (`wheelAction`).
+    const cellSize = () => {
+      const screen = host.querySelector<HTMLElement>(".xterm-screen");
+      const box = screen?.getBoundingClientRect();
+      return box && term.rows > 0 && term.cols > 0 ? { box, width: box.width / term.cols, height: box.height / term.rows } : null;
+    };
+    const stopTouchScroll = installTouchScroll(
+      host,
+      () => cellSize()?.height ?? 0,
+      (lines, point) => {
+        const cell = cellSize();
+        const at = cell
+          ? {
+              col: Math.min(term.cols - 1, Math.max(0, Math.floor((point.x - cell.box.left) / cell.width))),
+              row: Math.min(term.rows - 1, Math.max(0, Math.floor((point.y - cell.box.top) / cell.height))),
+            }
+          : { col: 0, row: 0 };
+        const action = wheelAction(
+          {
+            mouse: term.modes.mouseTrackingMode !== "none",
+            alternate: term.buffer.active.type === "alternate",
+            applicationCursor: term.modes.applicationCursorKeysMode,
+          },
+          lines,
+          at,
+        );
+        // A scroll is no typing: it never takes the terminal's size.
+        if ("scroll" in action) term.scrollLines(action.scroll);
+        else props.current.onData(action.send, false);
+      },
+    );
     const stopKeeping = () => {
       host.removeEventListener("mousemove", keepSelection, true);
       host.removeEventListener("mousedown", keepSelection, true);
     };
-    const dataDisp = term.onData((data) => props.current.onData(data));
+    // A key, a soft keyboard's input or an IME commit is typed; so is a
+    // paste (`pasteTyped`). Seen in the capture phase, before xterm's own
+    // handlers send the data, and held for a tick for a composition's
+    // delayed commit.
+    const typing = typedRef.current;
+    const hold = () => {
+      typing.until = performance.now() + 100;
+    };
+    const typingEvents = ["keydown", "beforeinput", "input", "compositionstart", "compositionupdate", "compositionend"] as const;
+    for (const type of typingEvents) host.addEventListener(type, hold, true);
+    const stopTyping = () => {
+      for (const type of typingEvents) host.removeEventListener(type, hold, true);
+    };
+    const dataDisp = term.onData((data) => props.current.onData(data, typing.depth > 0 || performance.now() < typing.until));
     const binaryDisp = term.onBinary((data) => props.current.onBinary(data));
 
     let disposed = false;
@@ -362,14 +461,15 @@ export function TerminalSurface({
         if (!text) return;
         event.preventDefault();
         event.stopPropagation();
-        term.paste(text);
+        pasteTyped(term, text);
       };
       host.addEventListener("paste", handlePaste);
       cleanups.push(() => {
         host.removeEventListener("mousedown", handleMouseDown);
         host.removeEventListener("paste", handlePaste);
       });
-      props.current.onOpened(term);
+      paneRef.current = { cols: term.cols, rows: term.rows };
+      props.current.onOpened(term, paneRef.current);
       // Debounced refits; none while hidden (`display: none` has no size,
       // and a fit would shrink the program's screen for real).
       let resizeTimer: number | null = null;
@@ -378,9 +478,11 @@ export function TerminalSurface({
         resizeTimer = window.setTimeout(() => {
           if (host.clientWidth < 2 || host.clientHeight < 2) return;
           try {
-            fit.fit();
-            if (term.cols < 2 || term.rows < 2) return;
-            props.current.onResize(term.cols, term.rows);
+            const pane = measurePane();
+            if (!pane || pane.cols < 2 || pane.rows < 2) return;
+            paneRef.current = { cols: pane.cols, rows: pane.rows };
+            props.current.onResize(pane.cols, pane.rows);
+            applyGrid();
           } catch {}
         }, 80);
       });
@@ -399,6 +501,8 @@ export function TerminalSurface({
       disposed = true;
       cleanups.forEach((c) => c());
       stopKeeping();
+      stopTouchScroll();
+      stopTyping();
       ro?.disconnect();
       dataDisp.dispose();
       binaryDisp.dispose();
@@ -430,7 +534,8 @@ export function TerminalSurface({
           display: "flex",
         }}
       >
-        <div ref={hostRef} data-testid="terminal-mount" style={{ flex: 1, minHeight: 0, minWidth: 0 }} />
+        {/* A grid larger than the pane at the smallest font is clipped here. */}
+        <div ref={hostRef} data-testid="terminal-mount" style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }} />
       </div>
     </div>
   );

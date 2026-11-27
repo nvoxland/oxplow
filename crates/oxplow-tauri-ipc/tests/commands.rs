@@ -75,19 +75,27 @@ async fn list_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_page_visits_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    let v = commands::generated::list_recent_page_visits(app.state(), 10, None)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
+    let v = rpc(
+        &app,
+        "list_recent_page_visits",
+        serde_json::json!({ "limit": 10, "threadId": null }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v, serde_json::json!([]));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn top_visited_pages_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    let v = commands::generated::top_visited_pages(app.state(), 10, None)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
+    let v = rpc(
+        &app,
+        "top_visited_pages",
+        serde_json::json!({ "limit": 10, "threadId": null }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v, serde_json::json!([]));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -176,11 +184,11 @@ async fn git_reads_over_primary_worktree() {
         Some("git:HEAD".into()),
     )
     .await;
-    let _ = commands::generated::vcs_blame(
-        s.clone(),
-        None,
-        "nope.txt".into(),
-        oxplow_domain::vcs::Revision::Working,
+    // A person's read through the bus (a `req` row: Tauri adds no caller).
+    let _ = rpc(
+        &app,
+        "vcs_blame",
+        serde_json::json!({ "path": "nope.txt", "revision": "working" }),
     )
     .await;
 }
@@ -207,12 +215,19 @@ async fn stream_reads() {
         .await
         .unwrap()
         .is_some());
-    let _ = commands::generated::get_current_stream(app.state())
+    // A request with no device reads the default and may not choose.
+    let current = rpc(&app, "get_current_stream", serde_json::json!({}))
         .await
         .unwrap();
-    commands::generated::switch_stream(app.state(), Some(stream.id))
-        .await
-        .unwrap();
+    assert_eq!(current, serde_json::Value::Null);
+    let refused = rpc(
+        &app,
+        "switch_stream",
+        serde_json::json!({ "id": stream.id.to_string() }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(refused.code, "INVALID");
 }
 
 // ---- config commands ----
@@ -233,9 +248,17 @@ async fn thread_reads_over_default_thread() {
         .await
         .unwrap()
         .is_empty());
-    let _ = commands::generated::get_thread_state(app.state(), stream.id)
-        .await
-        .unwrap();
+    let state = rpc(
+        &app,
+        "get_thread_state",
+        serde_json::json!({ "streamId": stream.id.to_string() }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        state["selectedThreadId"].is_string(),
+        "the first open thread: {state}"
+    );
 }
 
 // ---- page-ref + search reads ----
@@ -264,22 +287,36 @@ async fn page_ref_reads_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn search_returns_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    assert!(
-        commands::generated::search(app.state(), "anything".into(), None, None, Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(commands::generated::search(
-        app.state(),
-        "anything".into(),
-        None,
-        Some(vec!["oxplow/knowledge".into()]),
-        None
+    let hits = rpc(
+        &app,
+        "search",
+        serde_json::json!({ "query": "anything", "limit": 10 }),
     )
     .await
-    .unwrap()
-    .is_empty());
+    .unwrap();
+    assert_eq!(hits, serde_json::json!([]));
+    let hits = rpc(
+        &app,
+        "search",
+        serde_json::json!({ "query": "anything", "resources": ["oxplow/knowledge"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(hits, serde_json::json!([]));
+}
+
+/// A `req` row as its Tauri adapter runs it: no caller. (Its adapter also
+/// takes the plugin runtime, which this harness doesn't build.)
+async fn rpc(
+    app: &TestApp,
+    name: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, oxplow_rpc::IpcError> {
+    let ctx = oxplow_rpc::RpcContext {
+        services: app.state().inner().clone(),
+        plugin_runtime: None,
+    };
+    oxplow_rpc::dispatch(name, args, &ctx).await
 }
 
 // ---- snapshot reads ----

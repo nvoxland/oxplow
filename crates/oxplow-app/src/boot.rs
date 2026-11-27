@@ -389,6 +389,9 @@ pub async fn run_boot_orchestration(
         state.stopping(),
     );
     state.page_runs.start(state);
+    // The host's devices and settings change in the host too (a pairing
+    // finished on the device): the Devices page reads them again then.
+    crate::commands::host_devices::watch_host(state);
     state.spawn_every(
         std::time::Duration::from_secs(60),
         std::time::Duration::from_secs(60),

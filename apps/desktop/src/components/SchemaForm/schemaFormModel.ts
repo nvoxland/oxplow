@@ -194,6 +194,10 @@ export function draftsFrom(fields: Field[], value: unknown): Drafts {
         case "json":
           out[f.path] = JSON.stringify(v, null, 2);
           break;
+        case "boolean":
+          // A loader's row says yes as 1 (SQL has no booleans).
+          out[f.path] = v === true || v === 1 || v === "1" || v === "true" ? "true" : "false";
+          break;
         default:
           out[f.path] = String(v);
       }

@@ -109,7 +109,13 @@ fn production_part(text: &str) -> &str {
     let mut at = 0;
     while let Some(i) = text[at..].find("#[cfg(test)]") {
         let start = at + i;
-        let rest = text[start + "#[cfg(test)]".len()..].trim_start();
+        let mut rest = text[start + "#[cfg(test)]".len()..].trim_start();
+        // Other attributes may stand between (`#[cfg(unix)]`).
+        while rest.starts_with("#[") {
+            rest = rest
+                .find(']')
+                .map_or("", |end| rest[end + 1..].trim_start());
+        }
         if rest.starts_with("mod tests") || rest.starts_with("pub(crate) mod tests") {
             return &text[..start];
         }
@@ -170,12 +176,17 @@ const EMITTERS: &[(&str, &str)] = &[
     // The extension catalog's own signal: what extensions
     // contribute isn't a dataset to re-read, and a file path was a guess.
     ("ExtensionsChanged", "crates/oxplow-app/src/boot.rs"),
+    // The host's own state changed: its datasets are read again.
+    ("HostChanged", "crates/oxplow-app/src/commands/host_devices.rs"),
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
     ("MetricSamplesChanged", "crates/oxplow-app/src/datasets_changed.rs"),
     ("DatasetsChanged", "crates/oxplow-app/src/datasets_changed.rs"),
     // An open page run's loaders re-ran: names only, the window fetches.
     ("PageRunChanged", "crates/oxplow-app/src/pages/open_runs.rs"),
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
+    // A request to one window (`client_host.rs`), like a call: not a change
+    // to re-read.
+    ("TabsQueued", "crates/oxplow-app/src/client_host.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/stream_watch.rs"),
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
     // A restored file is on disk, in no dataset.
@@ -394,8 +405,9 @@ fn every_ui_event_has_a_listener() {
     // capture. The renderer re-reads those datasets, so it needs no listener.
     // A credential's news (`v_provider_credential`, a sign-in's end) is the
     // same: the datasets that follow it are re-read, and a sign-in's own end
-    // is the host's answer to the component that asked.
-    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged", "credentialChanged"];
+    // is the host's answer to the component that asked. The host's devices
+    // and settings (`v_host_device`, `v_host_settings`) likewise.
+    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged", "credentialChanged", "hostChanged"];
     let unheard: Vec<String> = event_kinds()
         .into_iter()
         .filter(|k| !DAEMON_ONLY.contains(&k.as_str()))
@@ -421,6 +433,19 @@ fn every_ui_event_has_an_emitter() {
         .filter(|k| !emitted.contains(k))
         .collect();
     assert_eq!(silent, Vec::<String>::new());
+}
+
+/// The scan's own rule: a file's tests are cut off at its `#[cfg(test)]`
+/// test module, whatever other attributes stand before `mod tests` (a
+/// module that runs on Unix only).
+#[test]
+fn a_files_test_module_is_not_production_whatever_its_attributes() {
+    let plain = "fn a() {}\n#[cfg(test)]\nmod tests { fn b() {} }\n";
+    assert_eq!(production_part(plain), "fn a() {}\n");
+    let unix = "fn a() {}\n#[cfg(test)]\n#[cfg(unix)]\nmod tests { fn b() {} }\n";
+    assert_eq!(production_part(unix), "fn a() {}\n");
+    let not_a_module = "fn a() {}\n#[cfg(test)]\nfn helper() {}\n";
+    assert_eq!(production_part(not_a_module), not_a_module);
 }
 
 /// P7.B6's guard: nothing listens to the in-memory bus but the `/events`

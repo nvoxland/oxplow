@@ -136,8 +136,8 @@ pub fn insert_with_outcome_tx(
         .map_err(map_sql_err)?;
     }
     conn.execute(
-        "INSERT INTO command_run (command, run_id, input_json, result_json, inverse_json)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO command_run (command, run_id, input_json, result_json, inverse_json, device_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             row.command,
             run.run().as_str(),
@@ -146,6 +146,7 @@ pub fn insert_with_outcome_tx(
             row.inverse
                 .as_ref()
                 .map(|call| serde_json::to_string(call).expect("CommandCall serializes")),
+            run.caller().map(|c| c.device.as_str()),
         ],
     )
     .map_err(map_sql_err)?;
@@ -177,8 +178,12 @@ pub fn insert_rolled_back_children_tx(
         });
         crate::contribution_run_store::record_tx(conn, &child, outcome, error)?;
         conn.execute(
-            "INSERT INTO command_run (command, run_id) VALUES (?1, ?2)",
-            params![contribution.id.local, child.run().as_str()],
+            "INSERT INTO command_run (command, run_id, device_id) VALUES (?1, ?2, ?3)",
+            params![
+                contribution.id.local,
+                child.run().as_str(),
+                child.caller().map(|c| c.device.as_str())
+            ],
         )
         .map_err(map_sql_err)?;
     }
@@ -328,6 +333,94 @@ mod tests {
     use super::*;
 
     use serde_json::json;
+
+    /// A person's run keeps the device it was asked from, so the audit says
+    /// where they acted; a run nobody asked from a device keeps none.
+    #[tokio::test]
+    async fn a_command_run_keeps_the_device_that_asked() {
+        let db = Database::in_memory();
+        let device = oxplow_domain::DeviceId::generate();
+        let caller = oxplow_domain::Caller {
+            device: device.clone(),
+            connection: oxplow_domain::ConnectionId::generate(),
+        };
+        let row = || NewCommandRun {
+            command: "oxplow.thread.rename".into(),
+            input: None,
+            outcome: Outcome::Ok,
+            error: None,
+            result: None,
+            inverse: None,
+            scopes: BTreeMap::new(),
+        };
+        let devices = db
+            .transaction(move |tx| {
+                let asked = insert_tx(
+                    tx,
+                    &test_command_run("oxplow.thread.rename", oxplow_domain::Actor::Human)
+                        .with_caller(Some(caller.clone())),
+                    &row(),
+                )?;
+                let unasked = insert_tx(
+                    tx,
+                    &test_command_run("oxplow.thread.rename", oxplow_domain::Actor::Human),
+                    &row(),
+                )?;
+                let device_of = |id: i64| -> Option<String> {
+                    tx.query_row(
+                        "SELECT device_id FROM command_run WHERE id = ?1",
+                        [id],
+                        |r| r.get(0),
+                    )
+                    .unwrap()
+                };
+                Ok((device_of(asked), device_of(unasked)))
+            })
+            .await
+            .unwrap();
+        assert_eq!(devices, (Some(device.to_string()), None));
+    }
+
+    /// A child that ran inside a rolled-back run keeps the device too: the
+    /// person asked for it as they asked for its parent.
+    #[tokio::test]
+    async fn a_rolled_back_child_keeps_the_device_that_asked() {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        use oxplow_domain::run::{ContributionRef, Mode};
+        let db = Database::in_memory();
+        let device = oxplow_domain::DeviceId::generate();
+        let parent = test_command_run("oxplow.thread.rename", oxplow_domain::Actor::Human)
+            .with_caller(Some(oxplow_domain::Caller {
+                device: device.clone(),
+                connection: oxplow_domain::ConnectionId::generate(),
+            }));
+        let child = parent.child(
+            Some(ContributionRef {
+                id: ContributionId::new("oxplow", ContributionKind::Command, "oxplow.thread.mark"),
+                extension: "core".into(),
+                version: None,
+                generation: None,
+                deployment: None,
+            }),
+            Mode::External,
+        );
+        parent.track_child(&child);
+        child.observe_rollback_outcome(oxplow_domain::run::Outcome::Failed, Some("no".into()));
+        let recorded: Option<String> = db
+            .transaction(move |tx| {
+                insert_rolled_back_children_tx(tx, &parent)?;
+                Ok(tx
+                    .query_row(
+                        "SELECT device_id FROM command_run WHERE command = 'oxplow.thread.mark'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        assert_eq!(recorded, Some(device.to_string()));
+    }
 
     #[tokio::test]
     async fn command_run_rows_round_trip_and_mark_undone_once() {

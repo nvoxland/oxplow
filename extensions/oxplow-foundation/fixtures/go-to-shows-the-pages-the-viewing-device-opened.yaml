@@ -1,0 +1,39 @@
+# Go To is the viewing device's own: its recent and most visited pages are the
+# ones opened on it, plus the visits from before devices (they have none, so
+# they count as every device's). A request with no device sees all of them.
+given:
+  - observe: { visit: { page: "oxplow:oxplow/file?path=on-a.rs", kind: file, label: on-a.rs, thread: thr1, device: dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=on-b.rs", kind: file, label: on-b.rs, thread: thr1, device: dev-2c5f39cb-3fb2-22e3-994a-1127e4ddb538 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=old.rs", kind: file, label: old.rs, thread: thr1 } }
+  - { files: { "on-a.rs": "x\n", "on-b.rs": "x\n", "old.rs": "x\n" } }
+when: { panel: go-to, thread: thr1, device: dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427, choices: { mode: recent } }
+expect:
+  body:
+    loaders:
+      go_to:
+        rows:
+          - { title: old.rs }
+          - { title: on-a.rs }
+steps:
+  - when: { choices: { mode: top }, device: dev-2c5f39cb-3fb2-22e3-994a-1127e4ddb538 }
+    expect:
+      body:
+        loaders:
+          go_to:
+            rows:
+              - { times: "1×" }
+              - { times: "1×" }
+  - when: { choices: { mode: recent }, device: dev-2c5f39cb-3fb2-22e3-994a-1127e4ddb538 }
+    expect:
+      body:
+        loaders:
+          go_to:
+            rows:
+              - { title: old.rs }
+              - { title: on-b.rs }
+  - when: { choices: { mode: recent }, device: null }
+    expect:
+      body:
+        loaders:
+          go_to:
+            rows: 3

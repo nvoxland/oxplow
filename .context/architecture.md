@@ -200,13 +200,15 @@ Both kinds can switch branches — either via the `BranchPicker` in the `TitleBa
 
 ## The shell and its daemons
 
-Oxplow is **one shell process owning every window**, with **one
-`oxplow-daemon` child per open project**. The shell holds no project
-state at all: no `Services`, no database, no watchers, no control plane.
-Each project window talks to its own daemon over loopback HTTP/WS (see
-[remote-daemon.md](./remote-daemon.md)); the only things the shell
-serves itself are the shell surface — windowing, native menus, the OS
-clipboard, external URLs, and the project lifecycle below.
+Oxplow is **one shell process owning every window**, with **one host**
+(`oxplow-host`, the shell's child) that runs **one `oxplow-daemon` per
+held project** ([host.md](./host.md)). The shell holds no project state at
+all: no `Services`, no database, no watchers, no control plane. Each
+project window talks to its daemon through the host over loopback HTTP/WS
+(see [remote-daemon.md](./remote-daemon.md)); other devices (a tablet's
+browser) reach the same host and daemons once paired. The only things the
+shell serves itself are the shell surface — windowing, native menus, the
+OS clipboard, external URLs, and the project lifecycle below.
 
 This replaced process-per-window (one OS process per project, each
 booting its own `Services`). That model gave every project a separate
@@ -216,8 +218,9 @@ a per-project instance lock plus a loopback focus channel, and the
 session set had to be *inferred* from "recent projects whose lock is
 held". The shell now simply knows — see `WindowRegistry` in
 `crates/oxplow-tauri-ipc/src/windows.rs`. Local and remote also stopped
-being different code paths: a local project window is a remote client
-that happens to be talking to a daemon on 127.0.0.1.
+being different code paths: a local project window is a client of a host
+that happens to be on 127.0.0.1, and a window on another machine's host
+(the launcher's "Other computers") is the same client elsewhere.
 
 The trade is a process hop on every command (~3–4 ms round trip,
 measured — see [performance.md](./performance.md)) and a daemon boot
@@ -244,12 +247,15 @@ Boot flow (`apps/desktop/src-tauri/src/main.rs` — one path, no modes):
   project the session recorded, skipping any that is no longer a project
   on disk. If nothing opened, show the launcher.
 
-**Closing a project window stops its daemon, and therefore its
-agents.** A deliberate choice: closing the window is the user saying
-they're done with the project, and a backend still churning behind a
-window that no longer exists is worse than a clean stop. If that ever
-needs to change, the feature is reattaching to a surviving daemon — not
-leaving one running by accident.
+**Closing a project window releases its hold, which stops its daemon,
+and therefore its agents,** unless another device (a tablet) holds the
+project too. A deliberate choice: closing the window is the user saying
+they're done with the project here, and a backend still churning behind
+a window that no longer exists is worse than a clean stop. **Quitting
+the app ends its host,** every project and every other device's
+connection with it: the app is the whole of oxplow to the person. A
+host that outlives the app is a headless one (`oxplow host serve`),
+which the app does not use.
 
 **A background loop is a `Services::spawn_every`.** It holds the
 services weakly (only while a tick runs) and stops on
@@ -269,10 +275,12 @@ gone: a test's throwaway oxplow (`Host`, dropped after its example, runs
 (`a_dropped_fork_frees_its_database`).
 
 **Opening a project** (`ShellWindows::open_project`) is: focus the
-window that already has it, else sweep any orphaned daemon, start a
-daemon, wait for it to report its loopback endpoint, then create a
-window carrying that endpoint. The order is forced — the base URL is
-injected at window creation — which is why the call blocks. At startup
+window that already has it, else start the app's host if it isn't
+running (the app's child, `.context/host.md` "The Mac app"), register
+and hold the project there, wait for its daemon to run, then create a
+window carrying `<host>/p/<id>` and the host token. The order is forced —
+the base URL is injected at window creation — which is why the call
+blocks. At startup
 that happens on the main thread (nothing is on screen yet anyway);
 `open_project` / `create_project` from the UI run it on a blocking
 thread so open windows stay responsive.
@@ -289,18 +297,18 @@ from. The two guards are the pure `resolve_open_target` /
 **Which screen a window is** comes from the shell, not a command: the
 injected `window.__OXPLOW__.kind` (`project` / `launcher` / `setup`)
 that `<Root>` switches on. There is no launch-mode round trip and no
-loading flash — the context is set before any page script runs. A window
-the shell didn't create (a plain browser over a tunnel) has no context
-and gets the app shell.
+loading flash — the context is set before any page script runs. A page
+a host served says `hostHome` (pairing, then the projects) or `project`
+with the host's origin, and pairs first when it has no token.
 
-**Orphaned daemons.** A shell that dies without unwinding (crash,
-SIGKILL) leaves its daemons running, holding their projects' instance
-locks. Each daemon publishes `.oxplow/daemon.json` (`{base_url, pid}`),
-so the next open sweeps it: kill, wait for the project lock to come free
-(`oxplow_app::wait_for_project_unlock`), then start the replacement.
-Orphans are killed, not adopted — a backend outliving its window is a
-feature nobody has asked for, and adopting one on a guess is worse than
-a clean restart.
+**No orphans.** The host holds each daemon's stdin lifeline and the app
+holds the host's, so a shell that dies without unwinding (crash,
+SIGKILL) takes its host and daemons with it. A daemon of another oxplow
+(an older app, one started by hand) still holds its project: each daemon
+publishes `.oxplow/daemon.json` (`{base_url, pid}`), and the host refuses
+to start that project, naming the process, after waiting briefly for one
+that is ending (`oxplow_app::wait_for_project_unlock`). It is never
+killed or adopted.
 
 **One instance per project** is still enforced by the lock, but now by
 the *daemon*, which is the thing that would actually collide (two
@@ -511,7 +519,8 @@ The outer shell should remain app-specific and stream-aware.
 
 The shell should continue to own:
 
-- current stream selection
+- each device's current stream and thread selection (the daemon keeps them
+  per device; the shell follows the caller's)
 - the stream + thread Navigator
 - left sidebar modes
 - bottom panel

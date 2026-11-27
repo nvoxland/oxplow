@@ -1,10 +1,11 @@
 // Cross-surface "start a new thread" channel.
 //
-// Thread creation lives in the Navigator's inline flow (title input +
-// agent picker). Surfaces that can't reach it directly — the command
-// palette's "New Thread…", keyboard shortcuts — dispatch here; the
-// Navigator subscribes, opens its overlay, and shows the inline
-// creator for the requested stream.
+// Thread creation is a flow of the window's stream and thread menus
+// (`window/useStreamThreadMenus.tsx`), drawn by the shell (the desktop's
+// Navigator panel). Surfaces that can't reach it directly — the command
+// palette's "New Thread…", keyboard shortcuts — dispatch here; the hook
+// subscribes, reveals the shell's place for it and starts the creator for
+// the requested stream.
 
 type Listener = (streamId: string) => void;
 const listeners = new Set<Listener>();

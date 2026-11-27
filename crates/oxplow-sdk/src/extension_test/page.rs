@@ -52,6 +52,7 @@ pub(super) async fn component_example(
                     on_behalf_of: Actor::Human,
                     confirmed: true,
                     version: version.clone(),
+                    caller: None,
                 },
             )
             .await
@@ -70,6 +71,7 @@ pub(super) async fn component_example(
                     on_behalf_of: Actor::Human,
                     confirmed: true,
                     version: version.clone(),
+                    caller: None,
                 },
             )
             .await
@@ -596,7 +598,17 @@ pub(super) async fn run_page(
     Ok(run)
 }
 
-/// The example's `view: { stream?, thread? }` (`str1`, `thr1` or their
+/// The device a fixture views or visits as (`dev-<uuid>`): `Ok(None)` when it
+/// names none, `Err` when the text isn't a device id.
+pub(super) fn device_of(v: Option<&Value>) -> Result<Option<oxplow_domain::DeviceId>, ()> {
+    match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => oxplow_domain::DeviceId::parse(s).map(Some).map_err(|_| ()),
+        Some(_) => Err(()),
+    }
+}
+
+/// The example's `view: { stream?, thread?, device? }` (`str1`, `thr1` or their
 /// numbers) as the context its page runs in — the project's first stream
 /// when it names none, so a page that binds `stream_id` needs no param; `None`, with the error
 /// reported, when it isn't that shape.
@@ -620,10 +632,22 @@ pub(super) async fn view_context(
             ex.shown,
             None,
             "fixture.view",
-            "`view` isn't `{ stream?, thread? }`",
+            "`view` isn't `{ stream?, thread?, device? }`",
         ));
         return None;
     }
+    let Ok(device) = device_of(view.get("device")) else {
+        report.errors.push(
+            error(
+                ex.shown,
+                None,
+                "fixture.view",
+                "`view.device` isn't a device id",
+            )
+            .fix("`device: dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427`"),
+        );
+        return None;
+    };
     match (
         id(view.get("stream"), |s| {
             oxplow_domain::StreamId::try_from_str(s).map(|i| i.value())
@@ -640,6 +664,7 @@ pub(super) async fn view_context(
                 None => first_stream(host).await.ok().map(|s| s.value()),
             },
             thread_id,
+            device_id: device.map(|d| d.as_str().to_string()),
             active: None,
         }),
         _ => {
@@ -912,6 +937,7 @@ impl PageAt<'_> {
                 input.unwrap_or_else(|| json!({})),
                 Actor::Human,
                 confirmed,
+                None,
             )
             .await
         } else {
@@ -931,6 +957,7 @@ impl PageAt<'_> {
                         .map(str::to_string),
                     on_behalf_of: Actor::Human,
                     confirmed,
+                    caller: None,
                 },
             )
             .await

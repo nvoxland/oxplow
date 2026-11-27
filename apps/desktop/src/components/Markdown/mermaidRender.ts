@@ -104,7 +104,7 @@ export async function attachPanZoom(
     "border: 1px solid var(--border-subtle)",
     "border-radius: 4px",
     "padding: 2px",
-    "font-size: 12px",
+    "font-size: var(--text-xs)",
     "z-index: 1",
   ].join(";");
   const makeBtn = (label: string, title: string, onClick: () => void) => {
@@ -118,7 +118,7 @@ export async function attachPanZoom(
       "color: var(--text-primary)",
       "cursor: pointer",
       "padding: 2px 6px",
-      "font-size: 12px",
+      "font-size: var(--text-xs)",
       "line-height: 1",
       "min-width: 20px",
     ].join(";");
@@ -179,7 +179,7 @@ export async function renderMermaidInto(
     host.innerHTML = "";
     const err = document.createElement("div");
     err.style.color = "var(--severity-critical)";
-    err.style.fontSize = "12px";
+    err.style.fontSize = "var(--text-xs)";
     err.style.padding = "8px";
     err.textContent = `Mermaid parse error: ${String(error)}`;
     host.appendChild(err);

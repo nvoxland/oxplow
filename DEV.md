@@ -56,7 +56,8 @@ cargo run -q -p oxplow-dev -- extension deploy   # deploy what changed (oxplow q
 
 ### Sign dev builds (macOS)
 
-The daemon reads AI keys from the macOS keychain. An unsigned build is a new
+The daemon reads AI keys from the macOS keychain, and the shell the device
+tokens for hosts on other machines. An unsigned build is a new
 app to the keychain after every rebuild, so macOS asks again (twice: once for
 the item's trusted apps, once for its partition list), even after Always
 Allow. A build signed with one stable identity is the same app every time.
@@ -67,8 +68,9 @@ sh scripts/dev-signing-identity.sh    # makes "oxplow dev" in the login keychain
 ```
 
 From then on `bun run build:dev` (so `run:dev`) signs `target/debug/oxplow-daemon`
-with it (identifier `net.voxland.oxplow.daemon`) before staging, and only when it
-isn't signed by it already. At the next keychain prompt choose **Always Allow**;
+(identifier `net.voxland.oxplow.daemon`; the AI keys) and `target/debug/oxplow`
+(`net.voxland.oxplow`; the device tokens for hosts on other machines) with it
+(`scripts/sign-dev.sh`), and only when one isn't signed by it already. At the next keychain prompt choose **Always Allow**;
 later rebuilds don't ask. The first signing may also ask to let `codesign` use
 the key: Always Allow that too. `OXPLOW_DEV_SIGNING_IDENTITY` names another
 identity. Without one the build stays unsigned and works as before.
@@ -200,6 +202,13 @@ Two things it does **not** move:
 - **Tauri's `app_config_dir()`** (webview storage, etc.) still uses the
   platform location.
 
+#### Two apps and the tablet's port
+
+Each home's app listens for other devices on its own port: `oxplow
+--device-port 7401 .`, `OXPLOW_DEVICE_PORT=7401 bun run run:dev`, or the
+port on the Devices page, in that order (default 7400). Two apps on one machine
+that both allow other devices need two ports.
+
 #### The instance lock is per project, not per home
 
 `OXPLOW_HOME` separates global config; it does not let two builds hold
@@ -222,45 +231,44 @@ being dev-only as soon as you launch the installed build from a
 terminal — a GUI launch doesn't inherit your shell env, a terminal
 launch does. Putting it on the command keeps the scoping explicit.
 
-## Run headless (daemon + browser)
+## Run headless (a host + a browser)
 
-The full app also runs without the Tauri shell: `oxplow-daemon`
-serves the backend over HTTP/WebSocket, and the frontend in remote
-mode talks to it from any browser. This is the route the browser suite
-takes (`bun run e2e`, below) and the one for remote dev (see
-`.context/remote-daemon.md`).
+The full app also runs without the Tauri shell: a headless `oxplow-host`
+starts a daemon for each project a browser opens, and serves the app to
+any browser that pairs with it. This is how a server (EC2, a box under the
+desk) runs oxplow, and the browser suite's host specs do the same
+(`tests-e2e/specs/host`). See `.context/host.md`.
 
 ```
-# terminal 1 — headless backend on loopback; it prints `ui token: <token>`
-cargo build -p oxplow-daemon && ./target/debug/oxplow-daemon --project . --bind 127.0.0.1:7420
-
-# terminal 2 — build the frontend and serve dist/ (vite preview, :4173)
-bun run --cwd apps/desktop build && bun run --cwd apps/desktop preview
+cargo build -p oxplow-host -p oxplow-daemon && bun run --cwd apps/desktop build
+./target/debug/oxplow-host project add .                 # register the project
+./target/debug/oxplow-host serve --bind 127.0.0.1:7400   # runs until stopped; prints its token
 ```
 
-Connect from the launcher's Remote connect flow, or open
-`http://localhost:4173/#oxplow-token=<token>` after setting the base.
+Open `http://127.0.0.1:7400/` and choose Show a Code; in another terminal,
+`./target/debug/oxplow-host pair <that code>`. Then Open the project. On a
+server, `./target/debug/oxplow-host settings set allow=on
+address=<private-address>` (port 7400, or `port=<port>`; it applies at once
+on a running host), or `--public-bind <private-address>` on `serve` for
+that run only: other devices come in over HTTPS with the host's own
+certificate for that address (a browser there trusts `/host/ca.pem` once;
+`tls-cert=`/`tls-key=` give one of your own), and pair from the other
+machine's browser. `oxplow-host stop` ends it; `oxplow-host devices` lists
+the paired browsers. An installed app runs the same with `oxplow host …`.
 
-`/ipc` and `/events` refuse a call without the token (`Authorization:
-Bearer`, or `?token=` on the WebSocket). To hand it over without
-putting it in a command line, start the daemon with `--token-stdin` and
-write it to its stdin, then keep stdin open: closing it stops the daemon
-(it's the lifeline to the app that started it).
-
-The page keeps the base and token in localStorage (`oxplow.remoteBase`,
-`oxplow.remoteToken`). Any static server works in place of `preview`.
+For the renderer alone on a daemon of your own (profiling), the Vite dev
+server takes `VITE_OXPLOW_REMOTE=<base> VITE_OXPLOW_REMOTE_TOKEN=<token>
+bun run --cwd apps/desktop dev`: it puts the window's context in the page
+the way the shell does. A build never carries it.
 
 Notes:
 
-- The project dir must already contain `.oxplow/`; sanity-check the
-  daemon with `curl http://127.0.0.1:7420/health` (no token needed).
-- The daemon takes the same per-project instance lock as the desktop
-  shell — the app and the daemon can't run against the same project
-  simultaneously.
+- The project dir must already contain `.oxplow/`.
+- A daemon takes the per-project instance lock, so the Mac app and a
+  headless host can't run the same project at once (the host says which
+  process has it).
 - Shell-native surfaces (native menus, window chrome, Tauri dialogs)
-  don't exist in this mode; everything else is the real app.
-- A custom component's frame only loads from a loopback daemon: its
-  bundle is served to a loopback `Host` alone.
+  don't exist in a browser; everything else is the real app.
 
 ## Test
 

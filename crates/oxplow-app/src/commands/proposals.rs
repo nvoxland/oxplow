@@ -233,9 +233,20 @@ impl CommandBus {
     /// the run's own transaction. A run that fails leaves it pending.
     /// Approving is a person's only.
     pub async fn approve(&self, actor: &Actor, id: i64) -> Result<CommandOutcome, CommandError> {
-        let proposal = self.pending_proposal(actor, id).await?;
+        self.approve_in(&RunContext::core(actor.clone(), Mode::External), id)
+            .await
+    }
+
+    /// [`Self::approve`] as `run`'s actor and caller: the approved run keeps
+    /// the device the person approved from.
+    pub async fn approve_in(
+        &self,
+        run: &RunContext,
+        id: i64,
+    ) -> Result<CommandOutcome, CommandError> {
+        let proposal = self.pending_proposal(run.actor(), id).await?;
         self.run_inner(
-            &RunContext::core(actor.clone(), Mode::External),
+            run,
             &proposal.command,
             proposal.input,
             true,

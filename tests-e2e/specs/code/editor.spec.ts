@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown, load } from "../../support/ui.js";
+import { open, shown, load, closeTab, tabDirty, tabOf } from "../../support/ui.js";
 
 // The editor is oxplow-foundation's page over the `editor` viz: a file of
 // the working tree, its unsaved edits marked on its tab (●), saved with
@@ -44,9 +44,9 @@ test("typing marks the tab dirty; Ctrl/Cmd+S writes the file and clears it", asy
   await editor.locator(".view-line").first().click();
   await page.keyboard.press("Home");
   await page.keyboard.type("kiwi ");
-  await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
+  await expect(tabDirty(page, TAB)).toBeVisible();
   await page.keyboard.press("ControlOrMeta+s");
-  await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).not.toBeVisible();
+  await expect(tabDirty(page, TAB)).not.toBeVisible();
   expect(readFileSync(join(daemon.project, "emu.txt"), "utf8")).toBe("kiwi emu\n");
 });
 
@@ -58,11 +58,11 @@ test("closing a dirty tab offers Undo, which brings the tab and its draft back",
   await editor.locator(".view-line").first().click();
   await page.keyboard.press("Home");
   await page.keyboard.type("owl ");
-  await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
-  await page.getByTestId(`center-tab-close-${TAB}`).click();
-  await expect(page.getByTestId(`center-tab-${TAB}`)).not.toBeVisible();
+  await expect(tabDirty(page, TAB)).toBeVisible();
+  await closeTab(page, TAB);
+  await expect(tabOf(page, TAB)).not.toBeVisible();
   await page.getByTestId("undo-toast-undo").click();
-  await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
+  await expect(tabDirty(page, TAB)).toBeVisible();
   await expect(shown(page).getByTestId("viz-editor").locator(".monaco-editor").first()).toContainText("owl emu");
   expect(readFileSync(join(daemon.project, "emu.txt"), "utf8")).toBe("emu\n");
 });

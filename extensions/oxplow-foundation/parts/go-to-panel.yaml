@@ -3,6 +3,7 @@ description: The thread's bookmarks, the pages it opened last, or the ones it op
 params:
 - name: thread_id
   label: Thread
+- name: device_id
 # The panel's header toggle: each kind an icon, its label the hover.
 - name: mode
   role: filter
@@ -18,7 +19,7 @@ loaders:
   go_to:
     page: oxplow/thread-go-to
     loader: pages
-    params: { thread_id: { param: thread_id }, mode: { param: mode } }
+    params: { thread_id: { param: thread_id }, device_id: { param: device_id }, mode: { param: mode } }
 view:
   from: go_to
   viz: list

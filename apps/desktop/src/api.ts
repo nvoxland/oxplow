@@ -1,8 +1,13 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
+  AttachResult,
   TabReport,
   TabReportAnswer,
+  TabSave,
+  OtherDeviceTabs,
+  TabSession,
+  QueuedTab,
   HookEnvelope,
   OpOutcome,
   PointOffer,
@@ -154,10 +159,7 @@ function buildBridge() {
       uri: string,
       cols: number,
       rows: number,
-    ): Promise<{ sessionId: string; replayB64: string }> => {
-      const result = unwrap(await commands.openTerminalSession(uri, cols, rows));
-      return { sessionId: result.sessionId, replayB64: result.replayB64 };
-    },
+    ): Promise<AttachResult> => unwrap(await commands.openTerminalSession(uri, cols, rows)),
     /// The live process of `uri` (a terminal or an agent session), without
     /// starting one: `null` when none runs.
     lookupTerminalSession: async (uri: string): Promise<string | null> =>
@@ -491,6 +493,40 @@ export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
   return unwrap(await commands.reportTabs(report));
 }
 
+/// This device's stored tabs of every thread it opened (`tab_session`).
+export async function listTabSessions(): Promise<TabSession[]> {
+  return unwrap(await commands.listTabSessions());
+}
+
+/// The other devices' stored tabs of `threadId`, the one used last first
+/// (Continue from <device>).
+export async function listOtherDeviceTabs(threadId: string): Promise<OtherDeviceTabs[]> {
+  return unwrap(await commands.listOtherDeviceTabs(threadId));
+}
+
+/// Keep this device's tabs of `threadId`, if still at `revision` (the one
+/// last read; null for a thread it has no tabs of yet). When they moved on
+/// since, nothing is written and the answer names the revision they are at.
+export async function saveTabSession(threadId: string, sessionJson: string, revision: number | null): Promise<TabSave> {
+  return unwrap(await commands.saveTabSession(threadId, sessionJson, revision));
+}
+
+/// The tabs agents opened for this device while it was away, oldest first.
+/// The daemon keeps them until `forgetQueuedTabs`.
+export async function listQueuedTabs(): Promise<QueuedTab[]> {
+  return unwrap(await commands.listQueuedTabs());
+}
+
+/// This window kept these queued tabs (`QueuedTab.id`): the daemon drops them.
+export async function forgetQueuedTabs(ids: QueuedTab["id"][]): Promise<void> {
+  unwrap(await commands.forgetQueuedTabs(ids));
+}
+
+/// Forget this device's tabs of `threadId`.
+export async function forgetTabSession(threadId: string): Promise<void> {
+  unwrap(await commands.forgetTabSession(threadId));
+}
+
 /// Analyze a change (a commit, a request, or a stream's working tree) if
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
 
@@ -613,25 +649,24 @@ async function runAsBackgroundTask(
 
 /** The commands a person is offered — those with a `ui` they may run now
  *  (`list_person_commands`); search lists the ref-less ones. */
-/** Window `client` says it's open and hosts `scopes` (`clientHost.ts`). */
-export async function registerClientHost(client: string, scopes: string[]): Promise<void> {
-  unwrap(await commands.registerClientHost(client, scopes));
+/** This window says it's open and hosts `scopes` (`clientHost.ts`). Which
+ *  window is the request's own page load (its `Oxplow-Connection`). */
+export async function registerClientHost(scopes: string[]): Promise<void> {
+  unwrap(await commands.registerClientHost(scopes));
 }
 
-/** Window `client` is closing: calls stop coming to it. */
-export async function unregisterClientHost(client: string): Promise<void> {
-  unwrap(await commands.unregisterClientHost(client));
+/** This window is closing: calls stop coming to it. */
+export async function unregisterClientHost(): Promise<void> {
+  unwrap(await commands.unregisterClientHost());
 }
 
-/** Window `client`'s answer to a `clientCall`: its result, or why not. */
+/** This window's answer to a `clientCall`: its result, or why not. */
 export async function answerClientCall(
-  client: string,
   id: string,
   answer: { result: unknown } | { error: string },
 ): Promise<void> {
   unwrap(
     await commands.answerClientCall(
-      client,
       id,
       "result" in answer ? (answer.result ?? null) : null,
       "error" in answer ? answer.error : null,
@@ -646,7 +681,7 @@ export async function runCommandForCall(
   name: string,
   input: unknown,
 ): Promise<CommandOutcome> {
-  return unwrap(await commands.runCommandForCall(call.client, call.id, name, input));
+  return unwrap(await commands.runCommandForCall(call.id, name, input));
 }
 
 export async function listPersonCommands(): Promise<CommandSpec[]> {
@@ -704,6 +739,34 @@ export async function gitRevert(streamId: string, rev: string, confirmed: boolea
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   const ctx = unwrap(await commands.getWorkspaceContext());
   return { vcsEnabled: ctx.vcs_enabled };
+}
+
+// ---- Hosts on other machines (the launcher) ----
+
+/// Ask a host on another machine to pair this Mac: the code for the person
+/// there to type (`oxplow host pair <code>`, or its Devices page).
+export async function askHost(address: string): Promise<import("./tauri-bridge/generated/bindings.js").HostAsk> {
+  return unwrap(await commands.askHost(address));
+}
+
+/// Wait (a while) for the person there to type the code: `true` once paired,
+/// `false` while it still waits; throws once the ask ended.
+export async function collectHost(origin: string, request: string): Promise<boolean> {
+  return unwrap(await commands.collectHost(origin, request));
+}
+
+export async function remoteHosts(): Promise<import("./tauri-bridge/generated/bindings.js").RemoteHostView[]> {
+  return unwrap(await commands.remoteHosts());
+}
+
+/// Open a project of a host on another machine; `closeCaller` closes the
+/// window that asked (the launcher).
+export async function openRemoteProject(origin: string, project: string, closeCaller: boolean): Promise<void> {
+  unwrap(await commands.openRemoteProject(origin, project, closeCaller));
+}
+
+export async function forgetRemoteHost(origin: string): Promise<void> {
+  unwrap(await commands.forgetRemoteHost(origin));
 }
 
 // ---- Launcher / multi-window ----

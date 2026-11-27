@@ -178,16 +178,20 @@ impl ThreadStore for SqliteThreadStore {
 
     async fn selected_for_stream(
         &self,
+        device: &oxplow_domain::DeviceId,
         stream: &StreamId,
     ) -> Result<Option<ThreadId>, DomainError> {
         let stream = *stream;
+        let device = device.as_str().to_string();
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT selected_thread_id FROM thread_selection WHERE stream_id = ?1",
+                    "SELECT selected_thread_id FROM thread_selection
+                     WHERE device_id = ?1 AND stream_id = ?2",
                 )?;
-                let mut rows =
-                    stmt.query_map(params![stream.value()], |r| r.get::<_, Option<i64>>(0))?;
+                let mut rows = stmt.query_map(params![device, stream.value()], |r| {
+                    r.get::<_, Option<i64>>(0)
+                })?;
                 match rows.next() {
                     Some(Ok(Some(s))) => Ok(Some(ThreadId::new(s))),
                     Some(Ok(None)) => Ok(None),
@@ -200,18 +204,20 @@ impl ThreadStore for SqliteThreadStore {
 
     async fn set_selected_for_stream(
         &self,
+        device: &oxplow_domain::DeviceId,
         stream: &StreamId,
         thread: Option<&ThreadId>,
     ) -> Result<(), DomainError> {
         let stream = *stream;
         let thread = thread.cloned();
+        let device = device.as_str().to_string();
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "INSERT INTO thread_selection (stream_id, selected_thread_id)
-                     VALUES (?1, ?2)
-                     ON CONFLICT(stream_id) DO UPDATE SET selected_thread_id = excluded.selected_thread_id",
-                    params![stream.value(), thread.as_ref().map(|t| t.value())],
+                    "INSERT INTO thread_selection (device_id, stream_id, selected_thread_id)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(device_id, stream_id) DO UPDATE SET selected_thread_id = excluded.selected_thread_id",
+                    params![device, stream.value(), thread.as_ref().map(|t| t.value())],
                 )?;
                 Ok(())
             })
@@ -307,14 +313,29 @@ mod tests {
         let (store, sid) = make_store().await;
         let t = thread(sid);
         store.upsert(&t).await.unwrap();
-        assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
+        let (mac, tablet) = (
+            oxplow_domain::DeviceId::generate(),
+            oxplow_domain::DeviceId::generate(),
+        );
+        assert_eq!(store.selected_for_stream(&mac, &sid).await.unwrap(), None);
         store
-            .set_selected_for_stream(&sid, Some(&t.id))
+            .set_selected_for_stream(&mac, &sid, Some(&t.id))
             .await
             .unwrap();
-        assert_eq!(store.selected_for_stream(&sid).await.unwrap(), Some(t.id));
-        store.set_selected_for_stream(&sid, None).await.unwrap();
-        assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
+        assert_eq!(
+            store.selected_for_stream(&mac, &sid).await.unwrap(),
+            Some(t.id)
+        );
+        // Each device's selection is its own.
+        assert_eq!(
+            store.selected_for_stream(&tablet, &sid).await.unwrap(),
+            None
+        );
+        store
+            .set_selected_for_stream(&mac, &sid, None)
+            .await
+            .unwrap();
+        assert_eq!(store.selected_for_stream(&mac, &sid).await.unwrap(), None);
     }
 
     #[tokio::test]

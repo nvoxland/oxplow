@@ -9,6 +9,7 @@ use oxplow_app::Services;
 use oxplow_db::SqlCell;
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 /// Where the app's extensions come from: the main worktree, for every
 /// stream. A stream's `stream_id` only scopes the data a page reads.
@@ -107,7 +108,7 @@ pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcErr
 /// never the frame) — when the bundle `version` the frame was loaded at is
 /// approved.
 pub async fn invoke_component_command(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     id: String,
     command: String,
     input: oxplow_domain::Json,
@@ -115,8 +116,8 @@ pub async fn invoke_component_command(
     version: String,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     Ok(oxplow_app::viz_actions::invoke_component_command(
-        svc,
-        root(svc),
+        req,
+        root(req),
         oxplow_app::viz_actions::ComponentInvoke {
             component: id,
             command,
@@ -124,6 +125,7 @@ pub async fn invoke_component_command(
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed,
             version,
+            caller: req.caller.cloned(),
         },
     )
     .await?)
@@ -133,7 +135,7 @@ pub async fn invoke_component_command(
 /// component acting for the person: whichever command answers the point for
 /// `context` (`command` names one when several do).
 pub async fn invoke_component_point(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     id: String,
     point: String,
     context: oxplow_domain::Json,
@@ -142,8 +144,8 @@ pub async fn invoke_component_point(
     version: String,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     Ok(oxplow_app::viz_actions::invoke_component_point(
-        svc,
-        root(svc),
+        req,
+        root(req),
         oxplow_app::viz_actions::ComponentPointInvoke {
             component: id,
             point,
@@ -152,6 +154,7 @@ pub async fn invoke_component_point(
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed,
             version,
+            caller: req.caller.cloned(),
         },
     )
     .await?)

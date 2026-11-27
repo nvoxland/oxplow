@@ -571,6 +571,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
                     option: None,
                     on_behalf_of: oxplow_domain::Actor::Human,
                     confirmed: false,
+                    caller: None,
                 },
             )
             .await

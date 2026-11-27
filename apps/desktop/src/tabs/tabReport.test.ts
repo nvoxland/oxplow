@@ -1,58 +1,30 @@
 import { expect, test } from "bun:test";
 
 import { buildTabReport, createTabReporter } from "./tabReport.js";
-import { fileRef, knowledgePageRef } from "./pageRefs.js";
-import { back, emptySession, navigate, open } from "./session.js";
 
-// A window reports every thread's tabs with their shown titles, the one
-// selected in each and where each tab's history leads, the thread it
-// shows, and its active page's detail.
-test("a window's report lists every thread's tabs, selection and history", () => {
-  let thr1 = open(emptySession(), { ref: knowledgePageRef("oxwiki", "home") });
-  const slot = thr1.active!;
-  thr1 = navigate(thr1, slot, { ref: knowledgePageRef("oxwiki", "start") });
-  thr1 = navigate(thr1, slot, { ref: knowledgePageRef("oxwiki", "next") });
-  thr1 = back(thr1, slot);
-  thr1 = open(thr1, {
-    ref: fileRef("src/a.rs"),
-    from: { title: "Files in src", items: [{ ref: fileRef("src/a.rs"), label: "a.rs" }], index: 0 },
-  });
+// A window reports only what is live; its tabs are the stored ones.
+test("a window's report carries its focus, visibility, shown thread, detail and runs", () => {
   const report = buildTabReport({
-    client: "w1",
     focused: true,
     visible: true,
     shownThread: "thr1",
-    sessions: { thr1, thr2: emptySession() },
-    titleOf: (tab) => (tab.id === "oxplow:oxplow/knowledge?id=start&store=oxwiki" ? "Start" : null),
     detail: { path: "src/a.rs" },
     runs: ["panel-1", "markdown-1", "panel-1"],
   });
   expect(report).toEqual({
-    client: "w1",
     runs: ["markdown-1", "panel-1"],
     focused: true,
     visible: true,
     shown_thread: "thr1",
-    threads: [
-      {
-        thread: "thr1",
-        tabs: [
-          { id: "oxplow:oxplow/knowledge?id=start&store=oxwiki", kind: "oxplow/knowledge", title: "Start", back: ["oxplow:oxplow/knowledge?id=home&store=oxwiki"], forward: ["oxplow:oxplow/knowledge?id=next&store=oxwiki"], origin: null },
-          { id: "oxplow:oxplow/file?path=src/a.rs", kind: "oxplow/file", title: "oxplow/file", back: [], forward: [], origin: "Files in src" },
-        ],
-        active: "oxplow:oxplow/file?path=src/a.rs",
-      },
-      { thread: "thr2", tabs: [], active: null },
-    ],
     detail_json: '{"path":"src/a.rs"}',
   });
 });
 
 test("a window with no page runs reports an explicit empty roster", () => {
-  expect(buildTabReport({ client: "w2", focused: false, visible: true, shownThread: null, sessions: {}, titleOf: () => null, detail: null }).runs).toEqual([]);
+  expect(buildTabReport({ focused: false, visible: true, shownThread: null, detail: null }).runs).toEqual([]);
 });
 
-const rosterReport = (runs: string[]) => buildTabReport({ client: "w1", runs, focused: true, visible: true, shownThread: null, sessions: {}, titleOf: () => null, detail: null });
+const rosterReport = (runs: string[]) => buildTabReport({ runs, focused: true, visible: true, shownThread: null, detail: null });
 
 test("report writes are serialized and only the newest pending roster is sent", async () => {
   const sent: string[][] = [];
@@ -92,12 +64,9 @@ test("a failed report does not block a newer pending roster or a later heartbeat
 
 test("the shown page's run and focused node reach the report as detail_json", () => {
   const report = buildTabReport({
-    client: "w1",
     focused: true,
     visible: true,
     shownThread: null,
-    sessions: {},
-    titleOf: () => null,
     detail: { runId: "run-1", focus: { node: "big" } },
   });
   expect(JSON.parse(report.detail_json!)).toEqual({ runId: "run-1", focus: { node: "big" } });

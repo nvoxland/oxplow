@@ -154,5 +154,57 @@ export function chainedDrops(at: DropAt, dragged: readonly Record<string, SqlCel
 
 /** The row action key `key` runs (`key:`), if any. */
 export function keyAction(actions: readonly PageAction[], key: string): PageAction | null {
-  return actions.find((a) => a.row && !a.inForm && a.key !== null && a.key !== undefined && a.key === key) ?? null;
+  return actions.find((a) => a.row && !a.inForm && !a.drag && a.key !== null && a.key !== undefined && a.key === key) ?? null;
+}
+
+/** A place a row's menu can move it to: what a drag there would drop. */
+export interface MovePlace {
+  /** `up`, `down`, `into` (onto the row above), or `group:<key>`. */
+  id: string;
+  label: string;
+  place: DropAt;
+}
+
+/** The places a finger moves row `index` of `rows` (its group's rows in
+ *  drawing order, the row among them) to by menu, as a drag would drop it:
+ *  a step up or down, into the row above when a drop onto a row is taken
+ *  (`onto`), and the end of each other group. Which of them a drag action
+ *  takes is the caller's (`dragActionFor`). */
+export function movePlaces(
+  rows: readonly Record<string, SqlCell>[],
+  index: number,
+  group: SqlCell | null,
+  groups: readonly { key: string; label: string; value: SqlCell; rows: readonly Record<string, SqlCell>[] }[],
+  onto: boolean,
+): MovePlace[] {
+  const rest = rows.filter((_, i) => i !== index);
+  const out: MovePlace[] = [];
+  if (index > 0) out.push({ id: "up", label: "Move Up", place: dropBeside(rest, index - 1, "before", group) });
+  if (index < rows.length - 1) out.push({ id: "down", label: "Move Down", place: dropBeside(rest, index, "after", group) });
+  if (onto && index > 0) out.push({ id: "into", label: "Move Into Row Above", place: dropBeside(rest, index - 1, "onto", group) });
+  for (const g of groups) {
+    if (g.value === group) continue;
+    out.push({ id: `group:${g.key}`, label: g.label, place: dropInGroup(g.rows, g.value) });
+  }
+  return out;
+}
+
+/** Row `index`'s siblings in a `depth` list, itself among them, in drawing
+ *  order: the rows at its depth under the same parent (the run between the
+ *  shallower rows around it). */
+export function siblingsOf<R>(rows: readonly R[], index: number, depthOf: (row: R) => number): R[] {
+  const d = depthOf(rows[index]!);
+  let from = index;
+  while (from > 0 && depthOf(rows[from - 1]!) >= d) from--;
+  let to = index;
+  while (to < rows.length - 1 && depthOf(rows[to + 1]!) >= d) to++;
+  return rows.slice(from, to + 1).filter((r) => depthOf(r) === d);
+}
+
+/** Whether `action` uses a row's place among its neighbours (`before`,
+ *  `after` or the order): a board's move to a column names only the group,
+ *  so a step up or down there is no move. */
+export function takesSteps(action: PageAction): boolean {
+  const scopes = scopesOf(action.input);
+  return scopes.has("before") || scopes.has("after") || scopes.has("order");
 }

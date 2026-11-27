@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { desktopBridge, openInSystemBrowser } from "../api.js";
 import { classifyExternalUrl, describeRejection } from "../external-url-allowlist.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
+import { copyText } from "../clipboard.js";
 
 export function EmbedViz({ url }: { url: string | null }) {
   const verdict = classifyExternalUrl(url ?? "");
@@ -81,7 +82,7 @@ export function EmbedViz({ url }: { url: string | null }) {
           type="button"
           className="ox-button"
           data-testid="viz-embed-copy"
-          onClick={() => void navigator.clipboard.writeText(safeUrl).catch(() => {})}
+          onClick={() => void copyText(safeUrl)}
         >
           Copy URL
         </button>

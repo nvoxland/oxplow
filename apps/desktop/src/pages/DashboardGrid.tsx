@@ -2,13 +2,14 @@
  * source and goes through write_page; tile order previews immediately. */
 import { useRunner } from "../commands/RunnerContext.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MoreButton } from "../components/MoreButton.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { TileGrid, TileSlot, type TileSize } from "../kit/Tiles.js";
+import { TILE_MIME } from "../dragMimes.js";
 import { moveTile, removeTile } from "./dashboardEdits.js";
 import { useDashboardAuthoring, useDashboardWritable } from "./dashboardAuthoring.js";
 
 export interface DashboardChild { id: string; size: TileSize; body: ReactNode }
-const TILE_MIME = "application/x-oxplow-dashboard-tile";
 
 export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardChild[] }) {
   const authoring = useDashboardAuthoring();
@@ -55,7 +56,18 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
   return <>
     <TileGrid testId="dashboard-grid" aria-busy={busy}>
       {shown.map((tile, index) => {
-        const items = [{ id: "remove", label: "Remove tile…", enabled: !busy, run: () => setRemoving(tile.id) }];
+        // A drag's move, by menu: a finger cannot drag on iPad.
+        const moveTo = (to: number) => () => {
+          const next = shown.map((t) => t.id).filter((id) => id !== tile.id);
+          next.splice(to, 0, tile.id);
+          void edit((yaml) => moveTile(yaml, tile.id, to), next);
+        };
+        const items = [
+          { id: "move-earlier", label: "Move Earlier", enabled: !busy && index > 0, run: moveTo(index - 1) },
+          { id: "move-later", label: "Move Later", enabled: !busy && index < shown.length - 1, run: moveTo(index + 1) },
+          { id: "remove-separator", label: "", enabled: false, separator: true },
+          { id: "remove", label: "Remove tile…", enabled: !busy, run: () => setRemoving(tile.id) },
+        ];
         return <TileSlot key={tile.id} size={tile.size} tabIndex={writable ? 0 : undefined}
           data-testid={`dashboard-tile-${tile.id}`} draggable={writable && !busy}
           style={over === tile.id ? { outline: "2px solid var(--accent)" } : undefined}
@@ -80,6 +92,7 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
             onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setRemoving(null); } }}>
             <span>Remove this tile? </span><button autoFocus type="submit">Confirm</button><button type="button" onClick={() => setRemoving(null)}>Cancel</button>
           </form> : null}
+          {writable ? <div style={tileMore}><MoreButton testId={`dashboard-tile-more-${tile.id}`} label="Tile actions" onOpen={(at) => menu.openAt(at, items)} /></div> : null}
           {tile.body}
         </TileSlot>;
       })}
@@ -87,3 +100,7 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
     {menu.menu}
   </>;
 }
+
+/** A finger's way to a tile's menu: a line of its own above the tile (drawn
+ *  only on a touch screen), so it covers nothing of the tile's. */
+const tileMore = { display: "flex", justifyContent: "flex-end" } as const;

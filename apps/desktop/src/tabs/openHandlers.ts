@@ -1,5 +1,5 @@
 /// The kinds of ref the window opens in code of its own, instead of as a
-/// page tab (`App.handleOpenPage` supplies one handler per kind). Every
+/// page tab (`handleOpenPage` in `window/useWindowOpeners.ts` supplies one handler per kind). Every
 /// other kind opens as a per-thread page tab. A closed list on purpose: it
 /// only shrinks (`openHandlers.test.ts` pins it against
 /// `openHandlers.golden.json`) — a kind leaves it when its page opens it, and

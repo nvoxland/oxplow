@@ -1,0 +1,1504 @@
+//! The host's HTTP API under `/host/…`. Which caller may use a route
+//! (`crate::access`):
+//!
+//! - owner only: `POST /host/pair/approve` `{ code }` (pair the device
+//!   showing that code), `GET /host/pair/waiting` (who waits to pair, never
+//!   their codes), `GET /host/devices`, `PATCH /host/devices/<id>` `{ name }`, `DELETE
+//!   /host/devices/<id>`, `POST /host/projects` `{ path }` (register a folder,
+//!   or find it registered), `POST /host/shutdown`;
+//! - owner or device: `GET /host/status` (version, pid, projects, connected
+//!   devices), `GET /host/projects`, `POST|DELETE /host/holds` `{ device,
+//!   project }` (a device's hold is always its own), `GET /host/me` (who the
+//!   caller is, and the served UI's build), `DELETE /host/me` (a device
+//!   forgets itself);
+//! - owner or device, as a socket: `GET /host/events` (the projects, sent
+//!   again at each change);
+//! - anyone who reaches the host: `POST /host/pair` `{ name, kind }` asks
+//!   to pair and answers `{ request, code, expires_in }`: the device shows
+//!   the code for the owner to type, and keeps the request, its secret. It
+//!   must be JSON (so a page elsewhere cannot send it without a preflight,
+//!   and no route here answers one) and same-origin when it says an origin.
+//!   `GET /host/pair/<request>` waits (a while) for the owner and answers
+//!   `{ device, token }` once approved (`202` still waiting, `404` ended).
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use axum::extract::{Path, State};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, patch, post};
+use axum::{Json, Router};
+use oxplow_domain::{DeviceId, DeviceKind};
+use serde::{Deserialize, Serialize};
+
+use crate::access::{Access, Caller, Connected, Listener};
+use crate::devices::{Collect, DevicesError, PairedDevice};
+use crate::host::{Host, HostError, ProjectView};
+use crate::web::refuse;
+
+/// What the API is given.
+pub struct ApiConfig {
+    pub host: Arc<Host>,
+    pub access: Arc<Access>,
+    pub listener: Listener,
+    /// Told when a client asks the host to stop; `serve` waits on it.
+    pub stop: Arc<tokio::sync::Notify>,
+    /// The served UI, for its build id.
+    pub ui_dir: Option<PathBuf>,
+}
+
+#[derive(Clone)]
+struct ApiState {
+    host: Arc<Host>,
+    access: Arc<Access>,
+    listener: Listener,
+    stop: Arc<tokio::sync::Notify>,
+    ui_dir: Option<Arc<PathBuf>>,
+}
+
+#[derive(Serialize)]
+struct Status {
+    version: &'static str,
+    pid: u32,
+    /// The Mac app's own host, not a headless one.
+    for_app: bool,
+    projects: Vec<ProjectView>,
+    /// Devices with an open event socket now.
+    connected: Vec<Connected>,
+    /// Where other devices reach this host, or why they cannot.
+    public: crate::access::PublicListener,
+}
+
+#[derive(Deserialize)]
+struct AddProject {
+    path: PathBuf,
+}
+
+#[derive(Deserialize)]
+struct HoldRequest {
+    #[serde(default)]
+    device: String,
+    project: String,
+}
+
+#[derive(Deserialize)]
+struct PairRequest {
+    name: String,
+    kind: DeviceKind,
+}
+
+#[derive(Deserialize)]
+struct Approve {
+    code: String,
+}
+
+#[derive(Serialize)]
+struct Asked {
+    /// The ask's secret: what collects the key once approved.
+    request: String,
+    /// What the device shows for the owner to type (`ABCD-EFGH`).
+    code: String,
+    /// Seconds it waits for the owner.
+    expires_in: u64,
+}
+
+#[derive(Deserialize)]
+struct Rename {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct Paired {
+    device: PairedDevice,
+    token: String,
+}
+
+#[derive(Serialize)]
+struct Me {
+    owner: bool,
+    device: Option<PairedDevice>,
+    /// A hash of the served `index.html`: a page that sees it change after
+    /// a reconnect loads again (the host now serves another build).
+    build: Option<String>,
+}
+
+pub fn router(cfg: ApiConfig) -> Router {
+    let state = ApiState {
+        host: cfg.host,
+        access: cfg.access,
+        listener: cfg.listener,
+        stop: cfg.stop,
+        ui_dir: cfg.ui_dir.map(Arc::new),
+    };
+    Router::new()
+        .route("/host/status", get(status))
+        .route("/host/projects", get(projects).post(add_project))
+        .route("/host/projects/{id}", delete(remove_project))
+        .route("/host/settings", get(settings).put(save_settings))
+        .route("/host/changes", get(changes))
+        .route("/host/holds", post(hold).delete(release))
+        .route("/host/shutdown", post(shutdown))
+        .route("/host/pair", post(pair))
+        .route("/host/pair/approve", post(approve_pairing))
+        .route("/host/pair/waiting", get(waiting_to_pair))
+        .route("/host/pair/{request}", get(collect_pairing))
+        .route("/host/devices", get(devices))
+        .route(
+            "/host/devices/{id}",
+            patch(rename_device).delete(remove_device),
+        )
+        .route("/host/me", get(me).delete(forget_me))
+        .route("/host/events", get(events))
+        .with_state(state)
+}
+
+/// Equal without stopping at the first difference, so timing says nothing of
+/// how much of a guess was right.
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
+}
+
+/// The bearer token a request carries.
+pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+}
+
+fn unauthorized() -> Response {
+    refuse(StatusCode::UNAUTHORIZED, "missing or wrong token")
+}
+
+fn caller(s: &ApiState, headers: &HeaderMap) -> Result<Caller, Box<Response>> {
+    s.access
+        .caller(s.listener, bearer(headers))
+        .ok_or_else(|| Box::new(unauthorized()))
+}
+
+fn owner(s: &ApiState, headers: &HeaderMap) -> Result<(), Box<Response>> {
+    match caller(s, headers)? {
+        Caller::Owner => Ok(()),
+        Caller::Device(_) => Err(Box::new(refuse(
+            StatusCode::FORBIDDEN,
+            "only the host's owner may do that",
+        ))),
+    }
+}
+
+/// The JSON body, read after the caller is known (an extractor would answer
+/// a bad body before a missing token).
+fn body<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, Box<Response>> {
+    serde_json::from_slice(bytes)
+        .map_err(|e| Box::new(refuse(StatusCode::BAD_REQUEST, &e.to_string())))
+}
+
+macro_rules! check {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(refused) => return *refused,
+        }
+    };
+}
+
+async fn status(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(caller(&s, &headers));
+    Json(Status {
+        version: crate::VERSION,
+        pid: std::process::id(),
+        for_app: s.host.for_app(),
+        projects: s.host.projects(),
+        connected: s.access.tunnels.connected(),
+        public: s
+            .access
+            .public
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+    })
+    .into_response()
+}
+
+/// A project as a caller sees it: with whether the caller holds it.
+#[derive(Serialize)]
+struct ProjectForCaller {
+    #[serde(flatten)]
+    view: ProjectView,
+    held_by_you: bool,
+}
+
+async fn projects(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    let who = check!(caller(&s, &headers));
+    Json(projects_for(&s.host, &who)).into_response()
+}
+
+/// The projects as `who` sees them (`held_by_you` for a device).
+fn projects_for(host: &Host, who: &Caller) -> Vec<ProjectForCaller> {
+    let holds = host.holds();
+    let mine = |project: &str| match &who {
+        Caller::Owner => false,
+        Caller::Device(d) => holds
+            .iter()
+            .any(|h| h.project == project && h.device == d.id.as_str()),
+    };
+    host.projects()
+        .into_iter()
+        .map(|view| ProjectForCaller {
+            held_by_you: mine(&view.id),
+            view,
+        })
+        .collect()
+}
+
+/// `GET /host/events`: a socket that sends `{ "type": "projects", "projects":
+/// […] }` (as `GET /host/projects` answers it, for this caller) when it opens
+/// and after each change of a hold or a daemon's state, and pings every 20
+/// s. The token rides the query (`?token=`), as a browser cannot set a
+/// socket's headers. A device's socket counts as connected and closes with
+/// its removal (4003) or the host's end (4002), as a project's socket does.
+async fn events(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> Response {
+    let token = query.as_deref().and_then(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .find(|(k, _)| k == "token")
+            .map(|(_, v)| v.into_owned())
+    });
+    let Some(who) = s
+        .access
+        .caller(s.listener, bearer(&headers).or(token.as_deref()))
+    else {
+        return unauthorized();
+    };
+    let lease = match &who {
+        Caller::Device(d) => Some(s.access.open_tunnel(
+            Connected {
+                device: d.id.to_string(),
+                name: d.name.clone(),
+                kind: Some(d.kind),
+            },
+            s.listener,
+        )),
+        Caller::Owner => None,
+    };
+    ws.on_upgrade(move |socket| send_events(socket, s.host, who, lease))
+}
+
+async fn send_events(
+    mut socket: axum::extract::ws::WebSocket,
+    host: Arc<Host>,
+    who: Caller,
+    lease: Option<crate::access::TunnelLease>,
+) {
+    use axum::extract::ws::{CloseFrame, Message};
+    let mut changes = host.watch();
+    let mut closed = lease.as_ref().map(|l| l.closed.clone());
+    let mut ping = tokio::time::interval(std::time::Duration::from_secs(20));
+    ping.tick().await;
+    loop {
+        let list = serde_json::json!({ "type": "projects", "projects": projects_for(&host, &who) });
+        if socket
+            .send(Message::Text(list.to_string().into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        loop {
+            tokio::select! {
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    break;
+                }
+                code = async {
+                    match closed.as_mut() {
+                        Some(rx) => loop {
+                            if let Some(code) = *rx.borrow_and_update() {
+                                return code;
+                            }
+                            if rx.changed().await.is_err() {
+                                return std::future::pending::<u16>().await;
+                            }
+                        },
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let _ = socket
+                        .send(Message::Close(Some(CloseFrame { code, reason: "closed by the host".into() })))
+                        .await;
+                    return;
+                }
+                _ = ping.tick() => {
+                    if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        return;
+                    }
+                }
+                frame = socket.recv() => {
+                    if matches!(frame, None | Some(Err(_)) | Some(Ok(Message::Close(_)))) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn add_project(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> Response {
+    check!(owner(&s, &headers));
+    let req: AddProject = check!(body(&bytes));
+    match s.host.registry().add(&req.path) {
+        Ok(project) => Json(project).into_response(),
+        Err(
+            e @ (crate::registry::RegistryError::NotAProject(_)
+            | crate::registry::RegistryError::Unreadable(..)),
+        ) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct ChangesQuery {
+    after: Option<u64>,
+}
+
+/// How long `/host/changes` waits for a change before it answers anyway.
+const CHANGES_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// `GET /host/changes?after=<n>`: the count of changes a Devices page shows
+/// (`{ n }`), at once when it is past `after` (or none is given), else when
+/// it next moves, or after a while. A daemon keeps one asked, and reads
+/// its host datasets again when the count moves.
+async fn changes(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<ChangesQuery>,
+) -> Response {
+    check!(owner(&s, &headers));
+    let mut changes = s.access.changes();
+    let now = *changes.borrow_and_update();
+    if q.after.is_some_and(|after| after == now) {
+        let _ = tokio::time::timeout(CHANGES_WAIT, changes.changed()).await;
+    }
+    let n = *changes.borrow();
+    Json(serde_json::json!({ "n": n })).into_response()
+}
+
+/// "Allow other devices": saved, and in force under this run's flags.
+async fn settings(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    Json(s.access.other_devices.view()).into_response()
+}
+
+/// Keep "Allow other devices"; what cannot work is refused with its field
+/// and nothing is kept.
+async fn save_settings(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> Response {
+    check!(owner(&s, &headers));
+    let wanted: oxplow_host_access::settings::HostSettings = check!(body(&bytes));
+    let server = s.access.public_server.get().map(|p| p.as_ref());
+    match s.access.other_devices.apply(wanted, server).await {
+        Ok(_) => {
+            s.access.changed();
+            Json(s.access.other_devices.view()).into_response()
+        }
+        Err(crate::other_devices::SaveError::Invalid(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string(), "field": e.field() })),
+        )
+            .into_response(),
+        Err(crate::other_devices::SaveError::Unapplied(e)) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": e, "field": "address" })),
+        )
+            .into_response(),
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+/// Forget a project (the CLI's `project remove`); one a device holds open
+/// stays until it is closed there.
+async fn remove_project(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    check!(owner(&s, &headers));
+    if s.host.holds().iter().any(|h| h.project == id) {
+        return refuse(
+            StatusCode::CONFLICT,
+            "the project is open on a device; close it there first",
+        );
+    }
+    match s.host.registry().remove(&id) {
+        Ok(project) => Json(project).into_response(),
+        Err(e @ crate::registry::RegistryError::UnknownProject(_)) => {
+            refuse(StatusCode::NOT_FOUND, &e.to_string())
+        }
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+async fn shutdown(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    tracing::info!("a client asked the host to stop");
+    s.stop.notify_one();
+    StatusCode::ACCEPTED.into_response()
+}
+
+/// The device a hold is for: a device's own, whatever it named; the owner's
+/// as it named it.
+fn hold_device(who: &Caller, named: String) -> String {
+    match who {
+        Caller::Owner => named,
+        Caller::Device(d) => d.id.to_string(),
+    }
+}
+
+async fn hold(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::Bytes) -> Response {
+    let who = check!(caller(&s, &headers));
+    let req: HoldRequest = check!(body(&bytes));
+    answer(
+        s.host
+            .add_hold(&hold_device(&who, req.device), &req.project),
+    )
+}
+
+async fn release(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> Response {
+    let who = check!(caller(&s, &headers));
+    let req: HoldRequest = check!(body(&bytes));
+    answer(
+        s.host
+            .release_hold(&hold_device(&who, req.device), &req.project),
+    )
+}
+
+/// Whether `headers` say a JSON body and, if they name an origin, this
+/// host's own.
+fn pair_request_ok(headers: &HeaderMap) -> bool {
+    let json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(';')
+                .next()
+                .is_some_and(|t| t.trim() == "application/json")
+        });
+    let same_origin = match headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+        None => true,
+        Some(origin) => {
+            let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
+            let named = origin.split_once("://").map(|(_, rest)| rest);
+            host.is_some_and(|h| named == Some(h))
+        }
+    };
+    json && same_origin
+}
+
+/// A device asks to pair: it shows the code it gets for the owner to type,
+/// and keeps the request to collect its key.
+async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::Bytes) -> Response {
+    if !pair_request_ok(&headers) {
+        return refuse(
+            StatusCode::FORBIDDEN,
+            "pairing takes JSON from this host's own page",
+        );
+    }
+    let Ok(req) = serde_json::from_slice::<PairRequest>(&bytes) else {
+        return refuse(StatusCode::BAD_REQUEST, "pairing needs { name, kind }");
+    };
+    let asked = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .ask(&req.name, req.kind, Instant::now());
+    match asked {
+        Ok(ask) => {
+            tracing::info!(name = %req.name, "a device asks to pair");
+            s.access.changed();
+            Json(Asked {
+                request: ask.request,
+                code: ask.code,
+                expires_in: crate::devices::ASK_LIFETIME.as_secs(),
+            })
+            .into_response()
+        }
+        Err(e) => refuse(StatusCode::TOO_MANY_REQUESTS, &e.to_string()),
+    }
+}
+
+/// How long a device collecting its ask waits for the owner before it is
+/// told to ask again.
+const COLLECT_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The device collects its ask (its secret is the proof): `{ device, token
+/// }` once the owner approved it, else after a while `202` (still waiting),
+/// or `404` (ended, or collected already).
+async fn collect_pairing(State(s): State<ApiState>, Path(request): Path<String>) -> Response {
+    let mut changes = s.access.changes();
+    let until = Instant::now() + COLLECT_WAIT;
+    loop {
+        changes.borrow_and_update();
+        let found = s
+            .access
+            .pairing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .collect(&request, Instant::now());
+        match found {
+            Collect::Paired(device, token) => {
+                return Json(Paired { device, token }).into_response()
+            }
+            Collect::Gone => {
+                return refuse(
+                    StatusCode::NOT_FOUND,
+                    "this ask to pair ended (after ten minutes); ask again",
+                )
+            }
+            Collect::Waiting => {}
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({ "waiting": true })),
+            )
+                .into_response();
+        }
+        let _ = tokio::time::timeout(left, changes.changed()).await;
+    }
+}
+
+/// The owner typed the code a device shows: that device is paired.
+async fn approve_pairing(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> Response {
+    check!(owner(&s, &headers));
+    let req: Approve = check!(body(&bytes));
+    let approved = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .approve(&req.code, Instant::now(), |name, kind| {
+            s.access.devices.pair(name, kind)
+        });
+    match approved {
+        Ok(Some(device)) => {
+            tracing::info!(device = %device.id, name = %device.name, "a device paired");
+            s.access.changed();
+            Json(device).into_response()
+        }
+        Ok(None) => refuse(
+            StatusCode::NOT_FOUND,
+            "no device is waiting with that code; check the code its screen shows",
+        ),
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+/// Who waits to pair now (never their codes).
+async fn waiting_to_pair(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    let waiting = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .waiting(Instant::now());
+    Json(waiting).into_response()
+}
+
+async fn devices(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    Json(s.access.devices.list()).into_response()
+}
+
+fn device_id(raw: &str) -> Result<DeviceId, Box<Response>> {
+    DeviceId::parse(raw).map_err(|_| Box::new(refuse(StatusCode::NOT_FOUND, "no such device")))
+}
+
+fn device_answer(result: Result<PairedDevice, DevicesError>) -> Response {
+    match result {
+        Ok(device) => Json(device).into_response(),
+        Err(e @ DevicesError::Unknown(_)) => refuse(StatusCode::NOT_FOUND, &e.to_string()),
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+async fn rename_device(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    bytes: axum::body::Bytes,
+) -> Response {
+    check!(owner(&s, &headers));
+    let req: Rename = check!(body(&bytes));
+    let id = check!(device_id(&id));
+    let renamed = s.access.devices.rename(&id, &req.name);
+    s.access.changed();
+    device_answer(renamed)
+}
+
+async fn remove_device(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    check!(owner(&s, &headers));
+    let id = check!(device_id(&id));
+    device_answer(s.access.remove_device(&s.host, &id))
+}
+
+async fn me(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    let who = check!(caller(&s, &headers));
+    let build = match &s.ui_dir {
+        Some(dir) => crate::ui::build_id(dir).await,
+        None => None,
+    };
+    let (owner, device) = match who {
+        Caller::Owner => (true, None),
+        Caller::Device(d) => (false, Some(d)),
+    };
+    Json(Me {
+        owner,
+        device,
+        build,
+    })
+    .into_response()
+}
+
+async fn forget_me(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    match check!(caller(&s, &headers)) {
+        Caller::Owner => refuse(StatusCode::BAD_REQUEST, "the owner is no paired device"),
+        Caller::Device(d) => device_answer(s.access.remove_device(&s.host, &d.id)),
+    }
+}
+
+fn answer(result: Result<ProjectView, HostError>) -> Response {
+    match result {
+        Ok(view) => Json(view).into_response(),
+        Err(e @ HostError::UnknownProject(_)) => {
+            (StatusCode::NOT_FOUND, e.to_string()).into_response()
+        }
+        Err(e @ HostError::NoDevice) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{Fixture, RUNS};
+    use serde_json::json;
+
+    const TOKEN: &str = "host-secret";
+
+    struct Api {
+        url: String,
+        public: String,
+        access: Arc<Access>,
+        stop: Arc<tokio::sync::Notify>,
+    }
+
+    /// The API on a loopback listener and a public one, sharing one
+    /// `Access` (as `serve` runs them).
+    async fn api(fx: &Fixture) -> Api {
+        let access = Access::new(TOKEN.into(), fx.db.clone(), Default::default());
+        let stop = Arc::new(tokio::sync::Notify::new());
+        let mut urls = Vec::new();
+        for listener in [Listener::Loopback, Listener::Public] {
+            let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            urls.push(format!("http://{}", tcp.local_addr().unwrap()));
+            let app = router(ApiConfig {
+                host: fx.host.clone(),
+                access: access.clone(),
+                listener,
+                stop: stop.clone(),
+                ui_dir: None,
+            });
+            tokio::spawn(async move { axum::serve(tcp, app).await });
+        }
+        Api {
+            public: urls.pop().unwrap(),
+            url: urls.pop().unwrap(),
+            access,
+            stop,
+        }
+    }
+
+    async fn serve(fx: &Fixture) -> String {
+        api(fx).await.url
+    }
+
+    /// A device asks to pair at `url` as `name`: its secret ask and the
+    /// code it shows.
+    async fn ask(url: &str, name: &str) -> (String, String) {
+        let asked: serde_json::Value = reqwest::Client::new()
+            .post(format!("{url}/host/pair"))
+            .json(&json!({ "name": name, "kind": "tablet" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        (
+            asked["request"].as_str().unwrap().to_string(),
+            asked["code"].as_str().unwrap().to_string(),
+        )
+    }
+
+    /// The owner types `code`.
+    async fn approve(api: &Api, code: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("{}/host/pair/approve", api.url))
+            .bearer_auth(TOKEN)
+            .json(&json!({ "code": code }))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// The device collects its ask.
+    async fn collect(url: &str, request: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .get(format!("{url}/host/pair/{request}"))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// A tablet paired over the public listener, as the owner approves it:
+    /// `{ device, token }`.
+    async fn paired(api: &Api) -> serde_json::Value {
+        let (request, code) = ask(&api.public, "Tab S9").await;
+        assert_eq!(approve(api, &code).await.status(), 200);
+        collect(&api.public, &request).await.json().await.unwrap()
+    }
+
+    /// The owner sees who waits to pair (never their codes); a device may
+    /// not, and a code nobody shows approves nothing.
+    #[tokio::test]
+    async fn the_owner_sees_who_waits_and_approves_only_a_code_a_device_shows() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let waiting = || async {
+            reqwest::Client::new()
+                .get(format!("{}/host/pair/waiting", api.url))
+                .bearer_auth(TOKEN)
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        };
+        assert_eq!(waiting().await, json!([]));
+        let (_, code) = ask(&api.public, "Garage tablet").await;
+        let now = waiting().await;
+        assert_eq!(now, json!([{ "name": "Garage tablet", "kind": "tablet" }]));
+        assert!(
+            !now.to_string().contains(&code),
+            "the owner types it, never reads it"
+        );
+        assert_eq!(approve(&api, "AAAA-AAAA").await.status(), 404);
+        let refused = reqwest::Client::new()
+            .get(format!("{}/host/pair/waiting", api.url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 401);
+    }
+
+    /// A tablet asks over the public listener and waits; once the owner
+    /// types its code it collects its key (once), which then works there;
+    /// the owner's does not.
+    #[tokio::test]
+    async fn a_device_pairs_once_the_owner_types_its_code() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let (request, code) = ask(&api.public, "Tab S9").await;
+        assert_eq!(code.len(), 9, "ABCD-EFGH: {code}");
+        // A device waiting on its ask hears as soon as it is approved.
+        let waiting = tokio::spawn({
+            let url = api.public.clone();
+            let request = request.clone();
+            async move {
+                collect(&url, &request)
+                    .await
+                    .json::<serde_json::Value>()
+                    .await
+                    .unwrap()
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished(), "it waits for the owner");
+        let approved: serde_json::Value = approve(&api, &code).await.json().await.unwrap();
+        assert_eq!(approved["name"], "Tab S9");
+        let paired = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .expect("told once approved")
+            .unwrap();
+        let token = paired["token"].as_str().unwrap();
+        assert_eq!(paired["device"]["id"], approved["id"]);
+        assert!(paired["device"]["id"].as_str().unwrap().starts_with("dev-"));
+
+        let http = reqwest::Client::new();
+        let me: serde_json::Value = http
+            .get(format!("{}/host/me", api.public))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(me["owner"], false);
+        assert_eq!(me["device"]["id"], paired["device"]["id"]);
+        let owner_there = http
+            .get(format!("{}/host/status", api.public))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            owner_there.status(),
+            401,
+            "the owner token is for loopback only"
+        );
+        assert_eq!(
+            collect(&api.public, &request).await.status(),
+            404,
+            "the key is handed over once"
+        );
+        assert_eq!(
+            approve(&api, &code).await.status(),
+            404,
+            "a code is good once"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_device_may_not_do_what_only_the_owner_may() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let paired = paired(&api).await;
+        let token = paired["token"].as_str().unwrap().to_string();
+        let http = reqwest::Client::new();
+        for (method, path) in [
+            (reqwest::Method::POST, "/host/pair/approve"),
+            (reqwest::Method::GET, "/host/pair/waiting"),
+            (reqwest::Method::GET, "/host/devices"),
+            (reqwest::Method::POST, "/host/shutdown"),
+        ] {
+            let answer = http
+                .request(method.clone(), format!("{}{path}", api.public))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(answer.status(), 403, "{method} {path}");
+        }
+        let add = http
+            .post(format!("{}/host/projects", api.public))
+            .bearer_auth(&token)
+            .json(&json!({ "path": "/" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(add.status(), 403);
+    }
+
+    /// A device's project list says which it holds itself (its home page
+    /// offers to close those).
+    #[tokio::test]
+    async fn a_device_sees_which_projects_it_holds() {
+        let fx = Fixture::new(RUNS);
+        let alpha = fx.project("alpha");
+        fx.project("beta");
+        let api = api(&fx).await;
+        let paired = paired(&api).await;
+        let token = paired["token"].as_str().unwrap();
+        let http = reqwest::Client::new();
+        http.post(format!("{}/host/holds", api.public))
+            .bearer_auth(token)
+            .json(&json!({ "project": alpha }))
+            .send()
+            .await
+            .unwrap();
+        fx.host.add_hold("dev-mac", &fx.project("beta")).unwrap();
+        let projects: serde_json::Value = http
+            .get(format!("{}/host/projects", api.public))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let held = |name: &str| {
+            projects
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["name"] == name)
+                .unwrap()["held_by_you"]
+                .clone()
+        };
+        assert_eq!(held("alpha"), true);
+        assert_eq!(held("beta"), false, "the Mac holds it, not this device");
+    }
+
+    /// A device's hold is its own, whatever device it names.
+    #[tokio::test]
+    async fn a_devices_hold_is_always_its_own() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let api = api(&fx).await;
+        let paired = paired(&api).await;
+        let token = paired["token"].as_str().unwrap();
+        reqwest::Client::new()
+            .post(format!("{}/host/holds", api.public))
+            .bearer_auth(token)
+            .json(&json!({ "device": "dev-the-mac", "project": id }))
+            .send()
+            .await
+            .unwrap();
+        let holds = fx.host.holds();
+        assert_eq!(holds.len(), 1);
+        assert_eq!(holds[0].device, paired["device"]["id"].as_str().unwrap());
+    }
+
+    /// Removing a device revokes its token and releases its holds; a device
+    /// may forget itself.
+    #[tokio::test]
+    async fn a_removed_device_is_let_go_of() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let api = api(&fx).await;
+        let http = reqwest::Client::new();
+        let mut tokens = Vec::new();
+        for _ in 0..2 {
+            let paired = paired(&api).await;
+            tokens.push((
+                paired["device"]["id"].as_str().unwrap().to_string(),
+                paired["token"].as_str().unwrap().to_string(),
+            ));
+        }
+        let (first_id, first_token) = &tokens[0];
+        let (_, second_token) = &tokens[1];
+        http.post(format!("{}/host/holds", api.public))
+            .bearer_auth(first_token)
+            .json(&json!({ "project": id }))
+            .send()
+            .await
+            .unwrap();
+        let removed = http
+            .delete(format!("{}/host/devices/{first_id}", api.url))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(removed.status(), 200);
+        assert!(fx.host.holds().is_empty(), "its hold went");
+        let gone = http
+            .get(format!("{}/host/me", api.public))
+            .bearer_auth(first_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(gone.status(), 401);
+
+        let forgot = http
+            .delete(format!("{}/host/me", api.public))
+            .bearer_auth(second_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(forgot.status(), 200);
+        assert!(api.access.devices.list().is_empty());
+    }
+
+    /// A page on another site cannot pair a device: pairing takes JSON (a
+    /// cross-site form cannot send it, and nothing here answers a
+    /// preflight) and refuses a foreign Origin.
+    #[tokio::test]
+    async fn pairing_takes_json_from_the_hosts_own_page_only() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let body = json!({ "name": "x", "kind": "tablet" }).to_string();
+        let http = reqwest::Client::new();
+        let form = http
+            .post(format!("{}/host/pair", api.public))
+            .header("content-type", "text/plain")
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(form.status(), 403);
+        let foreign = http
+            .post(format!("{}/host/pair", api.public))
+            .header("content-type", "application/json")
+            .header("origin", "https://evil.example")
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), 403);
+        let own_origin = format!("http://{}", api.public.trim_start_matches("http://"));
+        let own = http
+            .post(format!("{}/host/pair", api.public))
+            .header("content-type", "application/json")
+            .header("origin", own_origin)
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(own.status(), 200, "its own page may ask");
+    }
+
+    /// The next text frame's JSON.
+    async fn next_text<S, E>(socket: &mut S) -> serde_json::Value
+    where
+        S: futures::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, E>> + Unpin,
+        E: std::fmt::Debug,
+    {
+        use futures::StreamExt;
+        loop {
+            if let tokio_tungstenite::tungstenite::Message::Text(t) =
+                socket.next().await.unwrap().unwrap()
+            {
+                return serde_json::from_str(&t).unwrap();
+            }
+        }
+    }
+
+    /// The events socket sends the projects when it opens and again at a
+    /// change; it needs a token like every other route.
+    #[tokio::test]
+    async fn the_events_socket_sends_the_projects_at_each_change() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let api = api(&fx).await;
+        let ws = |token: &str| {
+            format!(
+                "{}/host/events?token={token}",
+                api.url.replacen("http", "ws", 1)
+            )
+        };
+        assert!(tokio_tungstenite::connect_async(ws("nope")).await.is_err());
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws(TOKEN)).await.unwrap();
+        let first = next_text(&mut socket).await;
+        assert_eq!(first["type"], "projects");
+        assert_eq!(first["projects"][0]["id"], id);
+        assert_eq!(first["projects"][0]["state"], "stopped");
+        fx.host.add_hold("dev-a", &id).unwrap();
+        let mut states = Vec::new();
+        for _ in 0..5 {
+            let list = next_text(&mut socket).await;
+            let state = list["projects"][0]["state"].as_str().unwrap().to_string();
+            states.push(state.clone());
+            if state == "running" {
+                break;
+            }
+        }
+        assert_eq!(
+            states.first().map(String::as_str),
+            Some("starting"),
+            "{states:?}"
+        );
+        assert_eq!(
+            states.last().map(String::as_str),
+            Some("running"),
+            "{states:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_route_needs_the_host_token() {
+        let fx = Fixture::new(RUNS);
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        for (method, path) in [
+            (reqwest::Method::GET, "/host/status"),
+            (reqwest::Method::GET, "/host/projects"),
+            (reqwest::Method::POST, "/host/holds"),
+            (reqwest::Method::DELETE, "/host/holds"),
+            (reqwest::Method::POST, "/host/projects"),
+            (reqwest::Method::POST, "/host/shutdown"),
+            (reqwest::Method::POST, "/host/pair/approve"),
+            (reqwest::Method::GET, "/host/pair/waiting"),
+            (reqwest::Method::GET, "/host/devices"),
+            (reqwest::Method::GET, "/host/me"),
+            (reqwest::Method::DELETE, "/host/me"),
+            (
+                reqwest::Method::DELETE,
+                "/host/devices/dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427",
+            ),
+        ] {
+            let bare = http
+                .request(method.clone(), format!("{url}{path}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(bare.status(), 401, "{method} {path} without a token");
+            let wrong = http
+                .request(method.clone(), format!("{url}{path}"))
+                .bearer_auth("nope")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(wrong.status(), 401, "{method} {path} with a wrong token");
+        }
+        assert!(fx.host.holds().is_empty());
+    }
+
+    #[tokio::test]
+    async fn status_and_projects_say_what_runs() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+
+        let status: serde_json::Value = http
+            .get(format!("{url}/host/status"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(status["version"], crate::VERSION);
+        assert_eq!(status["projects"][0]["id"], id);
+        assert_eq!(status["projects"][0]["state"], "stopped");
+
+        let projects: serde_json::Value = http
+            .get(format!("{url}/host/projects"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(projects[0]["name"], "alpha");
+    }
+
+    #[tokio::test]
+    async fn a_hold_starts_the_project_and_deleting_it_stops_it() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        let body = json!({ "device": "dev-a", "project": id });
+
+        let held: serde_json::Value = http
+            .post(format!("{url}/host/holds"))
+            .bearer_auth(TOKEN)
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(held["state"], "starting");
+        assert_eq!(held["holds"], 1);
+        let id2 = id.clone();
+        let running = tokio::task::spawn_blocking({
+            // Waits on the worker thread, off the async runtime.
+            let host = fx.host.clone();
+            move || {
+                for _ in 0..400 {
+                    if host
+                        .projects()
+                        .iter()
+                        .any(|p| p.id == id2 && p.state == crate::host::DaemonState::Running)
+                    {
+                        return true;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                false
+            }
+        })
+        .await
+        .unwrap();
+        assert!(running);
+
+        let released = http
+            .delete(format!("{url}/host/holds"))
+            .bearer_auth(TOKEN)
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(released.status(), 200);
+        let released: serde_json::Value = released.json().await.unwrap();
+        assert_eq!(released["holds"], 0);
+    }
+
+    /// A daemon learns that the host's devices or settings changed (a
+    /// pairing made on the device itself, a new code): `/host/changes`
+    /// answers at once when it has moved past what the caller saw, else when
+    /// it next moves.
+    #[tokio::test]
+    async fn the_owner_is_told_when_devices_or_settings_change() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let http = reqwest::Client::new();
+        let seen = |after: Option<u64>| {
+            let url = match after {
+                Some(n) => format!("{}/host/changes?after={n}", api.url),
+                None => format!("{}/host/changes", api.url),
+            };
+            let http = http.clone();
+            async move {
+                let answer: serde_json::Value = http
+                    .get(url)
+                    .bearer_auth(TOKEN)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                answer["n"].as_u64().unwrap()
+            }
+        };
+        let now = seen(None).await;
+        let waiting = tokio::spawn(seen(Some(now)));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished(), "nothing changed yet");
+        ask(&api.public, "Garage tablet").await;
+        let moved = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .expect("told of the device waiting")
+            .unwrap();
+        assert!(moved > now);
+        assert_eq!(seen(Some(now)).await, moved, "behind: told at once");
+
+        let (_device, token) = api
+            .access
+            .devices
+            .pair("Tab", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let by_device = http
+            .get(format!("{}/host/changes", api.public))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(by_device.status(), 403);
+    }
+
+    /// The owner reads and saves "Allow other devices"; what cannot work
+    /// is refused with the field it is about, and a device may not.
+    #[tokio::test]
+    async fn the_owner_reads_and_saves_the_settings_for_other_devices() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let http = reqwest::Client::new();
+        let read = || async {
+            http.get(format!("{}/host/settings", api.url))
+                .bearer_auth(TOKEN)
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        };
+        let first = read().await;
+        assert_eq!(first["saved"]["allowOtherDevices"], false);
+        assert_eq!(first["effective"]["port"]["port"], 7400);
+        let put = |body: serde_json::Value| {
+            http.put(format!("{}/host/settings", api.url))
+                .bearer_auth(TOKEN)
+                .json(&body)
+                .send()
+        };
+        let saved =
+            put(json!({ "allowOtherDevices": true, "address": "192.168.1.20", "port": 7401 }))
+                .await
+                .unwrap();
+        assert_eq!(saved.status(), 200);
+        let now = read().await;
+        assert_eq!(now["saved"]["address"], "192.168.1.20");
+        assert_eq!(now["effective"]["allowOtherDevices"], true);
+        assert_eq!(now["effective"]["port"]["port"], 7401);
+
+        let refused = put(json!({ "allowOtherDevices": true, "address": "" }))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 400);
+        let why: serde_json::Value = refused.json().await.unwrap();
+        assert_eq!(why["field"], "address", "{why}");
+        assert_eq!(
+            read().await["saved"]["address"],
+            "192.168.1.20",
+            "nothing kept"
+        );
+
+        let (_device, token) = api
+            .access
+            .devices
+            .pair("Tab", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let by_device = http
+            .get(format!("{}/host/settings", api.public))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(by_device.status(), 403);
+    }
+
+    /// The owner removes a project it no longer wants listed; one a device
+    /// holds open stays, and the owner is told why.
+    #[tokio::test]
+    async fn a_project_is_removed_unless_it_is_held() {
+        let fx = Fixture::new(RUNS);
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        let id = fx.project("alpha");
+        let remove = || {
+            http.delete(format!("{url}/host/projects/{id}"))
+                .bearer_auth(TOKEN)
+                .send()
+        };
+        fx.host.add_hold("dev", &id).unwrap();
+        let held = remove().await.unwrap();
+        assert_eq!(held.status(), 409);
+        assert!(held.text().await.unwrap().contains("open"));
+        fx.host.release_hold("dev", &id).unwrap();
+
+        let removed: serde_json::Value = remove().await.unwrap().json().await.unwrap();
+        assert_eq!(removed["id"], id.as_str());
+        assert!(fx.host.registry().get(&id).is_none());
+        assert_eq!(remove().await.unwrap().status(), 404);
+        let unauthorized = http
+            .delete(format!("{url}/host/projects/{id}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), 401);
+    }
+
+    /// The Mac app opens a folder by its path: the host registers it (or
+    /// finds it registered) and answers its id.
+    #[tokio::test]
+    async fn a_project_is_registered_by_its_path() {
+        let fx = Fixture::new(RUNS);
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        let dir = fx.dir.path().join("beta");
+        std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
+        let add = || {
+            http.post(format!("{url}/host/projects"))
+                .bearer_auth(TOKEN)
+                .json(&json!({ "path": dir }))
+                .send()
+        };
+        let first: serde_json::Value = add().await.unwrap().json().await.unwrap();
+        assert_eq!(first["name"], "beta");
+        assert!(first["id"].as_str().unwrap().starts_with("prj-"), "{first}");
+        let again: serde_json::Value = add().await.unwrap().json().await.unwrap();
+        assert_eq!(
+            again["id"], first["id"],
+            "the same folder is the same project"
+        );
+
+        let plain = fx.dir.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let refused = http
+            .post(format!("{url}/host/projects"))
+            .bearer_auth(TOKEN)
+            .json(&json!({ "path": plain }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 400);
+        assert!(refused
+            .text()
+            .await
+            .unwrap()
+            .contains("not an oxplow project"));
+    }
+
+    /// A client ends a headless host this way.
+    #[tokio::test]
+    async fn shutdown_asks_the_host_to_stop() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let (url, stop) = (api.url.clone(), api.stop.clone());
+        let http = reqwest::Client::new();
+        let bare = http
+            .post(format!("{url}/host/shutdown"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bare.status(), 401);
+        let asked = http
+            .post(format!("{url}/host/shutdown"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(asked.status(), 202);
+        tokio::time::timeout(std::time::Duration::from_secs(1), stop.notified())
+            .await
+            .expect("the stop was asked for");
+    }
+
+    #[tokio::test]
+    async fn a_bad_hold_is_told_why() {
+        let fx = Fixture::new(RUNS);
+        let id = fx.project("alpha");
+        let url = serve(&fx).await;
+        let http = reqwest::Client::new();
+        let unknown = http
+            .post(format!("{url}/host/holds"))
+            .bearer_auth(TOKEN)
+            .json(&json!({ "device": "dev-a", "project": "prj-00000000" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unknown.status(), 404);
+        let nameless = http
+            .post(format!("{url}/host/holds"))
+            .bearer_auth(TOKEN)
+            .json(&json!({ "device": "", "project": id }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(nameless.status(), 400);
+    }
+}

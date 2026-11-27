@@ -24,8 +24,8 @@ import { logUi } from "./logger.js";
 import { sessionStatusKey } from "./agentStatusRollup.js";
 
 /**
- * Backend-event subscription wiring for the app shell, lifted out of
- * `App.tsx`. Each subscription lives in its own effect with an empty
+ * Backend-event subscription wiring for the window, called by the shell
+ * (`App.tsx`) with the setters `useWindowStreams` hands it (`live`). Each subscription lives in its own effect with an empty
  * dependency list — every input is either a stable `useState` dispatcher
  * passed in by the caller or an imported singleton, so none of these
  * re-subscribe across renders.

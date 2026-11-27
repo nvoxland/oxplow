@@ -65,14 +65,51 @@ impl std::ops::Deref for RpcContext {
     }
 }
 
+/// One request: the shared context, and who asks. The caller is the
+/// person's device and the page load the request comes from
+/// (`oxplow_domain::Caller`); a request with none (an agent over MCP, a
+/// script with the token, a test) reads per-device state as its defaults and
+/// may not write it. One `RpcContext` serves every request, so the caller
+/// rides beside it, never in it.
+#[derive(Clone, Copy)]
+pub struct RpcRequest<'a> {
+    pub ctx: &'a RpcContext,
+    pub caller: Option<&'a oxplow_domain::Caller>,
+}
+
+impl RpcRequest<'_> {
+    /// The page load asking, for a command that belongs to one (page runs,
+    /// tab reports, the client host): INVALID for a request with no caller.
+    pub fn connection(&self) -> Result<&oxplow_domain::ConnectionId, IpcError> {
+        self.caller.map(|c| &c.connection).ok_or_else(|| {
+            IpcError::invalid("this needs a page load: send Oxplow-Device and Oxplow-Connection")
+        })
+    }
+
+    /// Who asks, for a command that keeps per-device state.
+    pub fn caller(&self) -> Result<&oxplow_domain::Caller, IpcError> {
+        self.caller.ok_or_else(|| {
+            IpcError::invalid("this needs a device: send Oxplow-Device and Oxplow-Connection")
+        })
+    }
+}
+
+impl std::ops::Deref for RpcRequest<'_> {
+    type Target = RpcContext;
+    fn deref(&self) -> &RpcContext {
+        self.ctx
+    }
+}
+
 /// Build the [`dispatch`] function from two sections of
 /// `"wire_name" => core_fn { field: Type, ... }` entries:
 ///
 /// - `svc { ... }` — the common case; the core's first parameter is
 ///   `&Services`.
-/// - `ctx { ... }` — commands that need more than the services (today:
-///   agent spawn, which reads `plugin_runtime`); the core's first
-///   parameter is `&RpcContext`.
+/// - `req { ... }` — commands that need more than the services: who asks
+///   (the caller) or the agent spawn's `plugin_runtime`; the core's first
+///   parameter is `&RpcRequest`, and each row carries its return type,
+///   as `gen` does.
 ///
 /// Each entry generates a match arm that deserializes the args object
 /// into a private camelCase struct, destructures it, and calls the
@@ -80,18 +117,31 @@ impl std::ops::Deref for RpcContext {
 #[macro_export]
 macro_rules! rpc_dispatch {
     (
-        ctx { $( $cname:literal => $ccore:path { $( $cfield:ident : $cfty:ty ),* $(,)? } ),* $(,)? }
+        req { $( $rname:ident => $rcore:path { $( $rfield:ident : $rfty:ty ),* $(,)? } -> $rret:ty ),* $(,)? }
         svc { $( $name:literal => $core:path { $( $field:ident : $fty:ty ),* $(,)? } ),* $(,)? }
         gen { $( $gname:ident => $gcore:path { $( $gfield:ident : $gfty:ty ),* $(,)? } -> $gret:ty ),* $(,)? }
     ) => {
-        /// Route a command by name to its core, deserializing `args`
-        /// (the renderer's camelCase invoke payload) and re-serializing
-        /// the result. An unknown name yields `NOT_FOUND`.
+        /// [`dispatch_as`] a request with no caller: a test, a script, an
+        /// agent's path that names no device.
         pub async fn dispatch(
             name: &str,
             args: serde_json::Value,
             ctx: &$crate::RpcContext,
         ) -> Result<serde_json::Value, $crate::IpcError> {
+            dispatch_as(name, args, ctx, None).await
+        }
+
+        /// Route a command by name to its core, deserializing `args`
+        /// (the renderer's camelCase invoke payload) and re-serializing
+        /// the result. `caller` is who asks (`req` rows read it). An
+        /// unknown name yields `NOT_FOUND`.
+        pub async fn dispatch_as(
+            name: &str,
+            args: serde_json::Value,
+            ctx: &$crate::RpcContext,
+            caller: Option<&::oxplow_domain::Caller>,
+        ) -> Result<serde_json::Value, $crate::IpcError> {
+            let request = $crate::RpcRequest { ctx, caller };
             // The renderer omits the body for no-arg commands; normalize
             // `null`/absent to an empty object so the (possibly empty)
             // Args struct still deserializes.
@@ -104,18 +154,18 @@ macro_rules! rpc_dispatch {
             // (`IpcError::command_run_id`), so the window's record links the run.
             let (out, audited) = ::oxplow_app::commands::tracking_failed_run(Box::pin(async move { match name {
                 $(
-                    $cname => {
+                    stringify!($rname) => {
                         #[derive(serde::Deserialize)]
                         #[serde(rename_all = "camelCase")]
                         struct Args {
-                            $( $cfield : $cfty ),*
+                            $( $rfield : $rfty ),*
                         }
-                        let Args { $( $cfield ),* } = serde_json::from_value(args).map_err(|e| {
+                        let Args { $( $rfield ),* } = serde_json::from_value(args).map_err(|e| {
                             $crate::IpcError::invalid(format!("bad args for {name}: {e}"))
                         })?;
                         // Boxed, like each arm: dispatch holds one arm's future at a
                         // time, so none may size the whole state machine.
-                        let out = Box::pin($ccore(ctx $(, $cfield )*)).await?;
+                        let out: $rret = Box::pin($rcore(&request $(, $rfield )*)).await?;
                         serde_json::to_value(out).map_err(|e| {
                             $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
                         })
@@ -170,7 +220,7 @@ macro_rules! rpc_dispatch {
         /// sync with the Tauri specta surface (a command that exists only
         /// as a Tauri adapter 404s under `POST /ipc/:name`).
         pub fn registered_command_names() -> &'static [&'static str] {
-            &[ $( $cname, )* $( $name, )* $( stringify!($gname), )* ]
+            &[ $( stringify!($rname), )* $( $name, )* $( stringify!($gname), )* ]
         }
     };
 }
@@ -188,10 +238,58 @@ macro_rules! rpc_dispatch {
 macro_rules! oxplow_command_table {
     ($callback:path) => {
         $callback! {
-            ctx {
+            req {
                 // terminal — the agent-spawn path needs plugin_runtime
-                "open_terminal_session" => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 },
-                "restart_agent_terminal" => $crate::commands::terminal::restart_agent_terminal { uri: String },
+                open_terminal_session => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 } -> ::oxplow_app::terminal_sessions::AttachResult,
+                restart_agent_terminal => $crate::commands::terminal::restart_agent_terminal { uri: String } -> (),
+                // the window as a command host: its calls are its page load's
+                register_client_host => $crate::commands::bus::register_client_host { scopes: Vec<String> } -> (),
+                unregister_client_host => $crate::commands::bus::unregister_client_host {} -> (),
+                answer_client_call => $crate::commands::bus::answer_client_call { id: String, result: Option<::oxplow_domain::Json>, error: Option<String> } -> (),
+                run_command_for_call => $crate::commands::bus::run_command_for_call { call: String, id: String, input: ::oxplow_domain::Json } -> ::oxplow_domain::CommandOutcome,
+                // pages: a page load's open runs
+                open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String> } -> $crate::commands::pages::OpenedRun,
+                open_panel_part => $crate::commands::pages::open_panel_part { panel: String, part: ::oxplow_app::pages::panels::PanelPart, choices: Option<::std::collections::BTreeMap<String, String>>, stream_id: Option<String>, thread_id: Option<String> } -> $crate::commands::pages::OpenedRun,
+                get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
+                set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
+                // page visits: the device that opened the page owns the visit
+                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
+                list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
+                top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
+                // each device's own stream and thread (`.context/data-model.md` "device_view_state")
+                get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
+                select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
+                get_current_stream => $crate::commands::streams::get_current_stream {} -> Option<::oxplow_domain::Stream>,
+                switch_stream => $crate::commands::streams::switch_stream { id: Option<::oxplow_domain::StreamId> } -> (),
+                // pages viewed with the thread the caller's device shows
+                run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
+                page_options => $crate::commands::pages::page_options { page: String, param: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_db::SqlQueryResult,
+                renderers_for => $crate::commands::pages::renderers_for { uri: String, stream_id: Option<String> } -> Vec<::oxplow_app::pages::renderers::Renderer>,
+                // the person's runs: each keeps the device it was asked from
+                run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                undo_command => $crate::commands::bus::undo_command { command_run_id: ::oxplow_domain::CommandRunId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                decide_proposal => $crate::commands::bus::decide_proposal { proposal: ::oxplow_domain::ProposalId, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
+                // a person's typed reads through the bus: each keeps the device
+                search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
+                vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
+                // presses on a page or a component: each keeps the device
+                submit_page_form => $crate::commands::pages::submit_page_form { run_id: String, node: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::viz_actions::Drop>, option: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
+                invoke_component_point => $crate::commands::extensions::invoke_component_point { id: String, point: String, context: ::oxplow_domain::Json, command: Option<String>, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
+                // what a page load shows, for agents
+                report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> oxplow_app::client_reports::TabReportAnswer,
+                // each device's tabs of each thread (`.context/data-model.md` "tab_session")
+                list_tab_sessions => $crate::commands::tabs::list_tab_sessions {} -> Vec<::oxplow_db::tab_session_store::TabSession>,
+                list_other_device_tabs => $crate::commands::tabs::list_other_device_tabs { thread_id: ::oxplow_domain::ThreadId } -> Vec<$crate::commands::tabs::OtherDeviceTabs>,
+                save_tab_session => $crate::commands::tabs::save_tab_session { thread_id: ::oxplow_domain::ThreadId, session_json: String, revision: Option<::oxplow_db::tab_session_store::TabRevision> } -> ::oxplow_db::tab_session_store::TabSave,
+                forget_tab_session => $crate::commands::tabs::forget_tab_session { thread_id: ::oxplow_domain::ThreadId } -> (),
+                // the tabs agents opened for this device while it was away (`.context/remote-daemon.md` "An agent's tab on a device")
+                list_queued_tabs => $crate::commands::tabs::list_queued_tabs {} -> Vec<$crate::commands::tabs::QueuedTab>,
+                forget_queued_tabs => $crate::commands::tabs::forget_queued_tabs { ids: Vec<$crate::commands::tabs::QueuedTabId> } -> (),
+                // what a device remembers (`.context/data-model.md` "ui_preference")
+                get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
+                set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
             }
             svc {
             }
@@ -205,8 +303,6 @@ macro_rules! oxplow_command_table {
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 list_agent_harnesses => $crate::commands::threads::list_agent_harnesses {} -> Vec<::oxplow_app::harnesses::HarnessListing>,
-                get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
-                select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog
                 // tasks
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
@@ -216,14 +312,7 @@ macro_rules! oxplow_command_table {
                 list_person_commands => $crate::commands::bus::list_person_commands {} -> Vec<::oxplow_domain::CommandSpec>,
                 ref_commands => $crate::commands::bus::ref_commands { uri: String } -> Vec<String>,
                 action_point_commands => $crate::commands::bus::action_point_commands { point: String, context: ::oxplow_domain::Json } -> ::oxplow_app::commands::action_point_offers::PointOffer,
-                register_client_host => $crate::commands::bus::register_client_host { client: String, scopes: Vec<String> } -> (),
-                unregister_client_host => $crate::commands::bus::unregister_client_host { client: String } -> (),
-                answer_client_call => $crate::commands::bus::answer_client_call { client: String, id: String, result: Option<::oxplow_domain::Json>, error: Option<String> } -> (),
-                run_command_for_call => $crate::commands::bus::run_command_for_call { client: String, call: String, id: String, input: ::oxplow_domain::Json } -> ::oxplow_domain::CommandOutcome,
-                run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 command_open_after => $crate::commands::bus::command_open_after { id: String, result: ::oxplow_domain::Json } -> Option<String>,
-                undo_command => $crate::commands::bus::undo_command { command_run_id: ::oxplow_domain::CommandRunId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
-                decide_proposal => $crate::commands::bus::decide_proposal { proposal: ::oxplow_domain::ProposalId, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
                 // hooks
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
                 read_event_content => $crate::commands::hooks::read_event_content { event_id: String, body: oxplow_app::event_bodies::EventBodyKey } -> Option<oxplow_app::event_bodies::EventBody>,
@@ -233,47 +322,29 @@ macro_rules! oxplow_command_table {
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 // search
-                search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
-                get_panel_layout => $crate::commands::semantic::get_panel_layout { stream_id: Option<String>, thread_id: Option<String> } -> ::oxplow_db::ScopedPanelLayout,
-                set_panel_layout => $crate::commands::semantic::set_panel_layout { stream_id: Option<String>, thread_id: Option<String>, layout: ::oxplow_db::ScopedPanelLayout } -> (),
-                get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
-                set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
-                invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
-                invoke_component_point => $crate::commands::extensions::invoke_component_point { id: String, point: String, context: ::oxplow_domain::Json, command: Option<String>, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
                 run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,
                 component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::viz_actions::FormStart,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
                 // pages: a window's open runs
-                open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String>, client: String } -> $crate::commands::pages::OpenedRun,
-                open_panel_part => $crate::commands::pages::open_panel_part { panel: String, part: ::oxplow_app::pages::panels::PanelPart, choices: Option<::std::collections::BTreeMap<String, String>>, stream_id: Option<String>, thread_id: Option<String>, client: String } -> $crate::commands::pages::OpenedRun,
                 close_page => $crate::commands::pages::close_page { run_id: String } -> (),
                 set_page_params => $crate::commands::pages::set_page_params { run_id: String, params: ::std::collections::BTreeMap<String, ::oxplow_db::SqlCell> } -> ::oxplow_app::pages::runner::PageRun,
                 rerun_page => $crate::commands::pages::rerun_page { run_id: String } -> ::oxplow_app::pages::runner::PageRun,
                 set_page_visible => $crate::commands::pages::set_page_visible { run_id: String, visible: bool } -> bool,
                 fetch_page_runs => $crate::commands::pages::fetch_page_runs { run_ids: Vec<String> } -> ::std::collections::BTreeMap<String, ::oxplow_app::pages::open_runs::RunSnapshot>,
-                run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
                 page_text => $crate::commands::pages::page_text { run_id: String } -> String,
-                page_options => $crate::commands::pages::page_options { page: String, param: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_db::SqlQueryResult,
                 get_page => $crate::commands::pages::get_page { id: String } -> ::oxplow_app::pages::schema::Page,
-                renderers_for => $crate::commands::pages::renderers_for { uri: String, stream_id: Option<String> } -> Vec<::oxplow_app::pages::renderers::Renderer>,
                 page_spec => $crate::commands::pages::page_spec { page: String } -> $crate::commands::pages::PageSpec,
                 page_form => $crate::commands::pages::page_form { run_id: String, node: String } -> ::oxplow_app::viz_actions::FormStart,
-                submit_page_form => $crate::commands::pages::submit_page_form { run_id: String, node: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 page_action_form => $crate::commands::pages::page_action_form { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>> } -> ::oxplow_app::viz_actions::FormStart,
-                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::viz_actions::Drop>, option: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 // ai (Settings → AI)
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
-                report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> oxplow_app::client_reports::TabReportAnswer,
                 // comments
                 // page_visit
-                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
                 finish_page_visit => $crate::commands::page_visit::finish_page_visit { id: String, duration_ms: u32 } -> (),
-                list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
-                top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),
                 // usage
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
@@ -285,7 +356,6 @@ macro_rules! oxplow_command_table {
                 // workspace
                 resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
-                vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
                 // code_quality (duplication only — the metrics scan was retired in)
                 // config
@@ -320,8 +390,6 @@ macro_rules! oxplow_command_table {
                 // streams
                 list_streams => $crate::commands::streams::list_streams {} -> ::std::vec::Vec<::oxplow_domain::Stream>,
                 get_primary_stream => $crate::commands::streams::get_primary_stream {} -> Option<::oxplow_domain::Stream>,
-                get_current_stream => $crate::commands::streams::get_current_stream {} -> Option<::oxplow_domain::Stream>,
-                switch_stream => $crate::commands::streams::switch_stream { id: Option<::oxplow_domain::StreamId> } -> (),
             }
         }
     };
@@ -344,6 +412,18 @@ pub(crate) mod test_support {
     /// `svc.<store>` test usage keeps working. Keep the returned
     /// `TempDir` alive for the duration of the test.
     #[allow(clippy::unwrap_used)]
+    /// A page load on the person's device, as a window's request names it.
+    pub fn caller() -> oxplow_domain::Caller {
+        oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427")
+                .unwrap(),
+            connection: oxplow_domain::ConnectionId::parse(
+                "con-6fa459ea-ee8a-3ca4-894e-db77e160355e",
+            )
+            .unwrap(),
+        }
+    }
+
     pub async fn services() -> (crate::RpcContext, tempfile::TempDir) {
         use std::process::Command;
         let dir = tempfile::tempdir().unwrap();

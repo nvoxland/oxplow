@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useSyncExternalStore } from "react";
 import { getToastStore, type Toast } from "./toastStore.js";
-import { useDockState } from "./Dock/dockStore.js";
+import { useDockHeight, useDockState } from "./Dock/dockStore.js";
 
 const AUTO_DISMISS_MS = 7000;
 
@@ -21,13 +21,14 @@ export function UndoToastStack() {
   );
   // An open dock panel rises over the bottom of the page: sit above it.
   const dock = useDockState();
+  const [dockHeight] = useDockHeight();
   if (toasts.length === 0) return null;
   // The most-recent toast also gets the stable `undo-toast` testid (and
   // `undo-toast-undo` for its action button) so e2e probes can target
   // "the toast that just appeared" without knowing the random toast id.
   const latestId = toasts[toasts.length - 1]!.id;
   return (
-    <div style={dock.open ? { ...stackStyle, bottom: 24 + dock.height } : stackStyle} data-testid="undo-toast-stack">
+    <div style={dock.open ? { ...stackStyle, bottom: 24 + dockHeight } : stackStyle} data-testid="undo-toast-stack">
       {toasts.map((toast) => (
         <ToastRow key={toast.id} toast={toast} isLatest={toast.id === latestId} />
       ))}
@@ -122,7 +123,7 @@ const actionStyle: CSSProperties = {
   borderRadius: 4,
   padding: "3px 8px",
   fontFamily: "inherit",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 

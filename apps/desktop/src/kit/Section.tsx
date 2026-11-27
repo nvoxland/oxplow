@@ -3,6 +3,7 @@ import { CircleHelp } from "lucide-react";
 import { DisclosureGlyph } from "./Disclosure.js";
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
+import { useCoarsePointer } from "../coarsePointer.js";
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
 import { iconFor } from "../icons.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -81,10 +82,20 @@ export function Section({
   children,
 }: SectionProps) {
   const level = useSectionLevel();
+  // A finger has no hover: the help is text under the heading, not a title.
+  const coarse = useCoarsePointer();
   const Heading = `h${level}` as "h2";
   const collapse = useSectionCollapse(id, collapsible, defaultCollapsed);
   const open = collapse ? collapse.expanded : true;
   const Icon = iconFor(icon);
+  // A finger cannot hover the ? for its help: the help is a line of the
+  // body instead (shown while the body is, with the section's description).
+  const touchHelp =
+    help && coarse ? (
+      <p data-testid="section-help-text" className="ox-section-desc">
+        {help}
+      </p>
+    ) : null;
   return (
     <SectionLevelContext.Provider value={level}>
       <section
@@ -121,7 +132,7 @@ export function Section({
               title
             )}
             {opens ? <OpenPageLink to={opens.to} name={opens.name} onNavigate={opens.onNavigate} /> : null}
-            {help ? (
+            {help && !coarse ? (
               <span data-testid="section-help" className="ox-section-help" role="img" aria-label={help} title={help}>
                 <CircleHelp size={14} aria-hidden />
               </span>
@@ -137,11 +148,13 @@ export function Section({
         {open ? (
           collapse ? (
             <div data-testid={`${collapse.prefix}-section-body-${id}`} style={fill ? fillStyle : undefined}>
+              {touchHelp}
               {description ? <p className="ox-section-desc">{description}</p> : null}
               {children}
             </div>
           ) : (
             <>
+              {touchHelp}
               {description ? <p className="ox-section-desc">{description}</p> : null}
               {children}
             </>

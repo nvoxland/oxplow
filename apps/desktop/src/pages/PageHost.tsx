@@ -49,6 +49,7 @@ import { ridesView } from "./pageFiles.js";
 import { firstLoader } from "./firstLoader.js";
 import { recordOpError } from "../opErrors.js";
 import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
+import { copyText } from "../clipboard.js";
 
 export interface PageHostProps {
   pageKey: PageKey;
@@ -126,8 +127,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     if (!runId) return;
     reads
       .text(runId)
-      .then((text) => navigator.clipboard.writeText(text))
-      .then(() => {
+      .then((text) => copyText(text))
+      .then((ok) => {
+        if (!ok) throw new Error("The browser refused to copy");
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);
       })

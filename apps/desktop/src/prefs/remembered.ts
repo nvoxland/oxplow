@@ -10,26 +10,32 @@
  * - a panel's memory (`usePanelMemory`): its choice params.
  *
  * A tab's own view is its **view params** and its own memory its **history
- * state**; neither is here. Values are JSON. One store loads everything
- * once and writes a change after a pause, per key; a value equal to what's
- * there writes nothing.
+ * state**; neither is here. Values are JSON. One store loads everything,
+ * reads it again when the daemon reconnects or the rows change (another
+ * device wrote a component's memory), and writes a change after a pause, per
+ * key; a value equal to what's there writes nothing. A value waiting to be
+ * saved, or whose save failed (sent again after a delay and at each read),
+ * wins over a reloaded one.
  */
 
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 
-import { getUiPreferences, setUiPreference } from "../api.js";
+import { getUiPreferences, onRemoteReconnect, setUiPreference, subscribeOxplowEvents } from "../api.js";
 import { logUi } from "../logger.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { panelUri } from "../uri/uri.js";
 import { keyIdentityOf, typeOf } from "../uri/uri.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { UiPreference } from "../tauri-bridge/generated/bindings.js";
+import { readsChanged, readsOf } from "../viz/rerun.js";
 
 /** Where remembered values are read from and written to. */
 export interface RememberedBackend {
   load(): Promise<UiPreference[]>;
   /** Keep `valueJson` under `scope` and `key`; null forgets it. */
   save(scope: string, key: string, valueJson: string | null): Promise<void>;
+  /** Calls `reload` when what is kept may have changed elsewhere; returns the stop. */
+  watch?(reload: () => void): () => void;
 }
 
 export interface RememberedStore {
@@ -63,7 +69,7 @@ export function componentMemoryProblem(store: RememberedStore, scope: string, ke
 
 const at = (scope: string, key: string) => `${scope}\u0000${key}`;
 
-export function createRememberedStore(backend: RememberedBackend, debounceMs = 300): RememberedStore {
+export function createRememberedStore(backend: RememberedBackend, debounceMs = 300, retryMs = 3000): RememberedStore {
   const values = new Map<string, unknown>();
   const listeners = new Set<() => void>();
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
@@ -72,21 +78,78 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
     version += 1;
     for (const listener of Array.from(listeners)) listener();
   };
-  const ready = backend
-    .load()
-    .then((rows) => {
-      for (const row of rows) {
-        // A value kept before this load finished wins: it is newer.
-        if (values.has(at(row.scope, row.key))) continue;
-        try {
-          values.set(at(row.scope, row.key), JSON.parse(row.valueJson));
-        } catch {
-          // Not JSON: as if never kept.
+  // Ids with a save in flight, and ids written since the read in flight began:
+  // a read that started before them would bring back an older value.
+  const saving = new Set<string>();
+  const written = new Set<string>();
+  // Ids whose last save failed: still the person's value (a reload must not
+  // bring the old one back), sent again after a delay and before each read.
+  const failed = new Map<string, ReturnType<typeof setTimeout> | null>();
+  let reading = 0;
+  // Loaded: once a read's rows are applied (or the newest read failed). A
+  // read a newer one replaced doesn't count, so nothing reads the values
+  // before they are there.
+  let loaded: () => void = () => {};
+  const ready = new Promise<void>((resolve) => (loaded = resolve));
+  const send = (id: string) => {
+    const [scope, key] = id.split("\u0000") as [string, string];
+    clearTimeout(failed.get(id) ?? undefined);
+    failed.delete(id);
+    const now = values.get(id);
+    saving.add(id);
+    void backend
+      .save(scope, key, now === undefined ? null : JSON.stringify(now))
+      // A read in flight began before this save: it brings the old value.
+      .then(() => written.add(id))
+      .catch((e: unknown) => {
+        logUi("warn", "couldn't remember a value", { scope, key, error: String(e) });
+        failed.set(
+          id,
+          setTimeout(() => {
+            if (failed.has(id) && !pending.has(id)) send(id);
+          }, retryMs),
+        );
+      })
+      .finally(() => saving.delete(id));
+  };
+  const read = (): Promise<void> => {
+    for (const id of Array.from(failed.keys())) if (!pending.has(id) && !saving.has(id)) send(id);
+    const turn = ++reading;
+    written.clear();
+    return backend
+      .load()
+      .then((rows) => {
+        if (turn !== reading) return;
+        const incoming = new Map<string, unknown>();
+        for (const row of rows) {
+          try {
+            incoming.set(at(row.scope, row.key), JSON.parse(row.valueJson));
+          } catch {
+            // Not JSON: as if never kept.
+          }
         }
-      }
-      changed();
-    })
-    .catch((e: unknown) => logUi("warn", "couldn't read what was remembered", { error: String(e) }));
+        const mine = (id: string) => pending.has(id) || saving.has(id) || written.has(id) || failed.has(id);
+        let differs = false;
+        for (const [id, value] of incoming) {
+          if (mine(id) || JSON.stringify(values.get(id)) === JSON.stringify(value)) continue;
+          values.set(id, value);
+          differs = true;
+        }
+        for (const id of Array.from(values.keys())) {
+          if (incoming.has(id) || mine(id)) continue;
+          values.delete(id);
+          differs = true;
+        }
+        if (differs || turn === 1) changed();
+        loaded();
+      })
+      .catch((e: unknown) => {
+        logUi("warn", "couldn't read what was remembered", { error: String(e) });
+        if (turn === reading) loaded();
+      });
+  };
+  void read();
+  backend.watch?.(() => void read());
   return {
     ready,
     get: (scope, key) => values.get(at(scope, key)),
@@ -95,16 +158,14 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
       if (JSON.stringify(values.get(id)) === JSON.stringify(value)) return;
       if (value === undefined) values.delete(id);
       else values.set(id, value);
+      written.add(id);
       changed();
       clearTimeout(pending.get(id));
       pending.set(
         id,
         setTimeout(() => {
           pending.delete(id);
-          const now = values.get(id);
-          void backend
-            .save(scope, key, now === undefined ? null : JSON.stringify(now))
-            .catch((e: unknown) => logUi("warn", "couldn't remember a value", { scope, key, error: String(e) }));
+          send(id);
         }, debounceMs),
       );
     },
@@ -129,7 +190,21 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
 let shared: RememberedStore | null = null;
 /** The app's store, made on first use. */
 function appStore(): RememberedStore {
-  shared ??= createRememberedStore({ load: getUiPreferences, save: setUiPreference });
+  shared ??= createRememberedStore({
+    load: getUiPreferences,
+    save: setUiPreference,
+    watch: (reload) => {
+      const reads = readsOf("v_ui_preference", "v_component_memory");
+      const stopEvents = subscribeOxplowEvents((event) => {
+        if (readsChanged(event as Record<string, unknown>, reads)) reload();
+      });
+      const stopReconnect = onRemoteReconnect(reload);
+      return () => {
+        stopEvents();
+        stopReconnect();
+      };
+    },
+  });
   return shared;
 }
 
@@ -187,6 +262,20 @@ export function usePageMemory<T>(key: string, initial: T): [T, (value: T) => voi
 /** **App preference**: one value the whole app remembers for the person. */
 export function useAppPreference<T>(key: string, initial: T): [T, (value: T) => void] {
   return useRemembered("app", key, initial);
+}
+
+/** One app preference's value, read only: re-renders when this value
+ *  changes, never on another write to the store (a rail drag writes on
+ *  each move). For a component high in the tree. */
+export function useAppPreferenceValue(key: string): unknown {
+  const store = useContext(RememberedContext) ?? appStore();
+  return useSyncExternalStore(store.subscribe, () => store.get("app", key));
+}
+
+/** Set one app preference, without reading it (no re-render on writes). */
+export function useSetAppPreference(key: string): (value: unknown) => void {
+  const store = useContext(RememberedContext) ?? appStore();
+  return useCallback((value: unknown) => store.set("app", key, value), [store, key]);
 }
 
 /** A left-nav panel's memory: one value it remembers for the person. */

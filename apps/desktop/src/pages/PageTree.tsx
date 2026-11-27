@@ -195,6 +195,7 @@ function NodeView(props: NodeViewProps) {
           callout={callout}
           icon={def?.icon}
           collapsible={def?.collapsible ?? false}
+          defaultCollapsed={def?.collapsed ?? false}
           // The run resolved the link with the params its page declares.
           opens={at.link ? { to: at.link, name: title } : undefined}
           fill={fills}

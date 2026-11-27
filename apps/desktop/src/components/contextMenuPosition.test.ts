@@ -4,6 +4,7 @@ import {
   MENU_MARGIN,
   clampMenuPosition,
   submenuLeft,
+  submenuPlace,
   submenuTopOffset,
 } from "./contextMenuPosition.js";
 
@@ -79,4 +80,37 @@ describe("submenuLeft", () => {
     expect(submenuLeft(anchor, 1000, 1100)).toBe(92);
     expect(submenuLeft(anchor, 2000, 1100)).toBe(8);
   });
+});
+
+describe("submenuPlace", () => {
+  const phone = { width: 390, height: 844 };
+  const item = { left: 20, right: 370, top: 300, bottom: 330 };
+  test("beside its item when there is room, level with it", () => {
+    const at = submenuPlace({ left: 100, right: 300, top: 300, bottom: 330 }, { width: 200, height: 100 }, { width: 1100, height: 800 });
+    expect(at).toEqual({ left: 302, top: 300 });
+  });
+  test("with no room at the side, below the item and never over it", () => {
+    const at = submenuPlace(item, { width: 220, height: 200 }, phone);
+    expect(at.top).toBeGreaterThanOrEqual(item.bottom);
+    expect(at.left).toBeGreaterThanOrEqual(0);
+    expect(at.left + 220).toBeLessThanOrEqual(phone.width);
+  });
+  test("with no room below either, above the item", () => {
+    const low = { left: 20, right: 370, top: 700, bottom: 730 };
+    const at = submenuPlace(low, { width: 220, height: 400 }, phone);
+    expect(at.top + 400).toBeLessThanOrEqual(low.top);
+  });
+});
+
+// A tall submenu below or above its item takes only the room on that side
+// (it scrolls), so it never runs off the screen or covers the item.
+test("a tall submenu below or above its item keeps to the room there", () => {
+  const viewport = { width: 390, height: 600 };
+  const size = { width: 380, height: 900 };
+  const low = submenuPlace({ left: 10, right: 380, top: 100, bottom: 130 }, size, viewport);
+  expect(low.top).toBeGreaterThanOrEqual(130);
+  expect(low.top + (low.maxHeight ?? size.height)).toBeLessThanOrEqual(600);
+  const high = submenuPlace({ left: 10, right: 380, top: 500, bottom: 530 }, size, viewport);
+  expect(high.top + (high.maxHeight ?? size.height)).toBeLessThanOrEqual(500);
+  expect(high.top).toBeGreaterThanOrEqual(0);
 });

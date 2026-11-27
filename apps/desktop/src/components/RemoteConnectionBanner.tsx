@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import {
-  disconnectRemote,
   isRemote,
   isTokenRefused,
   onRemoteConnectionState,
@@ -18,7 +17,11 @@ import {
 /// daemon-side work (agents, watchers) ran through the gap either
 /// way. `refused` when the daemon refused this window's token:
 /// not a drop, so sticky — only reconnecting with the right token helps.
-export type BannerState = "hidden" | "down" | "restored" | "refused";
+/// `ended` when the host said it is ending (the app that runs it quit): the
+/// page keeps trying, slowly, until it starts again.
+/// `closed` when other devices were turned off on the computer that runs it
+/// (or their address changed): the page keeps trying, slowly.
+export type BannerState = "hidden" | "down" | "restored" | "refused" | "ended" | "closed";
 
 /// How long the "reconnected" confirmation lingers before it
 /// auto-dismisses (ms). Non-blocking — purely informational.
@@ -29,8 +32,9 @@ export const RESTORED_AUTO_DISMISS_MS = 4000;
 /// initial connect) stays hidden.
 export function nextBannerState(prev: BannerState, event: RemoteConnectionState): BannerState {
   if (prev === "refused" || event === "refused") return "refused";
-  if (event === "down") return "down";
-  return prev === "down" ? "restored" : prev;
+  if (event === "ended" || event === "closed") return event;
+  if (event === "down") return prev === "ended" || prev === "closed" ? prev : "down";
+  return prev === "down" || prev === "ended" || prev === "closed" ? "restored" : prev;
 }
 
 /// Top-of-window strip shown only in remote mode. Mounted once in App.
@@ -62,17 +66,31 @@ export function RemoteConnectionBanner() {
     return (
       <div data-testid="remote-banner-refused" style={{ ...stripStyle, ...downStyle }}>
         <span>
-          This window's token was refused by the daemon at {remoteBaseUrl()}. Reconnect from the
-          launcher with the token the daemon prints when it starts.
+          This window's token was refused at {remoteBaseUrl()}. Close it and open the project
+          again.
         </span>
-        <button
-          type="button"
-          data-testid="remote-banner-disconnect"
-          onClick={() => disconnectRemote()}
-          style={buttonStyle}
-        >
-          Disconnect
-        </button>
+      </div>
+    );
+  }
+
+  if (state === "ended") {
+    return (
+      <div data-testid="remote-banner-ended" style={{ ...stripStyle, ...downStyle }}>
+        <span>
+          Oxplow was quit on the computer that runs it, so its projects stopped. This page connects
+          again when Oxplow starts there.
+        </span>
+      </div>
+    );
+  }
+
+  if (state === "closed") {
+    return (
+      <div data-testid="remote-banner-closed" style={{ ...stripStyle, ...downStyle }}>
+        <span>
+          Other devices were turned off on the computer that runs Oxplow, or its address changed.
+          This page connects again when they are turned back on there.
+        </span>
       </div>
     );
   }
@@ -81,17 +99,9 @@ export function RemoteConnectionBanner() {
     return (
       <div data-testid="remote-banner-down" style={{ ...stripStyle, ...downStyle }}>
         <span>
-          Connection to remote daemon lost ({remoteBaseUrl()}) — reconnecting… Agent work keeps
-          running on the remote box.
+          Connection lost ({remoteBaseUrl()}) — reconnecting… Agent work keeps running where Oxplow
+          runs.
         </span>
-        <button
-          type="button"
-          data-testid="remote-banner-disconnect"
-          onClick={() => disconnectRemote()}
-          style={buttonStyle}
-        >
-          Disconnect
-        </button>
       </div>
     );
   }

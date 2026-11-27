@@ -4,8 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MENU_MAX_HEIGHT,
   clampMenuPosition,
-  submenuLeft,
-  submenuTopOffset,
+  submenuPlace,
 } from "./contextMenuPosition.js";
 
 import type { MenuItem, MenuPosition } from "../menu.js";
@@ -57,7 +56,10 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
   }, [items, minWidth, position]);
 
   useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
+    // A pointer's press, not the mouse event a touch screen sends at a
+    // finger's lift: a long press opens the menu, and its lift must not
+    // close it.
+    function handlePointerDown(event: PointerEvent) {
       if (rootRef.current?.contains(event.target as Node)) return;
       onClose();
     }
@@ -68,10 +70,10 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
       }
     }
 
-    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleEscape);
     return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleEscape);
     };
   }, [onClose]);
@@ -79,6 +81,8 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
   return (
     <div
       ref={rootRef}
+      // A finger's hold reads it: a menu opened, so its hint bubble goes.
+      data-oxplow-menu=""
       style={{
         ...menuStyle,
         position: "fixed",
@@ -87,7 +91,7 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
         minWidth,
         zIndex,
       }}
-      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
       // The menu is rendered inline inside the row it acts on, so a
       // menu-item click would otherwise bubble to the row's onClick —
       // selecting the row / closing the navigator slideout.
@@ -194,8 +198,9 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
  * Nested submenu, placed on the window beside its item (`anchor`): the
  * list it opens from scrolls in place, and a submenu laid out inside it
  * would be clipped by it. It measures itself and shifts up when it would
- * run off the bottom (as the outer ContextMenu does), and opens to the
- * item's left when there's no room on its right.
+ * run off the bottom (as the outer ContextMenu does), opens to the
+ * item's left when there's no room on its right, and below (or above)
+ * the item when there's no room at either side.
  */
 function Submenu({
   anchor,
@@ -212,16 +217,14 @@ function Submenu({
   minWidth: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; maxHeight?: number } | null>(null);
 
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node || !anchor) return;
     const at = anchor.getBoundingClientRect();
     const own = node.getBoundingClientRect();
-    const left = submenuLeft(at, own.width, window.innerWidth);
-    const top = at.top + submenuTopOffset({ top: at.top, height: own.height }, window.innerHeight);
-    setPlace({ left, top });
+    setPlace(submenuPlace(at, own, { width: window.innerWidth, height: window.innerHeight }));
   }, [anchor, items, minWidth]);
 
   return (
@@ -237,6 +240,7 @@ function Submenu({
         visibility: place ? "visible" : "hidden",
         zIndex: 2,
         maxWidth: SUBMENU_MAX_WIDTH,
+        ...(place?.maxHeight !== undefined ? { maxHeight: place.maxHeight, overflowY: "auto" as const } : {}),
       }}
     >
       <MenuList items={items} header={header} onAction={onAction} minWidth={minWidth} />
@@ -321,7 +325,7 @@ const checkStyle: CSSProperties = {
 
 const shortcutStyle: CSSProperties = {
   color: "var(--muted)",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   flexShrink: 0,
 };
 

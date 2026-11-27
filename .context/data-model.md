@@ -330,6 +330,9 @@ installed one — see [DEV.md](../DEV.md):
   dedups by canonical path, bumps recency, caps at 20. The IPC layer
   resolves the path via the Tauri path resolver and manages it as
   `RecentProjectsState` on the shell.
+- **`device.json`** — this install's device id and name, made once, in the
+  same app-config dir (`oxplow_config::this_device`,
+  `crates/oxplow-config/src/device.rs`). The shell gives it to each window.
 - **`session.json`** — the set of project dirs open last, in the same
   app-config dir. Managed by `oxplow_config::SessionProjects`
   (`crates/oxplow-config/src/session.rs`); drives session restore on a
@@ -348,6 +351,13 @@ installed one — see [DEV.md](../DEV.md):
   set or recents list. The path is resolved by
   `oxplow_config::global_config_dir()` so `main.rs` can read it before
   any Tauri handle exists.
+- **`host.db`** — the host's own SQLite file in the same app-config dir:
+  paired devices, the projects it knows, a headless host's holds
+  (`crates/oxplow-host/src/db.rs`, its own refinery migrations in
+  `crates/oxplow-host/migrations/`, not the project schema). The running
+  host holds it in SQLite's exclusive locking mode for its whole life,
+  which is also what keeps one host per home; everyone else goes through
+  the host (`.context/host.md`).
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
   for the life of the project's `oxplow-daemon`, so a second daemon
   can't boot on the same `local.sqlite`. Helpers:
@@ -406,7 +416,8 @@ Each stream owns:
 - two agent pane targets (`working` and `talking`)
 - per-pane / per-thread agent resume session ids (so reconnecting picks up
   history for the assigned agent)
-- a `runtime_state.current_stream_id` pointer (singleton row, id=1)
+- no shared "current stream": each device shows its own stream and its own
+  thread in each stream (see "device_view_state" below)
 - a `custom_prompt` column (migration V6, nullable TEXT; read as `v_stream.prompt`, v3) — per-stream
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via the `oxplow.stream.set_prompt`
@@ -415,6 +426,53 @@ Each stream owns:
   V6 also dropped a legacy `summary` column that was carried over from
   the TS schema and never displayed; the prompt feature briefly
   piggybacked on that slot before getting its own column.
+
+### device_view_state and thread_selection — each device's place
+
+The stream a device shows and the thread it shows in each stream are that
+device's own (migration V86; the device is the request's caller,
+`.context/remote-daemon.md` "Who is asking"):
+
+- `device_view_state(device_id PK, current_stream_id)`: the stream the
+  device shows. `get_current_stream` reads the caller's; `switch_stream`
+  writes it.
+- `thread_selection(device_id, stream_id, selected_thread_id,
+  PK(device_id, stream_id))`: the thread the device shows in a stream.
+  `get_thread_state` reads the caller's; `select_thread` writes it.
+
+- `tab_session(device_id, thread_id, session_json, revision, updated_at,
+  PK(device_id, thread_id))` (V87): the device's tabs of a thread, as the
+  window's session (`apps/desktop/src/tabs/session.ts`) writes them, at most
+  256 KB. A save gives the revision it read (`TabSessionStore::save`) and is
+  refused when the row moved on; a thread that goes takes its tabs. A thread
+  this device has no row for, with no agent session, opens the session
+  picker on it (the new-thread signal, per device). Another device's rows of
+  a thread are read by `list_other_device_tabs` (Continue from <device>:
+  never the caller's own, the device used last first), once, when the
+  person asks.
+
+- `tab_queued(id, device_id, thread_id, uri, queued_at, UNIQUE (device_id,
+  thread_id, uri))` (V91, the unique key V92): a tab an agent opened for a
+  device that was away (`TabQueueStore`), only for a device the project knows;
+  at most 50 per device (the oldest goes). The device reads its rows, oldest
+  first, when its window connects; a read drops the rows older than 14 days
+  and those of a closed thread or an archived stream, and keeps the rest until
+  the window has stored the tabs and calls `forget_queued_tabs`. Only deleting
+  a thread takes its rows with it (closing one does not: a read drops them).
+
+A device's choice that was archived (a stream) or closed (a thread) since,
+on another device say, reads as no choice: the primary stream, the
+stream's first open thread. Closing a thread keeps its `tab_session` rows;
+only deleting it takes them.
+
+A reader with no device (an agent, a job, an effect, a script with the
+token) gets the defaults: the primary stream, a stream's first open thread
+(`ThreadService::selected_or_first(None, …)`), never one device's choice. A
+write with no device is `INVALID` ("this needs a device"). A page viewed
+with no thread named takes the thread the caller's device shows
+(`pages::spec::view_context`); an agent's page is about its own thread. The
+old shared rows were dropped, not carried over: each device starts from the
+defaults.
 
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
@@ -1525,7 +1583,8 @@ layer (V94). Nothing is skipped silently.
 `command_run` is the command detail table named by V68. Its unique,
 required `run_id` names a `contribution_run`. It keeps the integer
 `id`, the command's name, `input_json`, `result_json`, `event_id`,
-`inverse_json` and `undone_by`. Reads and no-ops leave the payload and
+`inverse_json`, `undone_by` and `device_id` (the device a person asked
+from; NULL for agents, effects, jobs and requests with no caller). Reads and no-ops leave the payload and
 inverse columns NULL. The bus writes the run and its details through
 `command_run_store::insert_tx`, then links an event or undo when there
 is one. A nested write's details land with its transaction. A rolled-back
@@ -1566,17 +1625,14 @@ The store coalesces rapid repeats: if the most recent matching
 a new row. This keeps history clean when a user re-selects the same
 target several times in quick succession.
 
-Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
-`streamId` and `threadId`):
+Current write hookpoints (both in `apps/desktop/src/window/useWindowOpeners.ts`,
+both pass `streamId` and `threadId`):
 
-- `wiki-note` — `handleOpenNote` records a visit when a note becomes
-  the active center tab. Nothing reads it any more: the Knowledge page's
-  "Recently visited" is the `wiki-visited` page over `v_page_visit`.
-- `editor-file` — `handleOpenFile` records a visit when a file
-  becomes the active center tab. Not yet surfaced in UI; collected
-  for future "recent files" / "files this thread cares about" views.
-- `task` — `handleRequestEditTask` records a visit when the
-  user opens the edit modal. Not yet surfaced.
+- `editor-file` — `handleOpenFile` records a use when a file opens.
+  Not yet surfaced in UI; collected for future "recent files" /
+  "files this thread cares about" views.
+- `knowledge` — `handleOpenKnowledge` records a use when a knowledge
+  page opens. Not yet surfaced.
 
 UI surfaces consume via `subscribeUsageEvents(listener, { kind })` to
 refresh on cross-window visits without polling.
@@ -1826,8 +1882,10 @@ foundation's `thread-activity`, bundled's `usage`), which re-run on `DatasetsCha
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
-V126 (P6.G1), in three lists since V79: the person's left-nav layout in
-this project. A row is a panel (`ext:<namespace>/<id>`) at a
+V126 (P6.G1), in three lists since V79, and each device's own since V89
+(`device_id`, in the unique index; the old shared rows were dropped, so each
+device starts from the panels' declared order): a device's left-nav layout in this
+project. A row is a panel (`ext:<namespace>/<id>`) at a
 `visibility_scope` — `thread` (`thread_id`), `stream` (`stream_id`) or
 `project` (neither), FKs cascading as bookmarks' — with its `position` in
 that list, `collapsed`, and `hidden` (a project row only). A viewer — a
@@ -1843,21 +1901,35 @@ stream Z. A panel no list names shows expanded at the end of the
 project's, and a named panel that no longer exists is dropped
 (`components/Panels/panelLayout.ts` `resolveLayout`). Local state, never
 the repo. UI-only RPCs `get_panel_layout` / `set_panel_layout { stream_id?,
-thread_id? }` (a thread's stream is its own, `viewer_tx`).
+thread_id? }` (a thread's stream is its own, `viewer_tx`) read and write the
+caller's device's lists; a request with no device reads the defaults (no
+list) and may not set them. The rules hold within one device's lists.
 
-### `ui_preference` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
+### `ui_preference` and `component_memory` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
 
-V96. What the person's oxplow remembers for them outside any one tab
-(`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
-(JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
-without its params (`oxplow:oxplow/page?page=work`, `…?page=acme/pulls`) or
-`resource:<namespace>/<name>` (page memory, shared by every tab of the page); a panel's
-URI; `component:<namespace>/<id>` (a custom component's own memory). Anything
-else is refused, as is text that isn't JSON or a value over 64 KB, and a
-component's keys together stay under 1 MB. Local state, never the repo,
-like `panel_layout`. UI-only RPCs `get_ui_preferences` (all, read once at
-start by `prefs/remembered.ts`) / `set_ui_preference { scope, key,
-value_json | null }`; agents read `v_ui_preference`.
+V88. What a device's oxplow remembers for it outside any one tab
+(`.context/pages-and-tabs.md` "Page state"): `ui_preference(device_id,
+scope, key, value_json, updated_at)`, keyed by device, scope and key. Each
+device's values are its own: a phone and a Mac keep their own rail widths.
+Scopes: `app` (app preferences); a page's URI without its params
+(`oxplow:oxplow/page?page=work`, `…?page=acme/pulls`) or
+`resource:<namespace>/<name>` (page memory, shared by every tab of the page on
+that device); a panel's URI. V88 dropped the shared rows: each device starts
+from the defaults.
+
+A custom component's memory is extension data, so it is shared by every
+device: `component_memory(scope, key, value_json, updated_at)`, scope
+`component:<namespace>/<id>` (V84 copied the old rows into it). A set of a
+`component:` scope writes it and needs no device; any other scope with no
+device is refused (`Invalid`, "this needs a device"). Anything else is refused,
+as is text that isn't JSON or a value over 64 KB, and a component's keys
+together stay under 1 MB. Local state, never the repo, like `panel_layout`.
+
+UI-only RPCs `get_ui_preferences` (the caller device's rows and every
+component's; with no device, the components' alone; read by
+`prefs/remembered.ts` at start, on reconnect and when the rows change) /
+`set_ui_preference { scope, key, value_json | null }`. Agents read
+`v_ui_preference` and `v_component_memory`.
 
 ### `bookmark` — `bookmark_store` (`crates/oxplow-db/src/bookmark_store.rs`)
 
@@ -2111,8 +2183,8 @@ inside the bus's transactions; read as `v_command_proposal` (ref
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit
-recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
-`new-task`).
+recorded by the window's visit effect (`App.tsx`) as its active page changes
+(skipping `agent`, `new-stream`, `new-task`).
 
 Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
 pre-canonical ones, and V102 emptied the table again when a visit became the page's identity (the id without its `#`), so no row holds a view. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
@@ -2122,7 +2194,15 @@ recorded open when its page is shown (`record_page_visit`, no length) and
 finished by `finish_page_visit { id, duration_ms }` when it ends: another
 page shown, the thread changed, or the window's `pagehide`. The length is
 time with the window visible (`apps/desktop/src/pageVisitTimer.ts`); a
-visit whose end the app missed (it quit) keeps NULL. Indexes on
+visit whose end the app missed (it quit) keeps NULL. `device_id?` (V86)
+is the device the page was opened on, taken from the request's caller. A
+visit with a NULL `device_id` is from before devices (or recorded with no
+device) and counts as every device's. What a page shows of the visits is the
+viewing device's: its own and the NULL ones. `list_recent`, `list_top` and
+`list_frequent` take the device; with none they read every device's. The
+`device_id` page param is supplied by the view context, and Go To
+(`go-to`, `thread-go-to`) filters on it. The project-wide analytics pages
+(Usage, Dashboards) read every device's visits. Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and
 `(thread_id, visited_at DESC)`. Aggregates derived by query:
 

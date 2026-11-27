@@ -33,7 +33,7 @@ use super::*;
 ///   functions are there to read.
 /// - `refs: { branches?, tags?, heads? }`: the branches, tags and stream
 ///   heads the git indexer read (each replaces what was stored).
-/// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
+/// - `visit: { page, kind?, label?, thread?, device?, duration_ms? }`: a page the person
 ///   opened, as the shell records it.
 /// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject?, dims? }] }`:
 ///   what a collector found, recorded as one capture of the measure.
@@ -964,7 +964,7 @@ pub(super) async fn observe_refs(host: &Host, body: &Value) -> Result<(), String
     Ok(())
 }
 
-/// `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
+/// `visit: { page, kind?, label?, thread?, device?, duration_ms? }`: a page the person
 /// opened (`page` its ref, `kind` its page kind, `page` by default), recorded
 /// as the shell's `record_page_visit` does (`PageVisitStore::record`).
 /// `conversation: { harness, id, title?, first_prompt?, started_at?,
@@ -1029,12 +1029,15 @@ pub(super) async fn observe_visit(host: &Host, body: &Value) -> Result<(), Strin
     let text = |key: &str| body.get(key).and_then(Value::as_str);
     let page = text("page").ok_or("`visit.page` is the page's ref")?;
     let store = &host.svc.page_visit_store;
+    let device = super::page::device_of(body.get("device"))
+        .map_err(|()| "`visit.device` isn't a device id (`dev-<uuid>`)".to_string())?;
     let visit = store
         .record(
             text("kind").unwrap_or("page"),
             page,
             text("label"),
             text("thread"),
+            device.as_ref(),
         )
         .await
         .map_err(|e| e.to_string())?;

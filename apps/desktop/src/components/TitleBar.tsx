@@ -110,7 +110,7 @@ function menuFor(kind: "stream" | "thread", id: string) {
 }
 
 /** The stream's branch, opening the branch picker (checkout, manage). */
-function BranchChip({ stream, vcsEnabled }: { stream: Stream; vcsEnabled: boolean }) {
+export function BranchChip({ stream, vcsEnabled }: { stream: Stream; vcsEnabled: boolean }) {
   const title = vcsEnabled ? `Branch: ${stream.branch} (click to switch)` : "Git not enabled for this workspace";
   async function handlePick(target: PickedRef) {
     // Tags and remote refs are checked out via their local-name form; git
@@ -173,7 +173,7 @@ const searchStyle: CSSProperties = {
 };
 
 const kbdStyle: CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   color: "var(--text-muted)",
   background: "var(--surface-tab-inactive)",
   padding: "0 5px",

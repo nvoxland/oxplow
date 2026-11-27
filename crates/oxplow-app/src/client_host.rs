@@ -10,9 +10,11 @@
 //!
 //! An agent's call acts in its own thread's tabs (never another thread's
 //! or stream's); a person's in the thread the window shows. A call goes to
-//! one window — the last registered that hosts it — and only that window
-//! answers. With no window open, one that closed (`unregister`) or one
-//! that doesn't answer in time (then forgotten until it registers again),
+//! one window that hosts it — the window of the device its run was asked
+//! from, else the one the person used last, else the last registered — and
+//! only that window answers. The command a window runs to answer it runs as
+//! the call's actor, with that device ([`ClientHost::run_for`]). With no window open, one that closed (`unregister`) or one
+//! that doesn't answer in time (then forgotten, and its socket closed so a live page registers again),
 //! the run is refused. What the window runs on the daemon to answer a call
 //! (Save's `oxplow.file.save`) runs as the call's actor ([`ClientHost::caller`]).
 
@@ -20,32 +22,113 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_domain::{Actor, CommandError};
+use oxplow_db::tab_queue_store::TabQueueStore;
+use oxplow_domain::{Actor, CommandError, DeviceId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::ops::Op;
-use crate::commands::util::schema;
+use crate::commands::util::{schema, ServicesSlot};
 use crate::commands::{Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent};
+
+/// Where an agent's call to a named device went.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sent {
+    /// The device's window did it, and answered.
+    Answered(Value),
+    /// The device is away: the tab waits for it.
+    Queued(DeviceId),
+}
+
+impl Sent {
+    /// What a tool answers: the window's answer, or that the tab waits.
+    pub fn into_json(self) -> Value {
+        match self {
+            Sent::Answered(v) => v,
+            Sent::Queued(device) => serde_json::json!({ "queued": true, "device": device }),
+        }
+    }
+}
+
+/// What an agent's `client` names now.
+enum Target {
+    /// A connected device, and its page load.
+    Window(DeviceId, oxplow_domain::ConnectionId),
+    Away(DeviceId),
+}
+
+/// The thread and page of a call that can wait for a device: an agent on a
+/// thread opening a page (`uri`). A stream or a thread is where a window
+/// goes, not a tab, so it can't wait.
+fn queueable(
+    run: &oxplow_domain::run::RunContext,
+    scope: &str,
+    input: &Value,
+) -> Result<(oxplow_domain::ThreadId, String), CommandError> {
+    let invalid = |field: &str, message: String| CommandError::Invalid {
+        field: Some(field.into()),
+        message,
+    };
+    let Actor::Agent {
+        thread_id: Some(thread),
+        ..
+    } = run.actor()
+    else {
+        return Err(invalid(
+            "/client",
+            "a tab waits in a thread: only an agent on one leaves it for a device that is away"
+                .into(),
+        ));
+    };
+    let uri = input
+        .get("uri")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("/uri", "a tab that waits needs the `uri` to open".into()))?;
+    let resource = oxplow_domain::uri::build::resource_of(uri);
+    if matches!(
+        resource.as_deref(),
+        Some(oxplow_domain::uri::resources::STREAM | oxplow_domain::uri::resources::THREAD)
+    ) {
+        return Err(invalid(
+            "/uri",
+            format!("`{uri}` is a place to go, not a tab: it can't wait for a device that is away (`{scope}`)"),
+        ));
+    }
+    Ok((*thread, uri.to_string()))
+}
 
 /// How long a call waits for the window's answer.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long a call that waits on a person (a folder picker) waits for the
+/// window: the person may look for a while. A window that is gone ends the
+/// wait sooner (its socket closing drops its calls).
+pub const PERSON_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Whether the window answers `scope`'s `op` only after a person did: the
+/// folder pickers of `projects.write` (an `open` with no path, `create`).
+fn waits_on_person(scope: &str, op: &str, input: &Value) -> bool {
+    scope == "projects.write"
+        && (op == "create" || (op == "open" && !input.get("path").is_some_and(Value::is_string)))
+}
+
 type Answer = tokio::sync::oneshot::Sender<Result<Value, String>>;
 
-/// An open window: its id (minted by the window when it starts) and the
-/// scopes it hosts.
+/// An open window: its id (the window's id for one page load, the one its
+/// event socket and tab reports carry) and the scopes it hosts.
 struct Window {
     client: String,
     hosted: BTreeSet<String>,
 }
 
-/// A call waiting for its window: who ran it, and where the answer goes.
+/// A call waiting for its window: who ran it (and the device they asked
+/// from), and where the answer goes.
 struct Pending {
     client: String,
     actor: Actor,
+    caller: Option<oxplow_domain::Caller>,
     answer: Answer,
 }
 
@@ -57,20 +140,40 @@ pub struct ClientHost {
     windows: parking_lot::Mutex<Vec<Window>>,
     pending: parking_lot::Mutex<HashMap<String, Pending>>,
     timeout: Duration,
+    /// The wait for a call that waits on a person (a folder picker).
+    person_timeout: Duration,
+    /// Which device the person used last: where a call no device asked for
+    /// goes.
+    devices: Arc<crate::client_reports::devices::ClientDevices>,
 }
 
 impl ClientHost {
-    pub fn new(events: EventBus) -> Self {
-        Self::with_timeout(events, ANSWER_TIMEOUT)
+    pub fn new(
+        events: EventBus,
+        devices: Arc<crate::client_reports::devices::ClientDevices>,
+    ) -> Self {
+        Self::with_timeout(events, devices, ANSWER_TIMEOUT)
     }
 
-    pub fn with_timeout(events: EventBus, timeout: Duration) -> Self {
+    pub fn with_timeout(
+        events: EventBus,
+        devices: Arc<crate::client_reports::devices::ClientDevices>,
+        timeout: Duration,
+    ) -> Self {
         Self {
             events,
             windows: parking_lot::Mutex::default(),
             pending: parking_lot::Mutex::default(),
             timeout,
+            person_timeout: PERSON_TIMEOUT,
+            devices,
         }
+    }
+
+    /// The wait for a call that waits on a person (tests).
+    pub fn with_person_timeout(mut self, wait: Duration) -> Self {
+        self.person_timeout = wait;
+        self
     }
 
     /// Window `client` is open and hosts `scopes` (it says so when
@@ -87,6 +190,11 @@ impl ClientHost {
 
     /// Window `client` closed: it takes no more calls, and the ones it
     /// hadn't answered are refused now rather than when they time out.
+    /// Whether window `client` hosts the daemon's calls now.
+    pub fn hosts(&self, client: &str) -> bool {
+        self.windows.lock().iter().any(|w| w.client == client)
+    }
+
     pub fn unregister(&self, client: &str) {
         self.windows.lock().retain(|w| w.client != client);
         // Dropping a waiting call's sender answers it "closed".
@@ -118,14 +226,51 @@ impl ClientHost {
         }
     }
 
-    /// Have the window do `scope`'s `op` with `input` for `actor`.
+    /// The run a window runs a waiting call's command in: the call's actor,
+    /// and the device its run was asked from.
+    pub fn run_for(
+        &self,
+        client: &str,
+        id: &str,
+    ) -> Result<oxplow_domain::run::RunContext, CommandError> {
+        match self.pending.lock().get(id) {
+            Some(p) if p.client == client => Ok(oxplow_domain::run::RunContext::core(
+                p.actor.clone(),
+                oxplow_domain::run::Mode::External,
+            )
+            .with_caller(p.caller.clone())),
+            _ => Err(CommandError::Invalid {
+                field: Some("/call".into()),
+                message: format!("no call `{id}` is waiting for this window"),
+            }),
+        }
+    }
+
+    /// Have a window do `scope`'s `op` with `input` for `run`'s actor: the
+    /// window of the device the run was asked from (refused when it has none
+    /// that hosts it), else, for a run with no device, the one the person
+    /// used last, else the last registered that hosts it.
     pub async fn call(
         &self,
-        actor: &Actor,
+        run: &oxplow_domain::run::RunContext,
         scope: &str,
         op: &str,
         input: Value,
     ) -> Result<Value, CommandError> {
+        self.call_on(run, None, scope, op, input).await
+    }
+
+    /// [`ClientHost::call`] to the window of page load `target` when one is
+    /// named: refused when that window is not open or does not host `scope`.
+    pub async fn call_on(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        target: Option<&oxplow_domain::ConnectionId>,
+        scope: &str,
+        op: &str,
+        input: Value,
+    ) -> Result<Value, CommandError> {
+        let actor = run.actor();
         if scope == "agent_terminal.write" && !matches!(actor, Actor::Human) {
             return Err(CommandError::Denied {
                 reason: "only a person can restart an agent terminal".into(),
@@ -140,9 +285,53 @@ impl ClientHost {
             if windows.is_empty() {
                 return Err(refused("no window is open".into()));
             }
-            match windows.iter().rev().find(|w| w.hosted.contains(scope)) {
-                Some(w) => w.client.clone(),
-                None => return Err(refused(format!("the window doesn't host `{scope}`"))),
+            let hosting: Vec<&Window> = windows
+                .iter()
+                .filter(|w| w.hosted.contains(scope))
+                .collect();
+            let at = |connection: &oxplow_domain::ConnectionId| {
+                hosting
+                    .iter()
+                    .find(|w| w.client == connection.as_str())
+                    .map(|w| w.client.clone())
+            };
+            if let Some(target) = target {
+                match at(target) {
+                    Some(client) => client,
+                    None if windows.iter().any(|w| w.client == target.as_str()) => {
+                        return Err(refused(format!(
+                            "that device's window doesn't host `{scope}`"
+                        )))
+                    }
+                    None => return Err(refused("that device's window isn't open".into())),
+                }
+            } else {
+                match run.caller() {
+                    // A person's run acts on their own device: its page load
+                    // (or the newer one of the same device), never another
+                    // device's window.
+                    Some(c) => match at(&c.connection).or_else(|| {
+                        self.devices
+                            .connection_of(&c.device)
+                            .and_then(|current| at(&current))
+                    }) {
+                        Some(client) => client,
+                        None => {
+                            return Err(refused(format!(
+                                "your window doesn't host `{scope}` (it may still be loading)"
+                            )))
+                        }
+                    },
+                    None => {
+                        let used = || self.devices.last_used().and_then(|(_, c)| at(&c));
+                        match used().or_else(|| hosting.last().map(|w| w.client.clone())) {
+                            Some(client) => client,
+                            None => {
+                                return Err(refused(format!("the window doesn't host `{scope}`")))
+                            }
+                        }
+                    }
+                }
             }
         };
         let thread_id = match actor.agent_thread() {
@@ -157,6 +346,11 @@ impl ClientHost {
             Some(thread) => thread,
             None => None,
         };
+        let wait = if waits_on_person(scope, op, &input) {
+            self.person_timeout
+        } else {
+            self.timeout
+        };
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.pending.lock().insert(
@@ -164,6 +358,7 @@ impl ClientHost {
             Pending {
                 client: client.clone(),
                 actor: actor.clone(),
+                caller: run.caller().cloned(),
                 answer: tx,
             },
         );
@@ -176,7 +371,7 @@ impl ClientHost {
             op: op.into(),
             input: oxplow_domain::Json(input),
         });
-        let answered = tokio::time::timeout(self.timeout, rx).await;
+        let answered = tokio::time::timeout(wait, rx).await;
         self.pending.lock().remove(&id);
         match answered {
             Ok(Ok(Ok(result))) => Ok(result),
@@ -185,11 +380,134 @@ impl ClientHost {
             Err(_) => {
                 // A window that doesn't answer is taken as gone until it
                 // registers again, so the next call is refused at once
-                // instead of waiting out the timeout too.
+                // instead of waiting out the timeout too. Its socket is
+                // closed: a live page reconnects and registers again, and a
+                // frozen one is then away, not a host that never answers.
                 self.windows.lock().retain(|w| w.client != client);
+                self.devices.close(&client);
                 Err(refused("the window didn't answer".into()))
             }
         }
+    }
+
+    /// The device an agent's `client` names: a device id (`dev-…`), or the
+    /// name of a connected device. A name two devices share is refused.
+    fn resolve(&self, client: &str) -> Result<Target, CommandError> {
+        let invalid = |message: String| CommandError::Invalid {
+            field: Some("/client".into()),
+            message,
+        };
+        let connected = |device: DeviceId| match self.devices.connection_of(&device) {
+            Some(connection) => Target::Window(device, connection),
+            None => Target::Away(device),
+        };
+        if client.starts_with("dev-") {
+            let id = DeviceId::parse(client)
+                .map_err(|_| invalid(format!("`{client}` isn't a device id")))?;
+            return Ok(connected(id));
+        }
+        let named: Vec<_> = self
+            .devices
+            .list()
+            .into_iter()
+            .filter(|d| d.name == client)
+            .collect();
+        match named.as_slice() {
+            [one] => Ok(connected(one.id.clone())),
+            [] => Err(invalid(format!(
+                "no connected device is named `{client}`: give its id (`dev-…`) or the name `oxplow_list_tabs` shows"
+            ))),
+            many => Err(invalid(format!(
+                "{} connected devices are named `{client}`: give one's id ({})",
+                many.len(),
+                many.iter()
+                    .map(|d| d.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    /// An agent's call to the device `client` names (none: [`ClientHost::call`]).
+    /// A connected device's window does it. A device named by id that is not
+    /// connected gets the tab when it next connects (`queue`), for a call
+    /// that opens a page (`uri` in its input).
+    pub async fn call_for(
+        &self,
+        queue: &TabQueueStore,
+        run: &oxplow_domain::run::RunContext,
+        client: Option<&str>,
+        scope: &str,
+        op: &str,
+        input: Value,
+    ) -> Result<Sent, CommandError> {
+        let Some(client) = client else {
+            return Ok(Sent::Answered(self.call(run, scope, op, input).await?));
+        };
+        match self.resolve(client)? {
+            Target::Window(device, connection) => {
+                // A connected device whose window does not host yet (it is
+                // loading, or was closed after a missed answer) is away for
+                // a tab that can wait: it takes its queue once it hosts.
+                if !self.hosts_scope(connection.as_str(), scope) {
+                    if let Ok((thread, uri)) = queueable(run, scope, &input) {
+                        return self.queue_for(queue, &device, &thread, &uri).await;
+                    }
+                }
+                Ok(Sent::Answered(
+                    self.call_on(run, Some(&connection), scope, op, input)
+                        .await?,
+                ))
+            }
+            Target::Away(device) => {
+                let (thread, uri) = queueable(run, scope, &input)?;
+                self.queue_for(queue, &device, &thread, &uri).await
+            }
+        }
+    }
+
+    /// Whether window `client` is open and hosts `scope`.
+    fn hosts_scope(&self, client: &str, scope: &str) -> bool {
+        self.windows
+            .lock()
+            .iter()
+            .any(|w| w.client == client && w.hosted.contains(scope))
+    }
+
+    /// Leave `uri` for `device`, which this project knows; when the device is
+    /// connected after all (it came in since the call began), its window is
+    /// told to take its queue.
+    async fn queue_for(
+        &self,
+        queue: &TabQueueStore,
+        device: &DeviceId,
+        thread: &oxplow_domain::ThreadId,
+        uri: &str,
+    ) -> Result<Sent, CommandError> {
+        let unknown = self.devices.get(device).is_none()
+            && !queue
+                .knows(device)
+                .await
+                .map_err(crate::commands::util::failed)?;
+        if unknown {
+            return Err(CommandError::Invalid {
+                field: Some("/client".into()),
+                message: format!(
+                    "no device `{device}` is known to this project: give the id `oxplow_list_tabs` shows"
+                ),
+            });
+        }
+        queue
+            .queue(device, thread, uri)
+            .await
+            .map_err(crate::commands::util::failed)?;
+        // It may have connected and taken its (empty) queue just before.
+        if let Some(connection) = self.devices.connection_of(device) {
+            self.events.emit(OxplowEvent::TabsQueued {
+                client: connection.to_string(),
+            });
+        }
+        Ok(Sent::Queued(device.clone()))
     }
 
     /// `scope`'s operation `op` on the daemon: its runs go to the
@@ -209,9 +527,54 @@ impl ClientHost {
             Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
                 let host = host.clone();
                 Box::pin(async move {
-                    let result = host.call(invocation.actor(), scope, op, input).await?;
+                    let result = host.call(&invocation.run, scope, op, input).await?;
                     Ok(HandlerOutput {
                         result,
+                        ..HandlerOutput::default()
+                    })
+                })
+            })),
+        )
+    }
+
+    /// [`ClientHost::op`] whose input may name a `client` (a device id or a
+    /// connected device's name): the window of that device does it, and a
+    /// device that is away gets the tab when it connects.
+    pub fn op_to_client(
+        host: &Arc<ClientHost>,
+        services: ServicesSlot,
+        scope: &'static str,
+        op: &'static str,
+        input_schema: Value,
+    ) -> Op {
+        let host = host.clone();
+        Op::new(
+            scope,
+            op,
+            input_schema,
+            false,
+            Handler::External(Arc::new(move |invocation: Invocation, mut input: Value| {
+                let host = host.clone();
+                let services = services.clone();
+                Box::pin(async move {
+                    // The window gets the input without the device it is for.
+                    let client = input
+                        .as_object_mut()
+                        .and_then(|o| o.remove("client"))
+                        .and_then(|c| c.as_str().map(str::to_string));
+                    let svc = services.get()?;
+                    let sent = host
+                        .call_for(
+                            &svc.tab_queue_store,
+                            &invocation.run,
+                            client.as_deref(),
+                            scope,
+                            op,
+                            input,
+                        )
+                        .await?;
+                    Ok(HandlerOutput {
+                        result: sent.into_json(),
                         ..HandlerOutput::default()
                     })
                 })
@@ -244,7 +607,7 @@ impl ClientHost {
                             ),
                         });
                     }
-                    let result = host.call(invocation.actor(), scope, op, input).await?;
+                    let result = host.call(&invocation.run, scope, op, input).await?;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()
@@ -333,6 +696,12 @@ pub struct NavigateInput {
     /// one — leaving the shown page as it is.
     #[serde(default)]
     pub new_tab: bool,
+    /// The device to show it on: its id (`dev-…`) or a connected device's
+    /// name (`oxplow_list_tabs` shows `device`). Without it, the window the
+    /// person used last. A device that is not connected, named by id, gets
+    /// the page as a tab of your thread when it next connects.
+    #[serde(default)]
+    pub client: Option<String>,
 }
 
 /// An operation that takes nothing.
@@ -357,7 +726,7 @@ pub struct RestartTerminalInput {
 }
 
 /// The window's operations, run through `host` when the daemon runs them.
-pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
+pub fn ops(host: &Arc<ClientHost>, services: ServicesSlot) -> Vec<Op> {
     // An agent's in its own thread; a person's anywhere.
     let mut ops: Vec<Op> = ["open", "close", "focus"]
         .into_iter()
@@ -390,8 +759,9 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
     ));
     // Takes the person to a ref: open to an agent, which is how it shows them
     // what it found.
-    ops.push(ClientHost::op(
+    ops.push(ClientHost::op_to_client(
         host,
+        services,
         "window.show",
         "navigate",
         schema::<NavigateInput>(),
@@ -439,6 +809,21 @@ mod tests {
     use oxplow_domain::ThreadId;
     use serde_json::json;
 
+    /// A run of `actor` with no device: an agent's, a job's.
+    fn run_of(actor: Actor) -> oxplow_domain::run::RunContext {
+        oxplow_domain::run::RunContext::core(actor, oxplow_domain::run::Mode::External)
+    }
+
+    /// A device this project has stored tabs of, which is not connected.
+    async fn known_device(svc: &crate::Services, thread: ThreadId) -> DeviceId {
+        let device = DeviceId::generate();
+        svc.tab_session_store
+            .save(&device, &thread, "{}".into(), None)
+            .await
+            .unwrap();
+        device
+    }
+
     fn agent(thread: Option<i64>) -> Actor {
         Actor::Agent {
             session_id: None,
@@ -447,13 +832,273 @@ mod tests {
         }
     }
 
+    /// A person's run reaches that person's own window, though another
+    /// registered after it; an agent's reaches the window used last; the
+    /// command the window runs for a call carries the device of the run that
+    /// made it.
+    #[tokio::test]
+    async fn a_call_reaches_the_asking_device_else_the_one_used_last() {
+        use crate::client_reports::devices::ClientDevices;
+        use oxplow_domain::run::{Mode, RunContext};
+        use oxplow_domain::{Caller, ConnectionId, DeviceDescriptor, DeviceId, DeviceKind};
+        let events = EventBus::new();
+        let seen = events.subscribe_ui();
+        let devices = Arc::new(ClientDevices::default());
+        let host = Arc::new(ClientHost::new(events, devices.clone()));
+        let window = |name: &str| {
+            let device = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Desktop,
+            };
+            let connection = ConnectionId::generate();
+            devices
+                .connected(device.clone(), connection.clone())
+                .unwrap();
+            host.register(connection.as_str(), vec!["tabs.write".into()]);
+            Caller {
+                device: device.id,
+                connection,
+            }
+        };
+        let (mac, tablet) = (window("Mac"), window("Tab S9"));
+        let answer_as = |expected: String| {
+            let host = host.clone();
+            let mut seen = seen.resubscribe();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                let run = host.run_for(&client, &id).unwrap();
+                assert!(host.answer(&client, &id, Ok(json!(client))));
+                assert_eq!(client, expected);
+                run.caller().cloned()
+            })
+        };
+
+        let person = RunContext::core(Actor::Human, Mode::External).with_caller(Some(mac.clone()));
+        let answering = answer_as(mac.connection.to_string());
+        host.call(&person, "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            answering.await.unwrap(),
+            Some(mac.clone()),
+            "the call's run keeps the device"
+        );
+
+        devices.used(&tablet.device);
+        let agent_run = RunContext::core(agent(Some(3)), Mode::External);
+        let answering = answer_as(tablet.connection.to_string());
+        host.call(&agent_run, "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            answering.await.unwrap(),
+            None,
+            "an agent's call names no device"
+        );
+    }
+
+    /// A call that names a window reaches it, whoever asked and whichever
+    /// was used last; a window that is not open, or does not host the scope,
+    /// is refused, and the answer says so.
+    #[tokio::test]
+    async fn a_call_that_names_a_window_reaches_it_or_is_refused() {
+        use crate::client_reports::devices::ClientDevices;
+        use oxplow_domain::{ConnectionId, DeviceDescriptor, DeviceKind};
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let devices = Arc::new(ClientDevices::default());
+        let host = Arc::new(ClientHost::new(events, devices.clone()));
+        let window = |name: &str, scope: &str| {
+            let device = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Desktop,
+            };
+            let connection = ConnectionId::generate();
+            devices
+                .connected(device.clone(), connection.clone())
+                .unwrap();
+            host.register(connection.as_str(), vec![scope.into()]);
+            (device.id, connection)
+        };
+        let (mac, on_mac) = window("Mac", "tabs.write");
+        let (_, on_tablet) = window("Tab S9", "tabs.write");
+        let (_, on_editor) = window("Editor", "editor.write");
+        devices.used(&mac);
+        let run = run_of(agent(Some(3)));
+        let answering = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                assert!(host.answer(&client, &id, Ok(json!(client))));
+            })
+        };
+        let out = host
+            .call_on(&run, Some(&on_tablet), "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(out, json!(on_tablet.to_string()), "not the one used last");
+        answering.await.unwrap();
+
+        let err = host
+            .call_on(&run, Some(&on_editor), "tabs.write", "open", json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Unavailable { .. }), "{err:?}");
+        assert!(
+            err.to_string().contains("doesn't host `tabs.write`"),
+            "{err}"
+        );
+        let err = host
+            .call_on(
+                &run,
+                Some(&ConnectionId::generate()),
+                "tabs.write",
+                "open",
+                json!({}),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Unavailable { .. }), "{err:?}");
+        assert!(err.to_string().contains("isn't open"), "{err}");
+        let _ = on_mac;
+    }
+
+    /// An agent's `client` is a device id or a connected device's name: a
+    /// connected one's window does it, a name two devices share or nobody
+    /// has is refused, and a device away (by id) gets the tab queued in the
+    /// agent's thread.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_names_the_device_to_open_a_tab_on() {
+        use oxplow_domain::{ConnectionId, DeviceDescriptor, DeviceKind};
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let mut seen = svc.events.subscribe_ui();
+        let connect = |name: &str| {
+            let device = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Tablet,
+            };
+            let connection = ConnectionId::generate();
+            svc.client_devices
+                .connected(device.clone(), connection.clone())
+                .unwrap();
+            svc.client_host
+                .register(connection.as_str(), vec!["tabs.write".into()]);
+            (device.id, connection)
+        };
+        let (_, on_mac) = connect("Mac");
+        let (tablet, on_tablet) = connect("Tab S9");
+        connect("Twin");
+        connect("Twin");
+        let run = run_of(Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        });
+        let input = || json!({ "uri": "oxplow:oxplow/file?path=a.rs" });
+        let call = |client: &str, run: &oxplow_domain::run::RunContext| {
+            let client = client.to_string();
+            let run = run.clone();
+            async move {
+                svc.client_host
+                    .call_for(
+                        &svc.tab_queue_store,
+                        &run,
+                        Some(&client),
+                        "tabs.write",
+                        "open",
+                        input(),
+                    )
+                    .await
+            }
+        };
+        for name in [tablet.to_string(), "Tab S9".to_string()] {
+            let host = svc.client_host.clone();
+            let mut rx = seen.resubscribe();
+            let answering = tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = rx.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                assert!(host.answer(&client, &id, Ok(json!(client))));
+            });
+            assert_eq!(
+                call(&name, &run).await.unwrap(),
+                Sent::Answered(json!(on_tablet.to_string())),
+                "{name}"
+            );
+            answering.await.unwrap();
+        }
+        let _ = (&mut seen, on_mac);
+        for (name, wanted) in [
+            ("Twin", "2 connected devices"),
+            ("Nobody", "no connected device"),
+        ] {
+            let err = call(name, &run).await.unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/client"),
+                "{err:?}"
+            );
+            assert!(err.to_string().contains(wanted), "{err}");
+        }
+        // A device id nobody used is a wrong id, not a device that is away.
+        let stranger = DeviceId::generate();
+        let err = call(stranger.as_str(), &run).await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/client"),
+            "{err:?}"
+        );
+        assert!(svc
+            .tab_queue_store
+            .take(&stranger)
+            .await
+            .unwrap()
+            .is_empty());
+        let away = known_device(svc, fx.thread).await;
+        assert_eq!(
+            call(away.as_str(), &run).await.unwrap(),
+            Sent::Queued(away.clone())
+        );
+        let waiting = svc.tab_queue_store.take(&away).await.unwrap();
+        assert_eq!(
+            (waiting[0].thread, waiting[0].uri.as_str()),
+            (fx.thread, "oxplow:oxplow/file?path=a.rs")
+        );
+        let person = run_of(Actor::Human);
+        let err = call(away.as_str(), &person).await.unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+        // A stream or a thread is where a window goes, not a tab to leave.
+        let err = svc
+            .client_host
+            .call_for(
+                &svc.tab_queue_store,
+                &run,
+                Some(away.as_str()),
+                "window.show",
+                "navigate",
+                json!({ "uri": format!("oxplow:oxplow/thread?id={}", fx.thread) }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/uri"),
+            "{err:?}"
+        );
+    }
+
     /// The window answers a call it got as an event; the call carries the
     /// agent's own thread.
     #[tokio::test]
     async fn a_call_goes_to_the_window_with_the_agents_thread() {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
-        let host = Arc::new(ClientHost::new(events));
+        let host = Arc::new(ClientHost::new(events, Arc::default()));
         host.register("w1", vec!["tabs.write".into()]);
         let window = {
             let host = host.clone();
@@ -480,7 +1125,7 @@ mod tests {
         };
         let out = host
             .call(
-                &agent(Some(3)),
+                &run_of(agent(Some(3))),
                 "tabs.write",
                 "open",
                 json!({ "uri": "oxplow:oxplow/file?path=a.rs" }),
@@ -680,11 +1325,11 @@ mod tests {
     #[tokio::test]
     async fn a_call_nothing_can_answer_is_refused() {
         let events = EventBus::new();
-        let host = ClientHost::with_timeout(events, Duration::from_millis(50));
+        let host = ClientHost::with_timeout(events, Arc::default(), Duration::from_millis(50));
         let call = |actor| {
             let host = &host;
             async move {
-                host.call(&actor, "tabs.write", "open", json!({}))
+                host.call(&run_of(actor), "tabs.write", "open", json!({}))
                     .await
                     .unwrap_err()
                     .to_string()
@@ -711,7 +1356,7 @@ mod tests {
     async fn a_call_goes_to_one_window_and_only_it_answers() {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
-        let host = Arc::new(ClientHost::new(events));
+        let host = Arc::new(ClientHost::new(events, Arc::default()));
         host.register("w1", vec!["tabs.write".into()]);
         host.register("w2", vec!["tabs.write".into()]);
         let window = {
@@ -729,7 +1374,7 @@ mod tests {
             })
         };
         let out = host
-            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .call(&run_of(agent(Some(3))), "tabs.write", "open", json!({}))
             .await
             .unwrap();
         assert_eq!(out, json!("w2"));
@@ -742,7 +1387,7 @@ mod tests {
     async fn a_closed_windows_calls_are_refused_at_once() {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
-        let host = Arc::new(ClientHost::new(events));
+        let host = Arc::new(ClientHost::new(events, Arc::default()));
         host.register("w1", vec!["tabs.write".into()]);
         let closer = {
             let host = host.clone();
@@ -753,7 +1398,7 @@ mod tests {
         };
         let started = std::time::Instant::now();
         let err = host
-            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .call(&run_of(agent(Some(3))), "tabs.write", "open", json!({}))
             .await
             .unwrap_err()
             .to_string();
@@ -761,10 +1406,259 @@ mod tests {
         assert!(err.contains("closed before it answered"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(5));
         let err = host
-            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .call(&run_of(agent(Some(3))), "tabs.write", "open", json!({}))
             .await
             .unwrap_err()
             .to_string();
         assert!(err.contains("no window is open"), "{err}");
+    }
+
+    /// A call that waits on a person (a folder picker) is not a window that
+    /// stopped answering: it gets the long wait, and the window's socket
+    /// stays open while the picker is on screen.
+    #[tokio::test]
+    async fn a_call_that_waits_on_a_person_outlives_the_answer_timeout() {
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let host = Arc::new(
+            ClientHost::with_timeout(events, Arc::default(), Duration::from_millis(50))
+                .with_person_timeout(Duration::from_secs(5)),
+        );
+        host.register("w1", vec!["projects.write".into()]);
+        let window = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                // The person is still choosing a folder.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                assert!(host.answer("w1", &id, Ok(json!(null))));
+            })
+        };
+        // No path: the window opens a picker.
+        let run = run_of(Actor::Human);
+        host.call(&run, "projects.write", "open", json!({}))
+            .await
+            .expect("the window answered after its picker closed");
+        window.await.unwrap();
+        // With a path nothing waits on a person: the short wait applies.
+        let err = host
+            .call(&run, "projects.write", "open", json!({ "path": "/x" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("didn't answer"), "{err}");
+    }
+
+    /// A window that misses an answer is forgotten and its socket is asked
+    /// to close (a normal close): a live page then reconnects and registers
+    /// again; another device's socket stays.
+    #[tokio::test]
+    async fn a_call_that_times_out_closes_the_windows_socket() {
+        use crate::client_reports::devices::ClientDevices;
+        use oxplow_domain::{ConnectionId, DeviceDescriptor, DeviceKind};
+        let devices = Arc::new(ClientDevices::default());
+        let host =
+            ClientHost::with_timeout(EventBus::new(), devices.clone(), Duration::from_millis(50));
+        let connect = |name: &str| {
+            let descriptor = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Tablet,
+            };
+            let connection = ConnectionId::generate();
+            let opened = devices.connected(descriptor, connection.clone()).unwrap();
+            host.register(connection.as_str(), vec!["tabs.write".into()]);
+            (opened.socket, connection)
+        };
+        let (tablet, on_tablet) = connect("Tab S9");
+        let (mac, _) = connect("Mac");
+        devices.used(
+            &devices
+                .list()
+                .iter()
+                .find(|d| d.name == "Tab S9")
+                .unwrap()
+                .id,
+        );
+        let err = host
+            .call(&run_of(agent(Some(1))), "tabs.write", "open", json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("didn't answer"), "{err}");
+        assert!(!host.hosts(on_tablet.as_str()));
+        tokio::time::timeout(Duration::from_secs(1), tablet.closing())
+            .await
+            .expect("the silent window's socket is asked to close");
+        assert!(!tablet.is_replaced(), "a normal close, not a replacement");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), mac.closing())
+                .await
+                .is_err(),
+            "another window's socket stays"
+        );
+    }
+
+    /// A person's run never goes to another device's window: when its own
+    /// window doesn't host, it is refused; a reload of the same device is
+    /// still its own.
+    #[tokio::test]
+    async fn a_persons_run_is_refused_when_its_window_does_not_host() {
+        use crate::client_reports::devices::ClientDevices;
+        use oxplow_domain::run::{Mode, RunContext};
+        use oxplow_domain::{Caller, ConnectionId, DeviceDescriptor, DeviceKind};
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let devices = Arc::new(ClientDevices::default());
+        let host = Arc::new(ClientHost::new(events, devices.clone()));
+        let connect = |name: &str, register: bool| {
+            let descriptor = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Tablet,
+            };
+            let connection = ConnectionId::generate();
+            devices
+                .connected(descriptor.clone(), connection.clone())
+                .unwrap();
+            if register {
+                host.register(connection.as_str(), vec!["tabs.write".into()]);
+            }
+            Caller {
+                device: descriptor.id,
+                connection,
+            }
+        };
+        let mac = connect("Mac", true);
+        let tablet = connect("Tab S9", false);
+        devices.used(&mac.device);
+        let person =
+            RunContext::core(Actor::Human, Mode::External).with_caller(Some(tablet.clone()));
+        let err = host
+            .call(&person, "tabs.write", "open", json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Unavailable { .. }), "{err:?}");
+        assert!(seen.try_recv().is_err(), "nothing reached the Mac's window");
+
+        // The same device's newer page load hosts: the person's old id finds it.
+        let reload = ConnectionId::generate();
+        devices
+            .connected(
+                DeviceDescriptor {
+                    id: tablet.device.clone(),
+                    name: "Tab S9".into(),
+                    kind: DeviceKind::Tablet,
+                },
+                reload.clone(),
+            )
+            .unwrap();
+        host.register(reload.as_str(), vec!["tabs.write".into()]);
+        let answering = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                assert!(host.answer(&client, &id, Ok(json!(client))));
+            })
+        };
+        let out = host
+            .call(&person, "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(out, json!(reload.to_string()));
+        answering.await.unwrap();
+    }
+
+    /// A named device that is connected but whose window does not host yet
+    /// is away for a tab that can wait: it waits, the device's window is
+    /// told to take its queue, and an unknown device is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_tab_for_a_connected_device_that_does_not_host_waits() {
+        use oxplow_domain::{ConnectionId, DeviceDescriptor, DeviceKind};
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let mut seen = svc.events.subscribe_ui();
+        let device = known_device(svc, fx.thread).await;
+        let connection = ConnectionId::generate();
+        svc.client_devices
+            .connected(
+                DeviceDescriptor {
+                    id: device.clone(),
+                    name: "Tab S9".into(),
+                    kind: DeviceKind::Tablet,
+                },
+                connection.clone(),
+            )
+            .unwrap();
+        let run = run_of(Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        });
+        let sent = svc
+            .client_host
+            .call_for(
+                &svc.tab_queue_store,
+                &run,
+                Some(device.as_str()),
+                "tabs.write",
+                "open",
+                json!({ "uri": "oxplow:oxplow/file?path=a.rs" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(sent, Sent::Queued(device.clone()));
+        assert_eq!(svc.tab_queue_store.take(&device).await.unwrap().len(), 1);
+        let OxplowEvent::TabsQueued { client } = seen.recv().await.unwrap() else {
+            panic!("its window is told")
+        };
+        assert_eq!(client, connection.to_string());
+    }
+
+    /// A run with no device goes to the window used last; when that device's
+    /// window hosts nothing, to the last registered one.
+    #[tokio::test]
+    async fn a_run_with_no_device_falls_back_to_the_last_registered_window() {
+        use crate::client_reports::devices::ClientDevices;
+        use oxplow_domain::{ConnectionId, DeviceDescriptor, DeviceKind};
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let devices = Arc::new(ClientDevices::default());
+        let host = Arc::new(ClientHost::new(events, devices.clone()));
+        let connect = |name: &str, register: bool| {
+            let descriptor = DeviceDescriptor {
+                id: DeviceId::generate(),
+                name: name.into(),
+                kind: DeviceKind::Desktop,
+            };
+            let connection = ConnectionId::generate();
+            devices
+                .connected(descriptor.clone(), connection.clone())
+                .unwrap();
+            if register {
+                host.register(connection.as_str(), vec!["tabs.write".into()]);
+            }
+            (descriptor.id, connection)
+        };
+        let (_, on_mac) = connect("Mac", true);
+        let (tablet, _) = connect("Tab S9", false);
+        devices.used(&tablet);
+        let answering = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                assert!(host.answer(&client, &id, Ok(json!(client))));
+            })
+        };
+        let out = host
+            .call(&run_of(agent(Some(1))), "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(out, json!(on_mac.to_string()));
+        answering.await.unwrap();
     }
 }

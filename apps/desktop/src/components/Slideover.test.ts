@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { backdropShouldClose } from "./Slideover.js";
+import { DEFAULT_PANEL_WIDTH, backdropShouldClose } from "./Slideover.js";
 
 // Slideover is a thin React shell — its only non-trivial bit is the
 // "click on backdrop closes, click on panel doesn't" rule. The
@@ -18,5 +18,12 @@ describe("Slideover backdrop click rule", () => {
     const backdrop = {};
     const panel = {};
     expect(backdropShouldClose({ target: panel, currentTarget: backdrop })).toBe(false);
+  });
+});
+
+describe("default panel width", () => {
+  test("keeps a readable minimum on a phone and never passes the screen", () => {
+    // min(38vw, 560px) is ~148px at 390px wide.
+    expect(DEFAULT_PANEL_WIDTH).toBe("min(max(38vw, 360px), 560px, 100vw)");
   });
 });

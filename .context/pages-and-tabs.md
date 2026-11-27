@@ -17,9 +17,12 @@ pages are THE shell.
   open settings, close or remove; `+ Add stream` at the panel's foot
   opens the `new-stream` page. The launcher's New Thread… / New Stream…
   reach the same flows. See the Navigator row in "Modules".
-- **Each thread owns its own set of open tabs and an active tab.**
+- **Each thread owns its own set of open tabs and an active tab, on each
+  device.** The daemon keeps them per device (`tab_session`, "Persistence").
   Switching threads restores its tab set; switching streams swaps to the
-  selected thread of the new stream.
+  thread this device shows in the new stream. Each device shows its own
+  stream and thread ([remote-daemon.md](./remote-daemon.md) "What each
+  device has of its own").
 - **A thread's agents are its agent sessions, one tab each.** Every open
   `agent_session` row has a pinned tab (`agent_session:ses3`) leading the
   thread's tabs, in the order the sessions opened its terminal. The tabs follow the rows — `useThreadSessions` reads
@@ -28,8 +31,7 @@ pages are THE shell.
   tab and the active tab would fall to the MRU), and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
   keeps each open session's tab first and drops a closed one's — a
   session opened later still goes ahead of every other tab. **A new
-  thread** (one with no tab list yet; they persist, so it's one never
-  opened here) with no session opens the **session picker** (the
+  thread** (one this device has no stored tabs for yet) with no session opens the **session picker** (the
   `new-session` page). The picker is an ordinary tab after that: its ×
   closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
@@ -60,14 +62,14 @@ pages are THE shell.
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
 | `apps/desktop/src/tabs/pageRefs.ts` | Tab ids. A `TabRef` is `{ id, pinned? }`: the id is the URI the tab shows (a web page's is its URL), and there is no `kind` and no `payload`. A tab's content is read from its URI (`typeOf`, `paramOf`, `parseUri`, `fileOf(ref)`, `diffViewOf(ref)`, `resourceParamsOf(ref)`). Constructors for things are the URI builders in `uri/` (`fileRef`, `wikiPageRef`, …); route constructors are `pageTabRef(id, params?, state?)`, `extPageRef`, typed wrappers such as `newSessionRef`, `diffRef(spec)`, `endpointDiffRef`, `settingsRef`; `pagePayload(ref)` reads a route, `isPage`, `recordedPageKind`. `refFromTabId(id)` accepts every oxplow URI and every allowlisted http(s) URL, else null. `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
-| `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. Every page shows the nav bar when it has a navigation context (a page outside one — a test — gets the plain header instead); a page doesn't opt out. `titleIcon` draws before the title (an agent's logo). **The nav bar names what kind of thing the tab shows**: a muted chip before the title with the label its URI's resource declares (`resources:` → `v_resource.label`: "Measure", "Task"), worked out from the tab's URI (`kindOfTab`), so every resource's page gets it with no page saying so; a page route (`oxplow/page`) names none — the page is the thing. **The title is always the nav bar's** (with `titleIcon`, truncated with an ellipsis and the full text as its hover; `page-nav-title`): a page's body never draws its own title heading, scrolling or filling alike. A switch page's title is the section in view; a writable dashboard's is `DashboardTitle`, the rename in place. The tab-strip label via `usePageTitle` is the same string. **The body** takes `width?: "full" \| "reading"` and an independent `rightRail` (a 320px sticky control panel beside a body of either width); below ~960px the rail moves inline to the top of the body (`RailBody`) — "Body layouts" below. **Actions** are `PageAction[]` drawn in the nav bar, and `pin` adds Pin to Dashboard — "The nav bar is core's". Reads only semantic CSS variables (skin via theme). |
+| `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. Every page shows the nav bar when it has a navigation context (a page outside one — a test — gets the plain header instead); a page doesn't opt out. `titleIcon` draws before the title (an agent's logo). **The nav bar names what kind of thing the tab shows**: a muted chip before the title with the label its URI's resource declares (`resources:` → `v_resource.label`: "Measure", "Task"), worked out from the tab's URI (`kindOfTab`), so every resource's page gets it with no page saying so; a page route (`oxplow/page`) names none — the page is the thing. **The title is always the nav bar's** (with `titleIcon`, truncated with an ellipsis and the full text as its hover; `page-nav-title`); the bar wraps, so on a phone the buttons that do not fit go to a second line and the title keeps at least ~120px: a page's body never draws its own title heading, scrolling or filling alike. A switch page's title is the section in view; a writable dashboard's is `DashboardTitle`, the rename in place. The tab-strip label via `usePageTitle` is the same string. **The body** takes `width?: "full" \| "reading"` and an independent `rightRail` (a 320px sticky control panel beside a body of either width); below ~960px the rail moves inline to the top of the body (`RailBody`) — "Body layouts" below. **Actions** are `PageAction[]` drawn in the nav bar, and `pin` adds Pin to Dashboard — "The nav bar is core's". Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward, the list stepper, the title, the bookmark star, the primary and prominent actions as buttons, and the ☰ (`PageMenu`). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/tabs/PageMenu.tsx`, `tabs/pageMenuItems.ts` | The nav bar's ☰: one `ContextMenu` with everything else the page can be acted on with; `pageMenuItems` (pure, unit-tested) says what and in which order, `PageMenu` draws it and the panels it opens under the button (Backlinks, Outbound, Pin to Dashboard). "The nav bar is core's". |
-| `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. **`useTabEditing({ dirty, save })`** tells the tab its page holds unsaved edits and how to save them (`setEditing`, on the current page only): `App.tsx` keeps one setter per tab (`editingSetterFor`) and draws `CenterTab.dirty` as a ● before the label, publishes `pageDirty` (the File → Save `when`), runs the shown tab's `save` from `oxplow.editor.save` when the page isn't a file, and keeps a dirty tab from the cap's `evictions`. The editor (`FilePage`) and the `markdown` viz's editor call it. |
+| `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. **`useTabEditing({ dirty, save })`** tells the tab its page holds unsaved edits and how to save them (`setEditing`, on the current page only): `window/useWindowTabs.ts` keeps one setter per tab (`editingSetterFor`) and draws `WindowTab.dirty` as a ● before the label, publishes `pageDirty` (the File → Save `when`), runs the shown tab's `save` from `oxplow.editor.save` when the page isn't a file, and keeps a dirty tab from the cap's `evictions`. The editor (`FilePage`) and the `markdown` viz's editor call it. |
 | `apps/desktop/src/viz/EditorViz.tsx` | The `editor` viz that draws the working tree's file (foundation's `editor` page): its buffer from `editor/openFiles.ts`, `EditorPane` over it, `useTabEditing` for its ● / Save / Find. A renderer's page (`PageHost` with `renders`) shows the resource's backlinks and outbound links in the nav bar (`useBacklinks`), so knowledge pages, tasks and commits that reference the file are listed there. `.context/editor-and-monaco.md` "The editor viz". |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it; `ref` / `to` is a `TabRef` or a ref string (opened through `openRef`). Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
 | `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (every one an extension's — for example, Go To from Foundation and Work from Bundled). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the dock's Alerts panel, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** and between the groups (this thread's, this stream's, the project's; MIME `application/x-oxplow-rail-section`, the layout — group, order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` page (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "Nothing waiting", …) when it has no content. Passive — never auto-opens tabs. **A window narrower than 800 px hides the rail** (`useNarrowWindow` in `windowWidth.ts`) so the page keeps the room; it returns when the window grows. While narrow, `NarrowRail` (`RailHud/NarrowRail.tsx`) puts a small "Show the rail" button at the page's left edge; it shows the rail as an overlay above the page (the page keeps its width). Escape, a click outside, or opening a page from the rail hides it; widening the window resets it. There is no manual rail collapse otherwise. Go To is the `oxplow-foundation` panel `go-to` (bookmarks, then the five most recent or most visited pages — one line each, a most-visited page's count after its title; every row has an icon: a declared page that names none draws the generic page's, `DEFAULT_PAGE_ICON` (a window); a kind nothing knows draws `MISSING_PAGE_ICON` (a dashed square)). |
-| `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator** (each stream's open threads — `get_thread_state` leaves closed ones out; they're on the Closed Threads page): a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`) — a stream is a tab in the guide line's grey (`--text-muted`) with dark text (`--text-on-stream-tile`), coming out of the window's left edge and rounded on the right only, with its threads as tabs under it, all flush with the left edge and butted up against each other, each filling its shorter row and stopping short of the right (in the centre tab strip's header tint, `--panel-header-bg` over `--surface-card`, like a regular tab; the selected thread's accent bar is 3px, as thick as a selected centre tab's underline and in the same `--accent`, in the dark gap against its tab's right; a marked thread shows its mark as a corner fold on its top-left in `var(--thread-mark-<colour>)` (`navigator-thread-mark`, title "Marked <colour>"), not an outline; stacked tabs are set apart by a 1px divider along each one's bottom but the last's, in the guide line's grey (`--text-muted`), so none falls under the stream's tab, and the strip's column is `--surface-app`); a grey guide line runs down the column's right, flush with the stream tab's right edge, from under the stream's tab, with a tick from each thread's tab into it, ending at the last, each thread's agent status dot a node where the tick meets the tab; a stack's corners are rounded only where no tab sits next to it (the stream's top, the last tab's bottom), the rest flat; the strip draws no line against the HUD rail; in the expanded panel, on the strip's same dark (`--surface-app`), a thread's row keeps the strip's tab for its abbreviation, squared off, then the same 5px gap (`navigator-tab-gap`, `TAB_GAP`, which the line between stacked tabs runs through), then a second tab of the same shape for the title (`navigator-tab-title`; `IconColumn wide`, `IconCell label`), so a selected thread has a bar after each and the row's end looks like the strip's; a stream's row stays one tab, curved only at the row's end, with a thin dark line in the middle of the thread rows' gap; the panel's rows draw the same icon column (`IconColumn`) so the two line up; clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else.** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`), a stream glyph (which also switches to that stream, then shows its threads), or the already-selected thread's glyph (selecting it again would do nothing). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it. Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) — and each strip glyph, with the same menu — opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard), headed by the stream's or thread's name (`context-menu-header`); Rename and Add thread open the panel for their inline field. **Thread menu:** **"Mark with…"** (`menu-item-thread.mark`) opens a submenu headed by the line "A colour on the thread's tab, for grouping threads your way. It changes nothing else." (`context-submenu-header`, the generic `MenuItem.submenuHeader`) and lists `amber`, `red`, `green`, `blue`, `violet` (each with a colour chip, `MenuItem.swatch`) and None as `menu-item-thread.mark.<colour|none>`, the current one checked; picking one runs `oxplow.thread.mark` (via `onMarkThread` → `App.handleMarkThread`). Then Rename / Settings / Close. A mark only groups threads the person's way; every open thread of a stream shares its worktree. |
+| `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator** (each stream's open threads — `get_thread_state` leaves closed ones out; they're on the Closed Threads page): a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`) — a stream is a tab in the guide line's grey (`--text-muted`) with dark text (`--text-on-stream-tile`), coming out of the window's left edge and rounded on the right only, with its threads as tabs under it, all flush with the left edge and butted up against each other, each filling its shorter row and stopping short of the right (in the centre tab strip's header tint, `--panel-header-bg` over `--surface-card`, like a regular tab; the selected thread's accent bar is 3px, as thick as a selected centre tab's underline and in the same `--accent`, in the dark gap against its tab's right; a marked thread shows its mark as a corner fold on its top-left in `var(--thread-mark-<colour>)` (`navigator-thread-mark`, title "Marked <colour>"), not an outline; stacked tabs are set apart by a 1px divider along each one's bottom but the last's, in the guide line's grey (`--text-muted`), so none falls under the stream's tab, and the strip's column is `--surface-app`); a grey guide line runs down the column's right, flush with the stream tab's right edge, from under the stream's tab, with a tick from each thread's tab into it, ending at the last, each thread's agent status dot a node where the tick meets the tab; a stack's corners are rounded only where no tab sits next to it (the stream's top, the last tab's bottom), the rest flat; the strip draws no line against the HUD rail; in the expanded panel, on the strip's same dark (`--surface-app`), a thread's row keeps the strip's tab for its abbreviation, squared off, then the same 5px gap (`navigator-tab-gap`, `TAB_GAP`, which the line between stacked tabs runs through), then a second tab of the same shape for the title (`navigator-tab-title`; `IconColumn wide`, `IconCell label`), so a selected thread has a bar after each and the row's end looks like the strip's; a stream's row stays one tab, curved only at the row's end, with a thin dark line in the middle of the thread rows' gap; the panel's rows draw the same icon column (`IconColumn`) so the two line up; clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else.** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`), a stream glyph (which also switches to that stream, then shows its threads), or the already-selected thread's glyph (selecting it again would do nothing). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it. Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) — and each strip glyph, with the same menu — opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard), headed by the stream's or thread's name (`context-menu-header`); Rename and Add thread open the panel for their inline field. **Thread menu:** **"Mark with…"** (`menu-item-thread.mark`) opens a submenu headed by the line "A colour on the thread's tab, for grouping threads your way. It changes nothing else." (`context-submenu-header`, the generic `MenuItem.submenuHeader`) and lists `amber`, `red`, `green`, `blue`, `violet` (each with a colour chip, `MenuItem.swatch`) and None as `menu-item-thread.mark.<colour|none>`, the current one checked; picking one runs `oxplow.thread.mark` (via `onMarkThread` → `markThread` of `window/useWindowStreams.ts`). Then Rename / Settings / Close. A mark only groups threads the person's way; every open thread of a stream shares its worktree. |
 | `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest visibility scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `oxplow.bookmark.set` / `oxplow.bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To page's bookmark row actions re-scope and remove. **The native menu bar's Go menu** (macOS; after File and Edit) is what the Go To pane shows: its groups (Bookmarks, then History or Most visited, as the pane's toggle is), each under a disabled heading, a separator between, or one disabled "Nothing yet — star a page or open one". `GoMenuFeed` (`components/Panels/GoMenuFeed.tsx`, inside `PanelRunsProvider`) reads the `go-to` panel's body run (`menuBar.ts` `goRowsOf`: the loader whose rows have `grp`, `title`, `uri`) and hands the rows to `App`, which passes them to `buildNativeMenuSnapshots` (`goMenuItems`), so the menu changes as the pane does; an item's id is `go.open:<uri>`, and the `menu:command` handler opens it through `handleOpenPage`. The in-window `Menubar` (non-Mac) has no Go menu. |
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_resource` writer in the backend instead. |
 | `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) ; every launcher page is a declared page (`components/extensionLauncher.ts`). |
@@ -80,7 +82,124 @@ pages are THE shell.
 | `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`); renders `bar` vizzes. |
 | `apps/desktop/src/components/CollapsibleSections.tsx` | Collapsible page sections. Two parts plus a hook: `CollapsibleSections` (state provider), `SectionCollapseControls` (the "Expand all" / "Collapse all" pair), and `useSectionCollapse`, which the kit `Section` (`collapsible`, `defaultCollapsed`; the toggle is a button inside the `<h2>`) reads. Sections register themselves on mount so the controls know what "all" means — only what's **currently rendered** counts, so a filtered-out section is never silently expanded — and the controls self-hide when nothing is registered. **The page places the controls**: Recorded Metrics renders them in the **details rail** beside its filters, which works because the provider wraps the whole `<Page>` and `rightRail` is *rendered* inside Page's subtree (context follows the render tree, not the creation site). For that to be safe the provider renders `children` **bare** — a wrapper element there would break the page chrome's `height: 100%` column. Collapsed ids are the tab entry's state (`useHistoryState`); default is expanded, and stored ids are deliberately **not** reconciled against the rendered set (a section hidden by a page's search must return still collapsed). Pure state/persistence in the sibling `sectionCollapse.ts`. **Not a `Page` prop** — see `.context/usability.md` → "Collapsible page sections". Adopters: none now. |
 | `apps/desktop/src/components/TabModal.tsx` | The one dialog for anything that comes from within a tab (About this page, page/viz action forms, a custom component's forms, a command's confirmation). Drawn inside the tab's body (`CenterTabs` makes each body `position: relative`): dims only that tab, sized to its content, title + subtitle + ×, Escape/× close, focus in and back. A tab body stays mounted while another tab shows, so an open modal and a form's typed values survive switching tabs: its state is the body's own React state, no history state. |
-| `apps/desktop/src/components/Slideover.tsx` | Right-edge window-level panel (~38vw, backdrop-click + Escape close) for detail openings that aren't from one tab's content (`Navigator`, `BranchPicker`, commit/snapshot detail). |
+| `apps/desktop/src/components/Slideover.tsx` | Right-edge window-level panel (~38vw, at least 360px and never past the screen; backdrop-click + Escape close) for detail openings that aren't from one tab's content (`Navigator`, `BranchPicker`, commit/snapshot detail). |
+
+## The window's hooks
+
+A window's logic is shell-neutral hooks in `apps/desktop/src/window/`, so
+every shell (the desktop's and the tablet's, "Shells" below) draws the same
+window. `App.tsx` is the window: it calls them, in this order, builds the
+`ShellWindow` a shell draws, and lays out the desktop shell itself.
+`useStreamThreadMenus` is the one a shell calls (the Navigator, the tablet
+shell), since it draws that hook's flows where it lists streams.
+
+| Hook | Owns |
+|---|---|
+| `useWindowStreams` | Every stream and its threads, the shown stream and thread, the switch, the person's stream and thread commands; loaded on mount and on every reconnect. |
+| `useWindowTabs` | Every thread's session of tabs, what each tab registers (title, unsaved edits, Save, Find, actions), the shown thread's active tab and its operations, the agent sessions' tabs, a new thread's first tabs, the tab cap, the buffers the tabs keep. `HOME_TAB`. |
+| `useWindowOpeners` | Where a ref opens (its tab, its file, a symbol's line, an agent session or its transcript, a thread, a stream), in-tab navigation, closing a file with unsaved edits; `handleOpenPageRef` for callers made before it. |
+| `useWindowHost` | The window as the daemon's host (`clientHost.ts`), taken once the window is ready, the live tab report agents read (focus, visibility, the shown thread, page detail, runs), and the tabs agents queued while the device was away (`list_queued_tabs`, `forget_queued_tabs`). |
+| `useWindowCommands` | The context keys a command's `when` reads, the person's offers, the commands the window runs itself, the keyboard shortcuts. |
+| `useWindowPages` | The shown thread's tabs as `WindowTab[]` (`window/windowTab.ts`): what draws each page, each body in its navigation context. |
+| `useStreamThreadMenus` | Each stream's and thread's menu and the flows they start (rename, add a thread, remove a stream), New Thread requests (`new-thread-bus`) and menus asked for from outside (`navigator-bus`); the shell draws the flows where it lists streams (`reveal`). |
+| `<WindowProviders>` | What every shell's window sits in: the panels' runs and layout, the live origins of the shown thread's tabs, the alert toasts, and `useReportUse` (tells the daemon, at most once a second, that the person uses this window: the device used last). |
+
+Each hook has its own test (`window/*.test.tsx`), and
+`tests-e2e/specs/shell/window.spec.ts` pins the window's behavior across
+them. What stays in `App.tsx`'s desktop branch is the desktop's: the menu
+bar and native menu, the rail, the dock, the strip, the layout. The Git
+dialogs and the status bar come from the `ShellWindow` in both shells.
+
+### Shells
+
+A window is drawn by one shell (`apps/desktop/src/shells/`), chosen by
+`useShellKind` (`chooseShell`; it reads only the `shell` preference, so the
+window re-renders when that changes, not on other writes; a device whose
+preference differs from its default switches once it loads): a test's override first (the
+page's `?shell=desktop|tablet` or the window context's `shell`), then the
+device's own choice (the `shell` app preference, per device), then its
+kind: a desktop gets `desktop`; a tablet, and a phone until it has its own
+shell, get `tablet` once that shell is complete (`shellComplete`: no gap in
+the contract below), `desktop` until then. The contract is a hand-kept list
+of what a shell draws: complete means every listed contribution has a
+place, not that the tablet does all the desktop does (it cannot drag tabs
+or order panels, for one).
+
+- **`desktop`** is `App.tsx`'s own layout: menu bar, title bar, Navigator,
+  rail, `CenterTabs`, dock.
+- **`tablet`** is `TabletShell`: one line at the top (the context: stream
+  and thread, then the thread's tabs, then search), the page at full width,
+  the panels' tray at the bottom. A tab's
+  long press opens the window's tab menu (`buildTabMenu`).
+  A tap on the context opens the **switcher** (`TabletSwitcher`, a
+  `Slideover`): on a host's page the host's projects first (`/host/projects`;
+  a tap on another holds it and goes to `/p/<id>/`), then the streams, each
+  with its threads (a tap switches or selects; the current ones are
+  `aria-current`). A row's long press or ☰ opens the window's menu for it
+  (`useStreamThreadMenus`, which this shell calls itself: it has no
+  Navigator), and its flows are inline there: Rename, + New thread (made, it
+  is listed; a tap selects it, as in the Navigator), Remove… (the shared
+  `RemoveStreamDialog`). New Thread… from anywhere opens it on the field.
+  The top line's ☰ (`tablet-menu`) holds the menu bar's commands (Save,
+  Find, the extensions' `ui.menu` ones) as File ▸, Edit ▸ and View ▸
+  (`shellMenu`: the OS's own edit items left out; View turns panels on and
+  off, and the tray shows the ones on). The top line also has the
+  stream's branch (`BranchChip`) and, when other threads' agents wait on the
+  person, how many (`tablet-context-waiting`). The switcher's projects link
+  to the host's home (All projects…), where a project is let go and the
+  device forgotten; a marked thread shows its mark; + New stream… is there
+  only with git on; the new-thread field is made only by Enter, and its
+  Escape closes it alone.
+  The ☰ also has **Continue from ▸ <device>** when another device has pages
+  open in the shown thread (`window/continueFrom.ts`, read as the menu
+  opens): it opens that device's page tabs here, its shown one last. The
+  two devices share nothing after; agent sessions show on both already.
+  The **tray** (`shells/PanelTray.tsx`) is the rail's panels in the
+  device's rail order (`usePanelLayout`), each a button with its icon, name
+  and count, then the dock's bar. A tap opens the panel as a sheet (its
+  choices, its body whole, Open, Pin); **Pin** keeps one panel beside the
+  page as a column (`PinnedPanel`), by the device's `tablet.pinnedPanel`
+  preference, until its pin is pressed again.
+
+**A tab beside the page.** A thread's session can show one tab beside the
+active one (`Session.beside`, read through `besideSlot`: none once that
+tab closes or is the active one, so no closing operation needs to know;
+kept in the stored session). The window maps it to tab ids
+(`useWindowTabs`: `centerBeside`, `setCenterBeside`; `ShellWindow`:
+`besideTabId`, `setBeside`), and `TabBodies` draws the beside body after
+the active one, both shown, under a header. The tablet offers it on a
+tab's menu (Show Beside / Stop Showing Beside) and the beside column's
+header has its name and a ×: an agent's session beside the page it shows.
+The desktop strip has no item for it yet.
+
+**Choosing the layout.** Where a choice makes sense (a device that is no
+desktop, or one that chose the tablet's), both shells offer Desktop Layout
+and Tablet Layout (`layoutItems`): the tablet's ☰ under Layout ▸, the
+desktop's in-window View menu at its end. A pick is the device's `shell`
+preference. The Mac app offers none.
+
+App builds one `ShellWindow` (`shells/shellWindow.ts`): the streams and
+threads and their operations, the shown thread's tabs, `closeTab` (a file's
+tab closes its file, a diff's its diff, a session's the session),
+`reorderTabs`, opening a page and search, the menu bar's commands, the tray,
+the Git dialogs and the status bar. A tablet tab's menu also has Move Left
+and Move Right (no drag on a finger). Only the shown tab has its × (an
+agent session's closes the session, as on the desktop): a tap on another
+tab only shows it, where a short tab's × would take the tap; its menu has
+Close. Tablet bodies are keyed by stream, as
+the desktop's strip is. The dock's panel opens over the column a shell
+marks `data-dock-column`. Both shells draw tab bodies through
+`TabBodies` (`components/CenterTabs/TabBodies.tsx`: mounted when first
+shown, then kept; `center-tab-body-<id>`). Toasts, confirmations, Quick
+Open, the daemon-down dialogs and the connection banner are drawn outside
+the shell, for both.
+
+**The contract** (`shells/shellContract.ts`): every shell draws every
+contribution the window has (tabs, tab menus, streams and threads, panels,
+dock panels, panel alerts, menu commands, search, tab order, Git dialogs,
+background tasks). `SHELL_PLACES` names
+where; a `null` is a gap still to build, and `TabletShell.test.tsx` holds
+the list of gaps so it only shrinks.
 
 ## Renderers
 
@@ -190,12 +309,10 @@ shown as itself, the default for one anywhere; the Text view stands
 aside for it), `tsv` (a TSV file as a table), `wiki-page`, `task`,
 `diff-view` for `oxplow/snapshot`, `oxplow/request` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
-session's tab follows its row (`reconcileSessionTabs`). The tabs the browser
-stores per thread (`oxplow.layout.v8.sessions`) outlive a reset of the project,
-and a new thread can get an old one's id: when the window first sees a thread's
-open sessions, a stored entry whose agent-session tabs name none of them is
-forgotten and the thread opens as a new one (`storedSessionIsStale`), so it
-never sits on tabs that can't load. There is no `change-analysis` page.
+session's tab follows its row (`reconcileSessionTabs`): a session closed on
+another device loses its tab here too, and the thread's other tabs stay. The
+tabs a device keeps per thread (`tab_session`) go with their thread. There is
+no `change-analysis` page.
 
 ## Tab id format
 
@@ -250,18 +367,14 @@ undeclared one draws "No such page"; a URI nothing renders draws the
 fallback `resource` page. `newTaskRef(payload)` names the `new-task`
 page (an oxplow-bundled form page, `new-task`) with its `parent` param.
 
-There are no sentinel tab ids (`HOME_TAB` in `App.tsx` means "nothing
+There are no sentinel tab ids (`HOME_TAB` in `window/useWindowTabs.ts` means "nothing
 chosen", never a tab), and "is this the editor's working-tree file" is
 `diskFilePath(id)` (null for a pinned revision such as
 `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD`, which is a read-only viewer tab).
 
 **No compatibility layer for old ids.** When a kind is renamed or a page
-moves into an extension, its saved tabs/bookmarks/history are dropped
-(the tab-layout keys started fresh again as `oxplow.layout.v3.*` when
-pages became declared, 2026-10-17, as `oxplow.layout.v5.*` when ids
-became URIs, as `oxplow.layout.v6.*` when the view moved to the `#`, and
-as `oxplow.layout.v7.*` when a tab became just its URI; bookmarks
-moved into the project DB and started fresh again) — see the decision in [resources.md](./resources.md).
+moves into an extension, its saved tabs, bookmarks and history are dropped:
+a stored session (`tab_session`) of an old shape reads as none — see the decision in [resources.md](./resources.md).
 
 | Thing | Id format | Example |
 |---|---|---|
@@ -274,7 +387,7 @@ moved into the project DB and started fresh again) — see the decision in [reso
 | route | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<namespace>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a route; see "Declared pages" below | `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
 | web page | the URL itself, `https://example.com/docs` (`externalUrlRef(url)` is `{ id: url }`) — rendered by foundation's `external-url` page (a `viz: embed` over the URL), `for: [https, http]`, its tab labelled `{{param.uri|url}}`; see [external-url-tabs.md](./external-url-tabs.md) | `https://example.com/docs` |
 | symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
-| agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
+| agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`WindowTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
 
 ## Resource pages and standalone pages
 
@@ -532,9 +645,9 @@ reach the run's actual reads retry its initial execution; catalog-wide changes a
 retry. Unrelated writes (including records from its own command loaders) do not
 starve opening. A later change finds the published run. This closes the query/registration gap without a timed missed-event cache.
 A window opens
-a run (`open_page { page | specYaml, params, streamId, threadId, client }`
+a run (`open_page { page | specYaml, params, streamId, threadId }`
 → `{ runId, run }`; a left-nav panel's part is `open_panel_part { panel,
-part, choices?, streamId, threadId, client }`, the daemon saying which page
+part, choices?, streamId, threadId }`, the daemon saying which page
 and with what, and its reply and snapshots carrying the part's `panel`
 view: the header's count and the toggles) and closes it (`close_page`); a pick, filter or
 switch is `set_page_params`, Refresh `rerun_page`. The change loop
@@ -566,11 +679,11 @@ its loading screen. The window's run store publishes its whole live roster with
 instead of repeating a cached list. Reports use a single-flight writer:
 while one is in flight, only the newest pending snapshot is retained, so
 an older HTTP report cannot arrive after a newer roster and close its runs.
-Runs belong to their window's `client`; reports prune only that client's
+Runs belong to their window's connection (the request's caller); reports prune only that connection's
 previously acknowledged runs which are now absent. The event socket's
-`client` query param names the same stable id used by logs and reports
-(`uiClientId.ts`, independent of the API/transport import graph), and its
-disconnect and client expiry reclaim owned runs. A reconnect clears the
+`connection` query param (with `device`, `name` and `kind`) names the same id used by logs, reports and the
+client host (`uiClientId.ts`: `con-<uuid>`, one per page load, in memory; independent of the API/transport import graph), and its
+disconnect and connection expiry reclaim owned runs. The socket releases them only when it is the connection's current socket (`SocketLease`). A reconnect clears the
 old roster and reopens its held runs; stale open replies are fenced out and
 closed instead of resurrecting old ids. A dataset change keeps the loaders it didn't reach:
 the re-run is seeded (`PageRunner::run_seeded`) with every loader run —
@@ -782,7 +895,7 @@ of its own: the tab says what it is and, for a part, the pages, panels and
 slots that draw it — `hostsOf`, the daemon's `hosts_of`); `MissingPage` when no enabled extension has it, nothing
 while the extensions load. The one built-in is `builtInPages.resource`
 (`pages/builtInPages.tsx`), the fallback renderer; it is a
-`(ctx) => CenterTab | null` over `{ ref, params, nav }`, `nav` the slot's
+`(ctx) => WindowTab | null` over `{ ref, params, nav }`, `nav` the slot's
 `SlotNav` (`pages/slotNav.ts`). A page whose `view:` is one component node
 *is* that component (`ComponentPage`): a component may own its window
 as its view params, written on every change (not its opening default) and followed on
@@ -1334,12 +1447,12 @@ is the Alerts panel's icon.
   row plus the panel. `DockBar.tsx` draws the icons. `DockPanel.tsx` draws
   the open panel. `dockStore.ts` holds the state. `dockPanels.tsx` holds
   the registry.
-- **Store:** `{ open: id | null, height }`. At most one panel is open.
-  `toggle`, `open`, `close` and `setHeight` change it. The height is
-  clamped to 160px or more and kept in `shellStorage` under
-  `oxplow.dock.height`. The panel also keeps it within the column height
+- **Store:** `{ open: id | null }`. At most one panel is open.
+  `toggle`, `open` and `close` change it. The height is an app preference
+  (`useDockHeight`, key `dockHeight`), so each device has its own. It is
+  clamped to 160px or more. The panel also keeps it within the column height
   minus 80px.
-- **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, page? }`.
+- **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, Header?, Collapsed?, page? }`.
   `icon` is a name from `ICONS`. `useBadge` is a hook that returns a count
   and an optional `danger` tone, or null; the bar draws it as a count pill
   on the icon's top-right corner, overlapping it and ringed in the bar's
@@ -1351,6 +1464,15 @@ is the Alerts panel's icon.
   `CORE_ORDER` (alerts, the leftmost icon, then context). Extension panels with
   `dock: true` follow, sorted by title. Their body is the panel's `body`
   page and their badge is its `badge` or `count` page. `useDockPanels()` returns the whole list.
+  An extension panel draws its parts as a rail panel does, from the one
+  `Panels/PanelParts.tsx` (`PanelBody`, `PanelCollapsed`, `PanelChoiceToggle`;
+  the rail and the dock pass a `testIdPrefix`, `rail-panel` or `dock-panel`).
+  Its `Header` holds the body's choice toggles (`dock-panel-choice-<name>-<value>`
+  in the open panel's header). Its `Collapsed` is the collapsed page, drawn in
+  the bar beside the icon while the panel is closed (`dock-panel-collapsed`)
+  and gone while it is open. The badge on the icon is the count: a firing
+  badge page's alert count, else the count page's number. A body's "+N more"
+  opens the panel's page.
 - **Layout:** the panel is absolute and anchored above the bar, inside the
   center column. The page does not reflow. Undo toasts sit above an open
   panel. It is a popover, so it wears the elevated tier
@@ -1505,8 +1627,8 @@ them.
 ## Navigation model: a tab is a session of entries
 
 A thread's center tabs are one pure model, `tabs/session.ts`, as a
-browser keeps its session history. App holds a `Session` per thread
-(`useTabSessions`) and draws everything tab-shaped from it: the strip,
+browser keeps its session history. The window holds a `Session` per thread
+(`useTabSessions`, through `window/useWindowTabs.ts`) and draws everything tab-shaped from it: the strip,
 the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 
 | Browser | oxplow |
@@ -1596,44 +1718,76 @@ at other values") whose popover offers **update that bookmark**
 (`bookmarkedElsewhere`, `moveBookmark`: one `oxplow.command.sequence` of remove +
 set at the same scope, so one undo).
 
-**Persistence.** One key, `oxplow.layout.v7.sessions` (`{ [thread]:
-Session }`, written on every change, read on start; corrupt text reads
-as none). It holds every tab's history and the active tab, so a restart
-comes back to the same pages at the same params. A diff's spec rides in
+**Persistence.** The daemon keeps each device's tabs of each thread
+(`tab_session`, `.context/data-model.md`): `useTabSessions` reads them at
+start (`list_tab_sessions`; until they load no thread is known to be new, and
+a change made before they arrive stays), and saves each thread's session as it
+changes (`save_tab_session`), one save at a time per thread, each giving the
+revision the last one answered. A save refused as stale takes the daemon's copy
+of that thread. A thread's text that isn't a session reads as none. The browser
+keeps nothing of the tabs, so two projects never mix theirs, and another device
+of the same person has its own. A session holds every tab's history and the
+active tab, so a restart comes back to the same pages at the same params. A diff's spec rides in
 its ref (`diffRef`), so diffs survive too. An open file's buffer is
 read again when its tab's page mounts; unsaved edits don't outlive the
 window (`editor/buffers.ts`).
 
 ## What agents see of the tabs
 
-Each window reports what it shows (`report_tabs`, debounced 300 ms from
-`App.tsx`, built by the pure `tabs/tabReport.ts` from the sessions):
-every thread's tabs with their shown titles (the tab strip's label, else
-a page's own title, else its kind's label), each tab's `back` and
-`forward` (the ids of its entries before and after, oldest first) and
-`origin` (the title of the collection it was opened from), the one
-selected in each, the thread it shows,
-whether it is focused and visible, and the detail the shown page
-publishes through `tabs/openPageDetail.ts` (a page file's `{runId, focus: {node}}`,
-published by `PageHost`; an editor's `{path, caret, selection}`). A window is its renderer's
-`getUiClientId()`. The backend keeps the reports in memory
-(`oxplow_app::client_reports`): a window not heard from for 5 minutes is
-forgotten, a report older than a minute is listed as stale.
+A device's tabs are its stored ones (`tab_session`, "Persistence"): the
+daemon reads them directly, so an agent sees a device's tabs while the
+device is away. The strip's label of each tab of the **shown thread** is
+kept in its current entry's `label` (`useWindowPages`), a field of its own:
+`title` stays what the page registered, which the strip prefers, so the label
+never feeds the label it came from. Nothing is stored while the extensions
+load (the labels are placeholders), and an agent session's tab follows the
+session's name. A tab of another thread keeps the label it had until that
+thread is shown. Rust reads `label`, then `title`, then the kind. A tab's `kind` is
+`recordedPageKind` ported to Rust (`client_reports/stored_tabs.rs`): a
+page's route, else the resource, else `http`/`https`, else `link`. `back`
+and `forward` are the ids of the entries before and after the current one,
+oldest first, and `origin` is the title of the collection the entry was
+opened from. A session is read as loosely as the window reads it: a tab
+that does not read (no `slot`, an entry with no `ref.id`, an `at` that is not
+a position) is left out and the others stay; an origin needs no title. A
+stored session that is not JSON of tabs is skipped with a warning.
+
+Each window also reports what is live (`report_tabs`, debounced 300 ms from
+`window/useWindowHost.ts`, built by the pure `tabs/tabReport.ts`): the
+thread it shows, whether it is focused and visible, its page runs, and the
+detail the shown page publishes through `tabs/openPageDetail.ts` (a page
+file's `{runId, focus: {node}}`, published by `PageHost`; an editor's
+`{path, caret, selection}`). The report holds no tabs, so it changes only
+when one of those changes. A window is a page load, named by its renderer's `getUiClientId()` (`con-<uuid>`). The
+backend keeps the reports in memory (`oxplow_app::client_reports`): a window
+not heard from for 5 minutes is forgotten, a report older than a minute is
+listed as stale.
 
 - `oxplow_list_tabs { scope?, thread? }` lists the tabs of a thread
-  (default the caller's), its stream's threads or every thread, in every
-  window: id (a ref), kind, title, thread, stream, agent session for a
-  session tab, `selected` (in its thread, in that window), `visible`
-  (selected, in the thread its window shows, in a visible window),
-  window and staleness; `unreported` names the threads no window reported.
-- `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
-  thread in the window the person was in last (most recently focused),
-  with `others` (each other window's), or the listed `tab`: its
-  `pageId`, its `page` (the identity, the id without its `#`) and `view`
-  (the `#`, decoded — `uri::build::view_of`; an agent never parses an id), its tab's
-  `back`, `forward` and `origin`, and, for a page file, its tree and run as
-  text (`pages/text.rs`). Detail comes only from a window showing that thread's page. Two windows never
-  collapse into one "open page".
+  (default the caller's), its stream's threads or every thread, on every
+  device that has tabs stored for them, connected or not, the device used
+  last first: `tab` (a ref), kind, title, thread, stream, agent session for a
+  session tab, `selected` (the device's active tab in that thread),
+  `visible` (selected, and the device's window shows that thread and is
+  visible), `device`, `deviceName` (null when the device is away) and
+  `connected`. A connected device adds `client` (its connection, the page
+  load); a device with a live report adds `reportedAt` and `stale`.
+  `unreported` names the threads no device has tabs stored for. A window's
+  report is keyed by its page load, comes from the request's caller (the
+  report itself names no window), and is dropped when the window's event
+  socket closes; the window sends it again as soon as its socket is back
+  (`tabs/useTabReportRepeats.ts`), as well as on its minute heartbeat.
+- `oxplow_get_open_page { thread_id, tab? }` is the tab selected in the
+  thread on the device the person used last (`ClientDevices::last_used`),
+  else on the next device with one, with `others` (each other device's), or
+  the listed `tab`: its `pageId`, its `page` (the identity, the id without
+  its `#`) and `view` (the `#`, decoded — `OxplowUri::view`; an agent
+  never parses an id), its tab's `back`, `forward` and `origin`, its device
+  facts as in the list, and, for a page file, its tree and run as text
+  (`pages/text.rs`). `detail` comes from the device's live report, only for
+  the page its window shows in that thread. Two devices never collapse into
+  one "open page". With nothing open, `reason` says why and `shown` lists
+  what the live windows look at.
 
 Both are read-only: nothing an agent reads activates a tab or a window.
 
@@ -1757,19 +1911,22 @@ the docs and the skill:
 |---|---|---|---|
 | **view params** | this tab's view: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the `#` of the entry's ref | `nav.viewParams`, `nav.setViewParams(view, { push })`, `nav.patchViewParams(patch, { push })` |
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
-| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
-| **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
-| (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
+| **page memory** | this page, for the person on this device, every tab of it, across restarts | `ui_preference` (by device), scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
+| **app preference** | the whole app, for the person on this device | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
+| (a panel's memory) | a left-nav panel, for the person on this device | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |
 
 `prefs/remembered.ts` holds page memory and app preferences: one store
-loads everything once (`get_ui_preferences`), a change shows at once and
-is written after a pause per key (`set_ui_preference`), a value equal to
-what's there writes nothing; tests give it a backend
+loads everything (`get_ui_preferences`: the device's own rows and every
+component's memory) and reads it again on a reconnect and when
+`v_ui_preference` or `v_component_memory` changes, a change shows at once and
+is written after a pause per key (`set_ui_preference`), a value waiting to be
+written, or whose save failed (sent again after a delay and at each read),
+wins over a reloaded one, a value equal to what's there writes
+nothing; tests give it a backend
 (`RememberedContext`). **Nothing touches the browser's storage but
-`shellStorage.ts`**, which holds only the shell's own keys (the tab
-sessions, the open files' paths, the remote daemon and its token, the
-recent remotes, the window's log id); `no-direct-storage.test.ts` holds
+`shellStorage.ts`**, which holds only the shell's own keys (the
+remote daemon and its token, the recent remotes, this browser's device id); `no-direct-storage.test.ts` holds
 every other file to it.
 
 **One hook per kind, as easy as `useState`** (`tabs/useViewParam.ts`);
@@ -1826,7 +1983,7 @@ following its link back to that existing page.
 
 Every tab is a session tab, whatever it shows (a knowledge page, a file, a
 diff, a task, a page file, a commit, an agent session, a web page, …). The
-builder in `App.tsx` (`centerTabs`) takes each tab's `bodies`, draws
+builder in `window/useWindowPages.tsx` (`windowTabs`) takes each tab's `bodies`, draws
 each with `renderTab` — a route through `routeTab`, anything else
 through its renderer ("Renderers"), so there is no per-kind table to
 extend — and wraps it in a `PageNavigationContext`. `nav` is the

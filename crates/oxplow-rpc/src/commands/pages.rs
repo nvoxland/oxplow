@@ -17,6 +17,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, DomainError};
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 /// A run a window opened: its id (what it closes, fetches and acts by)
 /// and its first result.
@@ -42,33 +43,40 @@ fn target(page: Option<String>, spec_yaml: Option<String>) -> Result<RunTarget, 
     }
 }
 
-async fn context(svc: &Services, stream_id: Option<&str>, thread_id: Option<&str>) -> ViewContext {
+/// The context a page is viewed from: the stream and thread asked for,
+/// else the thread the caller's device shows in that stream.
+async fn context(
+    request: &RpcRequest<'_>,
+    stream_id: Option<&str>,
+    thread_id: Option<&str>,
+) -> ViewContext {
     oxplow_app::pages::spec::view_context(
-        svc,
+        request,
+        request.caller.map(|c| &c.device),
         stream_id.and_then(oxplow_domain::StreamId::try_from_str),
         thread_id.and_then(oxplow_domain::ThreadId::try_from_str),
     )
     .await
 }
 
-/// Run a page and keep it open for `client` (the window's id).
-#[allow(clippy::too_many_arguments)]
+/// Run a page and keep it open for the page load asking (its connection).
 pub async fn open_page(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     page: Option<String>,
     spec_yaml: Option<String>,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
     thread_id: Option<String>,
-    client: String,
 ) -> Result<OpenedRun, IpcError> {
+    let client = request.connection()?.as_str();
+    let svc: &Services = request;
     let req = RunRequest {
         target: target(page, spec_yaml)?,
         params: params.unwrap_or_default(),
-        ctx: context(svc, stream_id.as_deref(), thread_id.as_deref()).await,
+        ctx: context(request, stream_id.as_deref(), thread_id.as_deref()).await,
         viewer: Actor::Human,
     };
-    let (run_id, run) = svc.page_runs.open(svc, req, &client).await?;
+    let (run_id, run) = svc.page_runs.open(svc, req, client).await?;
     Ok(OpenedRun {
         run_id,
         run,
@@ -76,31 +84,31 @@ pub async fn open_page(
     })
 }
 
-/// Open `part` of left-nav panel `panel` (`<extension>/<panel>`) for
-/// `client`, as `open_page` does: the daemon says which page the part runs
+/// Open `part` of left-nav panel `panel` (`<extension>/<panel>`) for the
+/// page load asking, as `open_page` does: the daemon says which page the part runs
 /// and with what (`oxplow_app::pages::panels::part_request` — the scope's
 /// id from the view, the body's toggles from the viewer's `choices`), and
 /// what the run gives the panel (`part_view`: the header's count, the
 /// toggles), so the window decides neither.
-#[allow(clippy::too_many_arguments)]
 pub async fn open_panel_part(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     panel: String,
     part: oxplow_app::pages::panels::PanelPart,
     choices: Option<BTreeMap<String, String>>,
     stream_id: Option<String>,
     thread_id: Option<String>,
-    client: String,
 ) -> Result<OpenedRun, IpcError> {
     use oxplow_app::pages::panels;
+    let client = request.connection()?.as_str();
+    let svc: &Services = request;
     let found = panels::find_panel(svc, &panel).await?;
-    let ctx = context(svc, stream_id.as_deref(), thread_id.as_deref()).await;
+    let ctx = context(request, stream_id.as_deref(), thread_id.as_deref()).await;
     let req = panels::part_request(svc, &found, part, ctx, &choices.unwrap_or_default())
         .await?
         .ok_or_else(|| DomainError::Invalid(format!("panel `{panel}` has no {part:?} part")))?;
     let (run_id, run) = svc
         .page_runs
-        .open_part(svc, req, &client, &found, part)
+        .open_part(svc, req, client, &found, part)
         .await?;
     Ok(OpenedRun {
         panel: Some(panels::part_view(&found, part, &run)),
@@ -155,17 +163,18 @@ pub async fn fetch_page_runs(
 /// Run a page once, keeping nothing open (a launcher count, a picker's
 /// options).
 pub async fn run_page(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     page: Option<String>,
     spec_yaml: Option<String>,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<PageRun, IpcError> {
+    let svc: &Services = request;
     Ok(PageRunner::of(svc)
         .run(RunRequest {
             target: target(page, spec_yaml)?,
             params: params.unwrap_or_default(),
-            ctx: context(svc, stream_id.as_deref(), None).await,
+            ctx: context(request, stream_id.as_deref(), None).await,
             viewer: Actor::Human,
         })
         .await?)
@@ -175,18 +184,19 @@ pub async fn run_page(
 /// current values, run once — only that loader's chain
 /// (`pages::options::param_options`).
 pub async fn page_options(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     page: String,
     param: String,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<oxplow_db::SqlQueryResult, IpcError> {
+    let svc: &Services = request;
     Ok(oxplow_app::pages::options::param_options(
         svc,
         &page,
         &param,
         &params.unwrap_or_default(),
-        &context(svc, stream_id.as_deref(), None).await,
+        &context(request, stream_id.as_deref(), None).await,
         &Actor::Human,
     )
     .await?)
@@ -212,11 +222,12 @@ pub async fn get_page(svc: &Services, id: String) -> Result<Page, IpcError> {
 /// (`oxplow_app::pages::renderers`): the window's one way to choose what
 /// draws a tab and what View as lists.
 pub async fn renderers_for(
-    svc: &Services,
+    request: &RpcRequest<'_>,
     uri: String,
     stream_id: Option<String>,
 ) -> Result<Vec<oxplow_app::pages::renderers::Renderer>, IpcError> {
-    let ctx = context(svc, stream_id.as_deref(), None).await;
+    let svc: &Services = request;
+    let ctx = context(request, stream_id.as_deref(), None).await;
     Ok(oxplow_app::pages::renderers::renderers_for(svc, &uri, &ctx, &Actor::Human).await)
 }
 
@@ -264,7 +275,7 @@ pub async fn page_spec(svc: &Services, page: String) -> Result<PageSpec, IpcErro
 /// is one it holds.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_page_action(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     run_id: String,
     node: Option<String>,
     action: String,
@@ -276,8 +287,8 @@ pub async fn run_page_action(
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     use oxplow_app::pages::actions::{run_page_action, PageActionCall};
     Ok(run_page_action(
-        svc,
-        &svc.page_runs,
+        req,
+        &req.page_runs,
         PageActionCall {
             run_id,
             node,
@@ -288,6 +299,7 @@ pub async fn run_page_action(
             option,
             on_behalf_of: Actor::Human,
             confirmed,
+            caller: req.caller.cloned(),
         },
     )
     .await?)
@@ -305,20 +317,21 @@ pub async fn page_form(
 
 /// A form node of an open run is submitted.
 pub async fn submit_page_form(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     run_id: String,
     node: String,
     input: oxplow_domain::Json,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     Ok(oxplow_app::pages::actions::submit_page_form(
-        svc,
-        &svc.page_runs,
+        req,
+        &req.page_runs,
         &run_id,
         &node,
         input.0,
         Actor::Human,
         confirmed,
+        req.caller,
     )
     .await?)
 }
@@ -351,13 +364,15 @@ mod tests {
         let (ctx, _dir) = crate::test_support::services().await;
         let yaml = "title: Param\nparams: [{ name: n, default: 7 }]\nloaders:\n  value: { sql: 'SELECT :n AS n' }\nview: { viz: number, from: value }\n";
         let opened = open_page(
-            &ctx,
+            &crate::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&crate::test_support::caller()),
+            },
             None,
             Some(yaml.into()),
             None,
             None,
             None,
-            "snapshot-window".into(),
         )
         .await
         .unwrap();
@@ -401,13 +416,15 @@ mod tests {
         let (ctx, _dir) = crate::test_support::services().await;
         ctx.temp.put("v1.yaml", INLINE.as_bytes()).await.unwrap();
         let opened = open_page(
-            &ctx,
+            &crate::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&crate::test_support::caller()),
+            },
             Some("temp/v1".into()),
             None,
             None,
             None,
             None,
-            "window".into(),
         )
         .await
         .unwrap();
@@ -419,13 +436,15 @@ mod tests {
         close_page(&ctx, opened.run_id).await.unwrap();
         ctx.temp.remove("v1.yaml").await.unwrap();
         let missing = open_page(
-            &ctx,
+            &crate::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&crate::test_support::caller()),
+            },
             Some("temp/v1".into()),
             None,
             None,
             None,
             None,
-            "window".into(),
         )
         .await
         .unwrap_err();
@@ -450,7 +469,11 @@ mod tests {
         let source = page_spec(&ctx, "my_pages/example".into()).await.unwrap();
         assert!(source.writable);
         assert_eq!(source.yaml, edited);
-        let deployed = run_page(&ctx, Some("my_pages/example".into()), None, None, None)
+        let request = crate::RpcRequest {
+            ctx: &ctx,
+            caller: None,
+        };
+        let deployed = run_page(&request, Some("my_pages/example".into()), None, None, None)
             .await
             .unwrap();
         assert_eq!(

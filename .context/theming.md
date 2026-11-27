@@ -180,7 +180,7 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
 - **List rows** (tasks, file tree, notes, code-quality findings,
   snapshots, commits) use `padding: 8–10px 12px` and target ~36–40px
   height — up from the prior ~24–28px.
-- **Section headers** use `padding: 10px 12px` and 11px uppercase
+- **Section headers** use `padding: 10px 12px` and `--text-xs` (12px) uppercase
   labels, against `--surface-app` so they read as a divider band
   rather than a card surface.
 - **Tab strips** (`CenterTabs`) use `min-height: 36px` with
@@ -190,8 +190,25 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
 - **Selection / marked rows** use a 3px left stripe (was 2px) plus
   `--accent-soft-bg` rather than a generic semi-transparent yellow.
 
+No text in the page layer is smaller than `--text-xs` (12px): the touch
+guard (`touch.guard.test.ts`) keeps it so, but for SVG text a chart places
+by its own coordinates.
+
 When adding a new list surface, match these numbers — the
 "Metabase-clean" feel relies on them being consistent across panels.
+
+**Touch density.** `--control-height` (a control's height: 28px) and
+`--hit-min` (the least a target may be: 24px) are tokens on `:root`. A touch
+screen sets `data-density="touch"` on `<html>` (`followDensity` in
+`coarsePointer.ts`, from `(pointer: coarse)`, following a change; a shell or
+a test may set it itself), which makes both 44px and the two smallest text
+sizes a step bigger (`--text-xs` 13px, `--text-sm` 14px). A control sized
+for a finger uses `--control-height` / `--hit-min`, never a pixel literal;
+custom component frames get the same values with the other tokens.
+The kit's icon buttons and items, its buttons (`min-height`), its param rows
+and the page nav bar's buttons read these tokens. `src/touch.guard.test.ts`
+fails on a pixel font size of 12 or less in the page layer (`viz`, `kit`,
+`pages`, `tabs`, `components`, the kit sheet): use a `var(--text-*)` token.
 
 ## Spacing and radius
 

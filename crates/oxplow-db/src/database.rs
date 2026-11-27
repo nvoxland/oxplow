@@ -2639,6 +2639,110 @@ mod tests {
         assert_eq!(queued, ("acme-models".into(), "1.0".into(), None));
     }
 
+    /// V88 keeps a component's memory (copied to `component_memory`) and drops
+    /// the other preferences: each device starts from the defaults.
+    #[test]
+    fn v88_keeps_component_memory_and_drops_the_other_preferences() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(87))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO ui_preference (scope, key, value_json, updated_at)
+             VALUES ('component:acme/board', 'k', '1', 't'), ('app', 'railWidth', '320', 't');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let memory: Vec<(String, String, String)> = conn
+            .prepare("SELECT scope, key, value_json FROM component_memory")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            memory,
+            vec![("component:acme/board".into(), "k".into(), "1".into())]
+        );
+        let kept: i64 = conn
+            .query_row("SELECT count(*) FROM ui_preference", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 0);
+        conn.execute(
+            "INSERT INTO ui_preference (device_id, scope, key, value_json, updated_at)
+             VALUES ('d', 'app', 'k', '1', 't')",
+            [],
+        )
+        .unwrap();
+    }
+
+    /// V89 drops the shared panel layout rows and keys the new table by
+    /// device: the same panel in the same place may be placed by two devices.
+    #[test]
+    fn v89_drops_the_shared_layout_and_keys_it_by_device() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(88))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO panel_layout (panel, visibility_scope, position) VALUES ('go', 'project', 0);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM panel_layout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "every device starts from the defaults");
+        let insert = |device: &str| {
+            conn.execute(
+                "INSERT INTO panel_layout (device_id, panel, visibility_scope, position)
+                 VALUES (?1, 'go', 'project', 0)",
+                [device],
+            )
+        };
+        insert("a").unwrap();
+        insert("b").unwrap();
+        insert("a").unwrap_err();
+    }
+
+    /// V92 makes a queued tab unique for its device and thread and keeps the
+    /// oldest row of a repeat.
+    #[test]
+    fn v92_keeps_the_oldest_of_a_repeated_queued_tab() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(91))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 's', 'main', 'refs/heads/main', 'main', '/r', 't', 't');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 't', 't', 't');
+             INSERT INTO tab_queued (device_id, thread_id, uri, queued_at) VALUES
+               ('d', 1, 'u', 'first'), ('d', 1, 'u', 'second'), ('d', 1, 'v', 'third');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT uri, queued_at FROM tab_queued ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![("u".into(), "first".into()), ("v".into(), "third".into())]
+        );
+        conn.execute(
+            "INSERT INTO tab_queued (device_id, thread_id, uri, queued_at) VALUES ('d', 1, 'u', 'x')",
+            [],
+        )
+        .unwrap_err();
+    }
+
     /// V54 adds the change_hunk table, which goes with its change.
     #[test]
     fn v54_adds_change_hunk_that_cascades() {
@@ -3453,18 +3557,6 @@ mod tests {
         assert_eq!(row, "streams");
     }
 
-    #[test]
-    fn runtime_state_seeded() {
-        let db = Database::in_memory();
-        let conn = db.conn().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM runtime_state WHERE id = 1", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
     /// Schema regression: every table that should exist after all
     /// migrations apply should be present. agent_status + hook_event
     /// were dropped in V2 (now in-memory) — assert they're GONE so a
@@ -3475,9 +3567,12 @@ mod tests {
         let conn = db.conn().unwrap();
         let expected_present = [
             "streams",
-            "runtime_state",
+            "device_view_state",
             "threads",
             "thread_selection",
+            "tab_session",
+            "tab_queued",
+            "component_memory",
             "agent_turn",
             "page_visit",
             "usage_event",
@@ -3530,6 +3625,8 @@ mod tests {
         // `effort_observation` was dropped in V39; the V38
         // `metric_*` cluster was dropped in V49 (T-E3) — assert gone.
         let expected_absent = [
+            // V82: each device shows its own stream (`device_view_state`).
+            "runtime_state",
             // V47: the context items moved to `context_item`.
             "thread_context_item",
             // V45: comments are gone (the context basket's notes do their job).

@@ -24,13 +24,15 @@ command):
 
 | Write | Why it isn't a command |
 |---|---|
-| select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
-| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: a command run record per tab switch would flood `command_run`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
+| select a thread, switch stream (each the caller device's own), report the tabs a window shows (`report_tabs`, live facts only) | UI selection pointers, not project facts |
+| page visits (each tagged with the device it was opened on), usage recording, forgetting a page | implicit navigation telemetry, not an intent: a command run record per tab switch would flood `command_run`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
-| the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
-| page memory and app preferences (`set_ui_preference`) | the person's UI memory, like the panel layout: a pointer, not an intent (`v_ui_preference` reads it) |
+| the left-nav panel layout (`set_panel_layout`, the caller device's own) | a UI layout pointer, like the selection pointers |
+| a device's tabs of a thread (`save_tab_session`, `forget_tab_session`) | the window's own layout, like the panel layout: written on every tab change, so a command run record each time would flood `command_run` |
+| the tabs an agent opened for a device that was away (`list_queued_tabs`, `forget_queued_tabs`) | the window taking its own waiting tabs when it connects: it reads the device's queue, opens each one with its own `tabs.write`, and drops the rows once its tabs are stored |
+| a device's page memory and app preferences, and a component's memory (`set_ui_preference`) | the person's UI memory, like the panel layout: a pointer, not an intent (`v_ui_preference` and `v_component_memory` read it) |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized dataset — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
@@ -218,7 +220,9 @@ touches roughly seven files. They sit in this order:
    whose only job is to give `tauri-specta` something to derive the TS
    binding from. The standard generator takes `&Services`. Terminal
    launch and restart also need the plugin endpoints, so their dispatch
-   rows use `ctx` and their adapters supply `RpcContext`.
+   rows go in the `req` section and their adapters supply `RpcContext`.
+   A command that needs the caller (who asked: the device and the page
+   load) goes in `req` too; its core takes `&RpcRequest { ctx, caller }`.
 
    `cargo test -p oxplow-tauri-ipc` (`export_ts_bindings`) regenerates
    `apps/desktop/src/tauri-bridge/generated/bindings.ts`; CI fails on a
@@ -627,18 +631,14 @@ runtime exposes one writer over IPC; the rows are read through `v_usage_event`:
 
 The bus event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
 
-Active write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
-`streamId` and the active `threadId` so per-stream and per-thread
+Active write hookpoints (both in `apps/desktop/src/window/useWindowOpeners.ts`,
+both pass `streamId` and the active `threadId` so per-stream and per-thread
 queries both work):
 
-- `wiki-note` → `handleOpenNote`
 - `editor-file` → `handleOpenFile`
-- `task` → `handleRequestEditTask`
+- `knowledge` → `handleOpenKnowledge`
 
-The wiki-note rows currently feed `NotesPane`'s "Recently visited"
-section; editor-file and task rows are recorded but not yet
-surfaced in any UI — the architecture is ready, the consumer is the
-follow-up.
+No UI reads these rows yet.
 
 When wiring a new kind, record the visit at the moment the user
 *opens* the target — not on hover or focus — because the 30s coalesce
@@ -648,13 +648,13 @@ signal.
 ## `PageVisitStore` — page navigation event log
 
 Distinct from `UsageStore` (which is a generic kind/key tracker with
-coalescing). `PageVisitStore` records every `App.handleOpenPage` call
-as a fresh event with the full `TabRef` (kind + id + payload + label).
+coalescing). `PageVisitStore` records a visit each time the window's active page
+changes (the visit effect in `App.tsx`) as a fresh event with the full `TabRef` (kind + id + payload + label).
 Append-only, no coalescing — analytics queries collapse as needed.
 
 IPC:
 
-- `recordPageVisit(input)` — called from `handleOpenPage` for every
+- `recordPageVisit(input)` — called from the window's visit effect for every
   ref except `agent`/`new-stream`/`new-task`. The label is
   resolved from richer context first (task title) and falls back
   to `deriveDefaultLabel(ref)` from

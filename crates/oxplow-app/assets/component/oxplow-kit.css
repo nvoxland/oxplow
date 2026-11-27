@@ -116,6 +116,7 @@
   background: var(--button-secondary-bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
+  min-height: var(--hit-min);
   padding: 2px var(--space-3);
   cursor: pointer;
 }
@@ -125,7 +126,7 @@
 .ox-button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* A row's icon button (a table row whose click opens a form): quiet until
    the row is hovered or it is focused. */
-.ox-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.ox-icon-button { width: var(--hit-min); height: var(--hit-min); display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
 tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-primary); border-color: var(--border-subtle); background: var(--surface-elevated); }
 .ox-icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* A table row's ☰ (its menu): always shown, so a touch screen sees where
@@ -218,6 +219,11 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .ox-cell-badges { margin-left: auto; flex-shrink: 0; display: inline-flex; gap: var(--space-1); align-self: center; }
 /* A cut cell of parts (its text, then pills): the text is cut, the pills stay. */
 .ox-truncate .ox-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A tap on a cut cell shows its whole text (a finger has no hover). */
+.ox-truncate[data-expanded], .ox-truncate[data-expanded] .ox-cell-text { overflow: visible; text-overflow: clip; white-space: normal; }
+/* As specific as `.ox-table td.ox-nowrap`, so a tapped cut cell wraps there
+   too instead of running over the next columns. */
+.ox-table td.ox-truncate[data-expanded], .ox-table td.ox-truncate[data-expanded] .ox-cell-text { white-space: normal; overflow-wrap: anywhere; }
 
 /* Document pages: a title, an intro, then sections. A section is a
    heading over a rule, no box (document style); sections stack apart. */
@@ -342,7 +348,7 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   align-items: center;
   gap: var(--space-2);
-  min-height: 28px;
+  min-height: var(--control-height);
   font-size: var(--text-sm);
 }
 /* A long label wraps; it is never cut off. */
@@ -456,7 +462,7 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 
 /* Dashboards: a responsive grid of tiles; a tile spans by its size and
    is a titled card. 400px: a chart's labelled axis must fit. */
-.ox-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); grid-auto-rows: auto; gap: var(--space-4); }
+.ox-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr)); grid-auto-rows: auto; gap: var(--space-4); container-type: inline-size; }
 .ox-tile-slot { min-width: 0; position: relative; }
 /* Where a dragged tile lands: a bar in the grid gap beside the tile. The
    inset shadow other rows use would be painted under the opaque card. */
@@ -469,6 +475,8 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 .ox-tile-slot[data-drop="before"]::before { left: calc(var(--space-4) / -2 - 1.5px); }
 .ox-tile-slot[data-drop="after"]::after { right: calc(var(--space-4) / -2 - 1.5px); }
 .ox-tile-wide { grid-column: span 2; }
+/* Narrower than two columns: a wide tile takes the row, not a second column. */
+@container (max-width: 816px) { .ox-tile-wide { grid-column: 1 / -1; } }
 .ox-tile-tall { grid-row: span 2; }
 .ox-tile-full { grid-column: 1 / -1; }
 .ox-tile {
@@ -545,5 +553,5 @@ tr:hover .ox-icon-button, .ox-icon-button:focus-visible { color: var(--text-prim
 
 /* `viz: icons`: a row as its icon alone, side by side (a rail panel's
    collapsed view). Its value is the hover. */
-.ox-icon-item { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; background: var(--surface-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
+.ox-icon-item { width: var(--hit-min); height: var(--hit-min); display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; background: var(--surface-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
 .ox-icon-item:hover { color: var(--text-primary); border-color: var(--border-strong); }

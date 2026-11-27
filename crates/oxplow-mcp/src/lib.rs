@@ -735,6 +735,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_open_page_reports_what_the_human_sees() {
+        const WINDOW: &str = "con-00000000-0000-4000-8000-000000000001";
         use oxplow_domain::stores::ThreadStore;
         let (proj, services, server) = boot().await;
         let stream = services.streams.list_streams().await.unwrap()[0].clone();
@@ -762,7 +763,7 @@ mod tests {
         assert!(none["reason"]
             .as_str()
             .unwrap()
-            .contains("no window reports"));
+            .contains("no device has tabs stored"));
         assert_eq!(none["shown"], serde_json::json!([]));
 
         let p = proj.path().join(".oxplow/extensions/demo/pages");
@@ -795,30 +796,32 @@ mod tests {
                     ctx: oxplow_app::pages::spec::ViewContext::default(),
                     viewer: oxplow_domain::Actor::Human,
                 },
-                "window",
+                WINDOW,
             )
             .await
             .unwrap();
         let id = "oxplow:oxplow/page?page=demo/kinds#kind=primary";
+        let device = oxplow_domain::DeviceId::generate();
+        let session = serde_json::json!({
+            "tabs": [{ "slot": "t1", "at": 0,
+                "entries": [{ "ref": { "id": id }, "title": "Kinds" }] }],
+            "active": "t1", "mru": ["t1"], "next": 2
+        });
+        services
+            .tab_session_store
+            .save(&device, &thread, session.to_string(), None)
+            .await
+            .unwrap();
         services.client_reports.report(
+            &oxplow_domain::Caller {
+                device,
+                connection: oxplow_domain::ConnectionId::parse(WINDOW).unwrap(),
+            },
             oxplow_app::client_reports::TabReport {
                 runs: Vec::new(),
-                client: "window".into(),
                 focused: true,
                 visible: true,
                 shown_thread: Some(thread),
-                threads: vec![oxplow_app::client_reports::ThreadTabs {
-                    thread,
-                    tabs: vec![oxplow_app::client_reports::ReportedTab {
-                        id: id.into(),
-                        kind: "demo/kinds".into(),
-                        title: "Kinds".into(),
-                        back: Vec::new(),
-                        forward: Vec::new(),
-                        origin: None,
-                    }],
-                    active: Some(id.into()),
-                }],
                 detail_json: Some(serde_json::json!({ "runId": run_id }).to_string()),
             },
             oxplow_domain::Timestamp::now(),

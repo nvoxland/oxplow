@@ -104,6 +104,7 @@ import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
 import { MarksCell } from "./MarksCell.js";
+import { useCoarsePointer } from "../coarsePointer.js";
 import { SourceChip } from "../kit/SourceChip.js";
 import { DisclosureGlyph } from "../kit/Disclosure.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
@@ -111,7 +112,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { skipSummary, actionAnchor, actionHelp, actionEnabled, actionOffered, formAlso, offeredWholePage, rowMenuAction, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { skipSummary, actionAnchor, actionHelp, actionEnabled, actionOffered, formAlso, offeredWholePage, rowMenuAction, bulkOffers, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
@@ -123,9 +124,12 @@ import {
   dropZone,
   keyAction,
   marksAfterClick,
+  movePlaces,
   rowKey,
   shownMarks,
+  siblingsOf,
   takesOnto,
+  takesSteps,
   withOrder,
   type DropAt,
 } from "./rowInteract.js";
@@ -305,15 +309,6 @@ function actionMenuItem(
   };
 }
 
-/** The bulk actions (`bulk: true`) the marked rows are offered: an action
- *  any of them is offered (`when`), run on those. */
-function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
-  return run.config.actions
-    .filter((a) => a.bulk)
-    .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
-    .filter((o) => o.rows.length > 0);
-}
-
 /** While rows are marked: how many, the bulk actions, and Clear — in place
  *  of the viz's own buttons. */
 function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizActionsState; marks: Marks; options: ActionOptions }) {
@@ -324,10 +319,10 @@ function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizA
       <span data-testid="viz-marks-count" style={{ color: "var(--text-secondary)" }}>
         {marked.length} selected
       </span>
-      {bulkOffers(run, marked).map(({ action, rows }) => (
+      {bulkOffers(run.config.actions, marked).map(({ action, rows }) => (
         <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} options={options[action.id] ?? null} />
       ))}
-      <button type="button" data-testid="viz-marks-clear" onClick={() => marks.set([], null)}>
+      <button type="button" data-testid="viz-marks-clear" style={{ minHeight: "var(--hit-min)" }} onClick={() => marks.set([], null)}>
         Clear
       </button>
     </div>
@@ -523,7 +518,7 @@ function BulkButton({ run, action, rows, actions, options }: { run: VizRun; acti
           ))}
         </select>
       ) : (
-        <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionHelp(action)} onClick={() => actions.runMany(action, rows)}>
+        <button type="button" data-testid={`viz-bulk-${action.id}`} style={{ minHeight: "var(--hit-min)" }} disabled={actions.busy !== null} title={actionHelp(action)} onClick={() => actions.runMany(action, rows)}>
           {actions.busy === action.id ? `${action.label}…` : action.label}
         </button>
       )}
@@ -572,6 +567,11 @@ function RowsBody({
   actionOptions = NO_OPTIONS,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
+  // A finger has no Cmd or Shift: Select in a row's menu marks it, and
+  // while rows are marked a tap marks or unmarks one (only where a bulk
+  // action can use the marks).
+  const coarse = useCoarsePointer();
+  const touchMarks = coarse && marks !== undefined && viz.actions.some((a) => a.bulk && !a.drag);
   // A list may cap each group instead (`group.compact` in a panel,
   // `group.grown` in a panel grown to the rail; a page caps nothing): its
   // groups end in "+N more", and the list itself isn't cut.
@@ -798,6 +798,21 @@ function RowsBody({
     return refOffersFor(ref).then((entries) => [...base, ...refCommandMenuItems(entries)]);
   };
   const rowBase = (row: SqlCell[]): MenuItem[] => [
+    ...(marks && touchMarks
+      ? [
+          {
+            id: "viz.select",
+            label: shownMarks(marks.keys, drawnKeys).includes(rowKey(row)) ? "Unselect" : "Select",
+            enabled: true,
+            run: () => {
+              const shownNow = shownMarks(marks.keys, drawnKeys);
+              const next = marksAfterClick(shownNow, drawnKeys, drawnKeys.indexOf(rowKey(row)), null, { toggle: true, range: false });
+              marks.set(next.marks, next.anchor);
+            },
+          },
+        ]
+      : []),
+    ...(coarse ? touchMoveItems(row) : []),
     {
       id: "add-row-to-context",
       label: "Add to Context",
@@ -809,6 +824,35 @@ function RowsBody({
       .filter((a) => actionOffered(a, rowRecord(result.columns, row)))
       .map((a) => actionMenuItem(a, rowRecord(result.columns, row), actionOptions[a.id] ?? null, actions)),
   ];
+  // A finger cannot drag on iPad: the drops a drag would make, by menu
+  // (`movePlaces`), each where a drag action takes it. This row alone moves.
+  const touchMoveItems = (row: SqlCell[]): MenuItem[] => {
+    if (!actions || dragActions.length === 0) return [];
+    const record = recordOf(row);
+    const inGroup = drawn.filter((r) => sameGroup(r, row));
+    // In a `depth` list a step is among the row's siblings.
+    const list = viz.depth ? siblingsOf(inGroup, inGroup.indexOf(row), (r) => rowDepth(viz, result.columns, r)) : inGroup;
+    const others = (groups ?? []).map((g) => ({ key: g.key, label: g.label, value: g.value, rows: g.rows.filter((r) => r !== row).map(recordOf) }));
+    const runs = movePlaces(list.map(recordOf), list.indexOf(row), groupOf(row), others, onto).flatMap((m) => {
+      const at = withOrder(m.place, result.rows.map(recordOf), [record]);
+      const action = dragActionFor(dragActions, record, at);
+      const step = m.id === "up" || m.id === "down";
+      return action && (!step || takesSteps(action)) ? [{ ...m, run: () => actions.runDrops(action, [{ row: record, drop: at }]) }] : [];
+    });
+    const steps = runs.filter((m) => !m.id.startsWith("group:"));
+    const away = runs.filter((m) => m.id.startsWith("group:"));
+    return [
+      ...steps.map((m) => ({ id: `viz.move.${m.id}`, label: m.label, enabled: actions.busy === null, run: m.run })),
+      ...(away.length > 0
+        ? [{
+            id: "viz.move.to",
+            label: "Move To",
+            enabled: actions.busy === null,
+            submenu: away.map((m) => ({ id: `viz.move.${m.id}`, label: m.label, enabled: true, run: m.run })),
+          }]
+        : []),
+    ];
+  };
   // Every row of every row component: focusable, with its menu from a
   // right-click or the keyboard (Menu key / Shift+F10). A table row also
   // ends in a ☰ button that opens it (`rowMenu.button`), which a touch
@@ -841,6 +885,15 @@ function RowsBody({
     // click clears the marks, then picks or runs the primary action.
     onClick: (e: React.MouseEvent) => {
       const index = drawnKeys.indexOf(rowKey(row));
+      const onControl = (e.target as Element).closest("a, button, input, select, textarea") !== null;
+      // The marks still shown: a row whose cells changed (a bulk action ran
+      // on it) is gone from them, and with none left a tap is a tap.
+      const shownNow = marks ? shownMarks(marks.keys, drawnKeys) : [];
+      if (marks && touchMarks && shownNow.length > 0 && !onControl) {
+        const next = marksAfterClick(shownNow, drawnKeys, index, null, { toggle: true, range: false });
+        marks.set(next.marks, next.anchor);
+        return;
+      }
       if (marks && (e.metaKey || e.ctrlKey || e.shiftKey)) {
         e.preventDefault();
         const anchor = marks.anchor ?? clickedRef.current;
@@ -1216,6 +1269,9 @@ function GroupHeading({
   );
 }
 
+/** How wide a page's form grows. */
+export const FORM_WIDTH = "36rem";
+
 type RowMenuProps = {
   tabIndex: number;
   onKeyDown(e: React.KeyboardEvent): void;
@@ -1471,7 +1527,9 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
   if (!start || !schema) return null;
   const mode = run.config.form?.mode ?? "create";
   return (
-    <div data-testid="viz-form">
+    // A form reads down one column, never the page's whole width: a port or
+    // an address in a field as wide as a table is hard to read.
+    <div data-testid="viz-form" style={{ maxWidth: FORM_WIDTH }}>
       {form.pending ? (
         <CommandConfirm
           label={run.config.title}
@@ -2448,7 +2506,8 @@ function TableViz({ rows, cols, cell, rowMenu, view, header, revealed, singleLin
     el?.scrollIntoView?.({ block: "nearest" });
   }, [revealedAt]);
   // Every row ends in its menu's button.
-  columns.push({ key: "__row-menu", label: "", width: 36, truncate: false, wrap: "nowrap", render: ([row]) => rowMenu.button(row) });
+  // The ☰'s box plus room: 36px with a mouse, a finger's size on touch.
+  columns.push({ key: "__row-menu", label: "", width: "calc(var(--hit-min) + 12px)", truncate: false, wrap: "nowrap", render: ([row]) => rowMenu.button(row) });
   const parts = sections(rows, view);
   return (
     <div ref={tableRef} style={{ display: "contents" }}>
@@ -2524,7 +2583,7 @@ const groupHeadingStyle: CSSProperties = {
   alignItems: "center",
   gap: 6,
   padding: "10px 0 4px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   color: "var(--text-secondary)",
   textTransform: "uppercase",
@@ -2537,7 +2596,7 @@ const groupActionStyle: CSSProperties = {
   color: "var(--text-muted)",
   cursor: "pointer",
   font: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textTransform: "none",
 };
 const linkStyle: CSSProperties = {

@@ -1,0 +1,28 @@
+[package]
+name = "oxplow-host-access"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "What the host and its daemons share: the host's settings, this machine's private addresses and names, and the owner socket"
+
+# The host (`oxplow-host`) depends on `oxplow-app` for its supervisor, so a
+# daemon cannot use the host's crate. What both sides need lives here:
+# the settings' types and checks, the address and name helpers, and a call to the
+# running host as its owner over `host.sock`. See .context/host.md.
+
+[dependencies]
+oxplow-config = { workspace = true }
+if-addrs = "0.15"
+serde = { workspace = true }
+serde_json = { workspace = true }
+specta = { workspace = true }
+thiserror = { workspace = true }
+oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

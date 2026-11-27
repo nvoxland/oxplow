@@ -118,6 +118,7 @@ view:
     input:
       uri: '{{row.uri}}'
       before: '{{before.uri}}'
+      after: '{{after.uri}}'
   - id: nest
     label: Nest under
     point: oxplow/task.edit

@@ -1,6 +1,6 @@
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { newSessionPage, searchLauncher, load } from "../../support/ui.js";
+import { newSessionPage, searchLauncher, load, tabOf } from "../../support/ui.js";
 
 interface Opened {
   result: { id: string };
@@ -26,11 +26,11 @@ test("a closed session is listed on the New Session page and picking it reopens 
   // A click on the row takes it (its primary action).
   await row.click();
 
-  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
+  await expect(tabOf(page, `oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
   // Undo (the toast) closes it again.
   await page.getByTestId("undo-toast-undo").click();
-  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).not.toBeVisible();
+  await expect(tabOf(page, `oxplow:oxplow/agent_session?id=${id}`)).not.toBeVisible();
 });
 
 /// A closed session found by search opens its transcript, not nothing; the
@@ -51,11 +51,11 @@ test("a closed session found by search opens its transcript, which can reopen it
   await page.getByTestId(`launcher-hit-oxplow:oxplow/agent_session?id=${id}`).click();
   // Its transcript (it has no turns yet, so nothing is listed), not a tab
   // that isn't there; Reopen brings the session back.
-  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).not.toBeVisible();
+  await expect(tabOf(page, `oxplow:oxplow/agent_session?id=${id}`)).not.toBeVisible();
   const transcript = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=session-transcript"]');
   await transcript.getByTestId("page-nav-menu").click();
   await page.getByTestId("menu-item-action-page-action-reopen").click();
-  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
+  await expect(tabOf(page, `oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
 });
 
 /// A session open in this thread is listed too; picking it shows its tab
@@ -79,5 +79,5 @@ test("picking a session open here shows it and keeps the New Session page", asyn
 
   await expect(page.getByTestId(`center-tab-body-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=new-session")).toHaveCount(1);
+  await expect(tabOf(page, "oxplow:oxplow/page?page=new-session")).toHaveCount(1);
 });

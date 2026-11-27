@@ -20,16 +20,16 @@ Playwright cannot attach to the Tauri shell on macOS; the supported
 route is the daemon + a real browser:
 
 ```bash
-cargo build -p oxplow-daemon
-VITE_OXPLOW_REMOTE=http://127.0.0.1:7420 bun run --cwd apps/desktop build
-./target/debug/oxplow-daemon --project . --bind 127.0.0.1:7420 &   # background it
-bun run --cwd apps/desktop preview &                               # dist/ on :4173
-curl -s http://127.0.0.1:7420/health                               # expect "ok"
+cargo build -p oxplow-host -p oxplow-daemon && bun run --cwd apps/desktop build
+./target/debug/oxplow-host project add .                       # once
+./target/debug/oxplow-host serve --bind 127.0.0.1:7400 &       # headless; background it
+./target/debug/oxplow-host pair                                # a pairing code
 ```
 
-Then drive `http://localhost:4173` with the Playwright MCP tools
-(`browser_navigate` / `browser_snapshot` / `browser_click` /
-`browser_evaluate`). Prefer `browser_snapshot` + `data-testid`
+Then drive `http://127.0.0.1:7400/` with the Playwright MCP tools: type the
+code on the pair screen, then Open the project (DEV.md "Run headless").
+Drive it with `browser_navigate` / `browser_snapshot` / `browser_click` /
+`browser_evaluate`. Prefer `browser_snapshot` + `data-testid`
 selectors; screenshot when looks matter, and read the image.
 
 - The daemon holds the per-project instance lock — the desktop app
@@ -38,10 +38,11 @@ selectors; screenshot when looks matter, and read the image.
   holder before assuming staleness (it's an advisory flock; only a
   live process can hold it).
 - You own the servers: restart freely. Rust change → rebuild + restart
-  the daemon (leave ~3s between kill and start or the boot wiki scan
-  can hit the old process's WAL lock). Frontend change → rebuild with
-  the same `VITE_OXPLOW_REMOTE` and reload the browser. No HMR by
-  design — restart at points you choose.
+  the host (`oxplow-host stop`, then serve; leave ~3s or the boot wiki
+  scan can hit the old process's WAL lock). Frontend change → rebuild
+  and reload the browser (the host reads `dist/` at run time; a new
+  build reloads open pages). No HMR by design — restart at points you
+  choose. The browser stays paired across restarts.
 - A daemon restart relaunches thread agents with `--resume`; a big
   session shows claude's resume picker (answer it in the pane). A
   stale resume id prints `[oxplow] saved resume id was stale; starting

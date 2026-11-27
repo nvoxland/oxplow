@@ -13,6 +13,8 @@ use thiserror::Error;
 
 pub mod collectors;
 pub mod core_settings;
+pub mod device;
+pub use device::{this_device, ThisDevice};
 pub mod list_edit;
 pub mod settings;
 pub use list_edit::append_list_entry;
@@ -22,6 +24,7 @@ pub mod recent;
 pub use recent::{RecentProject, RecentProjects};
 
 mod atomic;
+pub use atomic::{lock_path, write_atomic};
 pub mod session;
 pub use session::SessionProjects;
 

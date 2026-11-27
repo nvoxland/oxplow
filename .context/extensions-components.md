@@ -398,8 +398,8 @@ the rail HUD — gives none: `init.view` is null, `setViewParams` and
 `setHistoryState` answer `INVALID`, and the component keeps its filters
 itself. Any component, page or not, has **page memory**: `{ id, method:
 pageMemoryGet, key }` and `{ id, method: pageMemorySet, key, value }`
-(null forgets), scope `component:<namespace>/<id>` in `ui_preference` — for
-the person, in every tab of it. A value over 64 KB or a component over
+(null forgets), scope `component:<namespace>/<id>` in `component_memory` — for
+the person, in every tab of it and on every device. A value over 64 KB or a component over
 1 MB is refused `INVALID` (`componentMemoryProblem`, before the write).
 A component keeps no view state of its own: `check` warns
 (`bundle_warnings`) at a bundle script that uses `localStorage` or

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { deploy, extensionSource, fileTask, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher, load } from "../../support/ui.js";
+import { searchLauncher, load, tabOf } from "../../support/ui.js";
 
 test("search finds a task and a knowledge page, and opens them", async ({ page, daemon }) => {
   const created = await fileTask(daemon, "Quokka migration");
@@ -17,7 +17,7 @@ test("search finds a task and a knowledge page, and opens them", async ({ page, 
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
   await page.getByTestId("launcher-hit-oxplow:oxplow/knowledge?id=quokka-notes&store=oxwiki").click();
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/knowledge?id=quokka-notes&store=oxwiki")).toBeVisible();
+  await expect(tabOf(page, "oxplow:oxplow/knowledge?id=quokka-notes&store=oxwiki")).toBeVisible();
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Quokka notes");
 });
 

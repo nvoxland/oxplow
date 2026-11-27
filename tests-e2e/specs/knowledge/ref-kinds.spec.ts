@@ -1,9 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { fileTask, run } from "../../support/daemon.js";
+import { fileTask, run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { navigate, taskIdOf, shown } from "../../support/ui.js";
+import { navigate, taskIdOf, shown, tabOf } from "../../support/ui.js";
 
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
   const n = await createItem(daemon, "Platypus item");
@@ -16,7 +16,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
 });
 
 
-async function createItem(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
+async function createItem(daemon: Daemon & { thread: string }, title: string) {
   const created = await fileTask(daemon, title);
   return taskIdOf(created.result.uri).replace(/^tsk/, "");
 }
@@ -25,7 +25,7 @@ test("an extension's resource URI opens on its renderer, and the tab's id is the
   const n = await createItem(daemon, "Quokka item");
   const uri = `oxplow:e2e/item?id=${n}`;
   await navigate(page, daemon, uri);
-  await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
+  await expect(tabOf(page, uri)).toBeVisible();
   await expect(shown(page).getByTestId("page-file").getByTestId("viz-row-0")).toContainText("Quokka item");
 });
 

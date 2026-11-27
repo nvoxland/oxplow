@@ -13,6 +13,9 @@ export function backdropShouldClose<T>({ target, currentTarget }: { target: T; c
   return target === currentTarget;
 }
 
+/** About 38vw, at least 360px, capped at 560px and the screen's width. */
+export const DEFAULT_PANEL_WIDTH = "min(max(38vw, 360px), 560px, 100vw)";
+
 /**
  * Right-edge slideover panel — replaces centered modals for form-shaped
  * flows that warrant a focused workspace but don't justify a full page.
@@ -35,7 +38,7 @@ export function Slideover({
   open,
   onClose,
   title,
-  width = "min(38vw, 560px)",
+  width = DEFAULT_PANEL_WIDTH,
   testId,
   actions,
   footer,
@@ -44,7 +47,7 @@ export function Slideover({
   open: boolean;
   onClose(): void;
   title: ReactNode;
-  /** CSS width value. Defaults to ~38vw capped at 560px. */
+  /** CSS width value. Defaults to `DEFAULT_PANEL_WIDTH`. */
   width?: string;
   testId?: string;
   /** Header right-side actions (close button is rendered automatically). */
@@ -58,10 +61,12 @@ export function Slideover({
   useEffect(() => {
     if (!open) return;
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
+      if (event.key !== "Escape") return;
+      // Escape closes the topmost layer only: an open menu (it closes
+      // itself) or what inside handled it already (a field's own Escape).
+      if (event.defaultPrevented || document.querySelector("[data-oxplow-menu]")) return;
+      event.preventDefault();
+      onClose();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -71,7 +76,10 @@ export function Slideover({
     if (!open) return;
     const node = panelRef.current;
     if (!node) return;
-    // Move focus inside the panel so Escape/Tab feel natural.
+    // Move focus inside the panel so Escape/Tab feel natural, unless its
+    // content took it already (a field a flow opened: moving focus away
+    // would blur it, and an empty field ends its flow on blur).
+    if (node.contains(document.activeElement)) return;
     const first = node.querySelector<HTMLElement>(
       "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
     );

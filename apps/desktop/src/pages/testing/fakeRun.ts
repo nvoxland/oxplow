@@ -88,6 +88,7 @@ interface Common {
   icon?: string | null;
   titleFrom?: string | null;
   collapsible?: boolean;
+  collapsed?: boolean;
   link?: string | null;
   size?: TileSize | null;
 }
@@ -100,7 +101,8 @@ const common = (id: string, o: Common = {}) => ({
   callout: o.callout ?? false,
   icon: o.icon ?? null,
   titleFrom: o.titleFrom ?? null,
-  collapsible: o.collapsible ?? false,
+  collapsible: (o.collapsible ?? false) || (o.collapsed ?? false),
+  collapsed: o.collapsed ?? false,
   link: o.link ?? null,
   replaceable: null,
   size: o.size ?? null,

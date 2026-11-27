@@ -2,6 +2,9 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <!-- A phone or tablet browser draws the page at its own width, not a
+         980px desktop page shrunk to fit. The Mac window ignores it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- A custom component's frame may navigate itself: bound it to this
          machine whatever serves this page (Tauri's CSP says the same;
          lens/frameBound.test.ts keeps the two one value). -->
@@ -253,7 +256,30 @@
         --radius-md:   6px;
         --radius-pill: 999px;
 
+        /* Density: how big a control is and how small a target may be. A
+           touch screen (`data-density="touch"`, set from the pointer by
+           `followDensity`) makes both a finger's size. Component frames get
+           these through the kit's tokens like any other. */
+        --control-height: 28px;
+        --hit-min:        24px;
+
         color-scheme: dark;
+      }
+
+      :root[data-density="touch"] {
+        --control-height: 44px;
+        --hit-min:        44px;
+        /* The two smallest sizes are hard to read held at arm's length. */
+        --text-xs: 13px;
+        --text-sm: 14px;
+      }
+      /* A finger's long press on a control or a row is its menu
+         (touchHints.ts): the OS's text selection and its callout must not
+         take the press first (iPad). Text, fields and the editor keep both. */
+      :root[data-density="touch"] :is(button, a, [role=button], [role=row], [role=option], [role=tab], tr, li, .ox-tile-slot, [data-testid^="viz-row-"]) {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
       }
 
       html, body, #root {
@@ -469,6 +495,15 @@
       }
       .oxplow-md-code:hover .oxplow-md-code-copy,
       .oxplow-md-code-copy:focus-visible { opacity: 1; }
+      /* A finger cannot hover: what the rules above show on hover (the blame
+         and link kebabs, a section's Copy / Add to Context, a code block's
+         Copy) is always shown where there is no hover. */
+      @media (hover: none) {
+        .oxplow-blame-row-kebab,
+        .oxplow-md-link-kebab,
+        .lens-section [data-testid="lens-actions"],
+        .oxplow-md-code-copy { opacity: 1; }
+      }
       .oxplow-md blockquote {
         border-left: 3px solid var(--border-subtle);
         padding: 0.1em 0 0.1em 0.9em;

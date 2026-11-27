@@ -15,6 +15,8 @@ import { pastedLink, type RefLink } from "./refPaste.js";
 import { linkTarget } from "../../uri/uri.js";
 import type { RefSearch } from "./refOptions.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import { copyText, PASTE_WITH_KEYBOARD, readText } from "../../clipboard.js";
+import { showToast } from "../toastStore.js";
 
 /** Put `refs` in at `pos` as their links (`refLinkOf`), a space between
  *  them and before them when the text there doesn't end in one. */
@@ -314,7 +316,7 @@ export function RichTextField({
         label: "Cut",
         enabled: !empty,
         run: async () => {
-          if (text) await navigator.clipboard.writeText(text);
+          if (text) await copyText(text);
           editor.chain().focus().deleteRange({ from, to }).run();
         },
       },
@@ -323,7 +325,7 @@ export function RichTextField({
         label: "Copy",
         enabled: !empty,
         run: () => {
-          if (text) void navigator.clipboard.writeText(text);
+          if (text) void copyText(text);
         },
       },
       {
@@ -331,7 +333,8 @@ export function RichTextField({
         label: "Paste",
         enabled: true,
         run: async () => {
-          const t = await navigator.clipboard.readText();
+          const t = await readText();
+          if (t === null) { showToast({ message: PASTE_WITH_KEYBOARD }); return; }
           if (t) editor.chain().focus().insertContentAt(empty ? from : { from, to }, t).run();
         },
       },

@@ -5,6 +5,7 @@ use oxplow_app::Services;
 use oxplow_domain::{Stream, StreamId};
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 pub async fn list_streams(svc: &Services) -> Result<Vec<Stream>, IpcError> {
     Ok(svc.streams.list_streams().await?)
@@ -19,13 +20,18 @@ pub async fn get_primary_stream(svc: &Services) -> Result<Option<Stream>, IpcErr
     Ok(stream_store.primary().await?)
 }
 
-/// Currently-selected stream (None falls back to primary in the UI).
-pub async fn get_current_stream(svc: &Services) -> Result<Option<Stream>, IpcError> {
-    Ok(svc.streams.current().await?)
+/// The stream the caller's device shows (None, and for a request with no
+/// device: the UI falls back to the primary stream).
+pub async fn get_current_stream(req: &RpcRequest<'_>) -> Result<Option<Stream>, IpcError> {
+    let device = req.caller.map(|c| &c.device);
+    Ok(req.streams.current(device).await?)
 }
 
-pub async fn switch_stream(svc: &Services, id: Option<StreamId>) -> Result<(), IpcError> {
-    svc.streams.set_current(id.as_ref()).await?;
+/// The caller's device shows stream `id` (`None` clears its choice). A
+/// request with no device may not choose.
+pub async fn switch_stream(req: &RpcRequest<'_>, id: Option<StreamId>) -> Result<(), IpcError> {
+    let device = &req.caller()?.device;
+    req.streams.set_current(device, id.as_ref()).await?;
     Ok(())
 }
 
@@ -35,7 +41,8 @@ mod tests {
     async fn switch_stream_accepts_optional_id() {
         let (svc, _dir) = crate::test_support::services().await;
         // Missing `id` key deserializes as None and clears the selection.
-        let out = crate::dispatch("switch_stream", serde_json::json!({}), &svc)
+        let caller = crate::test_support::caller();
+        let out = crate::dispatch_as("switch_stream", serde_json::json!({}), &svc, Some(&caller))
             .await
             .unwrap();
         assert!(out.is_null());

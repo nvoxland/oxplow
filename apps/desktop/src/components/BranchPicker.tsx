@@ -328,7 +328,7 @@ export function BranchPicker({
       >
         <span style={{ display: "inline-block", width: 10, color: "var(--muted)" }}>{isOpen ? "▾" : "▸"}</span>
         <span style={{ flex: 1, textAlign: "left", fontWeight: 600 }}>{label}</span>
-        <span style={{ color: "var(--muted)", fontSize: 10 }}>{count}</span>
+        <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{count}</span>
       </button>
     );
   }
@@ -593,7 +593,7 @@ function RemoteGroup({ remote, branches, busy, onPick, onOpenMenu, forceOpen }: 
       <button type="button" onClick={() => setOpen((v) => !v)} style={{ ...groupHeaderStyle, paddingLeft: 18, fontWeight: "var(--weight-regular)" }}>
         <span style={{ display: "inline-block", width: 10, color: "var(--muted)" }}>{isOpen ? "▾" : "▸"}</span>
         <span style={{ flex: 1, textAlign: "left" }}>{remote}</span>
-        <span style={{ color: "var(--muted)", fontSize: 10 }}>{branches.length}</span>
+        <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{branches.length}</span>
       </button>
       {isOpen ? branches.map((b) => {
         return (
@@ -636,11 +636,11 @@ function RowButton({ onClick, disabled, current, icon, name, meta, indent = 18, 
         background: current ? "var(--bg-2)" : "transparent",
       }}
     >
-      <span style={{ width: 14, color: "var(--muted)", fontSize: 11 }}>{icon}</span>
+      <span style={{ width: 14, color: "var(--muted)", fontSize: "var(--text-xs)" }}>{icon}</span>
       <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-      {current ? <span style={{ fontSize: 10, color: "var(--accent)" }}>current</span> : null}
-      {meta && !current ? <span style={{ fontSize: 10, color: "var(--muted)" }}>{meta}</span> : null}
-      {showChevron ? <span style={{ fontSize: 10, color: "var(--muted)" }}>›</span> : null}
+      {current ? <span style={{ fontSize: "var(--text-xs)", color: "var(--accent)" }}>current</span> : null}
+      {meta && !current ? <span style={{ fontSize: "var(--text-xs)", color: "var(--muted)" }}>{meta}</span> : null}
+      {showChevron ? <span style={{ fontSize: "var(--text-xs)", color: "var(--muted)" }}>›</span> : null}
     </button>
   );
 }
@@ -654,7 +654,7 @@ const chipStyle: CSSProperties = {
   padding: "2px 8px",
   color: "var(--fg)",
   fontFamily: "inherit",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   height: 20,
 };
 
@@ -704,7 +704,7 @@ const groupHeaderStyle: CSSProperties = {
   padding: "4px 8px",
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   color: "var(--muted)",
   width: "100%",
   textAlign: "left",
@@ -749,7 +749,7 @@ const BRANCH_PICKER = "branch-picker";
 const errorStyle: CSSProperties = {
   padding: "6px 10px",
   color: "#ff6b6b",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   borderTop: "1px solid var(--border)",
   whiteSpace: "pre-wrap",
 };

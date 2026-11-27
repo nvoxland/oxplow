@@ -73,6 +73,19 @@ impl IpcError {
         }
     }
 
+    /// The caller's page load was replaced by a newer one of its device
+    /// (`client_reports::devices`): it may ask nothing more.
+    pub fn replaced() -> Self {
+        Self {
+            code: "REPLACED".into(),
+            message: oxplow_app::client_reports::devices::Replaced.to_string(),
+            cause: None,
+            field: None,
+            details: Vec::new(),
+            command_run_id: None,
+        }
+    }
+
     pub fn with_cause(mut self, cause: impl ToString) -> Self {
         self.cause = Some(cause.to_string().into_boxed_str());
         self

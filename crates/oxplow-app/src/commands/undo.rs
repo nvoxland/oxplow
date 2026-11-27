@@ -15,6 +15,22 @@ impl CommandBus {
         command_run_id: i64,
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
+        self.undo_in(
+            &RunContext::core(actor.clone(), Mode::External),
+            command_run_id,
+            confirmed,
+        )
+        .await
+    }
+
+    /// [`Self::undo`] as `run`'s actor and caller (a person's request from a
+    /// device): the undo's command run keeps the device it was asked from.
+    pub async fn undo_in(
+        &self,
+        run: &RunContext,
+        command_run_id: i64,
+        confirmed: bool,
+    ) -> Result<CommandOutcome, CommandError> {
         let row = self
             .command_runs
             .get(command_run_id)
@@ -24,7 +40,7 @@ impl CommandBus {
             })?;
         let inverse = undoable(&row)?;
         self.run_inner(
-            &RunContext::core(actor.clone(), Mode::External).replaying_inverse(),
+            &run.clone().replaying_inverse(),
             &inverse.name,
             inverse.input.clone(),
             confirmed,

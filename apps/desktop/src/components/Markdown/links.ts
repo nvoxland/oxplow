@@ -16,6 +16,7 @@ import { WORKING } from "../../revision.js";
 import { fileUri, parseUri } from "../../uri/uri.js";
 import { recordLabel, recordOf } from "../../recordStores.js";
 import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
+import { copyText } from "../../clipboard.js";
 
 /** How a link opens a page: the page navigation's `openRef`, or none
  *  (outside a page nothing opens in a tab). */
@@ -53,7 +54,7 @@ const copy = (id: string, label: string, text: string): MenuItem => ({
   label,
   enabled: true,
   run: () => {
-    void navigator.clipboard.writeText(text).catch(() => {});
+    void copyText(text);
   },
 });
 

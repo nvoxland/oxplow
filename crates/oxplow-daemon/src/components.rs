@@ -22,13 +22,35 @@ use crate::DaemonState;
 
 pub use oxplow_app::component_http::LIB_PATH;
 
-/// The request's `Host`, when it names this machine's loopback.
-fn loopback(headers: &HeaderMap) -> Option<&str> {
+/// The header a host in front of the daemon names its public base in
+/// (`http://<name>/p/<project>`): the origin and prefix a browser reaches
+/// bundles by.
+pub const PUBLIC_BASE_HEADER: &str = "oxplow-public-base";
+
+/// Where this request's bundles are reached from outside, when it may be
+/// served: the public base a host says (believed only with the daemon's own
+/// token, which only the host has), else the loopback `Host`.
+fn reach(headers: &HeaderMap, token: &str) -> Option<String> {
+    let from_host = headers
+        .get(PUBLIC_BASE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(component_http::public_base)
+        .filter(|_| {
+            headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .is_some_and(|t| crate::same_secret(t, token))
+        });
+    if let Some(base) = from_host {
+        return Some(base.to_string());
+    }
     headers
         .get(header::HOST)?
         .to_str()
         .ok()
         .and_then(component_http::loopback_host)
+        .map(|host| format!("http://{host}"))
 }
 
 /// `served` as a response.
@@ -50,9 +72,16 @@ fn respond(served: Served) -> Response {
 }
 
 /// `/component-lib/{file}` — the client library, its types or the kit's
-/// stylesheet, to a loopback `Host` only.
-pub async fn component_lib(AxumPath(file): AxumPath<String>, headers: HeaderMap) -> Response {
-    match (loopback(&headers), component_http::library(&file)) {
+/// stylesheet, to a loopback `Host` or the host in front only.
+pub async fn component_lib(
+    State(state): State<DaemonState>,
+    AxumPath(file): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    match (
+        reach(&headers, &state.token),
+        component_http::library(&file),
+    ) {
         (Some(_), Some(served)) => respond(served),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
@@ -61,8 +90,12 @@ pub async fn component_lib(AxumPath(file): AxumPath<String>, headers: HeaderMap)
 /// `/components/v/{version}`: the folder form, so the bundle's relative
 /// URLs resolve inside it. The redirect appends `/` to the raw request path
 /// — decoded segments are never re-formatted.
-pub async fn component_root(uri: Uri, headers: HeaderMap) -> Response {
-    if loopback(&headers).is_none() {
+pub async fn component_root(
+    State(state): State<DaemonState>,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
+    if reach(&headers, &state.token).is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
     Redirect::permanent(&format!("{}/", uri.path())).into_response()
@@ -92,11 +125,16 @@ async fn serve(
     path: String,
     headers: HeaderMap,
 ) -> Response {
-    let Some(host) = loopback(&headers) else {
+    let Some(base) = reach(&headers, &state.token) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match component_http::bundle_file(&state.ctx.services.component_bundles, host, &version, &path)
-        .await
+    match component_http::bundle_file(
+        &state.ctx.services.component_bundles,
+        &base,
+        &version,
+        &path,
+    )
+    .await
     {
         Some(served) => respond(served),
         None => StatusCode::NOT_FOUND.into_response(),

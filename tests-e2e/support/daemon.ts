@@ -73,7 +73,7 @@ function installGithubExample(project: string): void {
  *  the person's own bin dirs, a plain `/bin/sh`, no global or system git
  *  config, and not Terminal.app's session (macOS's bash would save one into
  *  the home after its shell exits, racing the cleanup). */
-function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
+export function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     // The person's own bin dirs (an agent CLI installed under their home)
@@ -218,7 +218,11 @@ export async function startDaemon({
 }
 
 /** Call `/ipc/<name>` as the person; the result's data, or a thrown error. */
-export async function ipc<T = unknown>(daemon: Daemon, name: string, args: Record<string, unknown> = {}): Promise<T> {
+/** Where a project's calls go and their token: a daemon's own, or a
+ *  project's behind a host (`Host.project`). */
+export type Calls = Pick<Daemon, "base" | "token">;
+
+export async function ipc<T = unknown>(daemon: Calls, name: string, args: Record<string, unknown> = {}): Promise<T> {
   const res = await fetch(`${daemon.base}/ipc/${name}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${daemon.token}`, "content-type": "application/json" },
@@ -236,7 +240,7 @@ export async function ipc<T = unknown>(daemon: Daemon, name: string, args: Recor
 }
 
 /** Run a bus command as the person, confirmed. */
-export function run<T = unknown>(daemon: Daemon, name: string, input: Record<string, unknown>): Promise<T> {
+export function run<T = unknown>(daemon: Calls, name: string, input: Record<string, unknown>): Promise<T> {
   return ipc<T>(daemon, "run_command", { id: name, input, confirmed: true });
 }
 

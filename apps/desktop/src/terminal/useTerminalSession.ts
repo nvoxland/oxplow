@@ -17,8 +17,10 @@ import { logUi } from "../logger.js";
 import { typingElsewhere } from "../typingElsewhere.js";
 import {
   type ExitOutcome,
+  type Grid,
   failedLaunch,
   mayStartNow,
+  ownedElsewhere,
   readSessionMessage,
   reopened,
   RESTARTED_NOTICE,
@@ -41,13 +43,26 @@ export interface TerminalSessionOptions {
 }
 
 export interface TerminalSession {
-  /** The surface opened: follow the session into `term`. Returns the stop. */
-  attach(term: Terminal): () => void;
-  /** What the person typed (the only input a session takes: oxplow never
-   *  types at an agent), binary input, and a resize — in order. */
-  input(data: string): void;
+  /** The surface opened: follow the session into `term`, opening it at
+   *  `pane` (the room the pane measured; the terminal's own size when
+   *  omitted). Returns the stop. */
+  attach(term: Terminal, pane?: Grid): () => void;
+  /** What xterm sent (oxplow never types at an agent), binary input, and a
+   *  resize — in order. `typed` is whether a person made it (a key, a paste,
+   *  the touch bar): only that takes the terminal's size; xterm's answers to
+   *  a program's queries are written but take nothing. */
+  input(data: string, typed: boolean): void;
   binary(data: string): void;
   resize(cols: number, rows: number): void;
+  /** Take the terminal's size for this pane (Fit to this device): its grid
+   *  becomes `cols` × `rows` though another client typed into it last. */
+  fit(cols: number, rows: number): void;
+  /** The terminal's grid, as the client typing into it set it; null until
+   *  the session opens. A pane draws this grid, scaled down to fit. */
+  grid: Grid | null;
+  /** Another page load owns the size (the daemon says so): the pane is
+   *  watching. */
+  ownedElsewhere: boolean;
   /** Open it again (Start Again, Retry). */
   reopen(): void;
   /** The session's live working directory, for relative links. */
@@ -95,6 +110,13 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
   const endedRef = useRef(false);
   const launchFailedRef = useRef(false);
   const [ended, setEndedState] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
+  const [grid, setGrid] = useState<Grid | null>(null);
+  // Who owns the size, and which page load this is: the daemon says both.
+  const [owners, setOwners] = useState<{ owner: string | null; you: string | null }>({ owner: null, you: null });
+  const youRef = useRef<string | null>(null);
+  // The room the pane measured, in cells: what a session is opened at (the
+  // terminal's own size is the owner's, not this pane's).
+  const paneRef = useRef<Grid | null>(null);
   // Ended or not is what the pane shows; live is the same fact, for the
   // tab menu and `when`.
   const setEnded = useCallback(
@@ -135,7 +157,8 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
   );
 
   const attach = useCallback(
-    (term: Terminal) => {
+    (term: Terminal, pane?: Grid) => {
+      if (pane) paneRef.current = pane;
       const mounted = performance.now();
       let disposed = false;
       // Output may arrive before the open answers (a replay sent from
@@ -146,6 +169,10 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
       const applyEvent = (event: TerminalEvent) => {
         const msg = readSessionMessage(event.message);
         if (msg?.kind === "data") term.write(msg.bytes);
+        if (msg?.kind === "size") {
+          setGrid({ cols: msg.cols, rows: msg.rows });
+          setOwners({ owner: msg.owner, you: youRef.current });
+        }
         if (msg?.kind === "restart") {
           endedRef.current = true;
           sessionIdRef.current = null;
@@ -176,16 +203,23 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
       const openSession = (again: boolean) => {
         if (opening || disposed) return;
         opening = true;
-        logUi("info", "opening terminal session", { uri, cols: term.cols, rows: term.rows, again });
+        const room = paneRef.current ?? { cols: term.cols, rows: term.rows };
+        logUi("info", "opening terminal session", { uri, cols: room.cols, rows: room.rows, again });
         // Where a switch back to a terminal spends its time, in the log.
         const asked = performance.now();
         void desktopBridge()
-          .openTerminalSession(uri, term.cols, term.rows)
-          .then(({ sessionId, replayB64 }) => {
+          .openTerminalSession(uri, room.cols, room.rows)
+          .then(({ sessionId, replayB64, cols, rows, owner, you }) => {
             if (disposed) {
               void desktopBridge().closeTerminalSession(sessionId);
               return;
             }
+            // The answer's grid and owner are the terminal's now, whether or
+            // not the session is the one this pane already shows (it may
+            // have missed a size event while its socket was down).
+            setGrid({ cols, rows });
+            youRef.current = you ?? null;
+            setOwners({ owner: owner ?? null, you: you ?? null });
             if (reopened(sessionIdRef.current, sessionId) === "same") return;
             if (again) {
               term.reset();
@@ -287,9 +321,18 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
 
   return {
     attach,
-    input: (data) => send({ type: "input", data }),
+    input: (data, typed) => send({ type: "input", data, ...(typed ? { typed: true as const } : {}) }),
     binary: (data) => send({ type: "input-binary", data }),
-    resize: (cols, rows) => send({ type: "resize", cols, rows }),
+    resize: (cols, rows) => {
+      paneRef.current = { cols, rows };
+      send({ type: "resize", cols, rows });
+    },
+    fit: (cols, rows) => {
+      paneRef.current = { cols, rows };
+      send({ type: "resize", cols, rows, take: true });
+    },
+    grid,
+    ownedElsewhere: ownedElsewhere(owners.owner, owners.you),
     reopen: () => reopenRef.current?.(),
     cwd,
     ended,
@@ -299,15 +342,19 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
 /** One message to a terminal; `data` is what xterm gave (text for
  *  `input`, a byte per character for `input-binary`). */
 type TerminalMessage =
-  | { type: "input"; data: string }
+  | { type: "input"; data: string; typed?: true }
   | { type: "input-binary"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number; take?: true };
 
 /** `message` as the PTY's protocol reads it (`oxplow_app::terminal_sessions`). */
 function encode(message: TerminalMessage): string {
   switch (message.type) {
     case "input":
-      return JSON.stringify({ type: "input", bytes: utf8ToBase64(message.data) });
+      return JSON.stringify({
+        type: "input",
+        bytes: utf8ToBase64(message.data),
+        ...(message.typed ? { typed: true } : {}),
+      });
     case "input-binary":
       return JSON.stringify({ type: "input-binary", bytes: binaryToBase64(message.data) });
     default:

@@ -1,7 +1,8 @@
+// @desktop-only: navigator thread flows and the tab strip
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { installExtension } from "../../support/pages.js";
-import { newSessionPage, searchLauncher, load, reload, shown } from "../../support/ui.js";
+import { newSessionPage, searchLauncher, load, reload, shown, closeTab, tabsWith, tabUri, tabOf } from "../../support/ui.js";
 
 /** Turn the built-in agents on or off for the project, one
  *  `oxplow.agents.<harness>.enabled` each; the scripted test agent stays on. */
@@ -31,7 +32,7 @@ test("search offers a new agent session, which opens the picker", async ({ page 
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  const tab = tabsWith(page, "oxplow:oxplow/agent_session?").first();
   await expect(tab).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
   await searchLauncher(page, "new agent session");
@@ -51,13 +52,12 @@ test("an ended terminal session says so and its tab closes it", async ({ page, d
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  const tab = tabsWith(page, "oxplow:oxplow/agent_session?").first();
   await expect(tab).toBeVisible();
   await expect(page.getByTestId("terminal-ended")).toBeVisible();
-  const tabTestId = (await tab.getAttribute("data-testid")) ?? "";
-  const id = tabTestId.slice("center-tab-".length);
-  await page.getByTestId(`center-tab-close-${id}`).click();
-  await expect(page.getByTestId(tabTestId)).not.toBeVisible();
+  const id = await tabUri(tab);
+  await closeTab(page, id);
+  await expect(tabOf(page, id)).not.toBeVisible();
 });
 
 /// A launch that fails before any process exists (Codex, which the daemon's
@@ -83,9 +83,9 @@ test("an open tab stays drawn while the extensions reload", async ({ page, daemo
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  const tab = tabsWith(page, "oxplow:oxplow/agent_session?").first();
   await expect(tab).toBeVisible();
-  const id = ((await tab.getAttribute("data-testid")) ?? "").slice("center-tab-".length);
+  const id = await tabUri(tab);
   const body = page.getByTestId(`center-tab-body-${id}`);
   await body.getByTestId("page-nav-menu").click();
   const rename = page.getByTestId("menu-item-action-page-action-rename");
@@ -109,10 +109,10 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  const tab = tabsWith(page, "oxplow:oxplow/agent_session?").first();
   await expect(tab).toBeVisible();
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
-  const id = ((await tab.getAttribute("data-testid")) ?? "").slice("center-tab-".length);
+  const id = await tabUri(tab);
   const session = new URL(id).searchParams.get("id");
   const rename = (title: string) => run(daemon, "oxplow.agent_session.rename", { session, title });
   await rename("My review");
@@ -148,7 +148,7 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   // (with what was typed) is still there when the person comes back.
   await searchLauncher(page, "new codex session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
-  const sessions = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]');
+  const sessions = tabsWith(page, "oxplow:oxplow/agent_session?");
   await expect(sessions).toHaveCount(2);
   await sessions.nth(1).click();
   await expect(body).toBeHidden();
@@ -172,7 +172,7 @@ test("search starts an enabled agent's session directly", async ({ page, daemon 
   await page.keyboard.press("Escape");
   await searchLauncher(page, "new codex session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
-  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  const tab = tabsWith(page, "oxplow:oxplow/agent_session?").first();
   await expect(tab).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
 });
@@ -208,7 +208,7 @@ test("a new thread opens the picker with the last choice selected", async ({ pag
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
+  await expect(tabsWith(page, "oxplow:oxplow/agent_session?")).toHaveCount(1);
 
   await addThread(page, daemon, "Busy");
   const [stream] = await ipc<{ id: string }[]>(daemon, "list_streams");

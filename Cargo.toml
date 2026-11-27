@@ -17,6 +17,8 @@ members = [
     "crates/oxplow-rpc",
     "crates/oxplow-daemon",
     "crates/oxplow-daemon-sim",
+    "crates/oxplow-host",
+    "crates/oxplow-host-access",
     "crates/oxplow-dev",
     "crates/oxplow-tauri-ipc",
     "crates/oxplow-agent-text",
@@ -191,6 +193,8 @@ oxplow-app = { path = "crates/oxplow-app" }
 oxplow-rpc = { path = "crates/oxplow-rpc" }
 oxplow-daemon = { path = "crates/oxplow-daemon" }
 oxplow-daemon-sim = { path = "crates/oxplow-daemon-sim" }
+oxplow-host = { path = "crates/oxplow-host" }
+oxplow-host-access = { path = "crates/oxplow-host-access" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
 oxplow-agent-text = { path = "crates/oxplow-agent-text" }
 oxplow-harnesses = { path = "crates/oxplow-harnesses" }

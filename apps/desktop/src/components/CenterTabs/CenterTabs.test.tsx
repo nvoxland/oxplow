@@ -2,11 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { useState } from "react";
 
-import { CenterTabs, type CenterTab } from "./CenterTabs.js";
+import { CenterTabs } from "./CenterTabs.js";
+import type { WindowTab } from "../../window/windowTab.js";
 
 afterEach(cleanup);
 
-function makeTabs(): CenterTab[] {
+function makeTabs(): WindowTab[] {
   return [
     { id: "oxplow:oxplow/page?page=agent", label: "Agent", closable: false, render: () => null },
     { id: "oxplow:oxplow/file?path=a.ts", label: "a.ts", closable: true, render: () => null },
@@ -107,7 +108,7 @@ test("closing tabs that leave the active tab open does not refocus", () => {
 /// toast, not asked about first.
 test("a session's tab closes on one click of its ×", () => {
   const closed: string[] = [];
-  const tabs: CenterTab[] = [
+  const tabs: WindowTab[] = [
     { id: "oxplow:oxplow/agent_session?id=ses7", label: "Claude", closable: true, pinned: true, render: () => null },
     { id: "oxplow:oxplow/file?path=a.ts", label: "a.ts", closable: true, render: () => null },
   ];
@@ -128,7 +129,7 @@ test("a session's tab closes on one click of its ×", () => {
 // An agent session's tab shows its harness's logo, else the generic robot.
 test("an agent session's tab draws its harness's declared logo", () => {
   const mark = "data:image/svg+xml;base64,PHN2Zy8+";
-  const tabs: CenterTab[] = [
+  const tabs: WindowTab[] = [
     { id: "oxplow:oxplow/agent_session?id=ses1", label: "Claude", closable: true, icon: mark, render: () => null },
     { id: "oxplow:oxplow/agent_session?id=ses2", label: "Other", closable: true, render: () => null },
     { id: "oxplow:oxplow/file?path=a.ts", label: "a.ts", closable: true, icon: mark, render: () => null },
@@ -154,7 +155,7 @@ test("a body with the same key keeps its state when its id changes", () => {
       </button>
     );
   }
-  const tab = (id: string): CenterTab => ({ id, key: "t1/oxplow:oxplow/page?page=x/y", label: "Page", closable: true, render: () => <Counter /> });
+  const tab = (id: string): WindowTab => ({ id, key: "t1/oxplow:oxplow/page?page=x/y", label: "Page", closable: true, render: () => <Counter /> });
   const view = render(<CenterTabs tabs={[tab("oxplow:oxplow/page?page=x/y")]} activeId="oxplow:oxplow/page?page=x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   fireEvent.click(view.getByTestId("count"));
   view.rerender(<CenterTabs tabs={[tab("oxplow:oxplow/page?page=x/y&range=7d")]} activeId="oxplow:oxplow/page?page=x/y&range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
@@ -175,7 +176,7 @@ test("a tab whose page holds unsaved edits says ● before its label", () => {
 // component's iframe loads again and reads as navigating away). The strip
 // may reorder; the bodies never move.
 test("reordering the tabs moves no tab body", () => {
-  const tab = (id: string): CenterTab => ({ id, label: id, closable: true, render: () => <div>{id}</div> });
+  const tab = (id: string): WindowTab => ({ id, label: id, closable: true, render: () => <div>{id}</div> });
   const props = { onActivate: () => {}, onClose: () => {}, onReorder: () => {} };
   const view = render(<CenterTabs tabs={[tab("a"), tab("b"), tab("c")]} activeId="a" {...props} />);
   const parent = view.getByTestId("center-tab-body-a").parentElement!;
@@ -204,7 +205,7 @@ test("only the shown tab is mounted; another mounts when first shown and stays m
     useState(() => mounts.push(name));
     return <span data-testid={`probe-${name}`} />;
   };
-  const tabs: CenterTab[] = ["a", "b", "c"].map((name) => ({
+  const tabs: WindowTab[] = ["a", "b", "c"].map((name) => ({
     id: `oxplow:oxplow/file?path=${name}.ts`,
     label: name,
     closable: true,
@@ -224,7 +225,7 @@ test("only the shown tab is mounted; another mounts when first shown and stays m
 
 test("a tab's entries built as its menu opens come after its own", () => {
   let built = 0;
-  const tabs: CenterTab[] = [
+  const tabs: WindowTab[] = [
     {
       id: "oxplow:oxplow/file?path=a.ts",
       label: "a.ts",

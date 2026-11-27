@@ -1,0 +1,113 @@
+// @desktop-only: the host serves the desktop shell (rail and title bar)
+// The host serves the built UI and forwards a project's calls: a browser
+// that only knows the host's address pairs once and gets a working window.
+// No token is in a page, and nothing it loads comes from another origin.
+import { expect, test, type Page } from "@playwright/test";
+
+import { startHost, type Host } from "../../support/host.js";
+import { loadScreen, open, shown } from "../../support/ui.js";
+
+let host: Host;
+test.beforeAll(async () => {
+  host = await startHost();
+});
+test.afterAll(async () => {
+  await host?.stop();
+});
+
+/** Pair `page` at the host's home: it asks as `name` and shows a code,
+ *  which the owner types. */
+async function pair(page: Page, name: string) {
+  await loadScreen(page, `${host.base}/`, "pair-screen");
+  await page.getByTestId("pair-name").fill(name);
+  await page.getByTestId("pair-name").press("Enter");
+  const code = (await page.getByTestId("pair-shown-code").textContent())!;
+  await host.approve(code);
+  await expect(page.getByTestId("host-home")).toBeVisible();
+}
+
+test("a device pairs at the host's home, opens a project and its window is ready", async ({ page }) => {
+  test.setTimeout(240_000);
+  const id = host.addProject("alpha");
+
+  const origins = new Set<string>();
+  const failed: string[] = [];
+  page.on("request", (r) => origins.add(new URL(r.url()).origin));
+  page.on("requestfailed", (r) => failed.push(`${r.method()} ${r.url()}: ${r.failure()?.errorText}`));
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+
+  // Nothing of the projects is on the home page before pairing.
+  const root = await (await fetch(host.base)).text();
+  expect(root).not.toContain(id);
+  await pair(page, "Tab S9");
+  // Open holds it for this device: its daemon starts.
+  await page.getByTestId(`host-project-open-${id}`).click();
+  await page.waitForURL(`${host.base}/p/${id}/`);
+  await expect(page.getByTestId("rail-hud")).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByTestId("title-bar")).toBeVisible();
+
+  const context = await page.evaluate(() => (window as unknown as { __OXPLOW__: Record<string, unknown> }).__OXPLOW__);
+  expect(context.kind).toBe("project");
+  expect(context.base).toBe(`${host.base}/p/${id}`);
+  expect(context.host).toBe(host.base);
+  expect(context.token).toBeNull();
+  // The host knows this device by its record.
+  const [device] = await host.devices();
+  expect(device!.name).toBe("Tab S9");
+  await expect.poll(async () => (await host.status()).connected.map((c) => c.name)).toContain("Tab S9");
+  // Everything came from the host's one origin, and nothing failed.
+  expect([...origins].filter((o) => o !== host.base && !o.startsWith("data:") && !o.startsWith("blob:"))).toEqual([]);
+  expect(failed).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("a device its owner removes is asked to pair again", async ({ page }) => {
+  test.setTimeout(240_000);
+  const id = host.addProject("gamma");
+  await pair(page, "Phone");
+  await page.getByTestId(`host-project-open-${id}`).click();
+  await expect(page.getByTestId("rail-hud")).toBeVisible({ timeout: 180_000 });
+  const phone = (await host.devices()).find((d) => d.name === "Phone")!;
+  await host.removeDevice(phone.id);
+  await expect(page.getByTestId("pair-screen")).toBeVisible();
+});
+
+// The Devices page is a project's: its daemon talks to the host as its
+// owner. It lists this device as connected and makes a pairing code.
+test("the Devices page shows this device and makes a pairing code", async ({ page }) => {
+  test.setTimeout(240_000);
+  const id = host.addProject("delta");
+  await pair(page, "Kitchen");
+  await page.getByTestId(`host-project-open-${id}`).click();
+  await expect(page.getByTestId("rail-hud")).toBeVisible({ timeout: 180_000 });
+  await open(page, host.project(id), "oxplow:oxplow/page?page=devices");
+  const devices = shown(page, "page=devices");
+  await expect(devices.getByText("Kitchen")).toBeVisible();
+  await expect(devices.getByText("Connected")).toBeVisible();
+  // The host listens for other devices: the page says where, and offers
+  // to pair one by the code it shows.
+  await expect(devices.getByText(/^On: a device opens/)).toBeVisible();
+
+  // Another device asks on its own: the open page says it waits (no
+  // reload); typing its code pairs it, and it is listed.
+  const asked = await fetch(`${host.base}/host/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Garage tablet", kind: "tablet" }),
+  });
+  const { code } = (await asked.json()) as { code: string };
+  await expect(devices.getByText(/Waiting: Garage tablet/)).toBeVisible();
+  const pairForm = devices.locator('[data-node="pair"]');
+  await pairForm.getByLabel("The code the device shows").fill(code);
+  await pairForm.getByTestId("viz-form-fields-submit").click();
+  await expect(devices.getByRole("cell", { name: "Garage tablet" })).toBeVisible();
+  await expect(devices.getByText(/Waiting: Garage tablet/)).toHaveCount(0);
+});
+
+test("a project that is not held has no daemon to reach", async () => {
+  const id = host.addProject("beta");
+  const res = await fetch(`${host.base}/p/${id}/health`);
+  expect(res.status).toBe(404);
+  expect(((await res.json()) as { state: string }).state).toBe("stopped");
+});

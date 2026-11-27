@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use oxplow_domain::{
-    diff_trees, DomainError, FileChange, PageVisitId, StreamId, ThreadId, Timestamp, UsageEventId,
+    diff_trees, DeviceId, DomainError, FileChange, PageVisitId, StreamId, ThreadId, Timestamp,
+    UsageEventId,
 };
 
 use crate::database::Database;
@@ -55,34 +56,44 @@ impl SqlitePageVisitStore {
 #[async_trait]
 pub trait PageVisitStore: Send + Sync {
     /// A visit starts when its page is shown; its length is unknown until
-    /// it ends (`finish`), so `duration_ms` starts NULL.
+    /// it ends (`finish`), so `duration_ms` starts NULL. `device` is the
+    /// device it was opened on (none: a visit no device owns).
     async fn record(
         &self,
         page_kind: &str,
         page_id: &str,
         label: Option<&str>,
         thread_id: Option<&str>,
+        device: Option<&DeviceId>,
     ) -> Result<PageVisit, DomainError>;
     /// The visit (`pv12`) ended after `duration_ms` of being shown.
     async fn finish(&self, id: &str, duration_ms: i64) -> Result<(), DomainError>;
     /// Recent visits, optionally scoped to one thread. `None` returns
-    /// every visit across threads (the global view).
+    /// every visit across threads (the global view). With a `device`, the
+    /// visits made on it and the ones no device owns (from before devices);
+    /// with none, every device's.
     async fn list_recent(
         &self,
         limit: usize,
         thread_id: Option<&str>,
+        device: Option<&DeviceId>,
     ) -> Result<Vec<PageVisit>, DomainError>;
     /// Top visited (kind, id) tuples by visit count, optionally scoped to
-    /// one thread.
+    /// one thread, and to a `device` as `list_recent` is.
     async fn list_top(
         &self,
         limit: usize,
         thread_id: Option<&str>,
+        device: Option<&DeviceId>,
     ) -> Result<Vec<(String, String, i64)>, DomainError>;
     async fn forget_page(&self, page_kind: &str, page_id: &str) -> Result<(), DomainError>;
     /// Distinct (page_kind, page_id) tuples ordered by most recent visit
     /// — drives the "frequent" rail.
-    async fn list_frequent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError>;
+    async fn list_frequent(
+        &self,
+        limit: usize,
+        device: Option<&DeviceId>,
+    ) -> Result<Vec<PageVisit>, DomainError>;
 }
 
 #[async_trait]
@@ -93,7 +104,9 @@ impl PageVisitStore for SqlitePageVisitStore {
         page_id: &str,
         label: Option<&str>,
         thread_id: Option<&str>,
+        device: Option<&DeviceId>,
     ) -> Result<PageVisit, DomainError> {
+        let device = device.map(|d| d.as_str().to_string());
         let page_kind = page_kind.to_string();
         let page_id = page_id.to_string();
         let label = label.map(|s| s.to_string());
@@ -108,9 +121,16 @@ impl PageVisitStore for SqlitePageVisitStore {
                     .and_then(ThreadId::try_from_str)
                     .map(|t| t.value());
                 conn.execute(
-                    "INSERT INTO page_visit (page_kind, page_id, label, visited_at, thread_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![page_kind, page_id, label, ts_to_string(now), thread_id_val],
+                    "INSERT INTO page_visit (page_kind, page_id, label, visited_at, thread_id, device_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        page_kind,
+                        page_id,
+                        label,
+                        ts_to_string(now),
+                        thread_id_val,
+                        device
+                    ],
                 )?;
                 let id = PageVisitId::new(conn.last_insert_rowid()).to_string();
                 Ok(PageVisit {
@@ -144,8 +164,10 @@ impl PageVisitStore for SqlitePageVisitStore {
         &self,
         limit: usize,
         thread_id: Option<&str>,
+        device: Option<&DeviceId>,
     ) -> Result<Vec<PageVisit>, DomainError> {
         let thread_id = thread_id.map(|s| s.to_string());
+        let device = device.map(|d| d.as_str().to_string());
         self.db
             .call(move |conn| {
                 let mut stmt = if thread_id.is_some() {
@@ -153,12 +175,14 @@ impl PageVisitStore for SqlitePageVisitStore {
                         "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
                          FROM page_visit
                          WHERE thread_id = ?2
+                           AND (?3 IS NULL OR device_id IS NULL OR device_id = ?3)
                          ORDER BY visited_at DESC LIMIT ?1",
                     )?
                 } else {
                     conn.prepare(
                         "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
                          FROM page_visit
+                         WHERE (?2 IS NULL OR device_id IS NULL OR device_id = ?2)
                          ORDER BY visited_at DESC LIMIT ?1",
                     )?
                 };
@@ -195,12 +219,13 @@ impl PageVisitStore for SqlitePageVisitStore {
                     .map(|t| t.value())
                 {
                     let rows: rusqlite::Result<Vec<_>> = stmt
-                        .query_map(params![limit as i64, tid], map_row)?
+                        .query_map(params![limit as i64, tid, device], map_row)?
                         .collect();
                     rows
                 } else {
-                    let rows: rusqlite::Result<Vec<_>> =
-                        stmt.query_map(params![limit as i64], map_row)?.collect();
+                    let rows: rusqlite::Result<Vec<_>> = stmt
+                        .query_map(params![limit as i64, device], map_row)?
+                        .collect();
                     rows
                 }
             })
@@ -211,8 +236,10 @@ impl PageVisitStore for SqlitePageVisitStore {
         &self,
         limit: usize,
         thread_id: Option<&str>,
+        device: Option<&DeviceId>,
     ) -> Result<Vec<(String, String, i64)>, DomainError> {
         let thread_id = thread_id.map(|s| s.to_string());
+        let device = device.map(|d| d.as_str().to_string());
         self.db
             .call(move |conn| {
                 let map_row = |row: &rusqlite::Row<'_>| {
@@ -231,24 +258,27 @@ impl PageVisitStore for SqlitePageVisitStore {
                         "SELECT page_kind, page_id, COUNT(*) AS visits
                          FROM page_visit
                          WHERE thread_id = ?2
+                           AND (?3 IS NULL OR device_id IS NULL OR device_id = ?3)
                          GROUP BY page_kind, page_id
                          ORDER BY visits DESC
                          LIMIT ?1",
                     )?;
                     let rows: rusqlite::Result<Vec<_>> = stmt
-                        .query_map(params![limit as i64, tid], map_row)?
+                        .query_map(params![limit as i64, tid, device], map_row)?
                         .collect();
                     rows
                 } else {
                     let mut stmt = conn.prepare(
                         "SELECT page_kind, page_id, COUNT(*) AS visits
                          FROM page_visit
+                         WHERE (?2 IS NULL OR device_id IS NULL OR device_id = ?2)
                          GROUP BY page_kind, page_id
                          ORDER BY visits DESC
                          LIMIT ?1",
                     )?;
-                    let rows: rusqlite::Result<Vec<_>> =
-                        stmt.query_map(params![limit as i64], map_row)?.collect();
+                    let rows: rusqlite::Result<Vec<_>> = stmt
+                        .query_map(params![limit as i64, device], map_row)?
+                        .collect();
                     rows
                 }
             })
@@ -269,25 +299,33 @@ impl PageVisitStore for SqlitePageVisitStore {
             .await
     }
 
-    async fn list_frequent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError> {
+    async fn list_frequent(
+        &self,
+        limit: usize,
+        device: Option<&DeviceId>,
+    ) -> Result<Vec<PageVisit>, DomainError> {
+        let device = device.map(|d| d.as_str().to_string());
         self.db
             .call(move |conn| {
                 // Most-recent visit per page, ordered by visit count desc.
                 let mut stmt = conn.prepare(
                     "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
                      FROM page_visit pv
-                     WHERE id = (
+                     WHERE (?2 IS NULL OR device_id IS NULL OR device_id = ?2)
+                       AND id = (
                          SELECT id FROM page_visit pv2
                          WHERE pv2.page_kind = pv.page_kind AND pv2.page_id = pv.page_id
+                           AND (?2 IS NULL OR pv2.device_id IS NULL OR pv2.device_id = ?2)
                          ORDER BY visited_at DESC LIMIT 1
                      )
                      ORDER BY (
                          SELECT COUNT(*) FROM page_visit pv3
                          WHERE pv3.page_kind = pv.page_kind AND pv3.page_id = pv.page_id
+                           AND (?2 IS NULL OR pv3.device_id IS NULL OR pv3.device_id = ?2)
                      ) DESC
                      LIMIT ?1",
                 )?;
-                let rows = stmt.query_map(params![limit as i64], |row| {
+                let rows = stmt.query_map(params![limit as i64, device], |row| {
                     let id = PageVisitId::new(row.get::<_, i64>(0)?).to_string();
                     let page_kind: String = row.get(1)?;
                     let page_id: String = row.get(2)?;
@@ -3835,14 +3873,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_visit_lists_for_its_device_and_for_the_ones_no_device_owns() {
+        let store = SqlitePageVisitStore::new(Database::in_memory());
+        let (a, b) = (DeviceId::generate(), DeviceId::generate());
+        store
+            .record("task", "on-a", None, None, Some(&a))
+            .await
+            .unwrap();
+        store
+            .record("task", "on-b", None, None, Some(&b))
+            .await
+            .unwrap();
+        store.record("task", "old", None, None, None).await.unwrap();
+        let ids = |v: Vec<PageVisit>| {
+            let mut ids: Vec<_> = v.into_iter().map(|v| v.page_id).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(
+            ids(store.list_recent(10, None, Some(&a)).await.unwrap()),
+            ["old", "on-a"]
+        );
+        assert_eq!(
+            ids(store.list_recent(10, None, Some(&b)).await.unwrap()),
+            ["old", "on-b"]
+        );
+        assert_eq!(
+            ids(store.list_recent(10, None, None).await.unwrap()),
+            ["old", "on-a", "on-b"],
+            "no device: every device's"
+        );
+        let top = store.list_top(10, None, Some(&a)).await.unwrap();
+        assert_eq!(top.len(), 2);
+        assert!(top.iter().all(|t| t.1 != "on-b"));
+        let frequent = store.list_frequent(10, Some(&b)).await.unwrap();
+        assert_eq!(ids(frequent), ["old", "on-b"]);
+    }
+
+    #[tokio::test]
     async fn page_visit_record_then_recent() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "abc", None, None)
+            .record("oxplow/knowledge", "abc", None, None, None)
             .await
             .unwrap();
-        store.record("task", "wi-1", None, None).await.unwrap();
-        let recent = store.list_recent(10, None).await.unwrap();
+        store
+            .record("task", "wi-1", None, None, None)
+            .await
+            .unwrap();
+        let recent = store.list_recent(10, None, None).await.unwrap();
         assert_eq!(recent.len(), 2);
         // newest first
         assert_eq!(recent[0].page_kind, "task");
@@ -3852,13 +3931,13 @@ mod tests {
     async fn page_visit_is_recorded_open_and_finishing_it_stores_how_long_it_lasted() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         let shown = store
-            .record("oxplow/knowledge", "a", None, None)
+            .record("oxplow/knowledge", "a", None, None, None)
             .await
             .unwrap();
-        let other = store.record("task", "b", None, None).await.unwrap();
+        let other = store.record("task", "b", None, None, None).await.unwrap();
         assert_eq!(shown.duration_ms, None, "a visit starts with no length");
         store.finish(&shown.id, 4200).await.unwrap();
-        let recent = store.list_recent(10, None).await.unwrap();
+        let recent = store.list_recent(10, None, None).await.unwrap();
         let length = |id: &str| recent.iter().find(|v| v.id == id).unwrap().duration_ms;
         assert_eq!(length(&shown.id), Some(4200));
         assert_eq!(length(&other.id), None, "only the visit named is finished");
@@ -3872,18 +3951,18 @@ mod tests {
     async fn page_visit_top_groups_correctly() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, None)
+            .record("oxplow/knowledge", "a", None, None, None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "a", None, None)
+            .record("oxplow/knowledge", "a", None, None, None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, None)
+            .record("oxplow/knowledge", "b", None, None, None)
             .await
             .unwrap();
-        let top = store.list_top(10, None).await.unwrap();
+        let top = store.list_top(10, None, None).await.unwrap();
         assert_eq!(top[0].1, "a");
         assert_eq!(top[0].2, 2);
     }
@@ -3892,15 +3971,15 @@ mod tests {
     async fn page_visit_forget_clears_only_target() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, None)
+            .record("oxplow/knowledge", "a", None, None, None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, None)
+            .record("oxplow/knowledge", "b", None, None, None)
             .await
             .unwrap();
         store.forget_page("oxplow/knowledge", "a").await.unwrap();
-        let recent = store.list_recent(10, None).await.unwrap();
+        let recent = store.list_recent(10, None, None).await.unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].page_id, "b");
     }
@@ -3909,21 +3988,21 @@ mod tests {
     async fn page_visit_recent_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, Some("thr1"), None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, Some("thr2"))
+            .record("oxplow/knowledge", "b", None, Some("thr2"), None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "c", None, None)
+            .record("oxplow/knowledge", "c", None, None, None)
             .await
             .unwrap();
-        let in_thread = store.list_recent(10, Some("thr1")).await.unwrap();
+        let in_thread = store.list_recent(10, Some("thr1"), None).await.unwrap();
         assert_eq!(in_thread.len(), 1);
         assert_eq!(in_thread[0].page_id, "a");
-        let global = store.list_recent(10, None).await.unwrap();
+        let global = store.list_recent(10, None, None).await.unwrap();
         assert_eq!(global.len(), 3);
     }
 
@@ -3931,22 +4010,22 @@ mod tests {
     async fn page_visit_top_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, Some("thr1"), None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "a", None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, Some("thr1"), None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "a", None, Some("thr2"))
+            .record("oxplow/knowledge", "a", None, Some("thr2"), None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, Some("thr1"))
+            .record("oxplow/knowledge", "b", None, Some("thr1"), None)
             .await
             .unwrap();
-        let in_thread = store.list_top(10, Some("thr1")).await.unwrap();
+        let in_thread = store.list_top(10, Some("thr1"), None).await.unwrap();
         // a appears twice in b-1, b once
         assert_eq!(in_thread[0].1, "a");
         assert_eq!(in_thread[0].2, 2);

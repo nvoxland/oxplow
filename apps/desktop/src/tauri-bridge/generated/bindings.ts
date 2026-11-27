@@ -60,7 +60,8 @@ export const commands = {
 } | null, IpcError_Serialize>(__TAURI_INVOKE("get_primary_stream")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getCurrentStream: () => typedError<{
 	id: StreamId,
@@ -94,7 +95,8 @@ export const commands = {
 } | null, IpcError_Serialize>(__TAURI_INVOKE("get_current_stream")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	switchStream: (id: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("switch_stream", { id })),
 	/**
@@ -109,17 +111,20 @@ export const commands = {
 	listAgentHarnesses: () => typedError<HarnessListing[], IpcError_Serialize>(__TAURI_INVOKE("list_agent_harnesses")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("select_thread", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError_Serialize>(__TAURI_INVOKE("get_thread_state", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	search: (query: string, streamId: string | null, resources: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search", { query, streamId, resources, limit })),
 	/**
@@ -129,22 +134,26 @@ export const commands = {
 	querySql: (sql: string, params: SqlCell[] | null, limit: number | null, raw: boolean | null) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("query_sql", { sql, params, limit, raw })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getPanelLayout: (streamId: string | null, threadId: string | null) => typedError<ScopedPanelLayout, IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout", { streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	setPanelLayout: (streamId: string | null, threadId: string | null, layout: ScopedPanelLayout) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { streamId, threadId, layout })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	getUiPreferences: () => typedError<UiPreference[], IpcError_Serialize>(__TAURI_INVOKE("get_ui_preferences")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	setUiPreference: (scope: string, key: string, valueJson: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_ui_preference", { scope, key, valueJson })),
 	/**
@@ -159,12 +168,14 @@ export const commands = {
 	loadComponent: (id: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("load_component", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	invokeComponentPoint: (id: string, point: string, context: unknown, command: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_point", { id, point, context, command, confirmed, version })),
 	/**
@@ -184,14 +195,16 @@ export const commands = {
 	listServices: () => typedError<ServiceListing[], IpcError_Serialize>(__TAURI_INVOKE("list_services")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	openPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, params, streamId, threadId, client })),
+	openPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, params, streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	openPanelPart: (panel: string, part: PanelPart, choices: { [key in string]: string } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_panel_part", { panel, part, choices, streamId, threadId, client })),
+	openPanelPart: (panel: string, part: PanelPart, choices: { [key in string]: string } | null, streamId: string | null, threadId: string | null) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_panel_part", { panel, part, choices, streamId, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -219,7 +232,8 @@ export const commands = {
 	fetchPageRuns: (runIds: string[]) => typedError<{ [key in string]: RunSnapshot_Serialize }, IpcError_Serialize>(__TAURI_INVOKE("fetch_page_runs", { runIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	runPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<PageRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_page", { page, specYaml, params, streamId })),
 	/**
@@ -229,7 +243,8 @@ export const commands = {
 	pageText: (runId: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("page_text", { runId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	pageOptions: (page: string, param: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("page_options", { page, param, params, streamId })),
 	/**
@@ -239,7 +254,8 @@ export const commands = {
 	getPage: (id: string) => typedError<Page_Serialize, IpcError_Serialize>(__TAURI_INVOKE("get_page", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	renderersFor: (uri: string, streamId: string | null) => typedError<Renderer[], IpcError_Serialize>(__TAURI_INVOKE("renderers_for", { uri, streamId })),
 	/**
@@ -249,7 +265,8 @@ export const commands = {
 	pageSpec: (page: string) => typedError<PageSpec, IpcError_Serialize>(__TAURI_INVOKE("page_spec", { page })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	runPageAction: (runId: string, node: string | null, action: string, row: { [key in string]: SqlCell } | null, input: unknown | null, drop: {
 	before?: { [key in string]: SqlCell } | null,
@@ -265,7 +282,8 @@ export const commands = {
 	pageForm: (runId: string, node: string) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("page_form", { runId, node })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	submitPageForm: (runId: string, node: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("submit_page_form", { runId, node, input, confirmed })),
 	/**
@@ -275,9 +293,46 @@ export const commands = {
 	pageActionForm: (runId: string, node: string | null, action: string, row: { [key in string]: SqlCell } | null) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("page_action_form", { runId, node, action, row })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	reportTabs: (report: TabReport) => typedError<TabReportAnswer, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	listTabSessions: () => typedError<TabSession[], IpcError_Serialize>(__TAURI_INVOKE("list_tab_sessions")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	listOtherDeviceTabs: (threadId: ThreadId) => typedError<OtherDeviceTabs[], IpcError_Serialize>(__TAURI_INVOKE("list_other_device_tabs", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	saveTabSession: (threadId: ThreadId, sessionJson: string, revision: number | null) => typedError<TabSave, IpcError_Serialize>(__TAURI_INVOKE("save_tab_session", { threadId, sessionJson, revision })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	forgetTabSession: (threadId: ThreadId) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_tab_session", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	listQueuedTabs: () => typedError<QueuedTab[], IpcError_Serialize>(__TAURI_INVOKE("list_queued_tabs")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
+	forgetQueuedTabs: (ids: QueuedTabId[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_queued_tabs", { ids })),
 	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
@@ -330,7 +385,8 @@ export const commands = {
 	listOutbound: (source: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_outbound", { source, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	recordPageVisit: (pageKind: string, pageId: string, label: string | null, threadId: string | null) => typedError<PageVisit, IpcError_Serialize>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, threadId })),
 	/**
@@ -340,12 +396,14 @@ export const commands = {
 	finishPageVisit: (id: string, durationMs: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("finish_page_visit", { id, durationMs })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError_Serialize>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError_Serialize>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
 	/**
@@ -500,7 +558,8 @@ export const commands = {
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError_Serialize>(__TAURI_INVOKE("get_workspace_context")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
 	/**
@@ -530,32 +589,38 @@ export const commands = {
 	actionPointCommands: (point: string, context: unknown) => typedError<PointOffer, IpcError_Serialize>(__TAURI_INVOKE("action_point_commands", { point, context })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { client, scopes })),
+	registerClientHost: (scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { scopes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	unregisterClientHost: (client: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("unregister_client_host", { client })),
+	unregisterClientHost: () => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("unregister_client_host")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	answerClientCall: (client: string, id: string, result: unknown | null, error: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("answer_client_call", { client, id, result, error })),
+	answerClientCall: (id: string, result: unknown | null, error: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("answer_client_call", { id, result, error })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
-	runCommandForCall: (client: string, call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command_for_call", { client, call, id, input })),
+	runCommandForCall: (call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command_for_call", { call, id, input })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	undoCommand: (commandRunId: CommandRunId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { commandRunId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	decideProposal: (proposal: ProposalId, approve: boolean) => typedError<{
 	result: unknown,
@@ -581,7 +646,8 @@ export const commands = {
 	filesAt: (streamId: string | null, revision: string) => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("files_at", { streamId, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError_Serialize>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
 	/**
@@ -675,10 +741,16 @@ export const commands = {
 	 */
 	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
 	/**
-	 *  Open a renderer-attached terminal session: the agent CLI or a shell,
-	 *  run directly in a PTY, named by its URI (`oxplow_rpc::commands::terminal`).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
 	 */
 	openTerminalSession: (uri: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { uri, cols, rows })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core. A request
+	 *  over Tauri IPC names no caller.
+	 */
 	restartAgentTerminal: (uri: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("restart_agent_terminal", { uri })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -748,6 +820,30 @@ export const commands = {
 	 *  `~/.local/bin`.
 	 */
 	installCli: () => typedError<InstalledCli, IpcError_Serialize>(__TAURI_INVOKE("install_cli")),
+	/**
+	 *  Ask a host on another computer (`server.tailnet.ts.net:7400`,
+	 *  `https://…`) to pair this Mac: the code to type there.
+	 */
+	askHost: (address: string) => typedError<HostAsk, IpcError_Serialize>(__TAURI_INVOKE("ask_host", { address })),
+	/**
+	 *  Wait (a while) for the person at that host to type the code: `true`
+	 *  once they did (this Mac is paired, its token kept), `false` while it
+	 *  still waits; an error once the ask ended.
+	 */
+	collectHost: (origin: string, request: string) => typedError<boolean, IpcError_Serialize>(__TAURI_INVOKE("collect_host", { origin, request })),
+	/**  Each paired host, with its projects (or why it did not answer). */
+	remoteHosts: () => typedError<RemoteHostView[], IpcError_Serialize>(__TAURI_INVOKE("remote_hosts")),
+	/**
+	 *  Open a project of a host on another machine in a window of its own;
+	 *  `close_caller` closes the window that asked (the launcher), as an open
+	 *  from it does.
+	 */
+	openRemoteProject: (origin: string, project: string, closeCaller: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("open_remote_project", { origin, project, closeCaller })),
+	/**
+	 *  Forget a host on another machine: this Mac's device goes there, and the
+	 *  token here.
+	 */
+	forgetRemoteHost: (origin: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_remote_host", { origin })),
 };
 
 /* Types */
@@ -1057,6 +1153,19 @@ export type Atomicity = "tx" | "external" | "dispatch";
 export type AttachResult = {
 	sessionId: string,
 	replayB64: string,
+	/**
+	 *  The PTY's size now: the owner's, which a pane that is not the
+	 *  owner can draw.
+	 */
+	cols: number,
+	rows: number,
+	/**
+	 *  The page load that owns the size (`oxplow-app::terminal_sessions`:
+	 *  the one that last typed), and the caller's own: a pane is the owner
+	 *  when they are equal. Null for a caller with no page load.
+	 */
+	owner: string | null,
+	you: string | null,
 };
 
 export type BackgroundTask = {
@@ -3433,6 +3542,23 @@ export type HookKind =
 "post_compact";
 
 /**
+ *  This Mac's ask to pair with a host on another computer: the code for
+ *  the person there to type, and what collects the answer.
+ */
+export type HostAsk = {
+	origin: string,
+	/**  The ask's secret: what `collect_host` takes. */
+	request: string,
+	/**
+	 *  `ABCD-EFGH`: typed there (`oxplow host pair <code>`, or its Devices
+	 *  page).
+	 */
+	code: string,
+	/**  Seconds it waits. */
+	expiresIn: number,
+};
+
+/**
  *  The host a stream's worktree is on. Every stream is on the local machine
  *  today ([`HostId::LOCAL`]); naming it keeps "local" from being assumed
  *  silently where a worktree path is reached (`WorktreeRoot::local_path`).
@@ -4206,6 +4332,11 @@ export type Node_Deserialize = {
 	/**  Its heading folds it; the person's choice is the tab's. */
 	collapsible: boolean,
 	/**
+	 *  It starts folded (and folds at its heading): what most never need,
+	 *  such as settings for an unusual setup.
+	 */
+	collapsed: boolean,
+	/**
 	 *  The page an arrow beside its heading opens (`<extension>/<slug>`; a
 	 *  bare slug is this extension's).
 	 */
@@ -4253,6 +4384,11 @@ export type Node_Serialize = {
 	icon: string | null,
 	/**  Its heading folds it; the person's choice is the tab's. */
 	collapsible: boolean,
+	/**
+	 *  It starts folded (and folds at its heading): what most never need,
+	 *  such as settings for an unusual setup.
+	 */
+	collapsed: boolean,
 	/**
 	 *  The page an arrow beside its heading opens (`<extension>/<slug>`; a
 	 *  bare slug is this extension's).
@@ -4409,6 +4545,16 @@ export type OpenedRun_Serialize = {
 	panel: PartView_Serialize | null,
 };
 
+/**
+ *  Another device's stored tabs of a thread: which device, its name when
+ *  the daemon knows it, and its session as it keeps it.
+ */
+export type OtherDeviceTabs = {
+	device: string,
+	name: string | null,
+	sessionJson: string,
+};
+
 /**  Who contributed it. */
 export type Owner = {
 	extension: string,
@@ -4496,6 +4642,12 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
  */
 ({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
+ *  The host's devices or its settings changed (a pairing, a rename, a
+ *  removal, "Allow other devices"): `v_host_device` and
+ *  `v_host_settings` are read again.
+ */
+({ kind: "hostChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+/**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
  *  (the catalog's own signal). Every host listing what
@@ -4517,6 +4669,12 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
 client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
 actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+/**
+ *  A tab was queued for the device of window `client` (a connection id)
+ *  just after it connected: that window takes its queue now, not at its
+ *  next reconnect. Only that window does it.
+ */
+({ kind: "tabsQueued"; client: string }) & { actor?: never; agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
@@ -5726,6 +5884,16 @@ export type PublicContracts = {
 	withheld?: Withheld[],
 };
 
+/**  A tab waiting for a device: its row, the page, and the thread it opens in. */
+export type QueuedTab = {
+	id: QueuedTabId,
+	threadId: ThreadId,
+	uri: string,
+};
+
+/**  A queued tab's row. */
+export type QueuedTabId = number;
+
 /**
  *  What a query read, as SQLite's authorizer reported it while preparing
  *  it (P4.1).
@@ -5795,6 +5963,29 @@ export type RelationshipDecl = {
 	to: string,
 };
 
+export type RemoteHostView = {
+	origin: string,
+	/**  What the host calls this Mac. */
+	deviceName: string,
+	/**  Its version, when it answered. */
+	version: string | null,
+	/**  It runs another version than this app (said, never fixed here). */
+	otherVersion: boolean,
+	projects: RemoteProjectView[],
+	/**  Why it did not answer. */
+	error: string | null,
+};
+
+export type RemoteProjectView = {
+	id: string,
+	name: string,
+	/**  `starting`, `running`, `stopping`, `stopped` or `crashed`. */
+	state: string,
+	/**  How many devices hold it now. */
+	holds: number,
+	heldByYou: boolean,
+};
+
 /**  A page that can draw a URI. */
 export type Renderer = {
 	/**  `<extension>/<slug>`; what a view's `oxplow.renderer` names. */
@@ -5825,31 +6016,6 @@ export type ReportInput = {
 	 *  `json`, `xml`, `lcov` or `lines`.
 	 */
 	format?: string,
-};
-
-/**  One tab, as its window shows it. */
-export type ReportedTab = {
-	/**
-	 *  Its tab id: a canonical ref (`oxplow:oxplow/task?id=tsk3&provider=oxtask`,
-	 *  `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
-	 */
-	id: string,
-	/**  Its page kind (`task`, `page`, `agent_session`). */
-	kind: string,
-	/**  The title on the tab. */
-	title: string,
-	/**
-	 *  Where its Back leads: the ids of the entries before the one it
-	 *  shows, oldest first.
-	 */
-	back?: string[],
-	/**  Where its Forward leads (the ids of the entries after it). */
-	forward?: string[],
-	/**
-	 *  The collection the page was opened from (its title), whose items
-	 *  Up and Down step through.
-	 */
-	origin?: string | null,
 };
 
 /**  A declared resource. */
@@ -6397,15 +6563,16 @@ export type SymbolLocation = {
 	versionGone: boolean,
 };
 
-/**  What one window shows, as its renderer reports it. */
+/**
+ *  What one window shows, as its renderer reports it. Which window it is
+ *  comes from the request's caller (its page load and device), not from
+ *  the report.
+ */
 export type TabReport = {
-	/**  The window's renderer, for as long as it lives. */
-	client: string,
 	focused: boolean,
 	visible: boolean,
 	/**  The thread the window shows. */
 	shown_thread: ThreadId | null,
-	threads: ThreadTabs[],
 	/**
 	 *  The detail the shown thread's active page publishes (JSON text: a
 	 *  page's `{pageId, params}`, an editor's `{path, revision, selection}`).
@@ -6422,6 +6589,30 @@ export type TabReport = {
 export type TabReportAnswer = {
 	/**  The runs it reported that the daemon no longer holds for it. */
 	missingRuns: string[],
+};
+
+/**
+ *  A thread's tabs' revision: bumped by every save, and given back by the
+ *  next.
+ */
+export type TabRevision = number;
+
+/**
+ *  What a save did: whether it wrote, and the row's revision now (the new
+ *  one; for a refused save, the one the row is at, `None` for no row).
+ */
+export type TabSave = {
+	saved: boolean,
+	revision: TabRevision | null,
+};
+
+/**  One thread's stored tabs. */
+export type TabSession = {
+	threadId: ThreadId,
+	/**  The session, as the window writes it (JSON text). */
+	sessionJson: string,
+	/**  Bumped by every save: the next save gives it back. */
+	revision: TabRevision,
 };
 
 /**  One `test_conventions:` entry as the extension declares it. */
@@ -6496,14 +6687,6 @@ export type ThreadMark = "amber" | "red" | "green" | "blue" | "violet";
 export type ThreadState = {
 	selectedThreadId: ThreadId | null,
 	threads: Thread[],
-};
-
-/**  A thread's tabs in one window. */
-export type ThreadTabs = {
-	thread: ThreadId,
-	tabs: ReportedTab[],
-	/**  The tab selected in the thread (its id); none when none is. */
-	active: string | null,
 };
 
 /**

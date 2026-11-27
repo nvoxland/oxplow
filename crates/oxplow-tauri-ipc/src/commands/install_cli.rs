@@ -85,7 +85,8 @@ fn link_in(_exe: &Path, _target: &Target) -> std::io::Result<PathBuf> {
 /// `~/.local/bin`.
 #[tauri::command]
 #[specta::specta]
-pub async fn install_cli() -> Result<InstalledCli, IpcError> {
+pub async fn install_cli(window: tauri::Window) -> Result<InstalledCli, IpcError> {
+    super::local_window_only(&window)?;
     let exe = std::env::current_exe()
         .map_err(|e| IpcError::internal(format!("find the running app: {e}")))?;
     let mut targets = vec![Target {

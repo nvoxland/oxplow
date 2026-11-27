@@ -17,7 +17,7 @@ import type { KeyboardEvent, PointerEvent } from "react";
 import { ICONS, iconFor } from "../../icons.js";
 import { OpenPageLink } from "../../kit/OpenPageLink.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { dockStore, DOCK_MAX_HEIGHT_MARGIN, DOCK_MIN_HEIGHT, useDockState } from "./dockStore.js";
+import { dockStore, DOCK_MAX_HEIGHT_MARGIN, DOCK_MIN_HEIGHT, useDockHeight, useDockState } from "./dockStore.js";
 import { useDockPanels } from "./dockPanels.js";
 
 /** The height the panel draws at: the remembered one within the column. */
@@ -28,17 +28,19 @@ export function clampDockHeight(height: number, columnHeight: number): number {
 
 export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; onOpenPage(ref: TabRef): void }) {
   const panels = useDockPanels();
-  const { open, height } = useDockState();
+  const { open } = useDockState();
+  const [height, setHeight] = useDockHeight();
   const panel = panels.find((p) => p.id === open) ?? null;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ startY: number; base: number } | null>(null);
   const [columnHeight, setColumnHeight] = useState(Number.POSITIVE_INFINITY);
 
-  // The column is the dock's parent's parent (the dock wraps bar and panel).
+  // The column the panel opens over: the shell marks it `data-dock-column`
+  // (the desktop's center column, the tablet's whole window).
   useEffect(() => {
     if (!panel) return;
     const measure = () => {
-      const column = rootRef.current?.parentElement?.parentElement;
+      const column = rootRef.current?.closest<HTMLElement>("[data-dock-column]");
       if (column && column.clientHeight > 0) setColumnHeight(column.clientHeight);
     };
     measure();
@@ -72,13 +74,14 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
   };
   const onHandleMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current || e.buttons === 0) return;
-    dockStore.setHeight(clampDockHeight(drag.current.base + (drag.current.startY - e.clientY), columnHeight));
+    setHeight(clampDockHeight(drag.current.base + (drag.current.startY - e.clientY), columnHeight));
   };
   const onHandleUp = (e: PointerEvent<HTMLDivElement>) => {
     drag.current = null;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
   };
   const Body = panel.Body;
+  const Header = panel.Header;
   const Icon = iconFor(panel.icon) ?? ICONS.box;
   return (
     <div
@@ -141,6 +144,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
           </span>
         ) : null}
         <span style={{ flex: 1 }} />
+        {Header ? <span style={{ display: "inline-flex", gap: 4, marginRight: 8 }}><Header streamId={streamId} onOpenPage={onOpenPage} /></span> : null}
         <button
           type="button"
           data-testid="dock-panel-close"

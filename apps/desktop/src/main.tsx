@@ -10,6 +10,8 @@ import { createRoot } from "react-dom/client";
 import { Root } from "./Root.js";
 import { installUiLogging, logUi } from "./logger.js";
 import { remoteBaseUrl, windowKind } from "./tauri-bridge/transport.js";
+import { followDensity } from "./coarsePointer.js";
+import { installTouchHints } from "./touchHints.js";
 
 self.MonacoEnvironment = {
   getWorker(_workerId: string, label: string) {
@@ -41,6 +43,11 @@ logUi("info", "ui bootstrapping", {
   windowKind: windowKind(),
   daemon: remoteBaseUrl(),
 });
+
+// A finger's density on a touch screen (`coarsePointer.ts`), and a hold
+// that shows an icon control's label (`touchHints.ts`).
+followDensity(document.documentElement);
+installTouchHints();
 
 const el = document.getElementById("root")!;
 createRoot(el).render(<Root />);

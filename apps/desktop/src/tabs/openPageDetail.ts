@@ -1,7 +1,7 @@
 /**
  * Page-specific context a page publishes about itself (a page's id and
- * current params), keyed by page id. App reports the *active* page plus
- * its detail to the backend (`report_open_page`), so an agent's
+ * current params), keyed by page id. The window reports the *active* page plus
+ * its detail to the backend (`report_tabs`, `window/useWindowHost.ts`), so an agent's
  * `get_open_page` sees what the human sees. Keeping detail here, rather
  * than having pages report directly, means a mounted-but-hidden page can
  * never overwrite what's reported for the active one.

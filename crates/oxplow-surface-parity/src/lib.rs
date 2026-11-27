@@ -223,7 +223,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
-    dataset("get_ui_preferences", &["v_ui_preference"]),
+    dataset("get_ui_preferences", &["v_ui_preference", "v_component_memory"]),
     ui("set_ui_preference", "the person's page memory and app preferences, a UI pointer like the panel layout"),
     dataset("list_extensions", &["v_extension", "v_contribution"]),
     // A window's open page runs: it opens one, hears which loaders
@@ -285,6 +285,24 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
+    ),
+    ui(
+        "list_tab_sessions",
+        "a device's stored tabs of each thread, which its window restores",
+    ),
+    ui(
+        "list_other_device_tabs",
+        "the other devices' stored tabs of a thread, which a window continues from",
+    ),
+    ui("save_tab_session", "a window keeping its device's tabs of a thread"),
+    ui("forget_tab_session", "a window forgetting its device's tabs of a thread"),
+    ui(
+        "list_queued_tabs",
+        "a window reading the tabs agents opened for its device while it was away",
+    ),
+    ui(
+        "forget_queued_tabs",
+        "a window dropping the queued tabs it has kept in its device's stored tabs",
     ),
     ui(
         "listen_for_oauth_redirect",
@@ -524,6 +542,12 @@ pub const MANIFEST: &[Capability] = &[
     ui("setup_project", "a person confirms a project's first-run setup"),
     ui("install_cli", "a person puts the oxplow command on their PATH"),
     ui("abort_setup", "a person declines a project's first-run setup"),
+    // ---- hosts on other computers (the launcher) ----
+    ui("ask_host", "the launcher asks a host on another computer to pair this Mac"),
+    ui("collect_host", "the launcher waits for that host's person to type the code"),
+    ui("remote_hosts", "the launcher lists the hosts on other computers and their projects"),
+    ui("open_remote_project", "the launcher opens a project of a host on another computer"),
+    ui("forget_remote_host", "the launcher forgets a host on another computer"),
 ];
 
 /// Validate the manifest's internal shape independent of the real surfaces:

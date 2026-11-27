@@ -11,7 +11,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { subscribeOxplowEvents, unwrapResult } from "./api.js";
-import { getUiClientId } from "./uiClientId.js";
 import { commands, type PageRun, type PanelPart, type PartView, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
 import { onRemoteReconnect } from "./tauri-bridge/transport.js";
 
@@ -444,14 +443,13 @@ export function daemonTransport(): PageRunsTransport {
     open: async (key) =>
       unwrapResult(
         key.panel
-          ? await commands.openPanelPart(key.panel.panel, key.panel.part, key.panel.choices, key.streamId, key.threadId, getUiClientId())
+          ? await commands.openPanelPart(key.panel.panel, key.panel.part, key.panel.choices, key.streamId, key.threadId)
           : await commands.openPage(
               key.page ?? null,
               key.specYaml ?? null,
               key.params,
               key.streamId,
               key.threadId,
-              getUiClientId(),
             ),
       ),
     close: async (runId) => {

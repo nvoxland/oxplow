@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct VisitedPage {
@@ -17,17 +18,24 @@ pub struct VisitedPage {
     pub visit_count: i64,
 }
 
+/// A visit belongs to the device that opened the page.
 pub async fn record_page_visit(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     page_kind: String,
     page_id: String,
     label: Option<String>,
     thread_id: Option<String>,
 ) -> Result<PageVisit, IpcError> {
     #[expect(clippy::disallowed_methods, reason = "off the bus: page visits")]
-    let visit = svc
+    let visit = req
         .page_visit_store
-        .record(&page_kind, &page_id, label.as_deref(), thread_id.as_deref())
+        .record(
+            &page_kind,
+            &page_id,
+            label.as_deref(),
+            thread_id.as_deref(),
+            req.caller.map(|c| &c.device),
+        )
         .await?;
     Ok(visit)
 }
@@ -45,25 +53,35 @@ pub async fn finish_page_visit(
     Ok(())
 }
 
+/// The caller's device's visits and the ones no device owns; a request with
+/// no device reads every device's.
 pub async fn list_recent_page_visits(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     limit: u32,
     thread_id: Option<String>,
 ) -> Result<Vec<PageVisit>, IpcError> {
-    Ok(svc
+    Ok(req
         .page_visit_store
-        .list_recent(limit as usize, thread_id.as_deref())
+        .list_recent(
+            limit as usize,
+            thread_id.as_deref(),
+            req.caller.map(|c| &c.device),
+        )
         .await?)
 }
 
 pub async fn top_visited_pages(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     limit: u32,
     thread_id: Option<String>,
 ) -> Result<Vec<VisitedPage>, IpcError> {
-    let pairs = svc
+    let pairs = req
         .page_visit_store
-        .list_top(limit as usize, thread_id.as_deref())
+        .list_top(
+            limit as usize,
+            thread_id.as_deref(),
+            req.caller.map(|c| &c.device),
+        )
         .await?;
     Ok(pairs
         .into_iter()
@@ -114,6 +132,53 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(recent[0]["duration_ms"], 1500, "{recent}");
+    }
+
+    /// Each device lists the pages it opened and the ones from before
+    /// devices; a request with no device lists every device's.
+    #[tokio::test]
+    async fn each_device_lists_its_own_page_visits() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let mac = crate::test_support::caller();
+        let tablet = oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::generate(),
+            connection: oxplow_domain::ConnectionId::generate(),
+        };
+        let visit = |page: &str| serde_json::json!({"pageKind": "task", "pageId": page, "label": null, "threadId": null});
+        for (caller, page) in [
+            (Some(&mac), "on-mac"),
+            (Some(&tablet), "on-tablet"),
+            (None, "old"),
+        ] {
+            crate::dispatch_as("record_page_visit", visit(page), &svc, caller)
+                .await
+                .unwrap();
+        }
+        let list = |caller: Option<&oxplow_domain::Caller>| {
+            let svc = svc.clone();
+            let caller = caller.cloned();
+            async move {
+                let out = crate::dispatch_as(
+                    "list_recent_page_visits",
+                    serde_json::json!({"limit": 10, "threadId": null}),
+                    &svc,
+                    caller.as_ref(),
+                )
+                .await
+                .unwrap();
+                let mut pages: Vec<String> = out
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v["page_id"].as_str().unwrap().to_string())
+                    .collect();
+                pages.sort();
+                pages
+            }
+        };
+        assert_eq!(list(Some(&mac)).await, ["old", "on-mac"]);
+        assert_eq!(list(Some(&tablet)).await, ["old", "on-tablet"]);
+        assert_eq!(list(None).await, ["old", "on-mac", "on-tablet"]);
     }
 
     #[tokio::test]

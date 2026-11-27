@@ -449,7 +449,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
           // Opaque: the rail's items scroll under it.
           background: "var(--surface-chrome)",
           borderBottom: "1px solid var(--border-subtle)",
-          fontSize: 11,
+          fontSize: "var(--text-xs)",
           fontWeight: 600,
           color: "var(--text-secondary)",
           textTransform: "uppercase",

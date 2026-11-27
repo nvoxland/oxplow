@@ -80,7 +80,7 @@ function MermaidNodeView({ node, editor, getPos, selected }: NodeViewProps) {
           zIndex: 2,
           display: "flex",
           gap: 4,
-          fontSize: 11,
+          fontSize: "var(--text-xs)",
           color: "var(--text-secondary)",
           background: "var(--surface-elevated)",
           border: "1px solid var(--border-subtle)",

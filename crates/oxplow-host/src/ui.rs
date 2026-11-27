@@ -1,0 +1,280 @@
+//! The built UI, served from a folder read at run time (`--ui`), never
+//! embedded, so a fresh worktree builds without `apps/desktop/dist`.
+//!
+//! The UI is built with a relative asset base, so the same files load at `/`
+//! and under `/p/<project>/`. `/p/<project>/` is the app's `index.html` with
+//! `window.__OXPLOW__` put first in its head, the way the Mac shell states it
+//! to a window it creates (`oxplow-tauri-ipc` `windows.rs`), but with no
+//! token: a device's page uses the token it got at pairing, kept in its
+//! storage, and pairs first when it has none. `/` is the same app as the host's
+//! home (`kind: "hostHome"`): pairing, then the projects; the tablet shell
+//! replaces it.
+
+use std::path::{Component, Path as FsPath, PathBuf};
+
+use axum::extract::{Path, State};
+use axum::http::{header, HeaderMap, StatusCode, Uri};
+use axum::response::{Html, IntoResponse, Redirect, Response};
+use oxplow_app::component_http::content_type_for;
+
+use crate::web::{refuse, Web};
+
+const NO_UI: &str = "this host has no UI folder; start it with --ui <dir>";
+
+/// The context of a project's page.
+pub fn project_context(origin: &str, project: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "project",
+        "base": format!("{origin}/p/{project}"),
+        "host": origin,
+        "project": project,
+        "token": null,
+        "projectDir": null,
+    })
+}
+
+/// The context of the host's home page.
+pub fn home_context(origin: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "hostHome",
+        "base": null,
+        "host": origin,
+        "token": null,
+        "projectDir": null,
+    })
+}
+
+/// `html` with `window.__OXPLOW__ = context` first in its head, and the
+/// page's frame bound widened to its own origin. Pure.
+pub fn page_index(html: &str, origin: &str, context: &serde_json::Value) -> String {
+    // `<` is escaped so no value can close the script.
+    let json = context.to_string().replace('<', "\\u003c");
+    let script = format!("<script>window.__OXPLOW__ = Object.freeze({json});</script>");
+    // A component's frame is served from this origin, which may be a name
+    // other than loopback; the meta CSP in `index.html` must allow it.
+    let html = html.replacen("frame-src blob:", &format!("frame-src blob: {origin}"), 1);
+    match html.find("<head>") {
+        Some(at) => format!("{}{script}{}", &html[..at + 6], &html[at + 6..]),
+        None => format!("{script}{html}"),
+    }
+}
+
+/// The origin a browser reached this request by.
+pub(crate) fn origin(scheme: crate::web::Scheme, headers: &HeaderMap) -> Option<String> {
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+    Some(format!("{}://{host}", scheme.as_str()))
+}
+
+pub(crate) async fn project_redirect(Path(id): Path<String>) -> Response {
+    Redirect::permanent(&format!("/p/{id}/")).into_response()
+}
+
+/// `/p/<project>/`: the app, for a project the registry has.
+pub(crate) async fn project_page(
+    State(web): State<Web>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if web.host.registry().get(&id).is_none() {
+        return refuse(StatusCode::NOT_FOUND, "no such project");
+    }
+    let Some(dir) = &web.ui_dir else {
+        return refuse(StatusCode::NOT_FOUND, NO_UI);
+    };
+    let Some(origin) = origin(web.scheme, &headers) else {
+        return refuse(StatusCode::BAD_REQUEST, "no Host");
+    };
+    page(dir, &origin, &project_context(&origin, &id)).await
+}
+
+/// `/`: the host's home, for a device: pairing, then its projects.
+pub(crate) async fn host_home(State(web): State<Web>, headers: HeaderMap) -> Response {
+    let Some(dir) = &web.ui_dir else {
+        return refuse(StatusCode::NOT_FOUND, NO_UI);
+    };
+    let Some(origin) = origin(web.scheme, &headers) else {
+        return refuse(StatusCode::BAD_REQUEST, "no Host");
+    };
+    page(dir, &origin, &home_context(&origin)).await
+}
+
+/// The app's `index.html` with `context`, never cached, and never framed by
+/// another site.
+async fn page(dir: &FsPath, origin: &str, context: &serde_json::Value) -> Response {
+    let Ok(index) = tokio::fs::read(dir.join("index.html")).await else {
+        return refuse(StatusCode::NOT_FOUND, "the UI folder has no index.html");
+    };
+    let html = page_index(&String::from_utf8_lossy(&index), origin, context);
+    let mut response = Html(html).into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        header::HeaderValue::from_static("frame-ancestors 'self'"),
+    );
+    response
+}
+
+/// A short hash of the served `index.html`: its asset names change with each
+/// build, so this changes too.
+pub(crate) async fn build_id(dir: &FsPath) -> Option<String> {
+    use sha2::Digest;
+    let index = tokio::fs::read(dir.join("index.html")).await.ok()?;
+    Some(hex::encode(&sha2::Sha256::digest(&index)[..8]))
+}
+
+/// `/p/<project>/<file>`: a file of the UI (the app asks for them relative to
+/// its page).
+pub(crate) async fn project_file(web: &Web, id: &str, rest: &str) -> Response {
+    if web.host.registry().get(id).is_none() {
+        return refuse(StatusCode::NOT_FOUND, "no such project");
+    }
+    file(web, rest).await
+}
+
+/// Any other path: a file of the UI at the root.
+pub(crate) async fn root_file(State(web): State<Web>, uri: Uri) -> Response {
+    // A path that is not percent-decoded cannot name `..` by `%2e%2e`, so the
+    // decoded form is what is checked.
+    let decoded = percent_decode(uri.path().trim_start_matches('/'));
+    file(&web, &decoded).await
+}
+
+pub(crate) fn percent_decode(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(b) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `rest` under the UI folder when it names a file inside it: plain names
+/// only, so nothing climbs out and nothing absolute is read.
+fn inside(dir: &FsPath, rest: &str) -> Option<PathBuf> {
+    let rel = FsPath::new(rest);
+    let plain = !rest.is_empty()
+        && !rest.contains('\\')
+        && !rest.split('/').any(str::is_empty)
+        && rel.components().all(|c| matches!(c, Component::Normal(_)));
+    plain.then(|| dir.join(rel))
+}
+
+async fn file(web: &Web, rest: &str) -> Response {
+    let Some(dir) = &web.ui_dir else {
+        return refuse(StatusCode::NOT_FOUND, NO_UI);
+    };
+    let Some(path) = inside(dir, rest) else {
+        return refuse(StatusCode::NOT_FOUND, "no such file");
+    };
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            // Built files are named by their content; anything else may change
+            // with the next build.
+            let cache = if rest.starts_with("assets/") {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-cache"
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, content_type(&path)),
+                    (header::CACHE_CONTROL, cache),
+                    (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(_) => refuse(StatusCode::NOT_FOUND, "no such file"),
+    }
+}
+
+fn content_type(path: &FsPath) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        // The browser compiles wasm only as streamed with this type.
+        Some("wasm") => "application/wasm",
+        Some("map") => "application/json",
+        _ => content_type_for(path),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A page reached over the TLS listener says `https` in its base, so
+    /// its calls and socket stay secure.
+    #[test]
+    fn the_origin_carries_the_listeners_scheme() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "mac.tailnet.ts.net:7400".parse().unwrap());
+        assert_eq!(
+            origin(crate::web::Scheme::Https, &headers).as_deref(),
+            Some("https://mac.tailnet.ts.net:7400")
+        );
+        assert_eq!(
+            origin(crate::web::Scheme::Http, &headers).as_deref(),
+            Some("http://mac.tailnet.ts.net:7400")
+        );
+    }
+
+    #[test]
+    fn a_value_cannot_close_the_script() {
+        let html = page_index(
+            "<head></head>",
+            "http://h",
+            &project_context("http://h", "p</script><b>"),
+        );
+        assert_eq!(html.matches("</script>").count(), 1, "{html}");
+        assert!(html.contains("\\u003c/script>"), "{html}");
+    }
+
+    #[test]
+    fn a_page_with_no_head_gets_the_context_before_everything() {
+        let html = page_index("<body>x</body>", "http://h", &home_context("http://h"));
+        assert!(html.starts_with("<script>window.__OXPLOW__"), "{html}");
+    }
+
+    #[test]
+    fn only_plain_names_inside_the_folder() {
+        let dir = FsPath::new("/ui");
+        assert_eq!(
+            inside(dir, "assets/a.js"),
+            Some(PathBuf::from("/ui/assets/a.js"))
+        );
+        for bad in [
+            "",
+            "..",
+            "../x",
+            "a/../x",
+            "/etc/passwd",
+            "a//b",
+            "a\\b",
+            "a/",
+        ] {
+            assert_eq!(inside(dir, bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn percent_escapes_are_decoded_before_the_check() {
+        assert_eq!(percent_decode("%2e%2e/x"), "../x");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz"), "%zz");
+    }
+}

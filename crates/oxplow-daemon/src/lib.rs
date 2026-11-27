@@ -54,10 +54,32 @@ pub struct DaemonState {
     /// `/events` socket (`?token=`) must carry.
     pub token: String,
     pub ctx: oxplow_rpc::RpcContext,
+    /// How the daemon tells a live event socket from a gone one.
+    pub liveness: Liveness,
+}
+
+/// How the daemon knows a page is still there (`.context/remote-daemon.md`
+/// "Liveness"): every `interval` it sends a WebSocket ping (a browser
+/// answers it without script, so a throttled hidden page stays alive) and a
+/// `beat` frame (the page's watchdog); a socket that answers no ping for
+/// `missed` intervals, or whose send does not finish within one, is closed.
+#[derive(Debug, Clone, Copy)]
+pub struct Liveness {
+    pub interval: std::time::Duration,
+    pub missed: u32,
+}
+
+impl Default for Liveness {
+    fn default() -> Self {
+        Self {
+            interval: std::time::Duration::from_secs(20),
+            missed: 2,
+        }
+    }
 }
 
 /// Equal without an early exit, so response timing can't reveal a prefix.
-fn same_secret(a: &str, b: &str) -> bool {
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())
@@ -123,17 +145,71 @@ pub struct Daemon {
 async fn ipc_handler(
     State(state): State<DaemonState>,
     AxumPath(name): AxumPath<String>,
+    headers: axum::http::HeaderMap,
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
+    let caller = match caller_from_headers(&headers) {
+        Ok(caller) => caller,
+        Err(message) => {
+            let envelope = oxplow_rpc::ipc_envelope(Err(oxplow_rpc::IpcError::invalid(message)));
+            return (StatusCode::OK, Json(envelope)).into_response();
+        }
+    };
+    // A page load another one of its device replaced may ask nothing more.
+    if let Some(caller) = &caller {
+        if state
+            .ctx
+            .services
+            .client_devices
+            .check(&caller.connection)
+            .is_err()
+        {
+            let envelope = oxplow_rpc::ipc_envelope(Err(oxplow_rpc::IpcError::replaced()));
+            return (StatusCode::OK, Json(envelope)).into_response();
+        }
+    }
     let args = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
     // A request the UI makes is one a person waits on: its database work
     // isn't held back by background work's (`oxplow_db::interactive`).
-    let result = oxplow_db::interactive(oxplow_rpc::dispatch(&name, args, &state.ctx)).await;
+    let result = oxplow_db::interactive(oxplow_rpc::dispatch_as(
+        &name,
+        args,
+        &state.ctx,
+        caller.as_ref(),
+    ))
+    .await;
     // Single source of truth for the `{status, data|error}` shape — the
     // Tauri path reaches the byte-identical envelope via typedError +
     // the shared IpcError. See oxplow_rpc::envelope.
     let envelope = oxplow_rpc::ipc_envelope(result);
     (StatusCode::OK, Json(envelope)).into_response()
+}
+
+/// Who a request comes from (`.context/remote-daemon.md` "Who is asking"):
+/// the `Oxplow-Device` and `Oxplow-Connection` headers, both or neither. A
+/// request with neither (a script with the token, a test) has no caller; one
+/// header alone, or an id of the wrong shape, is refused. Until a host stands
+/// in front of the daemon it trusts them: the UI token already says the
+/// request is the person's.
+fn caller_from_headers(
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<oxplow_domain::Caller>, String> {
+    let read = |name: &str| -> Result<Option<&str>, String> {
+        headers
+            .get(name)
+            .map(|v| v.to_str().map_err(|_| format!("{name} is not text")))
+            .transpose()
+    };
+    match (read("oxplow-device")?, read("oxplow-connection")?) {
+        (None, None) => Ok(None),
+        (Some(device), Some(connection)) => Ok(Some(oxplow_domain::Caller {
+            device: oxplow_domain::DeviceId::parse(device)
+                .map_err(|e| format!("Oxplow-Device: {e}"))?,
+            connection: oxplow_domain::ConnectionId::parse(connection)
+                .map_err(|e| format!("Oxplow-Connection: {e}"))?,
+        })),
+        _ => Err("Oxplow-Device and Oxplow-Connection come together".into()),
+    }
 }
 
 /// Liveness probe for tunnels/scripts (the renderer uses `/ipc/ping`).
@@ -153,9 +229,48 @@ async fn health() -> &'static str {
 /// the upgrade's callback runs only after the client has its
 /// `101`, so a client that writes once its socket opens could otherwise
 /// cause an event no forwarder was there to see.
+///
+/// The socket says who it is in its query (`.context/remote-daemon.md` "Who
+/// is asking"): `device` and `connection`, both or neither, with the
+/// device's `name` and `kind`. A socket with neither (a test, a script)
+/// owns no page runs; one that names them wrongly is refused.
 #[derive(serde::Deserialize)]
 struct EventClient {
-    client: Option<String>,
+    device: Option<String>,
+    connection: Option<String>,
+    name: Option<String>,
+    kind: Option<String>,
+}
+
+impl EventClient {
+    fn caller(
+        self,
+    ) -> Result<Option<(oxplow_domain::DeviceDescriptor, oxplow_domain::ConnectionId)>, String>
+    {
+        let (device, connection) = match (self.device, self.connection) {
+            (None, None) => return Ok(None),
+            (Some(device), Some(connection)) => (device, connection),
+            _ => return Err("device and connection come together".into()),
+        };
+        let kind = match self.kind.as_deref() {
+            None => oxplow_domain::DeviceKind::Desktop,
+            Some(kind) => {
+                serde_json::from_value(serde_json::Value::String(kind.into())).map_err(|_| {
+                    let got: String = kind.chars().take(80).collect();
+                    format!("kind: expected desktop, tablet or phone, got `{got}`")
+                })?
+            }
+        };
+        Ok(Some((
+            oxplow_domain::DeviceDescriptor {
+                id: oxplow_domain::DeviceId::parse(&device).map_err(|e| format!("device: {e}"))?,
+                name: oxplow_domain::client::device_name(self.name.as_deref()),
+                kind,
+            },
+            oxplow_domain::ConnectionId::parse(&connection)
+                .map_err(|e| format!("connection: {e}"))?,
+        )))
+    }
 }
 
 async fn events_ws(
@@ -163,12 +278,73 @@ async fn events_ws(
     Query(client): Query<EventClient>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let named = match client.caller() {
+        Ok(named) => named,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
     let forwarders = subscribe(&state);
     let services = state.ctx.services.clone();
-    let owner = client
-        .client
-        .map(|client| services.page_runs.connect_client(&client));
-    ws.on_upgrade(move |socket| events_stream(socket, forwarders, services, owner))
+    // The page load takes over its device once the upgrade is done: a
+    // failed upgrade replaces nothing.
+    let liveness = state.liveness;
+    ws.on_upgrade(move |mut socket| async move {
+        let owner = match named
+            .map(|(descriptor, connection)| {
+                oxplow_app::client_reports::SocketLease::open(&services, descriptor, connection)
+            })
+            .transpose()
+        {
+            Ok(owner) => owner,
+            Err(_) => {
+                let _ = socket.send(replaced_close()).await;
+                return;
+            }
+        };
+        events_stream(socket, forwarders, services, owner, liveness).await
+    })
+}
+
+/// The frame that feeds a page's watchdog (`transport.ts`): a page that
+/// hears nothing for longer than a few beats reconnects.
+const BEAT_FRAME: &str = r#"{"channel":"beat"}"#;
+
+/// The frame a page sends while the person uses it (at most once a second):
+/// its device is the one used last (`ClientDevices::last_used`).
+const USED_FRAME: &str = r#"{"channel":"used"}"#;
+
+/// The close frame that tells a page its page load was replaced.
+fn replaced_close() -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code: oxplow_app::client_reports::devices::REPLACED_CLOSE_CODE,
+        reason: "replaced".into(),
+    }))
+}
+
+/// The normal close that tells a page to reconnect (it missed a call's
+/// answer, so the daemon no longer takes it as a host).
+fn closing_close() -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code: 1000,
+        reason: "reconnect".into(),
+    }))
+}
+
+/// Resolves once the daemon asks `owner`'s socket to close; never for a
+/// socket that names no device.
+async fn closing(owner: &Option<oxplow_app::client_reports::SocketLease>) {
+    match owner {
+        Some(owner) => owner.closing().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Resolves once `owner`'s page load is replaced; never for a socket that
+/// names no device.
+async fn replaced(owner: &Option<oxplow_app::client_reports::SocketLease>) {
+    match owner {
+        Some(owner) => owner.replaced().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// One channel's subscription, waiting for the socket's queue to forward
@@ -262,9 +438,24 @@ async fn events_stream(
     socket: WebSocket,
     subscriptions: [Forwarder; 3],
     services: std::sync::Arc<oxplow_app::Services>,
-    _owner: Option<oxplow_app::pages::open_runs::PageClient>,
+    owner: Option<oxplow_app::client_reports::SocketLease>,
+    liveness: Liveness,
 ) {
     let (mut sink, mut inbound) = socket.split();
+    let mut beat = tokio::time::interval(liveness.interval);
+    beat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    beat.tick().await; // the first tick is now
+    let mut last_pong = tokio::time::Instant::now();
+    let gone_after = liveness.interval * liveness.missed;
+    // A send that does not finish within an interval: the peer is gone.
+    macro_rules! send {
+        ($msg:expr) => {
+            match tokio::time::timeout(liveness.interval, sink.send($msg)).await {
+                Ok(Ok(())) => true,
+                _ => false,
+            }
+        };
+    }
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
     let forwarders = subscriptions.map(|start| start(tx.clone()));
     drop(tx);
@@ -273,17 +464,40 @@ async fn events_stream(
         tokio::select! {
             frame = rx.recv() => match frame {
                 Some(text) => {
-                    if sink.send(Message::Text(text.into())).await.is_err() {
+                    if !send!(Message::Text(text.into())) {
                         break;
                     }
                 }
                 None => break,
             },
+            () = replaced(&owner) => {
+                let _ = send!(replaced_close());
+                break;
+            }
+            () = closing(&owner) => {
+                let _ = send!(closing_close());
+                break;
+            }
+            _ = beat.tick() => {
+                if last_pong.elapsed() > gone_after {
+                    tracing::info!("event socket: no pong; the page is gone");
+                    break;
+                }
+                if !send!(Message::Ping(Vec::new().into())) || !send!(Message::Text(BEAT_FRAME.into())) {
+                    break;
+                }
+            }
             msg = inbound.next() => match msg {
                 // Inbound traffic is terminal input, ping and close —
                 // commands go over /ipc. None/Close ends the stream.
                 Some(Ok(Message::Close(_))) | None => break,
-                Some(Ok(Message::Text(text))) => terminal_frame(&services, &text),
+                Some(Ok(Message::Text(text))) if text.as_str() == USED_FRAME => {
+                    if let Some(owner) = &owner {
+                        owner.used();
+                    }
+                }
+                Some(Ok(Message::Text(text))) => terminal_frame(&services, owner.as_ref(), &text),
+                Some(Ok(Message::Pong(_))) => last_pong = tokio::time::Instant::now(),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) => break,
             },
@@ -297,7 +511,11 @@ async fn events_stream(
 /// One terminal-input frame from the window: its message queued for the
 /// terminal's PTY, before the next frame is read. A frame that isn't one,
 /// or names no terminal, is logged and dropped.
-fn terminal_frame(services: &oxplow_app::Services, text: &str) {
+fn terminal_frame(
+    services: &oxplow_app::Services,
+    owner: Option<&oxplow_app::client_reports::SocketLease>,
+    text: &str,
+) {
     #[derive(serde::Deserialize)]
     struct Frame {
         channel: String,
@@ -307,9 +525,13 @@ fn terminal_frame(services: &oxplow_app::Services, text: &str) {
     let [_, _, terminal] = ws_frame_keys();
     match serde_json::from_str::<Frame>(text) {
         Ok(f) if f.channel == terminal => {
-            if let Err(e) =
-                oxplow_rpc::commands::terminal::terminal_input(services, f.uri.clone(), f.message)
-            {
+            let connection = owner.map(|lease| lease.connection().clone());
+            if let Err(e) = oxplow_rpc::commands::terminal::terminal_input(
+                services,
+                connection,
+                f.uri.clone(),
+                f.message,
+            ) {
                 tracing::warn!(uri = %f.uri, error = %e, "terminal input refused");
             }
         }
@@ -414,6 +636,7 @@ mod tests {
 
     fn daemon_state(services: Arc<Services>) -> DaemonState {
         DaemonState {
+            liveness: Liveness::default(),
             token: UI_TOKEN.into(),
             ctx: oxplow_rpc::RpcContext {
                 services,
@@ -697,8 +920,153 @@ mod tests {
         }
     }
 
+    /// Behind the host a bundle is reached by the host's name and a prefix.
+    /// The host says so in `Oxplow-Public-Base`, which counts only with the
+    /// daemon's own token: any other caller still has to be loopback.
+    #[tokio::test]
+    async fn a_public_base_from_the_host_builds_the_csp_and_only_with_the_token() {
+        let (svc, dir) = services().await;
+        let ext = dir.path().join(".oxplow/extensions/x");
+        std::fs::create_dir_all(ext.join("components/c")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
+        let version = load(&svc, dir.path(), "x", "c").await;
+        let folder = format!("/components/v/{version}/");
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let bare = reqwest::Client::new();
+        let public = "http://tablet.lan:7400/p/prj-1";
+        let get = |path: String, token: Option<&str>, base: &str| {
+            let mut req = bare
+                .get(format!("http://{}{path}", daemon.bind_addr))
+                .header("host", "tablet.lan:7400")
+                .header("oxplow-public-base", base.to_string());
+            if let Some(t) = token {
+                req = req.bearer_auth(t);
+            }
+            req.send()
+        };
+        let ok = get(folder.clone(), Some(UI_TOKEN), public).await.unwrap();
+        assert_eq!(ok.status(), 200);
+        assert_eq!(
+            ok.headers()["content-security-policy"].to_str().unwrap(),
+            oxplow_app::component_http::bundle_csp(
+                &format!("{public}{folder}"),
+                &format!("{public}/component-lib/")
+            ),
+        );
+        let lib = get(
+            "/component-lib/oxplow-component.js".into(),
+            Some(UI_TOKEN),
+            public,
+        )
+        .await
+        .unwrap();
+        assert_eq!(lib.status(), 200);
+        // No token, or the wrong one: the header is not believed, and the
+        // Host is not loopback.
+        for token in [None, Some("wrong")] {
+            let refused = get(folder.clone(), token, public).await.unwrap();
+            assert_eq!(refused.status(), 404, "{token:?}");
+        }
+        // A base that could break out of the CSP is refused whoever sends it.
+        for bad in [
+            "javascript:alert(1)",
+            "http://x.lan/p/a; script-src *",
+            "http://x.lan/p/a b",
+            "http://x.lan/",
+            "",
+        ] {
+            let refused = get(folder.clone(), Some(UI_TOKEN), bad).await.unwrap();
+            assert_eq!(refused.status(), 404, "{bad:?}");
+        }
+    }
+
     /// A stream's page loads its component from the stream's worktree: a
     /// version of its own, served from what that worktree held.
+    fn headers(pairs: &[(&str, &str)]) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        h
+    }
+
+    const DEVICE: &str = "dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427";
+    const CONNECTION: &str = "con-6fa459ea-ee8a-3ca4-894e-db77e160355e";
+
+    /// A request says who asks with two headers, both or neither: a request
+    /// with neither (a script, a test) has no caller.
+    #[test]
+    fn a_request_names_its_caller_in_two_headers() {
+        assert_eq!(caller_from_headers(&headers(&[])), Ok(None));
+        let caller = caller_from_headers(&headers(&[
+            ("oxplow-device", DEVICE),
+            ("oxplow-connection", CONNECTION),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(caller.device.as_str(), DEVICE);
+        assert_eq!(caller.connection.as_str(), CONNECTION);
+        for bad in [
+            vec![("oxplow-device", DEVICE)],
+            vec![("oxplow-connection", CONNECTION)],
+            vec![
+                ("oxplow-device", "dev-x"),
+                ("oxplow-connection", CONNECTION),
+            ],
+            vec![("oxplow-device", CONNECTION), ("oxplow-connection", DEVICE)],
+        ] {
+            assert!(caller_from_headers(&headers(&bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    /// A malformed caller is refused before any command runs.
+    #[tokio::test]
+    async fn ipc_refuses_a_malformed_caller() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let url = format!("http://{}/ipc/ping", daemon.bind_addr);
+        let ok: serde_json::Value = client()
+            .post(&url)
+            .header("Oxplow-Device", DEVICE)
+            .header("Oxplow-Connection", CONNECTION)
+            .json(&serde_json::Value::Null)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(ok["status"], "ok");
+        let refused: serde_json::Value = client()
+            .post(&url)
+            .header("Oxplow-Device", "dev-not-an-id")
+            .header("Oxplow-Connection", CONNECTION)
+            .json(&serde_json::Value::Null)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(refused["status"], "error", "{refused}");
+        assert!(
+            refused.to_string().contains("Oxplow-Device"),
+            "the error names the header: {refused}"
+        );
+    }
+
     #[tokio::test]
     async fn ipc_ping_returns_ok_envelope() {
         let (svc, _dir) = services().await;
@@ -878,41 +1246,135 @@ mod tests {
         }
     }
 
+    /// A page's event socket names its device and its page load, with the
+    /// device's name and kind; the daemon knows the device while it is
+    /// connected, and refuses a socket that names them wrongly.
+    #[tokio::test]
+    async fn an_event_socket_says_which_device_it_is() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let base = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
+        let device = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        let (mut socket, _) = tokio_tungstenite::connect_async(format!(
+            "{base}&device={DEVICE}&connection={CONNECTION}&name=Tab%20S9&kind=tablet"
+        ))
+        .await
+        .unwrap();
+        let seen = svc
+            .client_devices
+            .get(&device)
+            .expect("the device is connected");
+        assert_eq!(seen.name, "Tab S9");
+        assert_eq!(seen.kind, oxplow_domain::DeviceKind::Tablet);
+        // What the window reports showing is shown while its socket is open.
+        let caller = oxplow_domain::Caller {
+            device: device.clone(),
+            connection: oxplow_domain::ConnectionId::parse(CONNECTION).unwrap(),
+        };
+        let ctx = oxplow_rpc::RpcContext {
+            services: svc.clone(),
+            plugin_runtime: None,
+        };
+        oxplow_rpc::dispatch_as(
+            "report_tabs",
+            serde_json::json!({ "report": { "focused": true, "visible": true, "shown_thread": null,
+                                            "threads": [], "detail_json": null } }),
+            &ctx,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        let now = oxplow_domain::Timestamp::now();
+        assert_eq!(
+            svc.client_reports.live_ids(now),
+            vec![CONNECTION.to_string()]
+        );
+        socket.close(None).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while svc.client_devices.get(&device).is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a closed socket's device is no longer connected");
+        assert!(
+            svc.client_reports
+                .live_ids(oxplow_domain::Timestamp::now())
+                .is_empty(),
+            "a closed window's report is gone with it"
+        );
+
+        for bad in [
+            format!("{base}&device={DEVICE}"),
+            format!("{base}&device=dev-x&connection={CONNECTION}"),
+            format!("{base}&device={DEVICE}&connection={CONNECTION}&kind=toaster"),
+        ] {
+            assert!(
+                tokio_tungstenite::connect_async(&bad).await.is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn closing_an_event_socket_releases_only_its_windows_page_runs() {
         let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
-        let url = |client| {
+        const ONE: &str = "con-11111111-1111-4111-8111-111111111111";
+        const TWO: &str = "con-22222222-2222-4222-8222-222222222222";
+        // Two devices: one device keeps one window per project.
+        const OTHER: &str = "dev-2b4e28ba-2fa1-11d2-883f-0016d3cca427";
+        let url = |device, connection| {
             format!(
-                "ws://{}/events?token={UI_TOKEN}&client={client}",
+                "ws://{}/events?token={UI_TOKEN}&device={device}&connection={connection}&name=Mac&kind=desktop",
                 daemon.bind_addr
             )
         };
-        let (mut one, _) = tokio_tungstenite::connect_async(url("one")).await.unwrap();
-        let (mut two, _) = tokio_tungstenite::connect_async(url("two")).await.unwrap();
+        let (mut one, _) = tokio_tungstenite::connect_async(url(DEVICE, ONE))
+            .await
+            .unwrap();
+        let (mut two, _) = tokio_tungstenite::connect_async(url(OTHER, TWO))
+            .await
+            .unwrap();
+        let ctx = oxplow_rpc::RpcContext {
+            services: svc.clone(),
+            plugin_runtime: None,
+        };
         let yaml =
             "title: Open\nloaders: { a: { sql: SELECT 1 AS n } }\nview: { viz: number, from: a }\n";
         let first = oxplow_rpc::commands::pages::open_page(
-            &svc,
+            &oxplow_rpc::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&oxplow_domain::Caller {
+                    device: oxplow_domain::DeviceId::parse(DEVICE).unwrap(),
+                    connection: oxplow_domain::ConnectionId::parse(ONE).unwrap(),
+                }),
+            },
             None,
             Some(yaml.into()),
             None,
             None,
             None,
-            "one".into(),
         )
         .await
         .unwrap();
         let second = oxplow_rpc::commands::pages::open_page(
-            &svc,
+            &oxplow_rpc::RpcRequest {
+                ctx: &ctx,
+                caller: Some(&oxplow_domain::Caller {
+                    device: oxplow_domain::DeviceId::parse(OTHER).unwrap(),
+                    connection: oxplow_domain::ConnectionId::parse(TWO).unwrap(),
+                }),
+            },
             None,
             Some(yaml.into()),
             None,
             None,
             None,
-            "two".into(),
         )
         .await
         .unwrap();
@@ -926,6 +1388,320 @@ mod tests {
         .expect("the disconnected window's runs are released");
         assert!(svc.page_runs.get(&second.run_id).is_some());
         two.close(None).await.unwrap();
+    }
+
+    /// A page that says it is in use makes its device the one used last.
+    #[tokio::test]
+    async fn a_page_in_use_is_the_device_used_last() {
+        use futures::SinkExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const MAC: &str = "con-11111111-1111-4111-8111-111111111111";
+        const TAB: &str = "con-22222222-2222-4222-8222-222222222222";
+        const TABLET: &str = "dev-2b4e28ba-2fa1-11d2-883f-0016d3cca427";
+        let url = |device, connection| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&device={device}&connection={connection}&name=x&kind=desktop",
+                daemon.bind_addr
+            )
+        };
+        let (mut mac, _) = tokio_tungstenite::connect_async(url(DEVICE, MAC))
+            .await
+            .unwrap();
+        let (_tab, _) = tokio_tungstenite::connect_async(url(TABLET, TAB))
+            .await
+            .unwrap();
+        mac.send(tokio_tungstenite::tungstenite::Message::Text(
+            USED_FRAME.into(),
+        ))
+        .await
+        .unwrap();
+        let mac_device = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while svc.client_devices.last_used().map(|(d, _)| d) != Some(mac_device.clone()) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the Mac, used, is the device used last");
+    }
+
+    /// A socket that names no device cannot make one the device used last.
+    #[tokio::test]
+    async fn use_from_a_socket_with_no_device_is_ignored() {
+        use futures::SinkExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const MAC: &str = "con-11111111-1111-4111-8111-111111111111";
+        let (mut anonymous, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{}/events?token={UI_TOKEN}",
+            daemon.bind_addr
+        ))
+        .await
+        .unwrap();
+        let (_mac, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={MAC}&name=Mac&kind=desktop",
+            daemon.bind_addr
+        ))
+        .await
+        .unwrap();
+        anonymous
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                USED_FRAME.into(),
+            ))
+            .await
+            .unwrap();
+        // Give the daemon time to hear it; the only device is still the one used last.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let mac = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        assert_eq!(svc.client_devices.last_used().map(|(d, _)| d), Some(mac));
+        assert_eq!(
+            svc.client_devices.list().len(),
+            1,
+            "no device for the anonymous socket"
+        );
+    }
+
+    /// A page that answers no ping is gone: its socket closes and its device
+    /// leaves. One that answers stays, and hears the watchdog's beat.
+    #[tokio::test]
+    async fn a_socket_whose_page_answers_no_ping_is_closed() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services().await;
+        let state = DaemonState {
+            // Short, so the test sees a gone peer in moments.
+            liveness: Liveness {
+                interval: std::time::Duration::from_millis(100),
+                missed: 2,
+            },
+            ..daemon_state(svc.clone())
+        };
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), state)
+            .await
+            .unwrap();
+        const LIVE: &str = "con-11111111-1111-4111-8111-111111111111";
+        const GONE: &str = "con-22222222-2222-4222-8222-222222222222";
+        const OTHER: &str = "dev-2b4e28ba-2fa1-11d2-883f-0016d3cca427";
+        let url = |device, connection| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&device={device}&connection={connection}&name=Mac&kind=desktop",
+                daemon.bind_addr
+            )
+        };
+        let (mut live, _) = tokio_tungstenite::connect_async(url(DEVICE, LIVE))
+            .await
+            .unwrap();
+        // Never read: tungstenite answers a ping only while it reads.
+        let (_gone, _) = tokio_tungstenite::connect_async(url(OTHER, GONE))
+            .await
+            .unwrap();
+        svc.client_host.register(GONE, vec!["tabs.write".into()]);
+        let other = oxplow_domain::DeviceId::parse(OTHER).unwrap();
+        let mine = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        let mut beats = 0;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        while svc.client_devices.get(&other).is_some() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the silent page is let go"
+            );
+            if let Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), live.next()).await
+            {
+                if text.contains("\"beat\"") {
+                    beats += 1;
+                }
+            }
+        }
+        assert!(beats > 0, "the live page hears the beat");
+        assert!(!svc.client_host.hosts(GONE), "the gone page hosts no call");
+        assert!(
+            svc.client_devices.get(&mine).is_some(),
+            "the page that answers stays"
+        );
+    }
+
+    /// A window that misses a call's answer is forgotten as a host and its
+    /// socket closes (a normal close, not "replaced"): a live page then
+    /// reconnects and registers again.
+    #[tokio::test]
+    async fn a_call_that_times_out_closes_the_windows_socket() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const CON: &str = "con-11111111-1111-4111-8111-111111111111";
+        let url = format!(
+            "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={CON}&name=Mac&kind=desktop",
+            daemon.bind_addr
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let client_host = std::sync::Arc::new(oxplow_app::client_host::ClientHost::with_timeout(
+            svc.events.clone(),
+            svc.client_devices.clone(),
+            std::time::Duration::from_millis(100),
+        ));
+        client_host.register(CON, vec!["tabs.write".into()]);
+        let run = oxplow_domain::run::RunContext::core(
+            oxplow_domain::Actor::Agent {
+                session_id: None,
+                thread_id: Some(oxplow_domain::ThreadId::new(1)),
+                stream_id: None,
+            },
+            oxplow_domain::run::Mode::External,
+        );
+        client_host
+            .call(&run, "tabs.write", "open", serde_json::json!({}))
+            .await
+            .unwrap_err();
+        let closed = loop {
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(10), socket.next())
+                .await
+                .expect("the silent window's socket closes");
+            if let Some(Ok(tokio_tungstenite::tungstenite::Message::Close(close))) = frame {
+                break close;
+            }
+        };
+        let code = closed.map(|c| u16::from(c.code));
+        assert_ne!(
+            code,
+            Some(oxplow_app::client_reports::devices::REPLACED_CLOSE_CODE),
+            "a normal close: the page reconnects"
+        );
+    }
+
+    /// A device keeps one page load: a new one takes over, the older one's
+    /// socket closes saying it was replaced, and the older one is refused
+    /// from then on, on `/ipc` and on a new socket.
+    #[tokio::test]
+    async fn a_new_page_load_of_a_device_replaces_the_older() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const OLD: &str = "con-11111111-1111-4111-8111-111111111111";
+        const NEW: &str = "con-22222222-2222-4222-8222-222222222222";
+        let url = |connection| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={connection}&name=Mac&kind=desktop",
+                daemon.bind_addr
+            )
+        };
+        let closed_replaced = |frame: Option<
+            Result<tokio_tungstenite::tungstenite::Message, _>,
+        >| {
+            matches!(
+                frame,
+                Some(Ok(tokio_tungstenite::tungstenite::Message::Close(Some(close))))
+                    if u16::from(close.code) == oxplow_app::client_reports::devices::REPLACED_CLOSE_CODE
+            )
+        };
+        let (mut old, _) = tokio_tungstenite::connect_async(url(OLD)).await.unwrap();
+        // The older page load hosts the daemon's calls until it is replaced.
+        svc.client_host.register(OLD, vec!["tabs.write".into()]);
+        let (_new, _) = tokio_tungstenite::connect_async(url(NEW)).await.unwrap();
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), old.next())
+            .await
+            .expect("the older socket hears it was replaced");
+        assert!(
+            closed_replaced(frame),
+            "the older socket closes as replaced"
+        );
+        assert!(
+            !svc.client_host.hosts(OLD),
+            "the replaced page load hosts no more calls"
+        );
+
+        let ask = |connection: &'static str| {
+            client()
+                .post(format!("http://{}/ipc/list_streams", daemon.bind_addr))
+                .header("oxplow-device", DEVICE)
+                .header("oxplow-connection", connection)
+                .json(&serde_json::json!({}))
+                .send()
+        };
+        let refused: serde_json::Value = ask(OLD).await.unwrap().json().await.unwrap();
+        assert_eq!(refused["error"]["code"], "REPLACED", "{refused}");
+        let answered: serde_json::Value = ask(NEW).await.unwrap().json().await.unwrap();
+        assert_eq!(answered["status"], "ok", "{answered}");
+
+        let (mut again, _) = tokio_tungstenite::connect_async(url(OLD)).await.unwrap();
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), again.next())
+            .await
+            .expect("a replaced page load's new socket is refused");
+        assert!(closed_replaced(frame), "and never comes back");
+    }
+
+    /// A page load keeps its connection across reconnects, so its new socket
+    /// can open before the daemon sees the old one close (a tablet that
+    /// slept). The old socket's close must leave the live window as it is.
+    #[tokio::test]
+    async fn a_stale_socket_closing_leaves_the_reconnected_window_connected() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        const ONE: &str = "con-11111111-1111-4111-8111-111111111111";
+        let url = format!(
+            "ws://{}/events?token={UI_TOKEN}&device={DEVICE}&connection={ONE}&name=Mac&kind=desktop",
+            daemon.bind_addr
+        );
+        let device = oxplow_domain::DeviceId::parse(DEVICE).unwrap();
+        let caller = oxplow_domain::Caller {
+            device: device.clone(),
+            connection: oxplow_domain::ConnectionId::parse(ONE).unwrap(),
+        };
+        let (mut old, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let (mut new, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let now = oxplow_domain::Timestamp::now();
+        svc.client_reports.report(
+            &caller,
+            oxplow_app::client_reports::TabReport {
+                focused: true,
+                visible: true,
+                shown_thread: None,
+                detail_json: None,
+                runs: vec![],
+            },
+            now,
+        );
+        let gone = |svc: &std::sync::Arc<oxplow_app::Services>| {
+            svc.client_devices.get(&device).is_none()
+                && svc
+                    .client_reports
+                    .live_ids(oxplow_domain::Timestamp::now())
+                    .is_empty()
+        };
+        old.close(None).await.unwrap();
+        // The old socket's close has run once its read loop ends; give it the
+        // time a close takes, then the window must still be there.
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            svc.client_devices.get(&device).is_some(),
+            "the device stays connected"
+        );
+        assert_eq!(
+            svc.client_reports.live_ids(oxplow_domain::Timestamp::now()),
+            vec![ONE.to_string()],
+            "the window's report stays"
+        );
+        new.close(None).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !gone(&svc) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the current socket's close releases the window");
     }
 
     #[tokio::test]
@@ -1010,7 +1786,7 @@ mod tests {
         let capture = dir.path().join("typed.txt");
         let command = format!("cat > '{}'", capture.display());
         svc.terminal_sessions
-            .attach_or_create(uri.clone(), 80, 24, |cols, rows| {
+            .attach_or_create(uri.clone(), None, 80, 24, |cols, rows| {
                 oxplow_app::terminal_sessions::SpawnRequest {
                     command: "sh".into(),
                     args: vec!["-lc".into(), command],

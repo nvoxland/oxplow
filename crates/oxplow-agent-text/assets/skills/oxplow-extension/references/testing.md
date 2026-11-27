@@ -92,7 +92,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
 | part | `{ part: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
 | query | `{ query: <slug \| ext/slug>, params? } or { query: <page>#<loader>, params? } (any page file's loader)` | `{ rows, columns? }` |
-| panel | `{ panel: <id \| ext/id>, thread?, stream?, choices? } (the panel run whole, as the rail shows it)` | `{ body?, collapsed?, count_page?, badge? (each a part's run, as a page's expect), count?, alert?, choices?, text? }` |
+| panel | `{ panel: <id \| ext/id>, thread?, stream?, device?, choices? } (the panel run whole, as the rail shows it)` | `{ body?, collapsed?, count_page?, badge? (each a part's run, as a page's expect), count?, alert?, choices?, text? }` |
 | form | `{ form: <page \| part>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
 | component | `{ component: <id>, invokes?: [{ command, input? } \| { point, context?, command? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
@@ -138,7 +138,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
      thread; with none, it runs from the project's first stream, so a page
      that declares `stream_id` gets it without a param.
-   - a panel: `when: { panel: <id | ext/id>, thread?, stream?, choices? }`
+   - a panel: `when: { panel: <id | ext/id>, thread?, stream?, device?, choices? }`
      runs the panel whole, as the rail shows it: its `body`, `collapsed`,
      `count` and `badge` parts, each from the view `thread` / `stream` name
      (default: the project's first stream, its first thread), every part

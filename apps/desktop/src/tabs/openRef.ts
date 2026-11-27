@@ -66,7 +66,7 @@ export async function openRef(
 }
 
 /** Opens a ref from outside any page (the rail, the palette): the
- *  window's, set by `App`. */
+ *  window's, set by `window/useWindowOpeners.ts`. */
 let windowOpener: ((ref: string, how: OpenHow) => void) | null = null;
 
 export function setWindowRefOpener(open: ((ref: string, how: OpenHow) => void) | null): void {

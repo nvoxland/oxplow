@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { fileTask, ipc } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { shown, load } from "../../support/ui.js";
+import { shown, load, alertsBadge, openAlerts } from "../../support/ui.js";
 
 // The test extension's effect deletes the project's file doomed.txt for a
 // task titled "[delete]": a destructive step oxplow never runs for an effect,
@@ -17,10 +17,8 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   // The dock's Alerts icon counts it once the effect has run (it runs in the
   // background, so wait for that). It opens the Alerts panel, which links
   // to the Alerts page, where the proposal waits.
-  const bell = page.getByTestId("dock-alerts");
-  await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
-  await bell.click();
-  await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
+  await expect(alertsBadge(page)).toHaveText("1");
+  await openAlerts(page);
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");
@@ -35,12 +33,11 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
 test("approving a proposal whose run fails keeps the failure on its card, recorded once", async ({ page, daemon }) => {
   await load(page);
   await fileTask(daemon, "Quince [delete]");
-  await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
+  await expect(alertsBadge(page)).toHaveText("1");
   // The file was never there (or goes another way first), so the delete the
   // effect asked for fails.
   rmSync(join(daemon.project, "doomed.txt"), { force: true });
-  await page.getByTestId("dock-alerts").click();
-  await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
+  await openAlerts(page);
   const card = shown(page).locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");
   await page.getByTestId(`proposal-approve-${id}-trigger`).click();

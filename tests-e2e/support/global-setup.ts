@@ -96,17 +96,18 @@ export default function globalSetup(): void {
   // daemon is whatever was built last, so not after a Rust change.
   const prebuilt = process.env.OXPLOW_E2E_BIN && resolve(process.env.OXPLOW_E2E_BIN);
   if (prebuilt) {
-    const bins = ["oxplow-daemon-sim", "oxplow-harness-fake", "oxplow-provider-fake", "oxplow-script-worker"];
+    const bins = ["oxplow-daemon-sim", "oxplow-harness-fake", "oxplow-provider-fake", "oxplow-script-worker", "oxplow-host"];
     const missing = bins.filter((b) => !existsSync(join(prebuilt, b)));
     if (missing.length > 0) throw new Error(`OXPLOW_E2E_BIN=${prebuilt} has no ${missing.join(", ")}`);
     process.env.OXPLOW_E2E_DAEMON = join(prebuilt, "oxplow-daemon-sim");
     process.env.OXPLOW_E2E_HARNESS_FAKE = join(prebuilt, "oxplow-harness-fake");
     process.env.OXPLOW_E2E_PROVIDER_FAKE = join(prebuilt, "oxplow-provider-fake");
+    process.env.OXPLOW_E2E_HOST = join(prebuilt, "oxplow-host");
     return;
   }
   const output = execFileSync(
     "cargo",
-    ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-harness-fake", "-p", "oxplow-provider-fake", "--message-format=json"],
+    ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-harness-fake", "-p", "oxplow-provider-fake", "-p", "oxplow-host", "--message-format=json"],
     { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "inherit"] },
   );
   // The daemon runs a page's or command's script in this worker, found next
@@ -115,4 +116,5 @@ export default function globalSetup(): void {
   process.env.OXPLOW_E2E_DAEMON = built(output, "oxplow-daemon-sim");
   process.env.OXPLOW_E2E_HARNESS_FAKE = built(output, "oxplow-harness-fake");
   process.env.OXPLOW_E2E_PROVIDER_FAKE = built(output, "oxplow-provider-fake");
+  process.env.OXPLOW_E2E_HOST = built(output, "oxplow-host");
 }

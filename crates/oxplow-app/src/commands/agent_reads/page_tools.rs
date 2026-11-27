@@ -19,6 +19,7 @@ use super::super::ops::Op;
 use super::super::util::{failed, invalid, parse, schema, ServicesSlot};
 use super::super::{Handler, HandlerOutput, Invocation};
 use super::{check_stream_id, stream_or_actors};
+use crate::client_host::Sent;
 use crate::pages::runner::{PageRun, PageRunner, RunNode, RunRequest, RunTarget};
 use crate::pages::schema::{
     parse_inline_page, parse_temp_page, temp_file_name, NodeKind, PageKind, TEMP_EXTENSION,
@@ -379,8 +380,11 @@ async fn context(
     if let Some(stream) = &stream_id {
         check_stream_id("/stream_id", stream)?;
     }
-    let stream = stream_or_actors(svc, invocation.actor(), stream_id).await?;
-    let thread = thread_id
+    let stream = stream_or_actors(svc, invocation.actor(), stream_id)
+        .await?
+        .as_deref()
+        .and_then(StreamId::try_from_str);
+    let given = thread_id
         .map(|t| {
             ThreadId::try_from_str(&t).ok_or_else(|| {
                 invalid(
@@ -390,12 +394,34 @@ async fn context(
             })
         })
         .transpose()?;
-    Ok(crate::pages::spec::view_context(
-        svc,
-        stream.as_deref().and_then(StreamId::try_from_str),
-        thread,
-    )
-    .await)
+    let thread = match given {
+        Some(thread) => Some(thread),
+        // No thread given: an agent's page is about its own thread, not the
+        // one the person has selected; a person keeps the selected one.
+        None => own_thread_in(svc, invocation.actor(), stream).await?,
+    };
+    // A person's run names the device they asked from: its thread, then.
+    let device = invocation.run.caller().map(|c| &c.device);
+    Ok(crate::pages::spec::view_context(svc, device, stream, thread).await)
+}
+
+/// The acting agent's own thread, when it is in `stream` (or no stream is
+/// named): an agent reading another stream's page reads it on that stream's
+/// thread, never with its own thread from elsewhere.
+async fn own_thread_in(
+    svc: &Services,
+    actor: &oxplow_domain::Actor,
+    stream: Option<StreamId>,
+) -> Result<Option<ThreadId>, CommandError> {
+    use oxplow_domain::stores::ThreadStore as _;
+    let Some(own) = actor.agent_thread().flatten() else {
+        return Ok(None);
+    };
+    let Some(stream) = stream else {
+        return Ok(Some(own));
+    };
+    let found = svc.thread_store.get(&own).await.map_err(super::failed)?;
+    Ok(found.filter(|t| t.stream_id == stream).map(|t| t.id))
 }
 
 fn page_error(page: &str, e: DomainError) -> CommandError {
@@ -466,6 +492,12 @@ pub struct ShowPageInput {
     /// page.
     #[serde(default)]
     pub spec: Option<String>,
+    /// The device to show it on: its id (`dev-…`) or a connected device's
+    /// name (`oxplow_list_tabs` shows `device`). Without it, the window the
+    /// person used last. A device that is not connected, named by id, gets
+    /// the tab when it next connects (`queued`).
+    #[serde(default)]
+    pub client: Option<String>,
 }
 
 /// The id of the view `yaml` is, on `oxplow:temp`: a hash of its text, so
@@ -577,18 +609,36 @@ fn show_op(services: ServicesSlot) -> Op {
                     .map_err(failed)?;
                 // Beside the conversation: a tab of the caller's thread in
                 // its window, if one is open.
-                let opened = svc
+                let sent = svc
                     .client_host
-                    .call(
-                        invocation.actor(),
+                    .call_for(
+                        &svc.tab_queue_store,
+                        &invocation.run,
+                        p.client.as_deref(),
                         "tabs.write",
                         "open",
                         json!({ "uri": uri }),
                     )
                     .await;
-                let mut result = json!({ "uri": uri, "text": text, "opened": opened.is_ok() });
-                if let Err(e) = opened {
-                    result["why"] = json!(e.to_string());
+                // A device named wrongly is the agent's mistake to fix, not
+                // a window that was not open.
+                if let Err(e @ CommandError::Invalid { field: Some(f), .. }) = &sent {
+                    if f == "/client" {
+                        return Err(e.clone());
+                    }
+                }
+                let mut result = json!({
+                    "uri": uri,
+                    "text": text,
+                    "opened": matches!(sent, Ok(Sent::Answered(_))),
+                });
+                match sent {
+                    Ok(Sent::Queued(device)) => {
+                        result["queued"] = json!(true);
+                        result["device"] = json!(device);
+                    }
+                    Ok(Sent::Answered(_)) => {}
+                    Err(e) => result["why"] = json!(e.to_string()),
                 }
                 Ok(HandlerOutput {
                     result,
@@ -1240,6 +1290,7 @@ fn run_action_op(services: ServicesSlot) -> Op {
                         on_behalf_of: invocation.actor().clone(),
                         // An agent never confirms.
                         confirmed: false,
+                        caller: None,
                     },
                 )
                 .await?;
@@ -1800,6 +1851,96 @@ mod tests {
 }
 
 #[cfg(test)]
+mod agent_thread_tests {
+    use oxplow_domain::stores::StreamStore as _;
+    use oxplow_domain::{Actor, StreamKind};
+    use serde_json::json;
+
+    use crate::pages::test_support::fixture;
+
+    const PAGE: &str = "title: T\nparams: [{ name: thread_id }]\nloaders:\n  a: { sql: \"SELECT :thread_id AS t\" }\nview: { viz: table, from: a }\n";
+
+    async fn thread_seen_by(
+        actor: &Actor,
+        svc: &crate::Services,
+        input: serde_json::Value,
+    ) -> serde_json::Value {
+        let out = svc
+            .commands
+            .run(actor, "oxplow.page.run", input, false)
+            .await
+            .unwrap()
+            .result;
+        out["loaders"]["a"]["rows"].clone()
+    }
+
+    #[tokio::test]
+    async fn an_agent_run_page_without_thread_id_uses_the_agents_own_thread() {
+        let (_dir, svc) = fixture().await;
+        let stream = svc
+            .stream_store
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| matches!(s.kind, StreamKind::Primary))
+            .unwrap()
+            .id;
+        // Two threads besides the fixture's own; the agent works on the second.
+        let first = crate::test_fixtures::new_thread(&svc, stream, "persons").await;
+        let mine = crate::test_fixtures::new_thread(&svc, stream, "agents own").await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(mine.id),
+            stream_id: Some(stream),
+        };
+        let input = json!({ "spec": PAGE, "format": "json" });
+        assert_eq!(
+            thread_seen_by(&agent, &svc, input).await,
+            json!([[mine.id.value()]])
+        );
+        // An explicit thread_id still wins.
+        let input = json!({ "spec": PAGE, "format": "json", "thread_id": first.id.to_string() });
+        assert_eq!(
+            thread_seen_by(&agent, &svc, input).await,
+            json!([[first.id.value()]])
+        );
+    }
+
+    /// An agent that reads another stream's page, naming no thread, reads it
+    /// on that stream's own thread: its own thread is in another stream.
+    #[tokio::test]
+    async fn an_agent_run_page_on_another_stream_does_not_use_its_own_thread() {
+        let (_dir, svc) = fixture().await;
+        let primary = svc.streams.ensure_primary().await.unwrap();
+        let other = svc
+            .stream_store
+            .upsert(&oxplow_domain::Stream {
+                id: oxplow_domain::StreamId::placeholder(),
+                kind: StreamKind::Worktree,
+                title: "other".into(),
+                branch: "other".into(),
+                worktree_path: _dir.path().join("other").to_string_lossy().into_owned(),
+                ..primary.clone()
+            })
+            .await
+            .unwrap();
+        let theirs = crate::test_fixtures::new_thread(&svc, other, "theirs").await;
+        let mine = crate::test_fixtures::new_thread(&svc, primary.id, "agents own").await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(mine.id),
+            stream_id: Some(primary.id),
+        };
+        let input = json!({ "spec": PAGE, "format": "json", "stream_id": other.to_string() });
+        assert_eq!(
+            thread_seen_by(&agent, &svc, input).await,
+            json!([[theirs.id.value()]])
+        );
+    }
+}
+
+#[cfg(test)]
 mod draft_tests {
     use oxplow_domain::stores::StreamStore as _;
     use oxplow_domain::{Actor, StreamId, StreamKind};
@@ -1953,6 +2094,31 @@ mod show_tests {
             matches!(bad, oxplow_domain::CommandError::Invalid { .. }),
             "{bad:?}"
         );
+    }
+
+    /// An agent with no thread has no tabs to open a page in: with a window
+    /// open it still gets the page's text, not an error.
+    #[tokio::test]
+    async fn an_agent_with_no_thread_still_gets_the_text_of_a_shown_page() {
+        let (_dir, svc) = fixture().await;
+        svc.client_host.register("w1", vec!["tabs.write".into()]);
+        let out = svc
+            .commands
+            .run(
+                &Actor::Agent {
+                    session_id: None,
+                    thread_id: None,
+                    stream_id: None,
+                },
+                "oxplow.page.show",
+                json!({ "spec": VIEW }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(out["opened"], json!(false), "{out}");
+        assert!(out["text"].as_str().unwrap().contains("# Mine"), "{out}");
     }
 }
 

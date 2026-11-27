@@ -11,7 +11,10 @@ import { join } from "node:path";
 // to: a browser that reached the daemon as `localhost` builds its
 // frames' URLs from that base. Not `[::1]`: a CSP host source can't be an
 // IPv6 literal (Chromium logs it invalid and ignores it), so the
-// daemon doesn't serve bundles there either.
+// daemon doesn't serve bundles there either. Never wider (`https:`): the
+// bound is the frame's one way out, and a frame that may navigate to any
+// site can carry its data there. A window on another machine's host has
+// no component frames until it gets a bound of its own.
 
 const DESKTOP = join(import.meta.dir, "..", "..");
 

@@ -2,8 +2,9 @@
 # Build the sidecars and stage them where Tauri's `externalBin` expects
 # them, i.e. `binaries/<name>-<target-triple>`:
 #
-# - `oxplow-daemon`: the packaged shell spawns one per open
-#   project;
+# - `oxplow-host`: the packaged shell starts it when none runs for its
+#   home, and opens each project through it (`.context/host.md`);
+# - `oxplow-daemon`: the host spawns one per held project;
 # - `oxplow-script-worker`: the process every Starlark and jaq script runs
 #   in, so a runaway one can be killed (`oxplow_script::workers`).
 #
@@ -34,7 +35,7 @@
 # invoked from. It is invoked from `beforeBuildCommand`, whose cwd is the
 # **app dir** (`apps/desktop`) — not `src-tauri`, which cost a
 # packaged build with no daemon in it.
-sidecars=(oxplow-daemon oxplow-script-worker)
+sidecars=(oxplow-daemon oxplow-script-worker oxplow-host)
 set -euo pipefail
 
 profile="${1:-release}"
@@ -69,23 +70,13 @@ if [ "$profile" = stub ]; then
 fi
 
 # shellcheck disable=SC2086 # profile_flag is intentionally word-split (empty for debug)
-cargo build $profile_flag -p oxplow-daemon -p oxplow-script --bins --manifest-path "$repo_root/Cargo.toml"
+cargo build $profile_flag -p oxplow-daemon -p oxplow-script -p oxplow-host --bins --manifest-path "$repo_root/Cargo.toml"
 
 # A debug daemon is signed with one stable local identity when this Mac has
-# it (DEV.md "Sign dev builds"), so the keychain trusts every rebuild as the
-# same app: after one Always Allow it stops asking for the AI keys. Without
-# the identity the build stays unsigned and macOS asks on each new build.
-# Signed in place, before staging, and only when not already signed by it:
-# a signature records its time, so signing twice would change the bytes and
-# restage (and relink) on every run.
-identity="${OXPLOW_DEV_SIGNING_IDENTITY:-oxplow dev}"
-if [ "$profile" = debug ] && [ "$(uname)" = Darwin ] &&
-  security find-identity -p codesigning 2>/dev/null | grep -qF "\"$identity\""; then
-  daemon="$repo_root/target/debug/oxplow-daemon"
-  if ! codesign -dvv "$daemon" 2>&1 | grep -qxF "Authority=$identity"; then
-    codesign --force --sign "$identity" --identifier net.voxland.oxplow.daemon --timestamp=none "$daemon"
-    echo "signed $daemon ($identity)"
-  fi
+# it (`scripts/sign-dev.sh`, DEV.md "Sign dev builds"), so the keychain
+# trusts every rebuild as the same app. Signed in place, before staging.
+if [ "$profile" = debug ]; then
+  bash "$repo_root/scripts/sign-dev.sh" "$repo_root/target/debug/oxplow-daemon" net.voxland.oxplow.daemon
 fi
 
 # Copied only when it changed: tauri-build reruns oxplow-desktop's build

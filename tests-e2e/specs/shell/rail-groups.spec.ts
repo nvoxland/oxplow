@@ -1,3 +1,4 @@
+// @desktop-only: the rail's groups, drag and remove zone
 // The rail's groups in a real engine (macOS's window is WebKit): dragging a
 // panel by its handle shows the groups' dividers and the Remove zone, and
 // a drop on a divider moves the panel there. Every panel's handle drags.

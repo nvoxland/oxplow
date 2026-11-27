@@ -9,33 +9,45 @@ use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
 use oxplow_domain::{CommandRunId, ProposalId};
 
 use crate::error::IpcError;
+use crate::RpcRequest;
 
 /// Run command `id` with `input` as the person. `confirmed` says the person
 /// confirmed this exact call (a destructive command, a human-only config
 /// key); an unconfirmed call that needs one comes back
 /// `NEEDS_CONFIRMATION`, so the UI asks and calls again.
 pub async fn run_command(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     id: String,
     input: Json,
     confirmed: bool,
 ) -> Result<CommandOutcome, IpcError> {
-    let outcome = svc
+    let outcome = req
         .commands
-        .run(&Actor::Human, &id, input.0, confirmed)
+        .run_in(&persons_run(req), &id, input.0, confirmed)
         .await?;
     Ok(outcome)
 }
 
+/// A person's run from `req`: its command run keeps the device they asked
+/// from (none for a request with no caller).
+fn persons_run(req: &RpcRequest<'_>) -> oxplow_domain::run::RunContext {
+    oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External)
+        .with_caller(req.caller.cloned())
+}
+
 /// A read the person makes through the bus: command `id` run as the
 /// person, its result decoded. A typed IPC read the agent has too is
-/// this, so both front doors validate and answer alike.
+/// this, so both front doors validate and answer alike. Its record keeps
+/// the device the person asked from.
 pub(crate) async fn read_as_person<T: serde::de::DeserializeOwned>(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     id: &str,
     input: serde_json::Value,
 ) -> Result<T, IpcError> {
-    let outcome = svc.commands.run(&Actor::Human, id, input, false).await?;
+    let outcome = req
+        .commands
+        .run_in(&persons_run(req), id, input, false)
+        .await?;
     serde_json::from_value(outcome.result)
         .map_err(|e| IpcError::internal(format!("`{id}` answered an unexpected shape: {e}")))
 }
@@ -113,26 +125,24 @@ pub async fn action_point_commands(
 /// (`oxplow_app::client_host`). Said when the window starts and again
 /// when it reconnects.
 pub async fn register_client_host(
-    svc: &Services,
-    client: String,
+    req: &RpcRequest<'_>,
     scopes: Vec<String>,
 ) -> Result<(), IpcError> {
-    svc.client_host.register(&client, scopes);
+    req.client_host.register(req.connection()?.as_str(), scopes);
     Ok(())
 }
 
 /// Window `client` is closing: no more calls go to it, and those it
 /// hadn't answered are refused now.
-pub async fn unregister_client_host(svc: &Services, client: String) -> Result<(), IpcError> {
-    svc.client_host.unregister(&client);
+pub async fn unregister_client_host(req: &RpcRequest<'_>) -> Result<(), IpcError> {
+    req.client_host.unregister(req.connection()?.as_str());
     Ok(())
 }
 
 /// Window `client`'s answer to client call `id`: its `result`, or the
 /// `error` it couldn't do it for.
 pub async fn answer_client_call(
-    svc: &Services,
-    client: String,
+    req: &RpcRequest<'_>,
     id: String,
     result: Option<Json>,
     error: Option<String>,
@@ -141,7 +151,8 @@ pub async fn answer_client_call(
         Some(message) => Err(message),
         None => Ok(result.map(|r| r.0).unwrap_or(serde_json::Value::Null)),
     };
-    svc.client_host.answer(&client, &id, answer);
+    req.client_host
+        .answer(req.connection()?.as_str(), &id, answer);
     Ok(())
 }
 
@@ -150,14 +161,14 @@ pub async fn answer_client_call(
 /// (its write gate and its stream), never as the person at the window.
 /// Not confirmed: a run that asks is the caller's to settle.
 pub async fn run_command_for_call(
-    svc: &Services,
-    client: String,
+    req: &RpcRequest<'_>,
     call: String,
     id: String,
     input: Json,
 ) -> Result<CommandOutcome, IpcError> {
-    let actor = svc.client_host.caller(&client, &call)?;
-    let outcome = svc.commands.run(&actor, &id, input.0, false).await?;
+    // As the call's actor, and with the device its run was asked from.
+    let run = req.client_host.run_for(req.connection()?.as_str(), &call)?;
+    let outcome = req.commands.run_in(&run, &id, input.0, false).await?;
     Ok(outcome)
 }
 
@@ -172,13 +183,13 @@ pub async fn get_command(svc: &Services, name: String) -> Result<CommandSpec, Ip
 /// Apply the inverse recorded for command run `command_run_id`, as the person,
 /// through the same pipeline.
 pub async fn undo_command(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     command_run_id: CommandRunId,
     confirmed: bool,
 ) -> Result<CommandOutcome, IpcError> {
-    let outcome = svc
+    let outcome = req
         .commands
-        .undo(&Actor::Human, command_run_id.value(), confirmed)
+        .undo_in(&persons_run(req), command_run_id.value(), confirmed)
         .await?;
     Ok(outcome)
 }
@@ -188,19 +199,19 @@ pub async fn undo_command(
 /// the outcome returned — declining records the decision and runs nothing
 /// (`None`).
 pub async fn decide_proposal(
-    svc: &Services,
+    req: &RpcRequest<'_>,
     proposal: ProposalId,
     approve: bool,
 ) -> Result<Option<CommandOutcome>, IpcError> {
     if !approve {
-        svc.commands
+        req.commands
             .decline(&Actor::Human, proposal.value())
             .await?;
         return Ok(None);
     }
-    let outcome = svc
+    let outcome = req
         .commands
-        .approve(&Actor::Human, proposal.value())
+        .approve_in(&persons_run(req), proposal.value())
         .await?;
     Ok(Some(outcome))
 }
@@ -220,6 +231,83 @@ mod tests {
     /// What a person's run opens next is bound here, by the bus's own
     /// tokenizer, from the run's result: a field the result lacks opens
     /// nothing and says why, rather than a page with an empty id.
+    /// A person's run keeps the device it was asked from, and so does its
+    /// undo; a run with no caller keeps none.
+    #[tokio::test]
+    async fn a_persons_run_and_its_undo_keep_the_device_that_asked() {
+        let (svc, _dir) = services().await;
+        let caller = crate::test_support::caller();
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .selected_or_first(None, &stream.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let mark = |mark: &str| {
+            json!({
+                "id": "oxplow.thread.mark",
+                "input": { "thread": thread.to_string(), "mark": mark },
+                "confirmed": true,
+            })
+        };
+        let marked = crate::dispatch_as("run_command", mark("amber"), &svc, Some(&caller))
+            .await
+            .unwrap();
+        let run_id = marked["command_run_id"].as_i64().expect("an audited run");
+        crate::dispatch_as(
+            "undo_command",
+            json!({ "commandRunId": run_id, "confirmed": true }),
+            &svc,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        let anonymous = crate::dispatch("run_command", mark("red"), &svc)
+            .await
+            .unwrap();
+        let rows = crate::dispatch(
+            "query_sql",
+            json!({ "sql": format!(
+                "SELECT id, device_id FROM v_command_run WHERE id >= {run_id} AND command = 'oxplow.thread.mark' ORDER BY id"
+            ) }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let device = caller.device.to_string();
+        let rows = rows["rows"].as_array().unwrap().clone();
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        assert_eq!(rows[0][1], json!(device), "the run");
+        assert_eq!(rows[1][1], json!(device), "its undo");
+        assert_eq!(rows[2][0], anonymous["command_run_id"]);
+        assert_eq!(rows[2][1], serde_json::Value::Null, "no caller, no device");
+    }
+
+    /// A person's typed read (search) is recorded with the device it came
+    /// from, as their writes are.
+    #[tokio::test]
+    async fn a_persons_read_keeps_the_device_that_asked() {
+        let (svc, _dir) = services().await;
+        let caller = crate::test_support::caller();
+        crate::dispatch_as(
+            "search",
+            json!({ "query": "anything" }),
+            &svc,
+            Some(&caller),
+        )
+        .await
+        .unwrap();
+        let rows = crate::dispatch(
+            "query_sql",
+            json!({ "sql": "SELECT device_id FROM v_command_run WHERE command = 'oxplow.search.find'" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows["rows"], json!([[caller.device.to_string()]]));
+    }
+
     /// A person's run that fails says which command run record recorded it, so the
     /// window's record of the failure links the run.
     #[tokio::test]
@@ -314,7 +402,7 @@ mod tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads
-            .selected_or_first(&stream.id)
+            .selected_or_first(None, &stream.id)
             .await
             .unwrap()
             .expect("the primary stream has a thread");

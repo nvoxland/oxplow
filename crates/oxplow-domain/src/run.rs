@@ -294,6 +294,10 @@ pub struct RunContext {
     replaying: bool,
     /// Accounting for a native command must preserve the actual composer.
     core_command: bool,
+    /// Who asked, when a person's request started it: their device and the
+    /// page load (`crate::client`). Its children inherit it; the command run
+    /// record keeps the device.
+    caller: Option<crate::client::Caller>,
 }
 
 impl RunContext {
@@ -320,7 +324,20 @@ impl RunContext {
             authority_guard: None,
             host_generation: None,
             decided: Arc::default(),
+            caller: None,
         }
+    }
+
+    /// This run as asked by `caller`: a person's request from a device and
+    /// page load. Its children keep it.
+    pub fn with_caller(mut self, caller: Option<crate::client::Caller>) -> Self {
+        self.caller = caller;
+        self
+    }
+
+    /// Who asked, when a person's request started this run.
+    pub fn caller(&self) -> Option<&crate::client::Caller> {
+        self.caller.as_ref()
     }
 
     /// Core's own work, for `actor`: no extension behind it.
@@ -570,6 +587,7 @@ impl RunContext {
             host_generation: self.host_generation.clone(),
             decided,
             replaying: self.replaying,
+            caller: self.caller.clone(),
         }
     }
 
@@ -897,6 +915,26 @@ mod tests {
             generation: Some(generation.into()),
             deployment: None,
         }
+    }
+
+    /// A person's run knows the device and page load that asked, and so does
+    /// all of its work.
+    #[test]
+    fn a_run_carries_who_asked_to_its_children() {
+        let caller = crate::client::Caller {
+            device: crate::client::DeviceId::generate(),
+            connection: crate::client::ConnectionId::generate(),
+        };
+        let run = RunContext::core(Actor::Human, Mode::External).with_caller(Some(caller.clone()));
+        assert_eq!(run.caller(), Some(&caller));
+        assert_eq!(
+            run.child(Some(effect("g1")), Mode::External).caller(),
+            Some(&caller)
+        );
+        assert_eq!(
+            RunContext::core(Actor::Human, Mode::External).caller(),
+            None
+        );
     }
 
     /// A child is the same run's work: same actor, same cancel flag, a

@@ -405,6 +405,7 @@ async fn invoke(ctx: &Ctx, command: &str, input: Value, confirmed: bool) -> Valu
             on_behalf_of: Actor::Human,
             confirmed,
             version: ctx.version.clone(),
+            caller: None,
         },
     )
     .await;
@@ -449,6 +450,7 @@ async fn invoke_point(
             on_behalf_of: Actor::Human,
             confirmed,
             version: ctx.version.clone(),
+            caller: None,
         },
     )
     .await;
@@ -621,8 +623,9 @@ async fn serve(ctx: &Ctx, version: &str, path: &str, headers: &HeaderMap) -> Res
     let Some(host) = host_of(headers) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let base = format!("http://{host}");
     let Some(mut served) =
-        component_http::bundle_file(&ctx.svc.component_bundles, host, version, path).await
+        component_http::bundle_file(&ctx.svc.component_bundles, &base, version, path).await
     else {
         return StatusCode::NOT_FOUND.into_response();
     };

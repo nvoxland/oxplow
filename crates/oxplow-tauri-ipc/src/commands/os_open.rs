@@ -146,7 +146,8 @@ pub(crate) fn check_local_path(path: &str, use_: PathUse) -> Result<PathBuf, Str
 /// Show `path` in the OS file manager, selected.
 #[tauri::command]
 #[specta::specta]
-pub async fn reveal_path(path: String) -> Result<(), IpcError> {
+pub async fn reveal_path(window: tauri::Window, path: String) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     let p = check_local_path(&path, PathUse::Reveal).map_err(IpcError::invalid)?;
     tauri_plugin_opener::reveal_item_in_dir(&p)
         .map_err(|e| IpcError::internal(format!("reveal {path}: {e}")))
@@ -155,7 +156,8 @@ pub async fn reveal_path(path: String) -> Result<(), IpcError> {
 /// Open `path` with its default app (a directory: in the file manager).
 #[tauri::command]
 #[specta::specta]
-pub async fn open_path(path: String) -> Result<(), IpcError> {
+pub async fn open_path(window: tauri::Window, path: String) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     let p = check_local_path(&path, PathUse::Open).map_err(IpcError::invalid)?;
     tauri_plugin_opener::open_path(&p, None::<&str>)
         .map_err(|e| IpcError::internal(format!("open {path}: {e}")))

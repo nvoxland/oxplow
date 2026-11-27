@@ -1445,6 +1445,14 @@ fn a_section_says_callout_collapsible_and_link() {
     assert!(!by_id("a").collapsible);
     assert!(by_id("b").collapsible);
     assert_eq!(by_id("b").link.as_deref(), Some("other"));
+    assert!(!by_id("b").collapsed, "open until it says closed");
+    // `collapsed` starts it folded, and folds it at its heading.
+    let folded = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: c, title: C, collapsed: true, viz: table, from: q }}\n"
+    ))
+    .expect("loads");
+    let c = folded.nodes().into_iter().find(|n| n.id == "c").unwrap();
+    assert!(c.collapsed && c.collapsible);
     let why = page(&format!(
         "{head}view:\n  stack:\n    - {{ id: a, title: A, callout: yes please, viz: detail, from: q }}\n"
     ))

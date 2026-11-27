@@ -133,3 +133,16 @@ test("a dashboard with no tiles says how to add one", () => {
   }}><DashboardGrid page="my-pages/empty" tiles={[]} /></DashboardEditContext.Provider>);
   expect(view.getByTestId("dashboard-empty").textContent).toContain("Pin to Dashboard");
 });
+
+// A finger cannot drag a tile on iPad: its menu moves it a place earlier or
+// later, as a drag would, and the first or last tile cannot go further.
+test("a tile's menu moves it earlier or later", async () => {
+  const f = fixture();
+  await f.ready();
+  fireEvent.contextMenu(f.view.getByTestId("dashboard-tile-tests"), { clientX: 20, clientY: 20 });
+  expect(f.view.getByTestId("menu-item-move-earlier").hasAttribute("disabled")).toBe(true);
+  fireEvent.click(f.view.getByTestId("menu-item-move-later"));
+  await waitFor(() => expect(f.writes.length).toBe(1));
+  expect(f.order()).toEqual(["dashboard-tile-coverage", "dashboard-tile-tests"]);
+  expect(parse(f.writes[0].spec).view.grid.map((tile: { id: string }) => tile.id)).toEqual(["coverage", "tests"]);
+});

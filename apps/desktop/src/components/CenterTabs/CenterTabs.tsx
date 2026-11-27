@@ -1,56 +1,17 @@
-import { TabVisibleContext } from "../../tabs/TabVisible.js";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { AgentStatus } from "../../api.js";
 import { kindForTabId, PageKindIcon } from "../../pageKinds.js";
 import { AgentIcon } from "../AgentIcon.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
-import { ErrorBoundary } from "../ErrorBoundary.js";
+import type { WindowTab } from "../../window/windowTab.js";
+import { TabBodies } from "./TabBodies.js";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
-import { tabsToCloseOthers, tabsToCloseRight } from "./tabClose.js";
-
-export interface CenterTab {
-  id: string;
-  /** Its body's React key, when it must outlive a change of `id` (a page
-   *  whose params changed stays mounted); `id` otherwise. */
-  key?: string;
-  label: string;
-  /** What hovering the tab says, when it is more than the label (a file's
-   *  whole path, where the label is its name). */
-  hint?: string;
-  closable: boolean;
-  /** Pinned: it leads the strip, isn't dragged or dropped on, and the
-   *  bulk closes ("Close Other Tabs") skip it (an agent session's tab). */
-  pinned?: boolean;
-  render: () => ReactNode;
-  agentStatus?: AgentStatus;
-  /** An agent session's harness's declared logo (`HarnessListing.icon`);
-   *  the session's tab draws it in place of the generic robot. */
-  icon?: string | null;
-  /** What the agent is waiting on, when `agentStatus` is awaiting. */
-  question?: string;
-  /** Its page holds unsaved edits (`useTabEditing`): a ● before its
-   *  label. */
-  dirty?: boolean;
-  /** Kind-specific right-click menu entries for this tab. They render at
-   *  the top of the tab's context menu, above the universal "Close Other
-   *  Tabs" / "Close Tabs to the Right" pair that CenterTabs appends for
-   *  every tab. (Right-click is the per-row action surface project-wide;
-   *  there is no visible kebab — see `.context/usability.md`.) */
-  contextMenu?: MenuItem[];
-  /** Entries built as the menu opens, after `contextMenu` (what the
-   *  window knows only then: Open In ▸ for a file's or a web page's tab). */
-  menuAtOpen?: () => MenuItem[] | Promise<MenuItem[]>;
-  /** When true, this tab does NOT appear in the strip but its body
-   *  still mounts (kept hidden via display:none). Used by the host
-   *  to keep back/forward stack entries alive so navigation between
-   *  them preserves React component state without remounting. */
-  hidden?: boolean;
-}
+import { buildTabMenu } from "./tabMenu.js";
+import { TAB_DRAG_MIME } from "../../dragMimes.js";
 
 interface CenterTabsProps {
-  tabs: CenterTab[];
+  tabs: WindowTab[];
   activeId: string;
   onActivate(id: string): void;
   onClose?(id: string): void;
@@ -60,15 +21,8 @@ interface CenterTabsProps {
   onReorder?(orderedIds: string[]): void;
 }
 
-const TAB_DRAG_MIME = "application/x-oxplow-center-tab";
-
 export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReorder }: CenterTabsProps) {
   const active = tabs.find((t) => t.id === activeId) ?? tabs.find((t) => !t.hidden) ?? tabs[0] ?? null;
-  // The bodies shown so far: a tab not yet shown mounts nothing, so a
-  // window arriving on a stream (or opening with many tabs) draws only the
-  // selected one.
-  const shownKeys = useRef(new Set<string>());
-  if (active) shownKeys.current.add(byKey(active));
   const stripTabs = tabs.filter((t) => !t.hidden);
   const cm = useContextMenu();
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -100,57 +54,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   // pinned (an agent session's): pinned tabs stay at the front, in the
   // order their sessions opened, and are never a drag source or drop
   // target. Every other closable tab can be dragged anywhere after them.
-  const isReorderable = (tab: CenterTab): boolean => !!onReorder && tab.closable && !tab.pinned;
+  const isReorderable = (tab: WindowTab): boolean => !!onReorder && tab.closable && !tab.pinned;
   // What the bulk closes may close: never a pinned tab.
   const bulkClosable = stripTabs.map((t) => ({ id: t.id, closable: t.closable && !t.pinned }));
 
-  // Close a batch of tabs through the host's single-tab close path, then —
-  // only if the close swept away the active tab — fall the selection back to
-  // the anchor the user right-clicked (so the strip doesn't snap to Agent
-  // when a perfectly good neighbour is still open).
-  const closeMany = (ids: string[], anchorId: string): void => {
-    if (!onClose || ids.length === 0) return;
-    const closingActive = ids.includes(activeId);
-    for (const id of ids) onClose(id);
-    if (closingActive) onActivate(anchorId);
-  };
-
-  // Per-tab right-click menu: the tab's own entries (if any) followed by the
-  // universal "Close Other Tabs" / "Close Tabs to the Right" pair. The pair
-  // only appears when the host wired a close handler; each is disabled when it
-  // has no targets. Targets are computed over the real open tabs (`stripTabs`)
-  // so overflowed-but-open tabs still close while back/forward stack entries
-  // (`hidden`) are excluded.
-  const buildTabMenu = (tab: CenterTab): MenuItem[] | Promise<MenuItem[]> => {
-    const later = tab.menuAtOpen?.() ?? [];
-    if (later instanceof Promise) return later.then((atOpen) => withCloseItems(tab, [...(tab.contextMenu ?? []), ...atOpen]));
-    return withCloseItems(tab, [...(tab.contextMenu ?? []), ...later]);
-  };
-  const withCloseItems = (tab: CenterTab, items: MenuItem[]): MenuItem[] => {
-    if (onClose) {
-      const others = tabsToCloseOthers(bulkClosable, tab.id);
-      const toRight = tabsToCloseRight(bulkClosable, tab.id);
-      if (items.length > 0) {
-        items.push({ id: "tab.close-sep", label: "", enabled: false, separator: true });
-      }
-      if (tab.closable && !tab.pinned) {
-        items.push({ id: "tab.close", label: "Close", enabled: true, run: () => onClose(tab.id) });
-      }
-      items.push({
-        id: "tab.close-others",
-        label: "Close Other Tabs",
-        enabled: others.length > 0,
-        run: () => closeMany(others, tab.id),
-      });
-      items.push({
-        id: "tab.close-right",
-        label: "Close Tabs to the Right",
-        enabled: toRight.length > 0,
-        run: () => closeMany(toRight, tab.id),
-      });
-    }
-    return items;
-  };
+  const tabMenu = (tab: WindowTab): MenuItem[] | Promise<MenuItem[]> =>
+    buildTabMenu({ tab, bulkClosable, activeId, onClose, onActivate });
 
   useLayoutEffect(() => {
     const outer = outerBarRef.current;
@@ -257,8 +166,8 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               draggable={canDrag}
               tabIndex={0}
               onClick={() => onActivate(tab.id)}
-              onContextMenu={(e) => cm.open(e, buildTabMenu(tab))}
-              onKeyDown={(e) => cm.openForKey(e, buildTabMenu(tab))}
+              onContextMenu={(e) => cm.open(e, tabMenu(tab))}
+              onKeyDown={(e) => cm.openForKey(e, tabMenu(tab))}
               onMouseEnter={() => setHoverId(tab.id)}
               onMouseLeave={() => setHoverId((prev) => (prev === tab.id ? null : prev))}
               onDragStart={canDrag ? (event) => {
@@ -453,44 +362,16 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             Loading…
           </div>
         ) : null}
-        {[...tabs].sort((a, b) => byKey(a).localeCompare(byKey(b))).map((tab) => {
-          const isActive = tab.id === active?.id;
-          // A body is mounted when its tab is first shown, and then kept.
-          if (!isActive && !shownKeys.current.has(byKey(tab))) return null;
-          return (
-            <div
-              key={byKey(tab)}
-              style={{
-                display: isActive ? "flex" : "none",
-                flex: 1,
-                minHeight: 0,
-                minWidth: 0,
-                flexDirection: "column",
-                // A tab's own dialogs (`TabModal`) cover this body only.
-                position: "relative",
-              }}
-              data-testid={`center-tab-body-${tab.id}`}
-              aria-hidden={!isActive}
-            >
-              <ErrorBoundary label={tab.label}>
-                <TabVisibleContext.Provider value={isActive}>{tab.render()}</TabVisibleContext.Provider>
-              </ErrorBoundary>
-            </div>
-          );
-        })}
+        <TabBodies tabs={tabs} activeId={active?.id ?? null} />
       </div>
       {cm.menu}
     </div>
   );
 }
 
-/** A tab body's React key. */
-function byKey(tab: CenterTab): string {
-  return tab.key ?? tab.id;
-}
 
 interface OverflowPanelProps {
-  tabs: CenterTab[];
+  tabs: WindowTab[];
   activeId: string | null;
   anchorRef: React.RefObject<HTMLButtonElement | null>;
   onActivate(id: string): void;

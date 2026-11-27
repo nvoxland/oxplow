@@ -24,8 +24,8 @@ fn usage(name: &str) -> ! {
          \n\
          --token-stdin reads the UI token from the first line of stdin\n\
          (how the desktop shell hands it over). Otherwise a fresh token\n\
-         is generated and printed; the UI must present it (launcher\n\
-         connect, or VITE_OXPLOW_REMOTE_TOKEN in dev).\n\
+         is generated and printed; the UI must present it (the Vite dev\n\
+         server's VITE_OXPLOW_REMOTE_TOKEN; a host hands it over itself).\n\
          \n\
          The project dir may also come from OXPLOW_PROJECT_DIR. The\n\
          daemon binds loopback only — reach it from another machine\n\
@@ -184,6 +184,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         });
 
     let daemon_state = DaemonState {
+        liveness: crate::Liveness::default(),
         token: token.clone(),
         ctx: oxplow_rpc::RpcContext {
             services: state,

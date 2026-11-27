@@ -8,17 +8,38 @@ machine (e.g. an EC2 dev box). Single-user by design; SSH is the auth
 layer. User-facing setup lives in the user docs — this note is the
 developer-facing mechanics.
 
+## What each device has of its own
+
+One daemon serves every device of the person (the Mac app, a paired
+browser, a tablet), and each request names its caller ("Who is asking").
+**Shared by every device:** streams, threads, agent sessions, terminals,
+tasks, bookmarks, and a custom component's memory. **Each device's own:**
+the stream it shows and the thread it shows in each stream
+([data-model.md](./data-model.md) "device_view_state and thread_selection"),
+its tabs of each thread (`tab_session`; [pages-and-tabs.md](./pages-and-tabs.md)
+"Persistence"), its preferences and page memory (`ui_preference`, "Page
+state"), its left-nav panel layout (`panel_layout`) and its page visits
+(`page_visit.device_id`). A device has one window per project ("One window per
+device"). The daemon knows which device was used last ("Last used"), whether
+a window is still there ("Liveness"), and keeps the tabs an agent opens for a
+device that is away ("An agent's tab on a device"). Agents read every
+device's tabs ([pages-and-tabs.md](./pages-and-tabs.md) "What agents see of
+the tabs").
+
 ## Pieces
 
-The event socket carries the window's stable `client` query parameter beside
-its token. Its page-run ownership guard drops that window's runs on disconnect;
+The event socket says who it is in its query, beside its token: `device`,
+`connection` (one id for the page load, in memory, `uiClientId.ts`, so a
+reload is a new connection and a duplicated browser tab is never the one it
+came from), and the device's `name` and `kind` (see "Who is asking"). Its
+page-run ownership guard drops that connection's runs on disconnect;
 a replacement socket takes a new generation, so late cleanup from the old socket
 cannot release new runs. An open in flight is fenced against that generation.
-Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identity.
+Logs, tab reports, the client host and the socket use the same `uiClientId.ts` identity.
 
 - **`crates/oxplow-rpc`** — transport-neutral command cores +
-  `rpc_dispatch!` registry (`dispatch(name, camelCase JSON args,
-  &Services) -> JSON`). Single source of truth for the command set;
+  `rpc_dispatch!` registry (`dispatch_as(name, camelCase JSON args,
+  ctx, caller) -> JSON`). Single source of truth for the command set;
   both hosts call it. No `tauri` deps, ever — the daemon builds
   headless.
 - **`crates/oxplow-daemon`** — headless binary. `--project <dir>`
@@ -70,8 +91,8 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
 
   **Two lanes, so a stream switch is never starved.** The webview holds six
   HTTP/1.1 connections to a daemon, and `/ipc` calls share them. A refetch
-  storm used to fill all six, and a stream switch took minutes. `invoke`
-  now sends each call through one of two first-in first-out lanes
+  storm can fill all six, so `invoke` sends each call through one of two
+  first-in first-out lanes
   (`createLanes`): **bulk** (4 in flight) and **priority** (2 in flight,
   `PRIORITY_COMMANDS`: `switch_stream`). The two add up to six, so a full
   bulk lane leaves the priority lane its connections; what waits in one
@@ -83,22 +104,22 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   `window.__OXPLOW__ = { base, kind, projectDir }` into every window it creates
   (`src-tauri/src/windows.rs`, `initialization_script` — built through
   `serde_json` so a URL can't break out of the literal), so two project
-  windows in one shell process can drive two different daemons.
-  `resolveBase` takes it from, in order: localStorage
-  `oxplow.remoteBase` (the launcher's manual connect — an explicit user
-  action outranks the default), the injected base, then
-  `VITE_OXPLOW_REMOTE` (dev override). All three are read once at module
-  load — switching is a window reload.
+  windows in one shell process can drive two different daemons. It is the
+  **one read path** (`resolveEndpoint`): the host injects the same into
+  each page it serves, the Vite dev server from `VITE_OXPLOW_REMOTE` and
+  `VITE_OXPLOW_REMOTE_TOKEN` (dev server only; a build never carries
+  them), and the e2e harness with `addInitScript` in the top frame only. A
+  remote daemon is a host on another machine (`.context/host.md`); there is
+  no manual connect and nothing in storage says where a daemon is. Read once
+  at module load — switching is a window reload.
 
   **Are the files on this machine?** `isRemote()` is true in every
   project window (the shell injects a loopback base), so it cannot say.
-  The shell starts its daemons on this machine, so `filesAreLocal()`
-  (`filesLocalFrom`, `transport.ts`) is true for a project window on its
-  injected base with no manual connect over it, and for the launcher. A
-  plain browser or a manual connect may drive a daemon elsewhere. It is
-  read once at load, as the base is: another window's connect or
-  disconnect changes the storage, not the daemon this one drives. Open In
-  ▸ Reveal and Default App show only when it is true.
+  The shell names the folder of a project it opened on this machine
+  (`projectDir`), so `filesAreLocal()` (`filesLocalFrom`, `transport.ts`)
+  is true for a shell window with a `projectDir`, and for the launcher; a
+  page a host served, or a window on another machine's host, has none. Read
+  once at load. Open In ▸ Reveal and Default App show only when it is true.
 
   **Routing is per command.** `invokeRoute(name, base, tauriAvailable)`
   sends shell commands (windowing, native menus, clipboard, project
@@ -145,25 +166,24 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   next bullet.
 - **Auto-resync on reconnect.** Recovery re-hydrates the client stores
   in place — *no* manual full-page reload. The top-level loader
-  (`loadInitialAppState` in `App.tsx`: streams, current stream + its
-  threads, workspace context), the core-store
+  (`loadInitialAppState` in `window/useWindowStreams.ts`: streams, the caller's
+  stream and its threads, workspace context), the core-store
   subscriptions (`useBackendSubscriptions`: config, agent
   statuses) all register
   `onRemoteReconnect` handlers. The daemon health probe (App.tsx, 2s
-  `/ipc/ping` poll) used to `window.location.reload()` on recovery;
-  it now `triggerRemoteResync()`s instead, so an HTTP-level recovery
-  takes the same in-place resync path (a reload would drop unsaved
-  editor drafts). To make a new surface live-again after a drop,
+  `/ipc/ping` poll) calls `triggerRemoteResync()` on recovery, so an
+  HTTP-level recovery takes the same in-place resync path (a reload would
+  drop unsaved editor drafts). To make a new surface live-again after a drop,
   register an `onRemoteReconnect` re-fetch alongside its event
   subscription.
-- **Launcher connect flow** — `launcher/Launcher.tsx`
-  `RemoteConnectSection` + `launcher/remoteRecents.ts`. Probes
-  `/ipc/ping` before committing. `Root.tsx` renders the full app
-  shell for any window without a shell-assigned `kind` — which is what a
-  plain browser over a tunnel is.
+- **No connect flow of its own.** A daemon on another machine is reached
+  through its host: the launcher's "Other computers"
+  (`launcher/RemoteHostsSection.tsx`, `.context/host.md` "The Mac app"), or
+  a browser that pairs at the host's home. `Root.tsx` renders the full app
+  shell for a window without a `kind` the shell or host assigned.
 - **`components/RemoteConnectionBanner.tsx`** — fixed top strip in
-  remote mode: red "reconnecting…" while the WS is down (with
-  Disconnect). Once it recovers, state auto-resyncs (see above), so the
+  remote mode: red "reconnecting…" while the WS is down, and "Oxplow was
+  quit on the computer that runs it" after a host's 4002. Once it recovers, state auto-resyncs (see above), so the
   banner shows only a brief, non-blocking "Connection restored — state
   resynced" confirmation that auto-dismisses (`RESTORED_AUTO_DISMISS_MS`)
   — no reload prompt. Agents on the daemon box run through the gap.
@@ -173,16 +193,19 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   `/ipc` 401 marks the transport refused (`isTokenRefused`), each call
   fails `UNAUTHORIZED` with what to do, the socket is closed and never
   retried, and the banner shows `remote-banner-refused` — "this window's
-  token was refused… reconnect from the launcher" — sticky, since no
-  retry fixes it. The health probe counts a refusal as the daemon
+  token was refused… open the project again" — sticky, since no retry
+  fixes it. On a page a host served, a refused token is the device's own
+  and it pairs again instead (`.context/host.md` "Pairing"). The health probe counts a refusal as the daemon
   answering, so the "Backend daemon disconnected" overlay doesn't show;
   background reads fail through `readFailed` (logged), never uncaught.
 
 ## Lifecycle, logs and stalls
 
-- **A daemon doesn't outlive its app.** The supervising app keeps the
-  daemon's stdin open; end-of-file means the app is gone (quit, crashed,
-  killed) and the daemon stops (`stop_when_app_goes`).
+- **A daemon doesn't outlive its app.** The host keeps the daemon's
+  stdin open, and the app keeps its own host's stdin open; end-of-file
+  means the parent is gone (quit, crashed, killed) and the child stops
+  (`stop_when_app_goes`; the host's `serve --for-app`). A headless host
+  (`oxplow host serve`) has no parent: its daemons stop when it does.
 - **Nothing the daemon started outlives it.** A stop (a signal, the
   lifeline) runs `Services::shutdown`, then `process::exit`, which runs no
   destructors, so each kind of child is ended explicitly first:
@@ -249,16 +272,18 @@ token**; only the person's renderer holds it.
 - **Presenting it:** `Authorization: Bearer <token>` on `/ipc`, and
   `?token=` on the `/events` WebSocket (browsers can't set its headers).
   The comparison is constant-time.
-- **Where the renderer gets it** (`transport.ts` `resolveToken`), paired
-  with whichever source supplied the base:
-  - the launcher's manual connect: a token field, or
-    `http://host:port#oxplow-token=…`, saved as `oxplow.remoteToken`;
-  - the shell's injected `window.__OXPLOW__.token`;
-  - `VITE_OXPLOW_REMOTE_TOKEN` in dev.
-  A `#oxplow-token=` URL fragment wins (scripted and Playwright
-  sessions).
-- **Headless dev:** start the daemon, read its `ui token:` line, and run
-  vite with `VITE_OXPLOW_REMOTE=… VITE_OXPLOW_REMOTE_TOKEN=…`.
+- **Where the renderer gets it** (`transport.ts` `resolveEndpoint`): the
+  window's `window.__OXPLOW__.token`, with its base.
+- **Through the host** (`.context/host.md`): a browser loads
+  `<host>/p/<project>/`, whose page states `window.__OXPLOW__ = { kind:
+  "project", base: "<origin>/p/<project>", host: "<origin>", project, token:
+  null }`. It uses the token it got at pairing (`oxplow.hostToken`). Its
+  calls (`/ipc`, `/events`, `/components`) go to the host, which checks the
+  caller's token, swaps in the daemon's and forwards with the prefix
+  removed, so a client never holds a daemon token.
+- **Headless dev:** run a headless host (DEV.md "Run headless"), or, for
+  the renderer alone, the Vite dev server with `VITE_OXPLOW_REMOTE=…
+  VITE_OXPLOW_REMOTE_TOKEN=…`.
 
 **Ungated: `/health` and custom component bundles** (P6b.D3,
 `oxplow-daemon/src/components.rs`). `GET
@@ -273,11 +298,13 @@ an extension's own files, never project data (the frame reaches that
 only through the host's bridged RPCs). It is mounted **outside the
 permissive CORS layer**, so a web page can't read a bundle with `fetch`,
 and it answers only a loopback `Host` (`127.0.0.1` or `localhost`,
-optional port — `component_http::loopback_host`, shared with a test's harness; not `[::1]`, since the page's
+optional port — `component_http::loopback_host`, shared with a test's harness and the host's own `Host` check; not `[::1]`, since the page's
 `frame-src` can't name an IPv6 literal and a frame there would never load):
 without that, DNS rebinding (a
 page whose name flips to 127.0.0.1) would read bundles same-origin; the
-CSP's bundle-folder source is built from that validated `Host`. 404 for a
+CSP's bundle-folder source is built from that validated `Host`, or, behind the
+host, from the `Oxplow-Public-Base` it sends with the daemon's token
+(`.context/host.md` "Routing"). 404 for a
 foreign `Host`, a version that isn't loaded, or anything but exactly one
 of the snapshot's files (a map lookup). Every 200 has `Content-Type`
 from a small table (`content_type_for`), `X-Content-Type-Options:
@@ -305,23 +332,164 @@ keeps the two one value.
 
 ## Dispatch context
 
-`dispatch` takes an `RpcContext { services, plugin_runtime }`
-(`crates/oxplow-rpc/src/lib.rs`; derefs to `Services`). The
-`rpc_dispatch!` registry has two sections: `svc { … }` cores receive
-`&Services` (the ~180 common commands) and `ctx { … }` cores receive
-`&RpcContext` (today just `open_terminal_session`, whose agent path
-reads `plugin_runtime` — the control-plane hook/MCP URLs + token).
-Both hosts populate it from their own control plane: the Tauri
-wrapper from the managed `PluginRuntimeState`, the daemon in
-`main.rs` from its `ControlPlane` handle. A host that passes
-`plugin_runtime: None` degrades cleanly — plain shell terminals
-work, agent spawn returns INVALID.
+`dispatch_as(name, args, ctx, caller)` runs a command
+(`crates/oxplow-rpc/src/lib.rs`); `dispatch(name, args, ctx)` is the same
+with no caller. `RpcContext { services, plugin_runtime }` is one value shared
+by every request (it derefs to `Services`). The `rpc_dispatch!` registry has
+these sections: `svc { … }` and `gen { … }` cores receive `&Services` (nearly
+every command), and `req { … }` cores receive `&RpcRequest { ctx, caller }`,
+for commands that need who asks or the agent spawn's `plugin_runtime`
+(`open_terminal_session`, `restart_agent_terminal`). `req` rows carry their
+return type, as `gen` rows do; the Tauri side generates their adapters too
+(`oxplow-tauri-ipc/src/commands/generated.rs`), with no caller.
+Both hosts populate `plugin_runtime` from their own control plane: the Tauri
+wrapper from the managed `PluginRuntimeState`, the daemon in `main.rs` from
+its `ControlPlane` handle. A host that passes `plugin_runtime: None` degrades
+cleanly — plain shell terminals work, agent spawn returns INVALID.
+
+## Who is asking
+
+A request names its caller (`oxplow_domain::Caller`): the person's **device**
+(`dev-<uuid>`: the Mac app, all its windows; or a paired browser on one host
+address) and the **connection** (`con-<uuid>`: one page load of one project's
+app, across its socket's reconnects). The client makes both ids;
+`oxplow_domain::client` checks their shape before they reach a row or a log.
+
+- `POST /ipc/:name` carries them as the `Oxplow-Device` and
+  `Oxplow-Connection` headers, both or neither (`caller_from_headers`,
+  `crates/oxplow-daemon/src/lib.rs`). Neither: no caller (a script with the
+  token, a test). One alone, or an id of the wrong shape: refused as INVALID
+  before any command runs.
+- Until a host stands in front of the daemon, the daemon trusts them: the UI
+  token already says the request is the person's. With the host, the host
+  sets them from the device's own token.
+- A request with no caller reads per-device state as its defaults and may
+  not write it, with two exceptions: a component's memory is shared by every
+  device (a request with no caller may write it), and a page visit with no
+  caller is recorded as every device's and read by every device
+  (`page_visit.rs`).
+- A person's command run keeps the device it was asked from
+  (`v_command_run.device_id`): the RPC commands that run as the person pass
+  the caller into the run's context (`.context/commands.md` "Run and
+  record").
+
+The frontend makes the ids. `device.ts` (`getDevice()`, once per page load)
+takes the Mac app's device from the shell's injected `window.__OXPLOW__.device`
+(the shell makes it once and keeps it in `device.json` in the global config
+dir, `oxplow_config::this_device`, named after the Mac; every project window
+gets the same one),
+or, in a browser, keeps a `dev-<uuid>` in `shellStorage` (`oxplow.device`);
+`uiClientId.ts` makes the `con-<uuid>`. `tauri-bridge/transport.ts` adds both
+headers to every HTTP invoke, and `eventsUrl` puts the device, its name and
+kind, and the connection in the event socket's query (a browser cannot set
+headers on a WebSocket). The daemon checks them as it checks the headers and
+refuses a socket that names them wrongly; one with neither owns no page runs.
+While a socket is open its device is in `Services::client_devices`
+(`crates/oxplow-app/src/client_reports/devices.rs`, memory only), with the newest
+name and kind it gave; it leaves when its connection's socket closes.
+
+### Liveness
+
+The daemon knows a page is still there (`Liveness` in
+`crates/oxplow-daemon/src/lib.rs`): every 20 s it sends each event socket a
+WebSocket ping (a browser answers it without script, so a throttled hidden
+page stays alive) and a `{"channel":"beat"}` frame. A socket that answers no
+ping for two intervals, or whose send does not finish within one, is closed:
+its page runs, tab report and client-host registration go with it. The page
+keeps a watchdog fed by every frame (`createWatchdog` in `transport.ts`,
+`SOCKET_SILENCE_MS`): 50 s with nothing, and the page drops the socket at
+once (`dropSocket`: its handlers go, it closes in the background) and
+reconnects, without waiting for the close handshake, which a dead path never
+finishes. The daemon also closes a socket whose window missed a call's answer
+(a normal close, not 4001; `ClientDevices::close`): the window stops hosting,
+and a live page reconnects and registers again, so one slow answer does not
+end its hosting. A frozen page is then away, and the tabs agents open for it
+wait. The 2-second `/ipc/ping` probe still drives the
+daemon-down dialog and the resync after an HTTP-level outage.
+
+### Last used
+
+While the person uses a window (a press or a key, terminal input included),
+it sends `{"channel":"used"}` on its event socket, at most once a second
+(`window/useReportUse.ts`, in `WindowProviders`). The daemon keeps each
+device's last use in memory (`ClientDevices::used`) and answers which
+connected page load was used last (`ClientDevices::last_used`; before any use
+is told, the newest connection): "last used in this project", where a call
+that no device asked for goes. A person's run has a device and never goes
+to another one: it goes to its own page load (or the newer one of its
+device), and is refused `Unavailable` when that window hosts nothing yet. An agent reads the tabs of every device, the
+one used last first (`.context/pages-and-tabs.md` "What agents see of the
+tabs"): the tabs are the device's stored ones, so an away device lists them
+too; the window's tab report holds only live facts (the shown thread, focus,
+visibility, detail, runs).
+
+### One window per device
+
+A device keeps one page load per project: per-device state (its stream,
+its thread, its tabs) has one window to follow. The first socket of a new
+connection takes over its device, in the socket upgrade's callback (a failed
+upgrade replaces nothing; `client_reports::SocketLease::open`):
+
+- the connection it replaces is told: its socket closes with code 4001
+  ("replaced", `devices::REPLACED_CLOSE_CODE`), and its tab report goes at
+  once;
+- it stops hosting the daemon's calls (`ClientHost::unregister`: a call
+  waiting on it is answered at once); its page runs go when its socket
+  closes;
+- the daemon keeps each device's latest page load after its socket closes,
+  so a page load that dropped is still replaced by a newer one and cannot
+  take the device back; a daemon restart forgets this;
+- a replaced connection is refused from then on: `/ipc` answers `REPLACED`
+  (`IpcError::replaced`) and a new socket closes at once with 4001. A
+  replaced id never comes back.
+
+The page stops reconnecting on either (`transport.ts`: the `replaced`
+connection state, `socketCloseMeaning`, `isReplacedError`) and shows "oxplow is
+open in another tab" over everything (`components/ReplacedScreen.tsx`, in
+`window/WindowProviders.tsx`). Use it here loads the page again: a new
+connection, which takes the device back. A reconnect of the same page load is
+the same connection and replaces nothing. The Mac app is one device, with one
+window per project, so it never meets this. Two browsers, two profiles or two
+addresses of the host are separate devices.
+
+## An agent's tab on a device
+
+An agent can open a page on a device it names: `oxplow_show_page` and
+`oxplow_navigate` take an optional `client`, a device id (`dev-…`, as
+`oxplow_list_tabs` shows `device`) or a connected device's name. Without it,
+the window used last gets the call ("Last used").
+
+- A connected device: the call goes to its page load
+  (`ClientHost::call_on`). A name that two devices share, or that no
+  connected device has, is refused (`Invalid`, `/client`). A device whose
+  window is not open, or does not host the scope, is refused `Unavailable`,
+  and the answer says so.
+- A device named by id that is not connected, or connected with a window
+  that hosts nothing yet (it is loading, or missed an answer), is away: the
+  tab waits (`tab_queued`, `TabQueueStore`), and the tool answers
+  `{ queued: true, device }`. Names are known only while a device is
+  connected, so a name never queues. Only an agent on a thread can queue: the
+  tab opens in that thread. Only a device this project knows can have a tab
+  wait (a row in `device_view_state`, `thread_selection` or `tab_session`, or
+  a connected one): any other id is `Invalid` on `/client`. The same page
+  waits once (`UNIQUE (device_id, thread_id, uri)`), at most 50 wait for a
+  device (the oldest goes), and a row older than 14 days is dropped.
+- The device's window reads its queue (`list_queued_tabs`) when it starts to
+  host the daemon's calls, after each reconnect, and when the daemon says a
+  tab was queued for it just after it connected (`OxplowEvent::TabsQueued`,
+  for the window's connection). A read returns the rows that can open (a
+  closed thread's or an archived stream's go, as do old ones) and keeps them.
+  The window opens each tab in its thread without focus, as an agent's open
+  does, waits until the thread's tabs are stored (`save_tab_session`
+  answered), then calls `forget_queued_tabs { ids }` (`window/useWindowHost.ts`).
+  A page load that dies before that reads the rows again; opening a page
+  that is open changes nothing.
 
 ## Known v1 gaps
 
 - **Picking a different project** = restarting the daemon with a
-  different `--project` (it's project-scoped, like the shell's
-  shell owns windows, daemons own projects). No remote directory browser.
+  different `--project` (a daemon is project-scoped: the shell owns
+  windows, daemons own projects). No remote directory browser.
 - External-URL tabs and the native menu/clipboard stay local to the
   shell in both modes.
 

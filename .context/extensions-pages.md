@@ -13,7 +13,7 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   optional `head` version column and opens the side-by-side
   `duplicate-block` page, which is the general compare page (two `code`
   rows with `sync: true`).
-  Both URIs carry their whole spec, so App's `handleOpenPage` and
+  Both URIs carry their whole spec, so the window's `handleOpenPage` (`window/useWindowOpeners.ts`) and
   in-tab navigation register them directly.
 
 - **A page keeps one shape whatever its data holds.** In a `stack`, every
@@ -115,7 +115,7 @@ Where it lives, and what is loaded:
   authored loader's first row, else `content`'s), filters `|short`, `|basename`, `|url`. Any other
   `{{…}}` is refused (`label_refs`).
   A label that shortens a path with `{{param.x|basename}}` (Editor, Directory, Diff) is
-  also the tab's hover: the whole path (`tabHint`, `CenterTab.hint`).
+  also the tab's hover: the whole path (`tabHint`, `WindowTab.hint`).
   A label whose every `{{…}}` is empty is the page's title, not its other
   words alone: Git History's `'{{param.path|basename}} history'` is
   "Git History" with no path (`tabLabel`).
@@ -246,12 +246,20 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   the matching dataset, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound
   to the viewer's context (`ViewContext`, numeric ids) unless the caller
-  supplies it. Precedence: supplied, then context, then `default`.
+  supplies it. `device_id` is the viewing device's id (`dev-…`, text; NULL
+  for a viewer with no device) and binds the same way: a page that shows
+  what a device did (Go To's visits) keeps that device's rows. Precedence: supplied, then context, then `default`.
   `view_context(svc, stream?, thread?)` resolves it: the given stream
   (else the thread's, else the primary) and the given thread (else the
   stream's selected-or-first one). IPC `open_page` and `run_page_action`
-  resolve it from their `stream_id`; MCP `oxplow_run_page` also takes the
-  agent's `thread_id`; `oxplow_get_open_page` uses the viewer's thread.
+  resolve it from their `stream_id`; MCP `oxplow_run_page` takes an
+  optional `stream_id` and `thread_id`. With no `thread_id`, an agent's run
+  (and `oxplow_show_page`, which takes neither) uses the agent's own thread
+  when it is in the run's stream, never the person's selected one; on
+  another stream it uses that stream's selected-or-first thread
+  (`page_tools.rs`, `own_thread_in`). A person's run keeps the
+  selected-or-first thread. `oxplow_get_open_page` uses the viewer's
+  thread.
   A dry run (a check, `validate`) uses no context.
 - **`head_sha`.** A param so named is, unless supplied, the viewed
   stream's HEAD commit (`v_stream.head_sha`, `PageRunner::params_of`).
@@ -546,7 +554,9 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   schema says `writeOnly: true` is masked without the flag
   ([commands.md](./commands.md) "Secrets"). The command must keep a secret
   out of its record (`unrecorded`), or the form refuses to open
-  (`form_start`). `mode: edit` edits what is saved: it starts from the
+  (`form_start`). A form is at most 36rem wide (`FORM_WIDTH`), one column however wide the page; a
+  checkbox's starting value is ticked from `true` or `1` (a loader's row:
+  SQL has no booleans). `mode: edit` edits what is saved: it starts from the
   saved values, Save is enabled only when the form is changed, Discard (or
   Escape) puts them back, and it lists its `fields`. `create`, the
   default, gathers something new. `choices` maps a field to a page of the
@@ -581,8 +591,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   `fact: <column>` on that fact's line (any `detail`'s)
   (`.ox-section[data-callout]`); one fact's label is left to the title, and
   with `hide_title` it is one line. `title_from: <column>` names it from its first row (`title` stands with
-  no row; agents' text reads `title`). `collapsible: true` folds at the heading,
-  remembered in the tab's history state (`PageTree` is the outermost
+  no row; agents' text reads `title`). `collapsible: true` folds at the heading (`collapsed: true` starts
+  it folded: an Advanced section), remembered in the tab's history state (`PageTree` is the outermost
   `CollapsibleSections`). `link: <page id>` is the arrow beside the heading
   (`RefSite::SectionLink`: it must name a page). It opens that page with
   this page's params of the names it declares (the run resolves it:
@@ -743,7 +753,7 @@ prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm?, options_from?,
 checked at load). A page action with `when` or `{{row.*}}` and no `row`
 reads the page's first loader's one row. A drag action also binds
 `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, and
-`{{order.x}}` (a list of column `x` in the new order).
+`{{order.x}}` (a list of column `x` in the new order). A drag action runs only on a drop: it is never a menu item, a click, a key or a bulk button, and the loader refuses `drag` with `primary`, `form`, `group`, `key` or `bulk`.
 
 An action that fails needs nothing from the page: core records it once
 (Failed operations on the Alerts page) and shows it beside the button

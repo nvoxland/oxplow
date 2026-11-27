@@ -497,6 +497,9 @@ pub struct Node {
     pub icon: Option<String>,
     /// Its heading folds it; the person's choice is the tab's.
     pub collapsible: bool,
+    /// It starts folded (and folds at its heading): what most never need,
+    /// such as settings for an unusual setup.
+    pub collapsed: bool,
     /// The page an arrow beside its heading opens (`<extension>/<slug>`; a
     /// bare slug is this extension's).
     pub link: Option<String>,
@@ -1721,7 +1724,8 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
             return Err(why);
         }
     }
-    let collapsible = flag(&mut map, "collapsible")?;
+    let collapsed = flag(&mut map, "collapsed")?;
+    let collapsible = flag(&mut map, "collapsible")? || collapsed;
     let link = take_str(&mut map, "link")?;
     let replaceable = take_str(&mut map, "replaceable")?;
     let when = map
@@ -1869,6 +1873,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         title_from,
         icon,
         collapsible,
+        collapsed,
         link,
         replaceable,
         size,

@@ -1,5 +1,5 @@
 import { expect, test } from "../../support/fixtures.js";
-import { newSessionPage, open } from "../../support/ui.js";
+import { newSessionPage, open, closeTab, tabsWith, tabUri, tabOf } from "../../support/ui.js";
 
 /// A session's tab closes the session on one click of its × — in WebKit
 /// too — and the toast's Undo opens it again, its tab back. Closing a
@@ -8,16 +8,17 @@ test("a session's tab closes the session at once, and Undo brings it back", asyn
   await open(page, daemon, "oxplow:oxplow/page?page=new-session");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  const tab = tabsWith(page, "oxplow:oxplow/agent_session?").first();
   await expect(tab).toBeVisible();
-  const tabTestId = (await tab.getAttribute("data-testid")) ?? "";
-  const id = tabTestId.slice("center-tab-".length);
-  await page.getByTestId(`center-tab-close-${id}`).click();
-  await expect(page.getByTestId(tabTestId)).not.toBeVisible();
+  const id = await tabUri(tab);
+  await closeTab(page, id);
+  await expect(tabOf(page, id)).not.toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
-  // The start's own toast is still up: the latest toast is the close's only
-  // once its run has come back, and its Undo is the one to take.
-  await expect(page.getByTestId("undo-toast")).toContainText("Close");
-  await page.getByTestId("undo-toast-undo").click();
-  await expect(page.getByTestId(tabTestId)).toBeVisible();
+  // Other toasts may be up or come after (the start's own, a project's
+  // language-pack suggestion), and only the newest is `undo-toast`: the
+  // close's is found by its words, and its Undo taken.
+  const closed = page.locator("[data-toast-id]").filter({ hasText: "Close" });
+  await expect(closed).toBeVisible();
+  await closed.getByRole("button", { name: "Undo" }).click();
+  await expect(tabOf(page, id)).toBeVisible();
 });

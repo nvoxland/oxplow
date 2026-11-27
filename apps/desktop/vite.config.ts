@@ -1,12 +1,37 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+/// `vite` (the dev server) on a daemon of your own: `VITE_OXPLOW_REMOTE=<base>`
+/// and `VITE_OXPLOW_REMOTE_TOKEN=<token>` put `window.__OXPLOW__` first in the
+/// page, as the shell does for a window it creates, so the transport has one
+/// read path (`resolveEndpoint`). Dev server only: a build never carries it.
+function injectDaemon(): Plugin {
+  return {
+    name: "oxplow-inject-daemon",
+    apply: "serve",
+    transformIndexHtml(html) {
+      const base = process.env.VITE_OXPLOW_REMOTE?.trim();
+      if (!base) return html;
+      const context = JSON.stringify({
+        kind: "project",
+        base,
+        token: process.env.VITE_OXPLOW_REMOTE_TOKEN?.trim() || null,
+        projectDir: null,
+      }).replace(/</g, "\\u003c");
+      return html.replace("<head>", `<head><script>window.__OXPLOW__ = Object.freeze(${context});</script>`);
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 // Tauri-aware Vite config: the build
 // emits to apps/desktop/dist/, which tauri.conf.json's frontendDist
 // (../dist relative to src-tauri) consumes.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), injectDaemon()],
+  // Relative, so the same build loads from Tauri's asset protocol, from
+  // `vite preview` at `/`, and from the host under `/p/<project>/`.
+  base: "./",
   // Vite handles env vars prefixed with VITE_, and we set TAURI_DEBUG
   // here in case any code branches on it.
   envPrefix: ["VITE_", "TAURI_"],

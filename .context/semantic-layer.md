@@ -649,6 +649,8 @@ hand), which language servers run and whose binary is on disk
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
 repo), every setting's effective value (`v_config_value`), the files of a filesystem (`v_file`: the stream's worktree by default), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
+host's paired devices and this computer's standing with it (`v_host_device`,
+`v_host_settings`: read from the host as its owner, following `HostChanged`), the
 registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares), the
 repository's working copies (`v_vcs_workspace`; one whose folder is gone
 is left out, and each that no stream uses carries its head commit's subject
@@ -913,7 +915,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [DATA_DATASET_X.md](./DATA_DATASET_X.md) "event_log"); `payload_expired_at` since V102) |
 | `v_contribution_run` | One row per recorded contribution run. Its `uri` is an `oxplow/contribution_run` resource. Holds identity, actor kind and id, cause, timing, outcome, cost, scopes and permission decisions. `parent_run_id` links to a recorded parent. `thread_id`, `turn_id` and `session_id` link to their datasets. Live rows have NULL `finished_at`, `outcome` and cost. Finished rows have a 90-day window by default. Successful commands with recorded input stay, and refused commands age out after 30 days. |
-| `v_command_run` | One row per recorded command run, including reads and unchanged calls. Joins command detail to the shared run. `id` is the integer detail ID. `changed` says whether the run succeeded and recorded its input, and `undone` says whether its inverse completed. The run's URI opens Run details. |
+| `v_command_run` | One row per recorded command run, including reads and unchanged calls. Joins command detail to the shared run. `id` is the integer detail ID. `device_id` is the device a person asked from (NULL when no caller). `changed` says whether the run succeeded and recorded its input, and `undone` says whether its inverse completed. The run's URI opens Run details. |
 | `v_job_run` | One row per job with `id`, `job`, `uri`, `intent_key`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested` and `queued_at`. Shared run fields describe its current attempt, including `run_id`, `outcome` and measured `ai_calls`. `rounds`, `tool_calls`, `input_tokens` and `output_tokens` follow the attempt's live output. Before the first claim, `extension` and `version` come from the job. [Jobs](./extensions-jobs.md) |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a page over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |

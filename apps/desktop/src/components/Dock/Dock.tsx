@@ -39,7 +39,7 @@ export function Dock({ streamId, onOpenPage, children }: { streamId: string | nu
         }}
       >
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>{children}</div>
-        <DockBar />
+        <DockBar streamId={streamId} onOpenPage={onOpenPage} />
       </div>
     </div>
   );

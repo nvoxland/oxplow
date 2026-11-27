@@ -1,7 +1,7 @@
 import { expect, test } from "../../support/fixtures.js";
 import { installExtension } from "../../support/pages.js";
 import { run } from "../../support/daemon.js";
-import { open, reload, shown } from "../../support/ui.js";
+import { open, reload, shown, tabOf } from "../../support/ui.js";
 
 const source = `title: Results
 params: [{ name: q }]
@@ -40,7 +40,7 @@ test("a temporary table saves the selected value with its original loader", asyn
     spec: source.replace("name: q", "name: q, default: Temporary"),
   });
   expect(result.opened).toBe(true);
-  await page.getByTestId(`center-tab-${result.uri}`).click();
+  await tabOf(page, result.uri).click();
   const table = shown(page, result.uri).getByTestId("node-results");
   await expect(table).toContainText("Temporary");
   await table.getByRole("combobox", { name: "Show as", exact: true }).selectOption("number");

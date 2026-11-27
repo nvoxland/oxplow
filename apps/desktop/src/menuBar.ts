@@ -150,6 +150,10 @@ export function viewMenu(panels: RailPanelEntry[], toggle: (id: string) => void)
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
 
+/** Oxplow ▸ Devices… (the app menu's own item, `menu.rs` `DEVICES_MENU_ID`):
+ *  the Devices page in a project window. */
+export const DEVICES_MENU_ID = "app.devices";
+
 /// Menu-command id prefix for a "Go ▸ <page>" entry; the rest is the
 /// page's URI, which the dispatch opens.
 export const GO_PREFIX = "go.open:";

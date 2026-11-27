@@ -1,5 +1,7 @@
 import type { CSSProperties, MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useCoarsePointer } from "../coarsePointer.js";
+import { EditorTouchBar } from "./EditorTouchBar.js";
 import type { BlameLine, Stream } from "../api.js";
 import { desktopBridge, installLspPackage, readAt } from "../api.js";
 import { computeDiffDecorations } from "../editor-diff.js";
@@ -24,6 +26,8 @@ import { editorContextEntry } from "../agent-context-ref.js";
 import { addToContext } from "../contextBasket.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { fileRef } from "../tabs/pageRefs.js";
+import { copyText, PASTE_WITH_KEYBOARD, readText } from "../clipboard.js";
+import { showToast } from "./toastStore.js";
 
 interface Props {
   stream: Stream;
@@ -129,6 +133,8 @@ export function EditorPane({
   // before the editor instance exists and the effect's early return makes
   // the pane stay blank until the next file change.
   const [monacoReady, setMonacoReady] = useState(false);
+  // A touch screen gets the selection keys Monaco lacks there.
+  const touch = useCoarsePointer();
 
   // Blame overlay (merged local+git attribution + gutter scroll sync +
   // refresh-on-save) lives in useBlame; the overlay is rendered below.
@@ -455,7 +461,7 @@ export function EditorPane({
         const model = ed?.getModel();
         const sel = ed?.getSelection?.();
         if (!ed || !model || !sel || sel.isEmpty()) return;
-        void navigator.clipboard.writeText(model.getValueInRange(sel));
+        void copyText(model.getValueInRange(sel));
         ed.executeEdits("cut", [{ range: sel, text: "" }]);
         ed.focus();
       },
@@ -469,7 +475,7 @@ export function EditorPane({
         const model = ed?.getModel();
         const sel = ed?.getSelection?.();
         if (!ed || !model || !sel || sel.isEmpty()) return;
-        void navigator.clipboard.writeText(model.getValueInRange(sel));
+        void copyText(model.getValueInRange(sel));
       },
     },
     {
@@ -480,7 +486,8 @@ export function EditorPane({
         const ed = editorRef.current;
         const sel = ed?.getSelection?.();
         if (!ed || !sel) return;
-        const t = await navigator.clipboard.readText();
+        const t = await readText();
+        if (t === null) { showToast({ message: PASTE_WITH_KEYBOARD }); return; }
         if (t) {
           ed.executeEdits("paste", [{ range: sel, text: t }]);
           ed.focus();
@@ -525,7 +532,7 @@ export function EditorPane({
       id: "editor.copy-path",
       label: "Copy Path",
       enabled: !!filePath,
-      run: () => (filePath ? navigator.clipboard.writeText(filePath) : undefined),
+      run: () => { if (filePath) void copyText(filePath); },
     },
     // The file outside oxplow: the file manager, its default app, a
     // terminal in its folder (`openIn.ts`).
@@ -623,7 +630,7 @@ export function EditorPane({
                 id: "blame.copy-sha",
                 label: "Copy commit SHA",
                 enabled: true,
-                run: () => { void navigator.clipboard?.writeText(blameMenu.sha); },
+                run: () => { void copyText(blameMenu.sha); },
               },
               {
                 id: "blame.reveal",
@@ -635,7 +642,7 @@ export function EditorPane({
                 id: "blame.copy-author-email",
                 label: "Copy author email",
                 enabled: !!blameMenu.authorMail,
-                run: () => { void navigator.clipboard?.writeText(blameMenu.authorMail); },
+                run: () => { void copyText(blameMenu.authorMail); },
               },
             ]}
             position={{ x: blameMenu.x, y: blameMenu.y }}
@@ -643,6 +650,7 @@ export function EditorPane({
           />
         ) : null}
       </div>
+      {touch && monacoReady ? <EditorTouchBar editor={editorRef.current} /> : null}
     </div>
   );
 }
@@ -682,7 +690,7 @@ function BlameOverlay({
         height: "100%",
         overflow: "hidden",
         fontFamily: "var(--font-mono)",
-        fontSize: 11,
+        fontSize: "var(--text-xs)",
         userSelect: "none",
         zIndex: 3,
       }}
@@ -789,7 +797,7 @@ const lspStatusStyle: CSSProperties = {
   border: "1px solid var(--border)",
   background: "var(--surface-hint)",
   color: "var(--muted)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   zIndex: 5,
   display: "flex",
   alignItems: "center",
@@ -797,7 +805,7 @@ const lspStatusStyle: CSSProperties = {
 };
 
 const lspInstallButtonStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   padding: "2px 6px",
   borderRadius: 3,
   border: "1px solid var(--border)",

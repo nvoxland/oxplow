@@ -322,7 +322,7 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "panel",
-        when: "{ panel: <id | ext/id>, thread?, stream?, choices? } (the panel run whole, as the rail shows it)",
+        when: "{ panel: <id | ext/id>, thread?, stream?, device?, choices? } (the panel run whole, as the rail shows it)",
         expect: "{ body?, collapsed?, count_page?, badge? (each a part's run, as a page's expect), count?, alert?, choices?, text? }",
     },
     Kind {

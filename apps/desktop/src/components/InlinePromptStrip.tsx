@@ -85,7 +85,7 @@ export function InlinePromptStrip({
         submit();
       }}
     >
-      <div style={{ color: "var(--muted)", fontSize: 11 }}>{message}</div>
+      <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{message}</div>
       <div style={{ display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap" }}>
         {fields.map((f, i) => {
           const common = {
@@ -116,7 +116,7 @@ export function InlinePromptStrip({
           );
         })}
         {toggle ? (
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-primary)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "var(--text-xs)", color: "var(--text-primary)" }}>
             <input
               type="checkbox"
               data-testid={testId ? `${testId}-${toggle.key}` : undefined}
@@ -172,7 +172,7 @@ const buttonStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 4,
   padding: "4px 8px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 const primaryStyle: CSSProperties = {
@@ -181,6 +181,6 @@ const primaryStyle: CSSProperties = {
   border: "1px solid var(--accent)",
   borderRadius: 4,
   padding: "4px 10px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };

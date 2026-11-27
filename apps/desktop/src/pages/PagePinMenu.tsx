@@ -10,6 +10,7 @@ import { useDashboardAuthoring } from "./dashboardAuthoring.js";
 import { addTile } from "./dashboardEdits.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
+import { newId } from "../newId.js";
 
 export interface PagePin { kind: "page"; page: string; params: Record<string, SqlCell>; title: string }
 interface Dashboard { id: string; title: string; uri: string }
@@ -45,7 +46,7 @@ export function PagePinMenu({ tile, testId, onOpenPage, onDone, style }: {
   async function pin(dashboard: Dashboard) {
     const spec = await authoring.read(dashboard.id);
     if (!spec.writable) throw new Error("This dashboard is read-only");
-    const yaml = addTile(spec.yaml, { id: `tile-${crypto.randomUUID()}`, page: tile.page, title: tile.title, params: tile.params });
+    const yaml = addTile(spec.yaml, { id: `tile-${newId()}`, page: tile.page, title: tile.title, params: tile.params });
     await authoring.write({ extension: spec.extension, page: spec.slug, spec: yaml, deploy: true });
     showToast({ message: `Pinned to ${dashboard.title}.` });
     const ref = refFromTabId(dashboard.uri);

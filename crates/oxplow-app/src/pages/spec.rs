@@ -1950,6 +1950,18 @@ pub(crate) fn parse_actions(
                 f.id
             ));
         }
+        if f.drag && f.key.is_some() {
+            return Err(format!(
+                "actions: `{}`: a drag action can't have a `key` (a key press doesn't drop)",
+                f.id
+            ));
+        }
+        if f.drag && f.bulk {
+            return Err(format!(
+                "actions: `{}`: a drag action can't be `bulk` (a button doesn't drop)",
+                f.id
+            ));
+        }
         if f.primary && !row {
             return Err(format!(
                 "actions: `{}`: `primary` is for a row action (`row: true`)",
@@ -2589,6 +2601,9 @@ impl VizConfig {
 pub struct ViewContext {
     pub stream_id: Option<i64>,
     pub thread_id: Option<i64>,
+    /// The device viewing (`dev-…`); `None` for a viewer with no device.
+    /// Pages keep what the device opened with it (`v_page_visit`).
+    pub device_id: Option<String>,
     /// What's active, to check a viz's needs against; `None` checks
     /// nothing.
     pub active: Option<crate::capabilities::Active>,
@@ -2596,7 +2611,7 @@ pub struct ViewContext {
 
 impl ViewContext {
     /// The params the context supplies when the caller doesn't.
-    const SUPPLIED: &[&str] = &["stream_id", "thread_id"];
+    const SUPPLIED: &[&str] = &["stream_id", "thread_id", "device_id"];
 
     /// Whether a param named `name` is one the context supplies.
     pub fn supplies(name: &str) -> bool {
@@ -2608,16 +2623,19 @@ impl ViewContext {
         match name {
             "stream_id" => self.stream_id.map(SqlCell::Int),
             "thread_id" => self.thread_id.map(SqlCell::Int),
+            "device_id" => self.device_id.clone().map(SqlCell::Text),
             _ => None,
         }
     }
 }
 
 /// The context a viz is viewed from: `stream` (else `thread`'s stream,
-/// else the primary) and `thread` (else that stream's selected or active
-/// thread). Lookups that fail leave the value unset.
+/// else the primary) and `thread` (else the thread `device` shows in that
+/// stream, else its first open thread — what a viewer with no device
+/// gets). Lookups that fail leave the value unset.
 pub async fn view_context(
     svc: &crate::Services,
+    device: Option<&oxplow_domain::DeviceId>,
     stream: Option<oxplow_domain::StreamId>,
     thread: Option<oxplow_domain::ThreadId>,
 ) -> ViewContext {
@@ -2643,12 +2661,18 @@ pub async fn view_context(
     }
     let thread = match (thread, stream) {
         (Some(t), _) => Some(t),
-        (None, Some(s)) => svc.threads.selected_or_first(&s).await.ok().flatten(),
+        (None, Some(s)) => svc
+            .threads
+            .selected_or_first(device, &s)
+            .await
+            .ok()
+            .flatten(),
         (None, None) => None,
     };
     ViewContext {
         stream_id: stream.map(|s| s.value()),
         thread_id: thread.map(|t| t.value()),
+        device_id: device.map(|d| d.as_str().to_string()),
         active: Some(
             svc.capabilities
                 .snapshot(&crate::config_service::read_config(&svc.config)),

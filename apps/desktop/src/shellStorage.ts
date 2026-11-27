@@ -2,13 +2,13 @@
  * The only code that touches the browser's storage (a guard,
  * `no-direct-storage.test.ts`, holds every other file to it). What lives
  * here is the shell's own: what must be there before the daemon answers,
- * or belongs to this window — the tab sessions, the open files' paths, the
- * remote daemon to connect to and its token, the recent remotes, and this
- * window's log id.
+ * or belongs to this browser — its device id, and the token the host gave
+ * it at pairing (the host origin's storage). The
+ * window's own id lives only in memory, one per page load (`uiClientId.ts`).
  *
  * Nothing else is kept in the browser. A page's view is its **view
- * params** and its own memory its **history state** (its tab, which this
- * stores as the tab sessions); what a page or the app remembers for the
+ * params** and its own memory its **history state** (its tab, which the
+ * daemon keeps: `tabs/useTabSessions.ts`); what a page or the app remembers for the
  * person is **page memory** and **app preferences** (`prefs/remembered.ts`,
  * the project's database). See `.context/pages-and-tabs.md` "Page state".
  *
@@ -18,42 +18,36 @@
 
 /** The shell's keys, and only these. */
 export type ShellKey =
-  | "oxplow.layout.v8.sessions"
-  | "oxplow.remoteBase"
-  | "oxplow.remoteToken"
-  | "oxplow.recentRemotes"
-  | "oxplow.dock.height";
+  | "oxplow.device"
+  | "oxplow.hostToken";
 
-/** This window's keys, gone when it closes. */
-export type WindowKey = "oxplow-ui-client-id";
-
-function area(kind: "local" | "session"): Storage | null {
+function area(): Storage | null {
   try {
-    return kind === "local" ? globalThis.localStorage : globalThis.sessionStorage;
+    return globalThis.localStorage;
   } catch {
     return null;
   }
 }
 
-function access<K extends string>(kind: "local" | "session") {
+function access<K extends string>() {
   return {
     getItem(key: K): string | null {
       try {
-        return area(kind)?.getItem(key) ?? null;
+        return area()?.getItem(key) ?? null;
       } catch {
         return null;
       }
     },
     setItem(key: K, value: string): void {
       try {
-        area(kind)?.setItem(key, value);
+        area()?.setItem(key, value);
       } catch {
         // Refused (quota, private mode): not kept.
       }
     },
     removeItem(key: K): void {
       try {
-        area(kind)?.removeItem(key);
+        area()?.removeItem(key);
       } catch {
         // Refused: nothing to do.
       }
@@ -62,7 +56,4 @@ function access<K extends string>(kind: "local" | "session") {
 }
 
 /** The shell's keys, kept across restarts. */
-export const shellStorage = access<ShellKey>("local");
-
-/** This window's keys, for its life. */
-export const windowStorage = access<WindowKey>("session");
+export const shellStorage = access<ShellKey>();

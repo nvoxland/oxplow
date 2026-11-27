@@ -35,6 +35,8 @@ pub struct PageActionCall {
     pub option: Option<String>,
     pub on_behalf_of: Actor,
     pub confirmed: bool,
+    /// The device and page load the press came from, if any.
+    pub caller: Option<oxplow_domain::Caller>,
 }
 
 fn invalid(field: &str, message: String) -> CommandError {
@@ -248,7 +250,7 @@ pub async fn run_page_action(
             )?
         }
     };
-    prepared.run(svc).await
+    prepared.run(svc, call.caller.as_ref()).await
 }
 
 /// The option an action with `options_from` was pressed with: that row of
@@ -490,6 +492,7 @@ pub async fn page_form(
 
 /// A form node is submitted: its command runs as the page for whoever
 /// submitted, the form's defaults under what they filled in.
+#[allow(clippy::too_many_arguments)]
 pub async fn submit_page_form(
     svc: &crate::Services,
     runs: &PageRuns,
@@ -498,6 +501,7 @@ pub async fn submit_page_form(
     input: Value,
     on_behalf_of: Actor,
     confirmed: bool,
+    caller: Option<&oxplow_domain::Caller>,
 ) -> Result<CommandOutcome, CommandError> {
     let run = runs
         .get(run_id)
@@ -518,11 +522,14 @@ pub async fn submit_page_form(
     };
     let merged = crate::viz_actions::filled(defaults, input, &form.fixed)?;
     svc.commands
-        .run(
-            &Actor::Page {
-                page_id: format!("{}#{id}", holder.page.id),
-                on_behalf_of: Box::new(on_behalf_of),
-            },
+        .run_in(
+            &crate::viz_actions::pressed_run(
+                Actor::Page {
+                    page_id: format!("{}#{id}", holder.page.id),
+                    on_behalf_of: Box::new(on_behalf_of),
+                },
+                caller,
+            ),
             &form.command.unwrap_or_default(),
             merged,
             confirmed,

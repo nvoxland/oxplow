@@ -5,6 +5,7 @@ import { fileUri, pageUri, withUriView, knowledgeUri } from "../uri/uri.js";
 import {
   activate,
   back,
+  besideSlot,
   bodies,
   close,
   current,
@@ -21,8 +22,10 @@ import {
   reorder,
   setStrip,
   serializeSession,
+  setBeside,
   patchHistoryState,
   setHistoryState,
+  setLabel,
   setTitle,
   slotShowing,
   stepOrigin,
@@ -269,6 +272,18 @@ test("setTitle keeps a page's title with its entry, through storage; the same ti
   expect(current(s.tabs[0]!).title).toBeUndefined();
 });
 
+// The strip's label is its own field: the page's registered title stays what
+// the page said, and the label never feeds back into it.
+test("setLabel keeps the strip's label beside the title; the same label is no change", () => {
+  const s = open(emptySession(), e(a));
+  const slot = s.active!;
+  const titled = setTitle(s, slot, "Git Status");
+  const labelled = setLabel(titled, slot, "Status (main)");
+  expect(current(labelled.tabs[0]!)).toMatchObject({ title: "Git Status", label: "Status (main)" });
+  expect(setLabel(labelled, slot, "Status (main)")).toBe(labelled);
+  expect(current(parseSession(serializeSession(labelled))!.tabs[0]!).label).toBe("Status (main)");
+});
+
 describe("origin: the collection a page was opened from", () => {
   const origin: Origin = {
     title: "Files in src",
@@ -442,4 +457,25 @@ test("patchHistoryState merges keys into the entry's state and ignores an unchan
   s = patchHistoryState(s, slot, { collapsed: ["x"] });
   expect(current(s.tabs[0]!).historyState).toEqual({ scrollY: 40, collapsed: ["x"] });
   expect(patchHistoryState(s, slot, { scrollY: 40, collapsed: ["x"] })).toBe(s);
+});
+
+// A tab shown beside the active one (an agent's session beside the page it
+// shows): one per thread's session, gone with its tab, none when it is the
+// active tab itself; kept through a store.
+describe("beside", () => {
+  test("a tab beside the active one, until it closes or is the active one", () => {
+    let s = open(open(open(emptySession(), e(a)), e(b)), e(c));
+    s = setBeside(s, slotOf(s, a.id));
+    expect(besideSlot(s)).toBe(slotOf(s, a.id));
+    expect(besideSlot(activate(s, slotOf(s, a.id)))).toBeNull();
+    expect(besideSlot(close(s, slotOf(s, a.id)))).toBeNull();
+    expect(besideSlot(setBeside(s, null))).toBeNull();
+  });
+  test("it is kept through a store, and a stale one reads as none", () => {
+    let s = open(open(emptySession(), e(a)), e(b));
+    s = setBeside(s, slotOf(s, a.id));
+    expect(besideSlot(parseSession(serializeSession(s))!)).toBe(slotOf(s, a.id));
+    const stale = JSON.stringify({ ...JSON.parse(serializeSession(s)), beside: "t99" });
+    expect(besideSlot(parseSession(stale)!)).toBeNull();
+  });
 });

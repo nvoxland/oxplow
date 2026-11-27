@@ -11,6 +11,7 @@ pub mod ai;
 pub mod ai_context;
 pub mod built;
 pub mod capability;
+pub mod client;
 pub mod code_intel;
 pub mod commands;
 pub mod contribution;
@@ -51,6 +52,7 @@ pub mod vocabulary;
 pub mod when;
 
 pub use ai_context::AiContext;
+pub use client::{Caller, ConnectionId, DeviceDescriptor, DeviceId, DeviceKind};
 pub use commands::{
     namespace_of, Access, Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec,
     CommandUi, Confirm, InputValidator, Invoker, Lifecycle, MenuPlace, OpRef, Preview,

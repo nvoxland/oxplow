@@ -43,15 +43,20 @@ pub const OXPLOW_EVENT_CHANNEL: &str = oxplow_app::event_channels::OXPLOW;
 pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "abort_setup",
     "answer_oauth_redirect",
+    "ask_host",
     "await_oauth_redirect",
     "clipboard_read_text",
+    "collect_host",
     "create_project",
+    "forget_remote_host",
     "install_cli",
     "list_recent_projects",
     "listen_for_oauth_redirect",
     "open_external_url",
     "open_path",
     "open_project",
+    "open_remote_project",
+    "remote_hosts",
     "remove_recent_project",
     "reveal_path",
     "set_native_menu",
@@ -152,6 +157,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::submit_page_form,
             commands::generated::page_action_form,
             commands::generated::report_tabs,
+            commands::generated::list_tab_sessions,
+            commands::generated::list_other_device_tabs,
+            commands::generated::save_tab_session,
+            commands::generated::forget_tab_session,
+            commands::generated::list_queued_tabs,
+            commands::generated::forget_queued_tabs,
             // The sign-in redirect, caught by the shell (P10).
             commands::oauth_redirect::listen_for_oauth_redirect,
             commands::oauth_redirect::await_oauth_redirect,
@@ -229,8 +240,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_lsp_servers,
             commands::generated::respond_lsp_apply_edit,
             // terminal
-            commands::terminal::open_terminal_session,
-            commands::terminal::restart_agent_terminal,
+            commands::generated::open_terminal_session,
+            commands::generated::restart_agent_terminal,
             // terminal sessions
             commands::generated::close_terminal_session,
             commands::generated::terminal_session_cwd,
@@ -247,6 +258,13 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::launch::abort_setup,
             // "Install `oxplow` command line…"
             commands::install_cli::install_cli,
+            // the Devices window
+            // hosts on other machines
+            commands::remote_hosts::ask_host,
+            commands::remote_hosts::collect_host,
+            commands::remote_hosts::remote_hosts,
+            commands::remote_hosts::open_remote_project,
+            commands::remote_hosts::forget_remote_host,
         ])
 }
 

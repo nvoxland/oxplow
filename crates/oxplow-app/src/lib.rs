@@ -589,6 +589,8 @@ pub struct Services {
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
     pub client_reports: Arc<client_reports::ClientReports>,
+    /// The devices connected now, as they named themselves (`client_reports::devices`).
+    pub client_devices: Arc<client_reports::devices::ClientDevices>,
     /// Durable atomic fact layer — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
     /// here; the read surface aggregates them through `metric_engine`.
@@ -615,6 +617,10 @@ pub struct Services {
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
     /// The person's page memory and app preferences (`ui_preference`).
     pub ui_preference_store: oxplow_db::SqliteUiPreferenceStore,
+    /// Each device's tabs of each thread.
+    pub tab_session_store: Arc<oxplow_db::tab_session_store::TabSessionStore>,
+    /// Tabs an agent opened for a device that was away.
+    pub tab_queue_store: Arc<oxplow_db::tab_queue_store::TabQueueStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Git history and branches (`v_commit`, `v_branch`, …).
@@ -1042,7 +1048,8 @@ impl Services {
                 .with_content_hasher(Arc::new(move |oid: &str| content.object_content_hash(oid)))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
-        let client_reports = Arc::new(client_reports::ClientReports::new());
+        let client_devices = Arc::new(client_reports::devices::ClientDevices::default());
+        let client_reports = Arc::new(client_reports::ClientReports::new(client_devices.clone()));
         let agent_status_store: Arc<dyn AgentStatusStore> = Arc::new(
             oxplow_db::SqliteAgentStatusStore::new(db.clone(), vocabulary.clone()),
         );
@@ -1132,6 +1139,10 @@ impl Services {
         let output_activity = output_activity::OutputActivity::new();
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), output_activity.clone());
+        terminal_sessions.set_liveness({
+            let devices = client_devices.clone();
+            Arc::new(move |connection| devices.away_for(connection))
+        });
         let worktrees = Arc::new(worktrees::WorktreeRouter::new(
             layout.project_dir.clone(),
             stream_store.clone(),
@@ -1654,6 +1665,10 @@ impl Services {
         sql.on_demand().bind(services_slot.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
         let ui_preference_store = oxplow_db::SqliteUiPreferenceStore::new(db.clone());
+        let tab_session_store = Arc::new(oxplow_db::tab_session_store::TabSessionStore::new(
+            db.clone(),
+        ));
+        let tab_queue_store = Arc::new(oxplow_db::tab_queue_store::TabQueueStore::new(db.clone()));
         for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
             .chain(commands::agent_settings::ops(
@@ -1688,7 +1703,10 @@ impl Services {
         {
             commands.add_op(command).expect("core ops register");
         }
-        let client_host = Arc::new(client_host::ClientHost::new(event_bus.clone()));
+        let client_host = Arc::new(client_host::ClientHost::new(
+            event_bus.clone(),
+            client_devices.clone(),
+        ));
         // oxplow's own commands are declared in its required extensions
         // over these operations (`commands/ops.rs`).
         for op in commands::bookmark::ops()
@@ -1712,12 +1730,13 @@ impl Services {
             .chain(commands::effect::ops(services_slot.clone()))
             .chain(commands::delivery::ops(services_slot.clone()))
             .chain(commands::ai_settings::ops(services_slot.clone()))
+            .chain(commands::host_devices::ops(services_slot.clone()))
             .chain(commands::credentials::ops(services_slot.clone()))
             .chain(commands::provider_instances::ops(services_slot.clone()))
             .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
-            .chain(client_host::ops(&client_host))
+            .chain(client_host::ops(&client_host, services_slot.clone()))
             .chain([
                 commands::file::save_op(services_slot.clone()),
                 commands::file::create_op(workspace_files.clone()),
@@ -1852,6 +1871,7 @@ impl Services {
             agent_status_store,
             agent_turn_store,
             client_reports,
+            client_devices,
             fact_store,
             metric_engine,
             metric_visibility,
@@ -1862,6 +1882,8 @@ impl Services {
             collector_runner,
             panel_layout_store,
             ui_preference_store,
+            tab_session_store,
+            tab_queue_store,
             tool_call_store,
             git_store,
             diagnostic_store,
@@ -2367,6 +2389,13 @@ mod tests {
                 "oxplow.git.publish",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
+                // The host's own state (its paired devices, devices asking to pair,
+                // "Allow other devices"), over its owner socket
+                // (`commands/host_devices`): a person's only.
+                "oxplow.host.pair",
+                "oxplow.host.remove_device",
+                "oxplow.host.rename_device",
+                "oxplow.host.set_settings",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",

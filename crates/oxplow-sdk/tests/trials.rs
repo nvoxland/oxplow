@@ -82,6 +82,7 @@ async fn as_board(
             on_behalf_of: Actor::Human,
             confirmed: true,
             version,
+            caller: None,
         },
     )
     .await

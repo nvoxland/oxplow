@@ -8,12 +8,12 @@
 // `@tauri-apps/api`. With one, `invoke` POSTs to the daemon's
 // `/ipc/:name` and `listen` reads the multiplexed `/events` WebSocket.
 //
-// **Which daemon is a per-window question.** The shell injects
-// `window.__OXPLOW__ = { base, kind }` into each window it creates
-// (`src-tauri/src/windows.rs`), so two project windows in one shell
-// process can drive two different daemons. localStorage and
-// VITE_OXPLOW_REMOTE remain as overrides — see `resolveBase`. All three
-// are read once at module load; switching is a reload-level decision.
+// **Which daemon is a per-window question**, with one answer:
+// `window.__OXPLOW__` (`resolveEndpoint`). The shell injects it into each
+// window it creates (`src-tauri/src/windows.rs`), so two project windows in
+// one shell process can drive two different daemons; the host injects it
+// into each page it serves; the Vite dev server (`VITE_OXPLOW_REMOTE`) and
+// the e2e harness inject it the same way. Read once at module load.
 //
 // **Routing is per command, not all-or-nothing.** Some commands only
 // exist in the shell (windowing, native menus, clipboard, project
@@ -31,6 +31,8 @@ import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels"
 import { SHELL_COMMANDS } from "./generated/shellCommands";
 import { shellStorage } from "../shellStorage.js";
 import { getUiClientId } from "../uiClientId.js";
+import { getDevice } from "../device.js";
+import { readWindowContext, type WindowContext } from "../windowContext.js";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
 /// the wire `channel` value in each frame. Sourced from the shared
@@ -45,25 +47,7 @@ const RESYNC_AFTER_MS = 1000;
 /// asserts the generated file still matches).
 const SHELL_COMMAND_SET: ReadonlySet<string> = new Set<string>(SHELL_COMMANDS);
 
-/// What the shell injects into every window it creates, before any page
-/// script runs. Absent in a plain-browser session.
-export type WindowContext = {
-  base: string | null;
-  /// The daemon's UI token (only this window's renderer gets it).
-  token?: string | null;
-  kind: string;
-  projectDir: string | null;
-};
-
-function readWindowContext(): WindowContext | null {
-  try {
-    const injected = (globalThis as { __OXPLOW__?: WindowContext }).__OXPLOW__;
-    if (injected && typeof injected === "object") return injected;
-  } catch {
-    // No window object (bun tests) — fall through.
-  }
-  return null;
-}
+export type { WindowContext };
 
 /// Which kind of window this renderer is in ("project" | "launcher" |
 /// "setup"), or null when the shell didn't create it (a plain browser
@@ -84,108 +68,128 @@ function cleanBase(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/// The daemon base for this window, in precedence order:
-///
-/// 1. **localStorage** — a manual "connect to remote daemon" from the
-///    launcher. An explicit user action outranks the default.
-/// 2. **The shell's injected base** — the normal path once windows own
-///    daemons.
-/// 3. **VITE_OXPLOW_REMOTE** — build/dev-time developer override.
-///
-/// null means "no daemon": talk to the shell over Tauri IPC.
-/// Pure; exported for tests.
-export function resolveBase(sources: {
-  stored?: string | null;
-  injected?: string | null;
-  env?: string | null;
-}): string | null {
-  return cleanBase(sources.stored) ?? cleanBase(sources.injected) ?? cleanBase(sources.env) ?? null;
-}
-
-type Endpoint = { base?: string | null; token?: string | null };
-
-/// The daemon's UI token for this window: from the same source the base
-/// came from (the manual connect, the shell's injection, or the dev env
-/// override), unless a person put one in the URL fragment
-/// (`#oxplow-token=…`, e.g. a scripted or Playwright session). Every
-/// `/ipc` call and the `/events` socket carry it; the daemon refuses
-/// anything without it. Pure; exported for tests.
-export function resolveToken(sources: {
-  stored?: Endpoint;
-  injected?: Endpoint;
-  env?: Endpoint;
-  fragment?: string | null;
-}): string | null {
-  const fromFragment = /(?:^#|&)oxplow-token=([^&]+)/.exec(sources.fragment ?? "")?.[1];
-  if (fromFragment) return decodeURIComponent(fromFragment);
-  for (const tier of [sources.stored, sources.injected, sources.env]) {
-    if (cleanBase(tier?.base)) return tier?.token?.trim() || null;
-  }
-  return null;
-}
-
-/// A pasted daemon address, split into its base and an optional
-/// `#oxplow-token=` token. Pure; exported for tests.
-export function parseRemoteInput(input: string): { base: string; token: string | null } {
-  const trimmed = input.trim();
-  const hash = trimmed.indexOf("#");
-  const base = (hash >= 0 ? trimmed.slice(0, hash) : trimmed).replace(/\/+$/, "");
-  const token = hash >= 0 ? resolveToken({ fragment: trimmed.slice(hash) }) : null;
+/// The daemon base and token for this window. One read path: what started
+/// the page says where its daemon is, in `window.__OXPLOW__` (the Mac shell
+/// injects it into each window, the host into each page it serves, and the
+/// Vite dev server and the e2e harness the same way). A page the host served
+/// carries no token: a paired device uses its own (`paired`). No context, or
+/// no base: no daemon (the launcher; Tauri IPC only). Pure; exported for
+/// tests.
+export function resolveEndpoint(
+  ctx: Pick<WindowContext, "base" | "token" | "host"> | null,
+  paired: string | null,
+): { base: string | null; token: string | null } {
+  const base = cleanBase(ctx?.base);
+  if (base === null) return { base: null, token: null };
+  const injected = ctx?.token?.trim() || null;
+  const token = injected ?? (ctx?.host ? paired?.trim() || null : null);
   return { base, token };
 }
 
-function readRemoteEndpoint(): { base: string | null; token: string | null; storedBase: string | null } {
-  let stored: Endpoint = {};
-  let fragment: string | null = null;
-  try {
-    stored = {
-      base: shellStorage.getItem("oxplow.remoteBase"),
-      token: shellStorage.getItem("oxplow.remoteToken"),
-    };
-    fragment = window.location.hash;
-  } catch {
-    // No window/localStorage (tests) — leave them empty.
-  }
-  const env = (import.meta as { env?: Record<string, string> }).env;
-  const ctx = readWindowContext();
-  const sources = {
-    stored,
-    injected: { base: ctx?.base ?? null, token: ctx?.token ?? null },
-    env: { base: env?.VITE_OXPLOW_REMOTE ?? null, token: env?.VITE_OXPLOW_REMOTE_TOKEN ?? null },
-    fragment,
-  };
-  return {
-    base: resolveBase({ stored: stored.base, injected: sources.injected.base, env: sources.env.base }),
-    token: resolveToken(sources),
-    storedBase: stored.base ?? null,
-  };
-}
-
-/// Whether this window's files are on this machine: the shell starts
-/// its daemons here, so a project window on the daemon its shell injected
-/// (no manual connect over it) has them, and so do the launcher's
-/// projects. A plain browser, or a manual connect, may drive a daemon
-/// elsewhere. Pure; exported for tests.
-export function filesLocalFrom(sources: {
-  shell: boolean;
-  kind: string | null;
-  stored: string | null;
-  injected: string | null;
-}): boolean {
+/// Whether this window's files are on this machine: the shell names the
+/// folder of a project it opened here (`projectDir`), and the launcher's
+/// projects are here. A page a host served, or a window on another
+/// machine's host, has none. Pure; exported for tests.
+export function filesLocalFrom(sources: { shell: boolean; kind: string | null; projectDir: string | null }): boolean {
   if (!sources.shell) return false;
   if (sources.kind === "launcher") return true;
-  return sources.kind === "project" && cleanBase(sources.stored) === null && cleanBase(sources.injected) !== null;
+  return sources.kind === "project" && sources.projectDir !== null;
 }
 
-const endpoint = readRemoteEndpoint();
+const endpoint = resolveEndpoint(
+  readWindowContext(),
+  readWindowContext()?.host ? shellStorage.getItem("oxplow.hostToken") : null,
+);
 const remoteBase: string | null = endpoint.base;
 const remoteToken: string | null = endpoint.token;
 
-/** The event connection owns this window's open runs until it closes. */
-export function eventsUrl(base: string, token: string | null, client: string): string {
+/// The host's origin, when a host served this page (`window.__OXPLOW__.host`):
+/// its API is there, and the page uses the device's own token.
+export function hostOrigin(): string | null {
+  return readWindowContext()?.host ?? null;
+}
+
+/// Whether this page must pair before anything else: a host served it and
+/// this browser has no token for that host yet.
+export function needsPairing(): boolean {
+  return hostOrigin() !== null && !readWindowContext()?.token && hostToken() === null;
+}
+
+/// The token this device got at pairing with the host that served this
+/// page, if any.
+export function hostToken(): string | null {
+  return shellStorage.getItem("oxplow.hostToken")?.trim() || null;
+}
+
+/// The token this device got at pairing, kept for the host's origin; the
+/// page loads again to use it.
+export function keepHostToken(token: string): void {
+  shellStorage.setItem("oxplow.hostToken", token);
+}
+
+/// This device's token no longer works (it was removed, or the host forgot
+/// it): forget it and load again, which pairs.
+export function forgetHostToken(): void {
+  shellStorage.removeItem("oxplow.hostToken");
+  window.location.reload();
+}
+
+/// The served UI's build when this page loaded, from `/host/me`.
+let loadedBuild: string | null | undefined;
+
+// A page the host served holds its project from the start (`checkHost`).
+if (hostOrigin() !== null && remoteToken !== null) queueMicrotask(() => void checkHost());
+
+/// Ask the host who this device is, and hold this page's project for it. A
+/// token it no longer knows means pair again (a browser cannot see the 401
+/// on a socket's upgrade, so this is how a removed device finds out); a
+/// build that changed since this page loaded means load again (the app
+/// restarted with a new build). The hold is taken at load and before each
+/// reconnect: a host that started again (the Mac app quit and opened)
+/// holds only what its devices ask for, and holding twice is one hold.
+async function checkHost(): Promise<void> {
+  const host = hostOrigin();
+  if (host === null || remoteToken === null) return;
+  let answer: Response;
+  try {
+    answer = await fetch(`${host}/host/me`, { headers: authHeaders(remoteToken) });
+  } catch {
+    return; // the host is away; the socket keeps trying
+  }
+  const project = readWindowContext()?.project;
+  if (answer.ok && project) {
+    await fetch(`${host}/host/holds`, {
+      method: "POST",
+      headers: { ...authHeaders(remoteToken), "Content-Type": "application/json" },
+      body: JSON.stringify({ project }),
+    }).catch(() => undefined);
+  }
+  if (answer.status === 401) {
+    forgetHostToken();
+    return;
+  }
+  if (!answer.ok) return;
+  const me = (await answer.json().catch(() => null)) as { build?: string | null } | null;
+  const build = me?.build ?? null;
+  if (loadedBuild === undefined) loadedBuild = build;
+  else if (build !== null && build !== loadedBuild) window.location.reload();
+}
+
+/** The event socket says which device and page load it is (a browser
+ *  cannot set headers on a WebSocket, so they ride in the query); it owns
+ *  this page load's open runs until it closes. */
+export function eventsUrl(
+  base: string,
+  token: string | null,
+  device: { id: string; name: string; kind: string },
+  connection: string,
+): string {
   const url = new URL(`${base.replace(/^http/, "ws")}/events`);
   if (token) url.searchParams.set("token", token);
-  url.searchParams.set("client", client);
+  url.searchParams.set("device", device.id);
+  url.searchParams.set("connection", connection);
+  url.searchParams.set("name", device.name);
+  url.searchParams.set("kind", device.kind);
   return url.toString();
 }
 
@@ -204,59 +208,6 @@ export function isRemote(): boolean {
 /// null in local mode.
 export function remoteBaseUrl(): string | null {
   return remoteBase;
-}
-
-/// Persist a remote daemon base and reload into remote mode. The
-/// transport reads the key once at module load, so a reload is the
-/// mode switch.
-export function connectRemote(base: string, token: string | null): void {
-  shellStorage.setItem("oxplow.remoteBase", base.trim().replace(/\/+$/, ""));
-  if (token) shellStorage.setItem("oxplow.remoteToken", token);
-  else shellStorage.removeItem("oxplow.remoteToken");
-  window.location.reload();
-}
-
-/// Drop the remote base and reload back into local mode.
-export function disconnectRemote(): void {
-  shellStorage.removeItem("oxplow.remoteBase");
-  shellStorage.removeItem("oxplow.remoteToken");
-  window.location.reload();
-}
-
-/// Probe a daemon base before committing to it: POST /ipc/ping and
-/// expect the ok envelope. Throws with a human-readable message on
-/// any failure (unreachable, non-JSON, wrong service).
-export async function probeRemoteDaemon(
-  base: string,
-  token: string | null,
-  timeoutMs = 4000,
-): Promise<void> {
-  const cleaned = base.trim().replace(/\/+$/, "");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(`${cleaned}/ipc/ping`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      body: "null",
-      signal: controller.signal,
-    });
-    if (resp.status === 401) {
-      throw new Error("the daemon needs its UI token (printed as \"ui token:\" when it starts)");
-    }
-    if (!resp.ok) throw new Error(`daemon replied HTTP ${resp.status}`);
-    const envelope = (await resp.json()) as { status?: string; data?: unknown };
-    if (envelope.status !== "ok" || envelope.data !== "pong") {
-      throw new Error("endpoint is not an oxplow daemon");
-    }
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") {
-      throw new Error(`no response within ${timeoutMs / 1000}s — is the tunnel up?`);
-    }
-    throw e instanceof Error ? e : new Error(String(e));
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /// Where an `invoke(name)` goes: the desktop shell's Tauri IPC
@@ -292,7 +243,13 @@ const UNLOAD_CALLS = new Set(["unregister_client_host"]);
 export function ipcRequest(name: string, args: Record<string, unknown> | undefined, token: string | null): RequestInit {
   return {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+      // Who is asking: the daemon reads both or neither.
+      "Oxplow-Device": getDevice().id,
+      "Oxplow-Connection": getUiClientId(),
+    },
     body: JSON.stringify(args ?? null),
     keepalive: UNLOAD_CALLS.has(name),
   };
@@ -360,6 +317,8 @@ export async function invoke<T>(name: string, args?: Record<string, unknown>): P
     | { status: "ok"; data: T }
     | { status: "error"; error: unknown };
   if (envelope.status === "ok") return envelope.data;
+  // Another page load of this device took over: this window stops.
+  if (isReplacedError(envelope.error)) markReplaced();
   throw envelope.error;
 }
 
@@ -375,13 +334,63 @@ let reconnectDelayMs = 500;
 /// Remote connection lifecycle, for the reconnect banner. "up" fires
 /// on every successful (re)connect; "down" on every drop; "refused" once,
 /// when the daemon refuses this window's token — after which the
-/// socket isn't opened or retried, since no retry fixes a wrong token.
+/// socket isn't opened or retried, since no retry fixes a wrong token;
+/// "replaced" once, when another page load of this device took over (the
+/// daemon keeps one per device, `client_reports::devices`) — after which
+/// the socket isn't opened or retried either.
 /// Local mode never fires any.
-export type RemoteConnectionState = "up" | "down" | "refused";
+export type RemoteConnectionState = "up" | "down" | "refused" | "replaced" | "ended" | "closed";
+
+/// The close code the daemon gives a replaced page load's socket
+/// (`client_reports::devices::REPLACED_CLOSE_CODE`).
+export const REPLACED_CLOSE_CODE = 4001;
+/// The host is ending: the app that runs it quit (`oxplow_host::access`).
+export const HOST_ENDING_CLOSE_CODE = 4002;
+/// The host's owner removed this device: its token is gone.
+export const DEVICE_REMOVED_CLOSE_CODE = 4003;
+/// Other devices were turned off on the host's computer, or the address
+/// they come in on changed (`oxplow_host::access`).
+export const OTHER_DEVICES_OFF_CLOSE_CODE = 4004;
+
+/// What a socket's close means: this page load was replaced, the daemon
+/// refused the token, this device was removed (pair again), other devices
+/// were turned off there (say so, try again slowly), the host is
+/// ending (say so, try again slowly), or a drop to wait out and retry.
+/// Pure; exported for tests.
+export function socketCloseMeaning(
+  code: number,
+  tokenRefused: boolean,
+): "replaced" | "refused" | "removed" | "ended" | "closed" | "retry" {
+  if (code === REPLACED_CLOSE_CODE) return "replaced";
+  if (code === DEVICE_REMOVED_CLOSE_CODE) return "removed";
+  if (code === HOST_ENDING_CLOSE_CODE) return "ended";
+  if (code === OTHER_DEVICES_OFF_CLOSE_CODE) return "closed";
+  if (tokenRefused) return "refused";
+  return "retry";
+}
+
+/// Whether a call's error says this page load was replaced.
+export function isReplacedError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "REPLACED";
+}
+
+let replaced = false;
+
+/// Whether another page load of this device took over: this window asks
+/// nothing more until it is loaded again.
+export function isReplaced(): boolean {
+  return replaced;
+}
+
+function markReplaced(): void {
+  if (replaced) return;
+  replaced = true;
+  socket?.close();
+  notifyConnectionState("replaced");
+}
 
 /// What a call says when the daemon refused this window's token.
-export const TOKEN_REFUSED =
-  "the daemon refused this window's token; reconnect from the launcher with the token it prints";
+export const TOKEN_REFUSED = "this window's token was refused; open it again";
 
 let tokenRefused = false;
 
@@ -392,6 +401,13 @@ export function isTokenRefused(): boolean {
 }
 
 function markTokenRefused(): void {
+  // On a page a host served, a refused token is this device's, and it no
+  // longer works (its owner removed it): pair again. A page with no token
+  // yet (the pair screen is up) has nothing to forget.
+  if (hostOrigin() !== null && !readWindowContext()?.token && remoteToken !== null) {
+    forgetHostToken();
+    return;
+  }
   if (tokenRefused) return;
   tokenRefused = true;
   socket?.close();
@@ -452,15 +468,23 @@ export function handleSocketOpen(): void {
   reconnectDelayMs = 500;
   notifyConnectionState("up");
   for (const h of reconnectHandlers) h();
+  void checkHost();
 }
 
 function ensureSocket(): void {
-  if (remoteBase === null || socket !== null || tokenRefused) return;
+  if (remoteBase === null || socket !== null || tokenRefused || replaced) return;
   // Browsers can't set headers on a WebSocket; the token rides the query.
-  const wsUrl = eventsUrl(remoteBase, remoteToken, getUiClientId());
+  const wsUrl = eventsUrl(remoteBase, remoteToken, getDevice(), getUiClientId());
   const ws = new WebSocket(wsUrl);
   socket = ws;
+  // The daemon beats every 20 s; a socket that hears nothing for longer is
+  // gone (a tablet that slept, a tunnel that dropped). It is dropped at
+  // once, not closed and waited for: on a dead path the close handshake
+  // takes a minute.
+  const watchdog = createWatchdog(SOCKET_SILENCE_MS, () => dropSocket(ws, () => down(1006)));
+  watchdog.feed();
   ws.onmessage = (msg) => {
+    watchdog.feed();
     let frame: { channel?: string; payload?: unknown };
     try {
       frame = JSON.parse(String(msg.data));
@@ -471,6 +495,7 @@ function ensureSocket(): void {
       scheduleResync();
       return;
     }
+    if (frame.channel === "beat") return;
     const local = frame.channel ? REMOTE_CHANNELS[frame.channel] : undefined;
     if (!local) return;
     const handlers = channelHandlers.get(local);
@@ -481,21 +506,86 @@ function ensureSocket(): void {
     flushFrames(ws, waitingFrames);
     handleSocketOpen();
   };
-  ws.onclose = () => {
+  const down = (code: number) => {
+    watchdog.stop();
     socket = null;
     waitingFrames.length = 0;
-    // A refused token isn't a drop: nothing to wait out or retry.
-    if (tokenRefused) return;
-    notifyConnectionState("down");
+    // A refused token or a replaced page load isn't a drop: nothing to
+    // wait out or retry.
+    const meaning = socketCloseMeaning(code, tokenRefused);
+    if (meaning === "replaced") {
+      markReplaced();
+      return;
+    }
+    if (meaning === "refused" || replaced) return;
+    if (meaning === "removed") {
+      forgetHostToken();
+      return;
+    }
+    // The app that runs the host quit, or other devices were turned off
+    // there: say so, and wait for it longer.
+    const away = meaning === "ended" || meaning === "closed";
+    if (away) reconnectDelayMs = Math.max(reconnectDelayMs, 5_000);
+    notifyConnectionState(meaning === "ended" || meaning === "closed" ? meaning : "down");
+    if (meaning === "retry") void checkHost();
     // Backoff reconnect; the RemoteConnectionBanner drives the
     // user-facing state off the notifications above.
     if (channelHandlers.size > 0) {
       setTimeout(ensureSocket, reconnectDelayMs);
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, away ? 30_000 : 10_000);
     }
   };
+  ws.onclose = (event) => down(event.code);
   ws.onerror = () => {
     ws.close();
+  };
+}
+
+/// Take `ws` out of service now: nothing it says or does is heard again, it
+/// closes in the background, and `gone` runs once (the reconnect). Exported
+/// for tests.
+export function dropSocket(
+  ws: { onmessage: unknown; onopen: unknown; onclose: unknown; onerror: unknown; close(): void },
+  gone: () => void,
+): void {
+  ws.onmessage = ws.onopen = ws.onclose = ws.onerror = null;
+  try {
+    ws.close();
+  } catch {
+    // Already gone.
+  }
+  gone();
+}
+
+/// How long the socket may hear nothing before the page takes it for gone
+/// and reconnects: a little over two of the daemon's 20-second beats
+/// (`oxplow-daemon` `Liveness`).
+export const SOCKET_SILENCE_MS = 50_000;
+
+/// A watchdog: `feed` it on every frame; `silent` runs once nothing came for
+/// `ms`. `stop` ends it. Exported for tests (`timers` is theirs).
+export function createWatchdog(
+  ms: number,
+  silent: () => void,
+  timers: { set: (f: () => void, ms: number) => unknown; clear: (t: unknown) => void } = {
+    set: (f, delay) => setTimeout(f, delay),
+    clear: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+  },
+) {
+  let timer: unknown = null;
+  const arm = () => {
+    if (timer !== null) timers.clear(timer);
+    timer = timers.set(() => {
+      timer = null;
+      silent();
+    }, ms);
+  };
+  return {
+    feed: arm,
+    stop() {
+      if (timer !== null) timers.clear(timer);
+      timer = null;
+    },
   };
 }
 
@@ -530,6 +620,13 @@ export function sendSocketFrame(frame: string): void {
   writeFrame(socket, waitingFrames, frame);
 }
 
+/// The person used this window now (a press, a key): an agent's call with no
+/// device of its own goes to the device used last. Sent on the open socket
+/// only; one lost to a drop matters not, the next use tells it again.
+export function reportUse(): void {
+  if (socket?.readyState === 1) socket.send('{"channel":"used"}');
+}
+
 /// Where a `listen(channel)` subscription routes: the daemon
 /// WebSocket ("ws"), the local Tauri event bus ("tauri"), or nowhere
 /// ("none" — a shell-local channel in a plain-browser session, where
@@ -556,13 +653,15 @@ export function shellAvailable(): boolean {
 }
 
 /// Whether this window's files are on this machine (`filesLocalFrom`):
-/// Open In ▸ Reveal and Default App need them.
-/// Read once, as the base is (`endpoint`): another window's connect or
-/// disconnect changes the storage, not the daemon this one drives.
+/// Open In ▸ Reveal and Default App need them. Read once.
 export function filesAreLocal(): boolean {
   if (localFilesAtLoad === null) {
     const ctx = readWindowContext();
-    localFilesAtLoad = filesLocalFrom({ shell: shellAvailable(), kind: ctx?.kind ?? null, stored: endpoint.storedBase, injected: ctx?.base ?? null });
+    localFilesAtLoad = filesLocalFrom({
+      shell: shellAvailable(),
+      kind: ctx?.kind ?? null,
+      projectDir: ctx?.projectDir ?? null,
+    });
   }
   return localFilesAtLoad;
 }

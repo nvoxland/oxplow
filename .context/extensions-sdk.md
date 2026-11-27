@@ -349,7 +349,7 @@ check already reported is not repeated.
   descriptors by public id, `unsupported` what only the app shows
   (decorators, replacements, skills; a slot mount runs in its
   host page's run, so a fixture of the host page checks it). A panel is
-  run whole by a `when: { panel, thread?, stream?, choices? }` fixture
+  run whole by a `when: { panel, thread?, stream?, device?, choices? }` fixture
   (`extension_test/panel.rs` over `oxplow_app::pages::panels::run_panel`,
   the rules the rail uses): each part checked as a page's `expect`, and the
   header's `count`, the `alert` and the toggles in force; a `params` key is
@@ -470,7 +470,7 @@ fails when the table is stale (`OXPLOW_BLESS=1` writes it). A new kind is
 a `KINDS` entry and a `dispatch` arm. The forms:
 
 - `when: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
-  `view: { stream?, thread? }` and `steps: [..]` beside `when`, and
+  `view: { stream?, thread?, device? }` and `steps: [..]` beside `when`, and
   `expect: { loaders?: { <name>: { rows: n | $any | [ { col: val } | [ val,
   … ] ] | { contains: [..] }, columns? } }, nodes?: [{ id, kind?,
   actions? }], text?, alert?,
@@ -487,6 +487,13 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   oxplow derives, included) — `actions_like`. A loader that fails
   is a finding naming it. `expect.text` is `{ contains: [..] }` or the exact
   text, against `page_text`.
+  - **`view.device`** (`dev-<uuid>`, also a panel's `device`) is the device
+    the page is viewed from, as a window's request names its device. It
+    supplies the page's `device_id` param, so a page that lists visits shows
+    that device's own and the ones with no device. With no `device`, the page
+    is viewed by no device: it reads every device's visits and the default
+    thread of the stream, not one device's choice. A `device` that is not a
+    device id is a finding.
   - **Bind and reuse.** `bind: <name>` on a step keeps its command's result;
     `$name.path` (`.key`, `[n]`) anywhere in a later step's `input`, the
     `params` or an `expect` is that value, its type kept (`$any` is never a
@@ -625,7 +632,9 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   streams in their own folder),
   `refs` (branches, tags and stream heads, `replace_branches` /
   `replace_tags` / `replace_stream_heads`),
-  `visit` (a page the person opened, `PageVisitStore::record`),
+  `visit` (a page the person opened, `PageVisitStore::record`; `device:
+  dev-<uuid>` names the device it was opened on, none records it as every
+  device's),
   `facts` (findings of a declared measure through `record_facts`) and
   `retention` (`event_retention::sweep`, run `days` ahead) and
   `detail_compaction` (`compact_capture_details`, keeping each producer's

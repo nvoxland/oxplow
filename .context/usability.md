@@ -479,7 +479,9 @@ markdown itself, nor edits it in a `<textarea>`.
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
   same tail, the commands about that thread. A submenu opens on hover
-  and on click; a click never closes the one its hover opened. Each runs as any offer does (asking first
+  and on click; a click never closes the one its hover opened. A submenu opens
+  beside its item, else (a narrow screen) below it or above it, never over
+  the item (`submenuPlace`). Each runs as any offer does (asking first
   when the command asks). Testids: a row menu's group
   `menu-item-ref-commands-<group>`, the ☰'s submenu of an action's
   `submenu` `menu-item-page-submenu-<name>`, a command in the ☰ (top
@@ -577,7 +579,7 @@ markdown itself, nor edits it in a `<textarea>`.
   through its own Save, and the tab cap never closes such a tab.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
   immediately and a toast offers Undo (which restores both the saved
-  buffer and the unsaved draft). See `App.tsx` →
+  buffer and the unsaved draft). See `window/useWindowOpeners.ts` →
   `handleCloseOpenFile`.
 
 ## Actions that reach outside oxplow
@@ -654,8 +656,9 @@ surface calls it and adds nothing of its own.
 | A web URL | Browser, Oxplow (the web tab, when the allowlist takes it) |
 
 - **Only what applies shows.** Reveal and Default App need the files on
-  this machine (`filesAreLocal()`; not over a manual connect or in a
-  plain browser). A file at another revision or on another filesystem is
+  this machine (`filesAreLocal()`: a shell window on a project folder
+  here, never a page a host served or a window on another machine's
+  host). A file at another revision or on another filesystem is
   not on disk. Terminal opens in this window's stream, so another
   stream's row and the launcher have none. With no item left there is no
   submenu.
@@ -665,7 +668,7 @@ surface calls it and adds nothing of its own.
 - **Terminal** runs `oxplow.terminal.open { stream, dir }` and shows the
   new terminal.
 - A failure goes to the error toast (`recordOpError`).
-- A tab builds its Open In as its menu opens (`CenterTab.menuAtOpen`), so
+- A tab builds its Open In as its menu opens (`WindowTab.menuAtOpen`), so
   it reads the window as it is then.
 - **Extensions add links.** `links:` (a pattern and a URI) make text a
   link in the terminal and markdown, with the same menu
@@ -724,6 +727,53 @@ param, never a second page name. A list's cursor (↑/↓ before Enter) is
 not a pick and isn't in the address.
 
 ## Hover reveals, click rearranges
+
+**A finger holds where a mouse hovers.** A press and hold (400 ms) on an
+icon-only control (a `title`, an `aria-label` with no text of its own or
+only a glyph like ×, or a label cut short) shows its label in a bubble
+above it (below it near the top of the screen), and the press then does
+nothing more (`touchHints.ts`, one listener for the page, touch presses
+only). After a hold that showed a hint or a menu, what the browser sends
+at the lift (mousedown, mouseup, click) is the hold's, until 400 ms after
+the lift; a drag ends that. Android's own long press may come before or
+after 400 ms: when it comes first no hint draws over its menu. A menu closes
+on a `pointerdown` outside it, never on the lift's mouse events. Only a
+scroll of what holds the finger ends the hold. So an
+icon button's `title` is enough on a tablet too; never put a control's only
+explanation anywhere a finger cannot reach.
+
+**A long press is a right-click.** A finger held still for 550 ms is a
+`contextmenu` at the finger (`touchHints.ts`), so every menu of the page
+opens by touch with no code at the site; Android's own long press counts
+instead when it comes first, and one press opens one menu (a Menu key
+after the press opens its own). No long press menu starts inside an open
+menu: a slow tap on an item is a tap. On a touch screen controls and rows
+take no text selection and no OS callout (`index.html`), so the press stays
+the page's. Text fields,
+rich text and the code editor keep the OS's own long press (select, paste;
+the editor has its touch bar). A long press on a link opens it in a new tab,
+as its right-click does. A menu draws `data-oxplow-menu` on its root, so the
+hold's hint bubble gives way to it.
+
+**Escape closes the topmost layer only.** A menu closes itself; a field
+that takes Escape (an inline title) prevents its default; a `Slideover`
+under them closes on Escape only when neither did (`Slideover.tsx`).
+
+**Nothing is only on hover.** Where there is no hover (`@media (hover:
+none)`), what a rule shows on hover is always shown: one block in
+`apps/desktop/index.html` next to the hover rules (the blame and link
+kebabs, a section's Copy / Add to Context, a code block's Copy). A new
+hover reveal is added to that block. Content that exists only as a tooltip
+is text on a coarse pointer (`useCoarsePointer`):
+
+- A section's `help:` is a line under the heading, not the `?` icon's
+  `title`.
+- A tap on a cut table cell shows its whole text; another tap cuts it again
+  (`data-expanded`). A tap on a link or button in the cell is the control's.
+  A hold does not do this: the cell's `title` is its own text, which the
+  hold hint skips.
+- The agent dot's question needs nothing more: the dot has a `title` and no
+  text, so a hold shows it ("Waiting on your answer: ...").
 
 > **These rules are enforced by code, not just written down here.** The
 > open/close state machine for a slide-out glyph strip lives in
@@ -789,6 +839,12 @@ not a pick and isn't in the address.
 > selected text) keep their right-click menus below; a page's body has
 > none (its ☰ in the nav bar holds it all).
 
+- **On a touch screen, a page-layer menu also has a ☰.** A finger's long
+  press opens any right-click menu (`touchHints.ts`), but nothing shows it
+  is there: a backlink row and a dashboard tile (on a line above it) draw a `MoreButton`
+  (`components/MoreButton.tsx`) that opens the same menu below itself,
+  only for a coarse pointer (a mouse keeps the row's space). Desktop chrome
+  the tablet shell replaces (tab strip, rail, Navigator) gets none.
 - **Outside page rows, right-click opens a row's menu.** The shared hook is
   `apps/desktop/src/components/useRowContextMenu.tsx`:
   - `useRowContextMenu(items, header?)` — bind the items when the row is
@@ -796,13 +852,16 @@ not a pick and isn't in the address.
     `{menu}`. `header` titles the menu with what it acts on
     (`context-menu-header`) — the Navigator heads every stream / thread
     menu with its name, since a strip glyph shows only initials.
-  - **An item has one menu wherever it shows.** The Navigator builds each
-    stream's and thread's menu once (`streamMenu` / `threadMenu`) and
-    binds it to both the strip glyph and the panel row; an action whose
-    inline field lives in the panel (Rename, Add thread) opens it. A
-    surface outside the Navigator that names a stream or thread (the title
-    bar) asks for the menu over `navigator-bus` (`requestNavigatorMenu`,
-    opened with `useContextMenu().openAt`) rather than building its own.
+  - **An item has one menu wherever it shows.** Each stream's and
+    thread's menu is built once, by the window's `useStreamThreadMenus`
+    (`window/useStreamThreadMenus.tsx`: `streamMenu` / `threadMenu`, and
+    the flows they start: rename, add a thread, remove a stream), so any
+    shell has them. The Navigator binds them to both the strip glyph and
+    the panel row and draws the flows in its panel; an action whose inline
+    field lives there opens it (`reveal`). A surface outside the stream
+    list that names a stream or thread (the title bar) asks for the menu
+    over `navigator-bus` (`requestNavigatorMenu`) rather than building its
+    own; New Thread… asks over `new-thread-bus`.
   - `useContextMenu()` — call once in a parent that renders rows in a
     `.map()` (a per-row hook can't run there); each row does
     `onContextMenu={(e) => open(e, items)}` and the parent renders
@@ -1005,7 +1064,8 @@ its right-click menu.
 - **The native menu is renderer-driven.** `App.tsx` pushes the menu
   snapshot to `set_native_menu` (built in
   `crates/oxplow-tauri-ipc/src/commands/menu.rs`); macOS shows the
-  native bar, off-Mac falls back to the in-window `Menubar`. (There is
+  native bar; everywhere else (another OS, or any browser: one on an iPad
+  or a Mac has no native menu) draws the in-window `Menubar`. (There is
   no `isElectron` gate any more — that was dead post-Tauri code.) The
   builder supports **nested submenus** via `MenuItemSnapshot.submenu`;
   dynamic entries (e.g. File ▸ Open Recent ▸ `<project>`, built by
@@ -1051,7 +1111,21 @@ its right-click menu.
   Dragging a marked row drags every marked row. A drop's place shows as a
   line above or below the row, or the row or group outlined
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
-  the marked rows). Marks are per page and kept in the entry's history
+  the marked rows). A drag action runs only on a drop or, on a touch screen,
+  its Move items below: it is never a row's click, key or bulk button.
+  On a touch screen (no Cmd or Shift), where the page has a bulk action,
+  a row's menu has **Select** (Unselect when marked), and while rows are
+  marked a tap marks or unmarks a row instead of opening it; Clear ends it.
+  A finger's drag is unreliable (a long press is the menu), so on a touch
+  screen a row's menu also has the drops a drag would make (`movePlaces`
+  in `viz/rowInteract.ts`): **Move Up**, **Move Down**, **Move Into Row
+  Above** (where a drop onto a row nests) and **Move To ▸** another group
+  or board column, each only where a drag action takes it (a step only
+  where it names `before`, `after` or the order), for that row alone. In a
+  `depth` list a step is among the row's siblings (`siblingsOf`): a parent
+  passes its children whole. A dashboard tile's menu has **Move Earlier**
+  and **Move Later**, for a mouse too.
+  Marks are per page and kept in the entry's history
   state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
   too: focusable, right-click and the Menu key open their row actions,
   `key:`s run them, and they drag where a drag action runs, the place
@@ -1221,8 +1295,9 @@ its right-click menu.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. **Every internal MIME
   lives in `apps/desktop/src/dragMimes.ts`** — `RAIL_SECTION_DRAG_MIME`
-  (RailHud section reorder) and `VIZ_ROW_DRAG_MIME` (a page's rows, to
-  where a drag action runs). **Nothing drags into an agent**: what the
+  (RailHud section reorder), `VIZ_ROW_DRAG_MIME` (a page's rows, to
+  where a drag action runs), `TAB_DRAG_MIME` (a center tab, to reorder the
+  strip) and `TILE_MIME` (a dashboard tile, to move it). **Nothing drags into an agent**: what the
   person wants an agent to read goes in the thread's context basket from a
   right-click or a ☰ ("Add to Context" below), never by a drop — the
   agent's terminal is a center tab, so a page's rows never share a screen
@@ -1240,7 +1315,7 @@ its right-click menu.
   the `agent` tab); it stays at the front and is never a drag source or
   drop target, so nothing lands before it. Reorders persist in the
   thread's tab session (`reorder`, `tabs/session.ts`);
-  `App.tsx`'s `handleReorderCenterTabs` reorders the whole strip, not a
+  `window/useWindowTabs.ts`'s `handleReorderCenterTabs` reorders the whole strip, not a
   per-kind subset. Clicking a tab in the
   overflow `▾` panel (or any activation of an overflowed tab) promotes it
   to **right after `agent`** via `promoteHiddenIntoStrip` (inserts after
@@ -1251,7 +1326,7 @@ its right-click menu.
   Pure reorder math lives in `centerTabsReorder.ts` (unit-tested).
 - **A tab area with no tab ready yet says "Loading…"** (`center-tabs-loading`), quiet and muted; the app shows the same line before the first stream loads. A blank pane is never the loading state.
 - **Right-clicking a center tab** opens its action menu: any kind-specific
-  entries (the `CenterTab.contextMenu` slot) followed by a **"Close"** (closable, unpinned tabs only) and the universal **"Close Other Tabs"** /
+  entries (the `WindowTab.contextMenu` slot) followed by a **"Close"** (closable, unpinned tabs only) and the universal **"Close Other Tabs"** /
   **"Close Tabs to the Right"** pair that `CenterTabs` appends for every
   tab. Each close item is disabled when it has no targets; targets are
   computed over the real open tabs in strip order (overflowed-but-open tabs
@@ -1266,7 +1341,7 @@ its right-click menu.
 ## Capitalization
 
 - **Title-case for every UI title.** Page titles (`<Page title=…>`),
-  tab labels (`label:` in CenterTab arrays), section / card headers
+  tab labels (`label:` in WindowTab arrays), section / card headers
   (`<Section title=…>`, `<Card title=…>`), modal headers, and menu
   items that name a destination (e.g. `New Stream…`) all use
   title case: capitalize the first and last words plus all major
@@ -1457,7 +1532,7 @@ rules extension authors follow are in the `oxplow-extension` skill
 Under 800 px the rail leaves its place so the page keeps its width. A small
 "Show the rail" button (`rail-show`, tooltip and aria-label) at the page's left
 edge shows the rail as an overlay (`rail-overlay`). Escape, a click outside it,
-or opening a page from it hides it; widening the window resets it (`NarrowRail`).
+or opening a page from it hides it; widening the window resets it (`NarrowRail`). A dashboard's tiles are at least 400px wide or the container's width, and a wide tile takes the whole row when the container is under two columns wide; a Slideover or dialog is 38vw, at least 360px, never wider than the screen.
 
 ## Page spacing
 

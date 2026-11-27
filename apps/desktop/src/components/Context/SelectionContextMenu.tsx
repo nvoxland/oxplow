@@ -12,6 +12,7 @@ import { useCallback, type MouseEvent, type ReactNode } from "react";
 import { addToContext } from "../../contextBasket.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { readSelection } from "./textSelection.js";
+import { copyText } from "../../clipboard.js";
 
 export function useSelectionContextMenu(uri: string | null): {
   /** The body's `onContextMenuCapture`. */
@@ -26,7 +27,7 @@ export function useSelectionContextMenu(uri: string | null): {
       if (!selection || !(e.target instanceof Node) || !selection.range.intersectsNode(e.target)) return;
       const { text } = selection;
       open(e, [
-        { id: "copy", label: "Copy", enabled: true, run: () => void navigator.clipboard.writeText(text).catch(() => {}) },
+        { id: "copy", label: "Copy", enabled: true, run: () => void copyText(text) },
         { id: "add-to-context", label: "Add Selection to Context", enabled: true, icon: "at-sign", run: () => void addToContext({ uri, text }) },
       ]);
     },

@@ -1,6 +1,6 @@
 import { ipc, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { inFrame, open, shown } from "../../support/ui.js";
+import { inFrame, open, shown, alertsBadge, closeTab } from "../../support/ui.js";
 
 // A person's command that fails (`.context/usability.md` "A person's command
 // that fails"): it is recorded once, as a failed operation, and shows beside
@@ -20,7 +20,7 @@ test("a page action that fails says so beside its button, recorded once, with no
   await expect(error).toContainText("the suite asked for a failure");
   await expect.poll(() => recorded(daemon)).toBe(1);
   // The bell counts it; the toast stays away while the button is on screen.
-  await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
+  await expect(alertsBadge(page)).toHaveText("1");
   await expect(page.getByTestId("undo-toast")).not.toBeVisible();
   // Details opens where it is recorded.
   await error.getByTestId("inline-error-details").click();
@@ -31,7 +31,7 @@ test("a failure whose page closed before it landed is the toast's, offering Revi
   const uri = "oxplow:oxplow/page?page=e2e/failing";
   await open(page, daemon, uri);
   await shown(page).getByTestId("action-page-action-boom").click();
-  await page.getByTestId(`center-tab-close-${uri}`).click();
+  await closeTab(page, uri);
   const toast = page.getByTestId("undo-toast").filter({ hasText: "Boom" });
   await expect(toast).toBeVisible();
   await expect(toast.getByTestId("undo-toast-undo")).toHaveText("Review");

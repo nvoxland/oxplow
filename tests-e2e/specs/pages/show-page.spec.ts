@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../support/fixtures.js";
 import { fileTask, run } from "../../support/daemon.js";
-import { open, shown, load, reload } from "../../support/ui.js";
+import { open, shown, load, reload, panelsReady, tabOf } from "../../support/ui.js";
 
 type Daemon = Parameters<typeof run>[0];
 const source = (title: string, prefix: string) => `# Keep the source comment
@@ -18,10 +18,10 @@ async function show(page: Page, daemon: Daemon, spec: string) {
   await load(page);
   // An open page and settled rail mean the window can answer a show call.
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
-  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+  await panelsReady(page);
   const shown = await run<{ result: { uri: string; opened: boolean; why?: string } }>(daemon, "oxplow.page.show", { spec });
   expect(shown.result.opened, shown.result.why).toBe(true);
-  const tab = page.getByTestId(`center-tab-${shown.result.uri}`);
+  const tab = tabOf(page, shown.result.uri);
   await expect(tab).toBeVisible();
   await tab.click();
   return shown.result.uri;
@@ -42,7 +42,7 @@ test("show_page opens a temp page (a file on oxplow:temp) whose live run survive
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
   await fileTask(daemon, "Shown Quoll evidence");
   await expect(body.locator('[data-node="count"]')).toContainText("1");
-  await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
+  await expect(tabOf(page, uri)).toBeVisible();
 });
 
 test("Save as Page writes the view's file as a deployed page and opens it", async ({ page, daemon }) => {
@@ -51,7 +51,7 @@ test("Save as Page writes the view's file as a deployed page and opens it", asyn
   const form = shown(page).getByTestId("save-view-form");
   await form.getByTestId("save-view-title").fill("Saved Wombat View");
   await form.getByTestId("save-view-title").press("Enter");
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=my_pages/saved-wombat-view")).toBeVisible();
+  await expect(tabOf(page, "oxplow:oxplow/page?page=my_pages/saved-wombat-view")).toBeVisible();
   await expect(shown(page).getByTestId("page-file").locator('[data-node="count"]')).toContainText("0");
 });
 
@@ -70,6 +70,6 @@ test("a view whose file is gone says so, and the tab stays", async ({ page, daem
   const id = uri.slice(uri.lastIndexOf("/") + 1);
   rmSync(join(daemon.project, ".oxplow", "runtime", "temp", `${id}.yaml`));
   await reload(page);
-  await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
+  await expect(tabOf(page, uri)).toBeVisible();
   await expect(shown(page).getByTestId("view-gone")).toContainText("This view is gone");
 });

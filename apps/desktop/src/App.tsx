@@ -1,325 +1,98 @@
-import { useTreeDirty } from "./treeDirty.js";
 import { useResourcesLoader } from "./resources.js";
-import { isWorkspaceDir } from "./workspaceFiles.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutItems, useShellKind } from "./shells/shellChoice.js";
+import { PanelTray, PinnedPanel } from "./shells/PanelTray.js";
+import { shellMenu, withLayouts } from "./shells/shellMenu.js";
+import { continueItems } from "./window/continueFrom.js";
+import type { ShellWindow } from "./shells/shellWindow.js";
+import { TabletShell } from "./shells/TabletShell.js";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
-  closeThread,
-  markThread,
-  createThread,
-  getThreadState,
   type AgentStatus,
   type AgentStatusEntry,
-  getCurrentStream,
-  getWorkspaceContext,
-  type GitOpKickoff,
   desktopBridge,
-  listStreams,
+  listOtherDeviceTabs,
   probeDaemon,
-  renameThread,
-  renameStream,
-  selectThread,
-  recordUsage,
-  switchStream,
   runCommand,
-  runCommandInBackground,
-  openInSystemBrowser,
-  commandOpenAfter,
-  type ThreadMark,
-  type ThreadState,
   type SqlCell,
-  type Stream,
-  type WorkspaceContext,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, DEVICES_MENU_ID, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, viewMenu, type GoRow } from "./menuBar.js";
 import { GoMenuFeed } from "./components/Panels/GoMenuFeed.js";
 import { RailMenuFeed, type RailMenu } from "./components/Panels/RailMenuFeed.js";
-import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Dock } from "./components/Dock/Dock.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
-import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { identityOf, keyOf, knowledgeUri, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
-import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
-import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
-import type { Extension } from "./tauri-bridge/generated/bindings.js";
-import { PageFileView } from "./pages/PageFileView.js";
-import { TempPage } from "./pages/TempPage.js";
-import { TEMP_EXTENSION } from "./pages/viewActions.js";
+import { paramOf, typeOf } from "./uri/uri.js";
+import { nextMode, openWithOf } from "./pages/renderers.js";
+import { drawnByRenderer } from "./pages/useRenderers.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
-import { runForPerson } from "./commands/runForPerson.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { Menubar } from "./components/Menubar.js";
-import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
-import type { DiffSpec } from "./components/Diff/DiffPane.js";
-import { builtInPages } from "./pages/builtInPages.js";
-import type { SlotNav } from "./pages/slotNav.js";
+import { CenterTabs } from "./components/CenterTabs/CenterTabs.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import { NarrowRail } from "./components/RailHud/NarrowRail.js";
 import { useNarrowWindow } from "./windowWidth.js";
+import { useWindowStreams } from "./window/useWindowStreams.js";
+import { WindowProviders } from "./window/WindowProviders.js";
+import { useWindowTabs } from "./window/useWindowTabs.js";
+import { useWindowOpeners } from "./window/useWindowOpeners.js";
+import { useWindowHost } from "./window/useWindowHost.js";
+import { useWindowCommands } from "./window/useWindowCommands.js";
+import { changeView, TabLoading, useWindowPages } from "./window/useWindowPages.js";
 import type { TabRef } from "./tabs/tabState.js";
-import { navigationKey } from "./tabs/navigationKeys.js";
-import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
-import type { PageAction } from "./kit/actions.js";
-import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
-import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
-import type { VisibilityScope } from "./visibilityScope.js";
-import { reconcileSessionTabs, storedSessionIsStale } from "./tabs/sessionTabs.js";
-import { newThreadOpening } from "./newThreadSession.js";
+import { liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
+import { useBookmarks } from "./tabs/bookmarks.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
-import { readThreadSessions, useThreadSessions } from "./agentSessions.js";
+import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
-import { insertIntoAgent } from "./agent-input-bus.js";
-import { getPageDetailStore } from "./tabs/openPageDetail.js";
-import { MissingPage } from "./pages/MissingPage.js";
-import { PartNotAPage } from "./pages/PartNotAPage.js";
-import { kindForTabId } from "./pageKinds.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
-import { openHandlerFor, type OpenHandlers } from "./tabs/openHandlers.js";
-import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
-import { PanelLayoutProvider } from "./components/Panels/PanelLayoutContext.js";
-import { useAlerts } from "./components/Alerts/useAlerts.js";
-import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
-import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt, pageTabRef, terminalRef } from "./tabs/pageRefs.js";
-import { requestNewThread } from "./new-thread-bus.js";
+import { diskFilePath,  refFromTabId, recordedPageKind,  newStreamRef, alertsRef,  streamSettingsRef, threadSettingsRef, viewParamsOf,  pageTabRef, terminalRef } from "./tabs/pageRefs.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
-import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
-import { buildTabReport, createTabReporter } from "./tabs/tabReport.js";
-import { windowPageRuns } from "./pageRuns.js";
-import { useTabSessions } from "./tabs/useTabSessions.js";
 import {
-  activate,
-  activeRef,
-  back as sessionBack,
-  bodies,
-  close as sessionClose,
   current as currentEntry,
-  evictions,
-  forward as sessionForward,
-  MAX_PAGE_TABS,
-  navigate as sessionNavigate,
-  open as sessionOpen,
-  setTitle as sessionSetTitle,
-  refsOf,
-  reorder as sessionReorder,
-  patchHistoryState as sessionPatchHistoryState,
-  setStrip,
-  slotShowing,
-  stepOrigin,
   identityOf as pageIdentityOf,
-  type Entry,
-  type Origin,
-  type OriginItem,
-  type Session,
-  type Tab,
 } from "./tabs/session.js";
-import { installCli, openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
-import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
-import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
-import { pickFolder } from "./tauri-bridge/nativeDialog.js";
-import { isDirty } from "./editor/buffers.js";
-import { buffers } from "./editor/openFiles.js";
-import { finishPageVisit, recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
+import { installCli, listRecentProjects, shellAvailable } from "./api.js";
+import { triggerRemoteResync } from "./api.js";
+import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import { finishPageVisit, recordPageVisit } from "./api.js";
 import { PageVisitTimer } from "./pageVisitTimer.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
-import { offerForShortcut } from "./keybindings.js";
-import { commandOffers, type OfferDeps } from "./commandOffers.js";
-import { setRefOfferHost } from "./components/refCommands.js";
-import type { WhenContext } from "./when.js";
-import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
-import { streamOfThread } from "./tabs/threadTabOps.js";
-import { planNavigation } from "./tabs/navigation.js";
-import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
-import { usePersonCommands } from "./personCommandsStore.js";
-import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
-import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
+import { personCommands } from "./personCommands.js";
+import { logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
-import { openInBrowser, openInForRef, setOpenInHost, withLinkOffers } from "./openIn.js";
+import { setOpenInHost } from "./openIn.js";
 import { setGitMenuHost, type GitStatusEntry } from "./gitMenu.js";
 import { openCompareWith, openRollback } from "./components/Git/gitDialogStore.js";
 import { GitDialogs } from "./components/Git/GitDialogs.js";
 import { startRecordStores } from "./recordStoresLoader.js";
-import { useLiveTerminals } from "./terminal/useTerminalSession.js";
-
-/// Prompt for a folder and open it as an **existing** project.
-/// `newWindow=false` replaces the current window (this process exits
-/// once the new one spawns); `true` opens an additional independent
-/// window. A folder that isn't a project yet is refused by
-/// `open_project` — File ▸ New Project… is the door for that.
-async function pickAndOpenProject(newWindow: boolean) {
-  const selected = await pickFolder(newWindow ? "Open Project in New Window" : "Open Project");
-  if (selected === null) return;
-  try {
-    await openProject(selected, newWindow);
-  } catch (e) {
-    recordOpError({
-      label: "Open project",
-      message: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
-
-/// Prompt for a folder and create a new project in it. Always opens in
-/// a new window, so creating never closes the window the command ran
-/// from; a folder that already is a project is refused by
-/// `create_project`.
-async function pickAndCreateProject() {
-  const selected = await pickFolder("New Project");
-  if (selected === null) return;
-  try {
-    await createProject(selected);
-  } catch (e) {
-    recordOpError({
-      label: "New project",
-      message: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
-
-/** No tab chosen: the thread's home tab shows — its first agent session's,
- *  else the session picker if it's open, else its first tab (`homeTabOf`). */
-const HOME_TAB = "";
-
-/** How often an unchanged window repeats its tab report (the backend forgets
- *  one that falls silent for five minutes). */
-const TAB_REPORT_HEARTBEAT_MS = 60_000;
-
-/** The tab a thread falls back to: its first agent session's, else the
- *  session picker, else its first tab. */
-function homeTabOf(tabs: TabRef[]): string {
-  return (
-    tabs.find((t) => typeOf(t.id) === "oxplow/agent_session")?.id ??
-    tabs.find((t) => isPage(t, "new-session"))?.id ??
-    tabs[0]?.id ??
-    HOME_TAB
-  );
-}
-
-/** What a tab shows while the daemon says which page draws it. */
-function TabLoading() {
-  return <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Loading…</div>;
-}
-
-/** The params a tab's label and renderer are given: an oxplow URI's, and for
- *  a web page (no oxplow URI) the page itself as `uri`. */
-function renderedParams(id: string): Record<string, string> {
-  return parseUri(id)?.params ?? { uri: id };
-}
-
-/** `slot`'s page in the view `view` makes of its current one (its id's
- *  `#`): the same page, so a filter replaces the entry and a pick
- *  (`push`) adds one Back returns from. */
-function changeView(
-  session: Session,
-  slot: string,
-  view: (now: Record<string, SqlCell>) => Record<string, SqlCell>,
-  opts?: { push?: boolean },
-): Session {
-  const tab = session.tabs.find((t) => t.slot === slot);
-  if (!tab) return session;
-  const ref = currentEntry(tab).ref;
-  return sessionNavigate(session, slot, { ref: withViewParams(ref, view(viewParamsOf(ref))) }, { replace: !opts?.push });
-}
+import { copyText } from "./clipboard.js";
 
 export function App() {
   // A window under 800 px wide gives the rail up so the page keeps the room.
   const narrowWindow = useNarrowWindow();
-  const [streams, setStreams] = useState<Stream[]>([]);
-  const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
   const harnesses = useAgentHarnesses();
-  // Mirror of threadStates for subscription callbacks that need the
-  // latest map without re-subscribing when it changes (see
-  // useBackendSubscriptions). Kept current on every render.
-  const threadStatesRef = useRef(threadStates);
-  threadStatesRef.current = threadStates;
 
   // Each agent session's status (`sessionStatusKey`). A thread's dot is its
   // sessions' roll-up, and its question (the rail dot's tooltip) the one
   // the awaiting session asks.
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
-  // The agent session whose tab's Rename… strip is open.
-  // The conversation picker open over a session's terminal, and for what.
   const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
     () => threadStatuses(Object.values(sessionStatuses)),
     [sessionStatuses],
   );
-  const [stream, setStream] = useState<Stream | null>(null);
-  // Every thread's center tabs: a session of entries per thread
-  // (`tabs/session.ts`), restored on start and stored on every change.
-  // The strip, the bodies, history, origins and the active tab all come
-  // from it (`.context/pages-and-tabs.md` "Navigation model").
-  const { sessions, update: updateSession, forget: forgetSession } = useTabSessions();
-  // Per-tab page titles, keyed by tab id. Pages register their title via
-  // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
-  // the tab strip label and the shared chrome header so the title lives in
-  // exactly one place.
-  const [pageTitles, setPageTitles] = useState<Record<string, string>>({});
-  const setPageTitle = useCallback((tabId: string, title: string) => {
-    setPageTitles((prev) => (prev[tabId] === title ? prev : { ...prev, [tabId]: title }));
-  }, []);
-  // Per-tab editing (`useTabEditing`), keyed by tab id: which tabs hold
-  // unsaved edits (the ●, `pageDirty`, the tab cap) and their Saves. One
-  // setter per tab, kept, so a body's registration doesn't re-run on
-  // every render of the strip.
-  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
-  const tabSavesRef = useRef<Record<string, () => void>>({});
-  const tabFindsRef = useRef<Record<string, () => void>>({});
-  const editingSettersRef = useRef<Record<string, (editing: TabEditing | null) => void>>({});
-  const editingSetterFor = useCallback((tabId: string) => {
-    const known = editingSettersRef.current[tabId];
-    if (known) return known;
-    const set = (editing: TabEditing | null) => {
-      if (editing) {
-        tabSavesRef.current[tabId] = editing.save;
-        if (editing.find) tabFindsRef.current[tabId] = editing.find;
-        else delete tabFindsRef.current[tabId];
-        setDirtyTabs((prev) => (prev[tabId] === editing.dirty ? prev : { ...prev, [tabId]: editing.dirty }));
-      } else {
-        delete tabSavesRef.current[tabId];
-        delete tabFindsRef.current[tabId];
-        setDirtyTabs((prev) => {
-          if (!(tabId in prev)) return prev;
-          const next = { ...prev };
-          delete next[tabId];
-          return next;
-        });
-      }
-    };
-    editingSettersRef.current[tabId] = set;
-    return set;
-  }, []);
-  // Per-tab page actions (`useTabActions`): a page's actions are its tab's
-  // right-click menu too. One setter per tab, kept.
-  const [tabActions, setTabActionsState] = useState<Record<string, readonly PageAction[]>>({});
-  const actionSettersRef = useRef<Record<string, (actions: readonly PageAction[] | null) => void>>({});
-  const actionsSetterFor = useCallback((tabId: string) => {
-    const known = actionSettersRef.current[tabId];
-    if (known) return known;
-    const set = (actions: readonly PageAction[] | null) =>
-      setTabActionsState((prev) => {
-        if (!actions) {
-          if (!(tabId in prev)) return prev;
-          const next = { ...prev };
-          delete next[tabId];
-          return next;
-        }
-        return { ...prev, [tabId]: actions };
-      });
-    actionSettersRef.current[tabId] = set;
-    return set;
-  }, []);
   const [error, setError] = useState<string | null>(null);
+  // Oxplow ▸ Devices… (the app menu; the shell handles its id).
   // Markdown reads `[[<store>:<id>]]` for the stores of every shared model:
   // know them from the start.
   useEffect(() => {
@@ -334,70 +107,38 @@ export function App() {
     return () => clearTimeout(t);
   }, [error]);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
-  const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ vcsEnabled: false });
+  // The streams, their threads and the shown thread; loaded on mount and
+  // on every reconnect.
+  const {
+    streams,
+    stream,
+    threadStates,
+    threadStatesRef,
+    workspaceContext,
+    selectedThread,
+    switchStream: handleSwitch,
+    renameStream: handleRenameStreamById,
+    renameThread: handleRenameThreadById,
+    streamCreated: handleStreamCreated,
+    selectThread: handleSelectThread,
+    createThread: handleCreateThread,
+    markThread: handleMarkThread,
+    closeThread: handleCloseThread,
+    live: windowStreamsLive,
+  } = useWindowStreams({ setError, setDaemonUnavailable });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState("");
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
-  // macOS uses the native top-of-screen menu bar (driven by the
+  // The Mac app uses the native top-of-screen menu bar (driven by the
   // renderer through `setNativeMenu`, built in
-  // src-tauri/.../commands/menu.rs); the in-window Menubar would
-  // duplicate it, so it only renders off-Mac.
-  const isMac = typeof navigator !== "undefined"
-    && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+  // src-tauri/.../commands/menu.rs) and floats its traffic lights over the
+  // title bar; the in-window Menubar would duplicate it. A browser (on an
+  // iPad or a Mac too) has no native menu: it gets the in-window one.
+  const nativeMenu = shellAvailable()
+    && typeof navigator !== "undefined"
+    && /Mac/.test(navigator.platform || navigator.userAgent || "");
 
-
-  // Top-level state hydration: streams, the current stream + its
-  // threads, workspace context, and the selected thread's work state.
-  // Run on mount and again on a remote-daemon WS reconnect (see
-  // `onRemoteReconnect` below) so state goes live again after a drop
-  // without a manual full-page reload.
-  const loadInitialAppState = useCallback(() => {
-    return Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
-      .then(async ([allStreams, current, context]) => {
-        const initialThreadState = await getThreadState(current.id);
-        setStreams(allStreams);
-        setStream(current);
-        setThreadStates((prev) => ({ ...prev, [current.id]: initialThreadState }));
-        setWorkspaceContext(context);
-        // Prefetch thread state for the remaining streams so the
-        // navigator can render every thread under every stream
-        // immediately, not only after the user switches to that stream.
-        const otherStreams = allStreams.filter((s) => s.id !== current.id);
-        for (const s of otherStreams) {
-          void getThreadState(s.id)
-            .then((state) => setThreadStates((prev) => ({ ...prev, [s.id]: state })))
-            .catch((e) => logUi("warn", "failed to prefetch thread state", { streamId: s.id, error: String(e) }));
-        }
-        setError(null);
-        setDaemonUnavailable(false);
-        logUi("info", "loaded initial app state", {
-          streamCount: allStreams.length,
-          currentStreamId: current.id,
-          vcsEnabled: context.vcsEnabled,
-        });
-      })
-      .catch((e) => {
-        setError(String(e));
-        setDaemonUnavailable(true);
-        logUi("error", "failed to load initial app state", { error: String(e) });
-      });
-  }, []);
-
-  useEffect(() => {
-    void loadInitialAppState();
-  }, [loadInitialAppState]);
-
-  // Remote-daemon WS reconnect: re-hydrate the top-level stores so the
-  // UI catches up on events missed while the socket was down. The WS
-  // itself auto-re-subscribes; this covers the snapshot the client
-  // holds. No manual reload — that's the whole point.
-  useEffect(() => {
-    return onRemoteReconnect(() => {
-      logUi("info", "remote daemon reconnected, resyncing state");
-      void loadInitialAppState();
-    });
-  }, [loadInitialAppState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -435,269 +176,66 @@ export function App() {
     };
   }, []);
 
-  async function handleSwitch(id: string) {
-    try {
-      logUi("info", "switching stream", { streamId: id });
-      const next = await switchStream(id);
-      let nextThreadState = threadStates[next.id] ?? await getThreadState(next.id);
-      // Invariant: a stream must always have a selected thread. If the
-      // switched-to stream has no remembered selection, auto-pick its
-      // first thread by sort order and persist that choice so subsequent
-      // switches remember it.
-      if (!nextThreadState.selectedThreadId && nextThreadState.threads.length > 0) {
-        nextThreadState = await selectThread(next.id, nextThreadState.threads[0].id);
-      }
-      setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
-      setStream(next);
-      setError(null);
-      setDaemonUnavailable(false);
-      logUi("info", "switched stream", { streamId: next.id, title: next.title });
-    } catch (e) {
-      setError(String(e));
-      logUi("error", "failed to switch stream", { streamId: id, error: String(e) });
-    }
-  }
-
-  async function handleRenameStreamById(streamId: string, newTitle: string) {
-    const updated = await renameStream(streamId, newTitle);
-    if (stream?.id === updated.id) setStream(updated);
-    setStreams((prev) =>
-      prev
-        .map((candidate) => (candidate.id === updated.id ? updated : candidate))
-        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
-    );
-    setError(null);
-  }
-
-  async function handleRenameThreadById(threadId: string, newTitle: string) {
-    if (!stream) return;
-    // The person's command: a failure is recorded, and the toast's.
-    await runForPerson("Rename thread", async () => {
-      await renameThread(stream.id, threadId, newTitle);
-      const refreshed = await getThreadState(stream.id);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: refreshed }));
-    });
-  }
-
-  async function handleStreamCreated(next: Stream) {
-    setStreams((prev) => {
-      const others = prev.filter((stream) => stream.id !== next.id);
-      return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    });
-    setError(null);
-    setDaemonUnavailable(false);
-    logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
-    // Make the new stream current on the backend BEFORE we let the
-    // terminal view mount and call open_terminal_session — that command
-    // builds its session_key from `state.streams.current()`, so without
-    // this hop the new thread's terminal would dedup onto the previous
-    // stream/thread's PTY and show the wrong agent's transcript.
-    try {
-      await switchStream(next.id);
-    } catch (e) {
-      logUi("warn", "switch_stream after create failed", { streamId: next.id, error: String(e) });
-    }
-    try {
-      const state = await getThreadState(next.id);
-      setThreadStates((prev) => ({ ...prev, [next.id]: state }));
-    } catch (e) {
-      setError(String(e));
-    }
-    setStream(next);
-  }
-
-  /** Open the working-tree file `path`, its tab showing `ref` (the file in
-   *  a view: `#lines=`; the plain file when none is given). Its buffer is
-   *  read first, so a clicked path that isn't a file (a dotted word in
-   *  prose, a stale link) opens no tab and says so; a directory opens its
-   *  folder's page. With `ref` null only the buffer is read. */
-  async function handleOpenFile(path: string, ref: TabRef | null = fileRef(path)) {
-    if (!stream) return;
-    // A trailing-slash link (terminal or agent output) is a folder: no
-    // read is tried for it.
-    if (path.endsWith("/") && (await isWorkspaceDir(stream.id, path))) {
-      setError(null);
-      handleOpenPageRef.current?.(directoryRef(path));
-      return;
-    }
-    const buffer = await buffers.open(stream, path);
-    if (buffer.state !== "ready") {
-      if (await isWorkspaceDir(stream.id, path)) {
-        setError(null);
-        handleOpenPageRef.current?.(directoryRef(path));
-        return;
-      }
-      if (buffer.state === "missing") {
-        setError(`File not found: ${path}`);
-        logUi("warn", "open file: target does not exist", { streamId: stream.id, path });
-      } else {
-        setError(buffer.error ?? `Couldn't open ${path}`);
-        logUi("error", "failed to open file", { streamId: stream.id, path, error: buffer.error });
-      }
-      return;
-    }
-    if (!ref) return;
-    openTab(ref);
-    setError(null);
-    void recordUsage({
-      kind: "editor-file",
-      key: path,
-      event: "open",
-      streamId: stream.id,
-      threadId: selectedThread?.id ?? null,
-    }).catch(() => {});
-  }
-
-  /** A `symbol:` ref opens its file at the symbol's line; one pinned to a
-   *  version opens the file as it was then. A pin whose version is gone
-   *  opens the current symbol and says so. */
-  async function openSymbol(ref: string) {
-    if (!stream) return;
-    try {
-      const at = await resolveSymbol(stream.id, ref);
-      if (!at) {
-        recordOpError({ label: "Open symbol", message: `${ref} isn't a symbol in this stream now.` });
-        return;
-      }
-      if (at.versionGone) {
-        recordOpError({ label: "Open symbol", message: `The version ${ref} pins is gone; showing the symbol as it is now.` });
-      }
-      if (at.revision) {
-        handleOpenPage(fileRef(at.path, at.revision));
-        return;
-      }
-      await handleNavigateToLocation({ path: at.path, line: at.line, column: at.col });
-    } catch (e) {
-      recordOpError({ label: "Open symbol", message: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
-  /** Open `target`'s file at its line: its tab in that view (`ref`, else
-   *  `#lines=<line>`, where the editor lands). */
-  async function handleNavigateToLocation(target: EditorNavigationTarget, ref?: TabRef) {
-    await handleOpenFile(target.path, ref ?? fileRefAt(target.path, target.line));
-  }
-
-  /** Close the tab showing the working file `path`. Unsaved edits close
-   *  with it, and a toast offers Undo for a while: the tab and its draft
-   *  come back. */
-  function handleCloseOpenFile(id: string, path: string) {
-    if (!stream) return;
-    const stashed = buffers.stash(stream.id, path);
-    closePageTab(id);
-    if (!stashed) return;
-    const basename = path.split("/").pop() ?? path;
-    showToast({
-      message: `Closed "${basename}" with unsaved changes.`,
-      actionLabel: "Undo",
-      onUndo: () => {
-        void buffers.restore(stashed).then(() => openTab(fileRef(path)));
-      },
-    });
-  }
-
-  async function handleSelectThread(streamId: string, threadId: string) {
-    try {
-      // Cross-stream selection: switch the active stream first so the
-      // rest of the app (center tabs, file session, work panel) reframes
-      // around the new stream before we apply the thread selection.
-      // Doing this sequentially also avoids a race where handleSwitch's
-      // own setThreadStates write (seeded from the prefetched state with
-      // the OLD selectedThreadId) clobbers the selection we're about to
-      // apply.
-      if (stream && streamId !== stream.id) {
-        await handleSwitch(streamId);
-      }
-      const next = await selectThread(streamId, threadId);
-      setThreadStates((prev) => ({ ...prev, [streamId]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleCreateThread(title: string): Promise<boolean> {
-    if (!stream) return false;
-    // It opens on the session picker: a thread names no agent.
-    const ran = await runForPerson("New thread", async () => {
-      const { state: next } = await createThread(stream.id, title);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-    });
-    return ran.ok;
-  }
-
-  async function handleMarkThread(threadId: string, mark: ThreadMark | null) {
-    const owner = streams.find((s) => threadStates[s.id]?.threads.some((t) => t.id === threadId));
-    if (!owner) return;
-    await runForPerson(mark ? "Mark thread" : "Clear thread mark", async () => {
-      const next = await markThread(owner.id, threadId, mark);
-      setThreadStates((prev) => ({ ...prev, [owner.id]: next }));
-    });
-  }
-
-  async function handleCloseThread(threadId: string) {
-    if (!stream) return;
-    await runForPerson("Close thread", async () => {
-      const next = await closeThread(stream.id, threadId);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-    });
-  }
 
 
-  const currentThreadState = useMemo(
-    () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, threads: [] } : { selectedThreadId: null, threads: [] }),
-    [threadStates, stream],
-  );
-  const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
   // The selected thread's open agent sessions: its session tabs follow them.
   const selectedThreadSessions = useThreadSessions(selectedThread?.id ?? null);
-  // A session just opened, to show once the window's list of sessions has it.
-  const pendingSessionRef = useRef<string | null>(null);
-  const [pendingSessionTick, setPendingSessionTick] = useState(0);
-  useEffect(() => {
-    const id = pendingSessionRef.current;
-    if (id && selectedThreadSessions?.some((candidate) => candidate.id === id)) {
-      pendingSessionRef.current = null;
-      setCenterActive(agentSessionRef(id).id);
-    }
-  }, [selectedThreadSessions, pendingSessionTick]);
   const selectedThreadId = selectedThread?.id ?? null;
-  // Each thread's tabs as the pages they show now, in strip order.
-  const threadPageTabs = useMemo(
-    () => Object.fromEntries(Object.entries(sessions).map(([thread, session]) => [thread, refsOf(session)])),
-    [sessions],
-  );
-  // The shown thread's active tab's page id; `HOME_TAB` when none is
-  // chosen (the thread's home tab shows — `effectiveCenterActive`).
-  const centerActive = (selectedThreadId ? activeRef(sessions[selectedThreadId])?.id : null) ?? HOME_TAB;
-  // The working-tree file the shown tab edits, if it does.
-  const shownFilePath = diskFilePath(centerActive);
-  /** Make the tab showing `id` active in the shown thread (`HOME_TAB`:
-   *  none). An id no tab shows changes nothing. */
-  const setCenterActive = useCallback(
-    (next: string | ((prev: string) => string)) => {
-      if (!selectedThreadId) return;
-      updateSession(selectedThreadId, (session) => {
-        const now = activeRef(session)?.id ?? HOME_TAB;
-        const id = typeof next === "function" ? next(now) : next;
-        if (id === now) return session;
-        if (id === HOME_TAB) return activate(session, null);
-        const slot = slotShowing(session, id);
-        return slot ? activate(session, slot) : session;
-      });
-    },
-    [selectedThreadId, updateSession],
-  );
-  /** Show `ref` in the shown thread: the tab showing it (its ref
-   *  refreshed), else a new one; it becomes active. */
-  const openTab = useCallback(
-    (ref: TabRef, opts: { historyState?: Record<string, unknown> } = {}) => {
-      if (!selectedThreadId) return;
-      const entry = opts.historyState ? { ref, historyState: opts.historyState } : { ref };
-      updateSession(selectedThreadId, (session) => sessionOpen(session, entry, { pinned: !!ref.pinned }));
-    },
-    [selectedThreadId, updateSession],
-  );
+  // The window's tabs: every thread's session of tabs, the shown thread's
+  // active tab and the operations on its tabs.
+  const {
+    sessions,
+    sessionsLoaded,
+    updateSession,
+    sessionsKept,
+    pageTitles,
+    setPageTitle,
+    dirtyTabs,
+    tabSavesRef,
+    tabFindsRef,
+    editingSetterFor,
+    tabActions,
+    actionsSetterFor,
+    centerActive,
+    pageTabsForActiveThread,
+    effectiveCenterActive,
+    shownFilePath,
+    setCenterActive,
+    centerBeside,
+    setCenterBeside,
+    openTab,
+    pendingSessionRef,
+    setPendingSessionTick,
+    handleReorderCenterTabs,
+    openingThread,
+    closePageTab,
+    liveItems,
+    setLiveItems,
+    handleStepOrigin,
+    handleGoBack,
+    handleGoForward,
+  } = useWindowTabs({ selectedThreadId, stream, threadStates, selectedThreadSessions });
+  // Where a ref opens: its tab, its file, a thread or a stream.
+  const {
+    closeDiffTab,
+    extensionsRef,
+    handleCloseOpenFile,
+    handleNavigateInTab,
+    handleOpenDiffInTab,
+    handleOpenExternalUrl,
+    handleOpenFile,
+    handleOpenPage,
+    handleOpenPageRef,
+    openRefRef,
+    openSearchHit,
+  } = useWindowOpeners({
+    stream,
+    selectedThread,
+    selectedThreadSessions,
+    setError,
+    streams: { threadStatesRef, selectThread: handleSelectThread, streamCreated: handleStreamCreated, switchStream: handleSwitch },
+    tabs: { sessions, updateSession, openTab, closePageTab, setCenterActive, pendingSessionRef, setPendingSessionTick },
+  });
 
   // A failed operation from no named thread is the one on screen's.
   useEffect(() => {
@@ -725,260 +263,11 @@ export function App() {
   useResourcesLoader();
   useBackendSubscriptions({
     threadStatesRef,
-    setWorkspaceContext,
-    setThreadStates,
-    setStreams,
-    setStream,
+    ...windowStreamsLive,
     setSessionStatuses,
   });
 
-  // Imperative shortcut for opening the New-Task modal. When PlanPane is
-  // mounted it registers its openCreateModal here; the menu handler can
-  // call this ref directly instead of going through setState + useEffect.
-  // Needed because menu clicks arrive as IPC messages (not "discrete user
-  // input events"), so React doesn't auto-flush effects for them — the
-  // useEffect chain can stall for 10+ seconds before committing. Direct
-  // ref call inside flushSync sidesteps the scheduler entirely.
-  // Forward ref so the forms and offers (declared above handleOpenPage) can
-  // route through the same page-tab opener used by every other caller.
-  // The ref is populated in a useEffect after handleOpenPage is defined.
-  const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
-  // The window's context keys: what a command's `when` reads
-  // (`oxplow_domain::when::CONTEXT_KEYS`; `.context/commands.md`).
-  const treeDirty = useTreeDirty(stream?.id);
-  // The agent terminals a pane shows running: Restart Terminal is offered
-  // for these only (an ended pane has Start Again).
-  const liveTerminals = useLiveTerminals();
-  const whenContext = useMemo<WhenContext>(
-    () => ({
-      streamShown: !!stream,
-      streamKind: stream?.kind ?? "",
-      threadShown: !!selectedThread,
-      fileShown: shownFilePath !== null,
-      pageDirty: !!centerActive && !!dirtyTabs[centerActive],
-      pageKind: centerActive ? kindForTabId(centerActive) : "",
-      agentTerminalLive: liveTerminals.has((centerActive && refFromTabId(centerActive)?.id) || ""),
-      vcsEnabled: !!workspaceContext.vcsEnabled,
-      treeDirty,
-      shellAvailable: shellAvailable(),
-      enabledAgents: harnesses
-        .filter((h) => h.enabled)
-        .map((h) => h.id)
-        .join(","),
-    }),
-    [centerActive, dirtyTabs, harnesses, liveTerminals, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
-  );
-  // Run a Git-menu mutation (pull/push) as a background task and surface
-  // any failure the same way the Git Dashboard does: record an op-error
-  // and offer a toast that opens its detail page. There's no page focus
-  // here, so we route through handleOpenPageRef rather than onOpenPage.
-  const runGitMenuOp = useCallback(
-    async (
-      label: string,
-      command: string,
-      action: () => Promise<GitOpKickoff>,
-    ) => {
-      const result = await awaitGitOp(await action());
-      if (result.success) return;
-      // Surfaces globally (toast + status-bar indicator) via recordOpError.
-      recordOpError(opErrorOf(label, command, result));
-    },
-    [],
-  );
-  /** One of the window's own forms — a command's `ui.form` that isn't a
-   *  tab id: what gathers New Thread's and Commit's input. */
-  const openForm = useCallback((name: string) => {
-    switch (name) {
-      case "new-thread":
-        // The Navigator owns thread creation (inline title + agent picker).
-        if (stream) requestNewThread(stream.id);
-        return;
-      default:
-        recordOpError({ label: "Open form", message: `the window has no form \`${name}\`` });
-    }
-  }, [stream, workspaceContext.vcsEnabled]);
-  const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
-  // The native menu and its recent projects are the shell's: a browser
-  // window has neither to ask for.
-  useEffect(() => {
-    if (!shellAvailable()) return;
-    listRecentProjects()
-      .then(setRecentProjects)
-      .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
-  }, []);
-  // Cancel the native WKWebView context menu everywhere except inputs,
-  // contenteditable, Monaco, and the terminal (see context-menu.ts).
-  useEffect(() => installContextMenuSuppressor(), []);
-  // A toast's Open link opens a page the way a command offer does.
-  useEffect(() => {
-    setPersonCommandsOpener((tabId) => {
-      const ref = refFromTabId(tabId);
-      if (ref) handleOpenPageRef.current?.(ref);
-    });
-    return () => setPersonCommandsOpener(null);
-  }, []);
-  // What the command bus offers a person (Pull, New Task, …): search lists
-  // them with the app's own commands, and a shortcut may run one.
-  const personSpecs = usePersonCommands();
-  const offerCtx = useMemo(
-    () => ({ streamId: stream?.id ?? null, threadId: selectedThreadId ?? null, when: whenContext }),
-    [stream?.id, selectedThreadId, whenContext],
-  );
-  const offerDeps = useMemo<OfferDeps>(
-    () => ({
-      openPage: (tabId) => {
-        const ref = refFromTabId(tabId);
-        if (ref) handleOpenPageRef.current?.(ref);
-      },
-      openForm,
-      run: (label, id, input) => {
-        // One the window hosts runs here: nothing goes to the daemon.
-        const spec = personSpecs.find((s) => s.id === id);
-        const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
-        if (local) {
-          return local
-            .then(({ result }): CommandOutcome => ({ result, command_run_id: null, event_id: null, inverse: null }))
-            .catch((e: unknown) => {
-              recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
-              return null;
-            });
-        }
-        return personCommands.run(label, id, input);
-      },
-      runInBackground: (label, id, input) =>
-        void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
-      openAfter: (id, result) =>
-        commandOpenAfter(id, result).catch((e: unknown) => {
-          recordOpError({ label: "Open what it made", message: e instanceof Error ? e.message : String(e) });
-          return null;
-        }),
-      }),
-    [personSpecs, runGitMenuOp, openForm],
-  );
-  const offers = useMemo(() => commandOffers(personSpecs, offerCtx, offerDeps), [personSpecs, offerCtx, offerDeps]);
-  // A ref's menus (its page's, its rows') run offers the same way.
-  useEffect(() => {
-    setRefOfferHost({ ctx: offerCtx, deps: offerDeps });
-    return () => setRefOfferHost(null);
-  }, [offerCtx, offerDeps]);
-  // The menu bar (File, Edit) and what search lists: the bus's offers,
-  // and the shell's project commands.
-  // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
-  // the layout's provider, hands them up as the layout changes).
-  const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
-  const menuGroups = useMemo(
-    () => [...buildMenuBar(offers), viewMenu(railMenu.panels, railMenu.toggle)],
-    [offers, railMenu],
-  );
-  // The stars the thread sees (a page's star says where it is starred).
-  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
-  // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
-  // panels' provider, hands it up as the pane's run changes).
-  const [goRows, setGoRows] = useState<GoRow[]>([]);
-  const nativeMenuSnapshots = useMemo(
-    () => buildNativeMenuSnapshots(menuGroups, recentProjects, goRows),
-    [menuGroups, recentProjects, goRows],
-  );
 
-  // The launcher (QuickOpen) is the single discovery surface — pages,
-  // files, commands, and body search in one box — and has exactly one
-  // shortcut: Cmd/Ctrl+P (`oxplow.window.quick_open`'s). The old
-  // Cmd+K / Cmd+Shift+F aliases were removed: one door is
-  // clearer, and Cmd+P is the established dev quick-open reflex. Monaco
-  // doesn't bind Cmd+P, so no capture-phase interception is needed — the
-  // menu accelerator opens the launcher even when the editor is focused.
-
-  useEffect(() => {
-    // Runs in both Electron and browser modes. In Electron the native
-    // menu's accelerator should also fire for the same command, but the
-    // handler is idempotent (an offer's run → modal setters are no-ops
-    // when the modal is already open) so a double-dispatch is harmless
-    // — and not relying on the native menu means Cmd+Shift+N works even
-    // when the menu snapshot is momentarily stale at startup.
-    function handleKeyDown(event: KeyboardEvent) {
-      // A command's `ui.shortcut`; typing in a field keeps it unless it
-      // runs while typing (Save, Find, Quick Open do — a user mid-way
-      // through a description shouldn't lose it to New Task's form).
-      const offer = offerForShortcut(offers, event, isEditableTarget(event.target));
-      if (offer) {
-        event.preventDefault();
-        offer.run();
-        return;
-      }
-      // Back, Forward, and Up / Down the page's origin, on the active tab.
-      const key = navigationKey(event, event.target);
-      if (!key) return;
-      const keys = navKeysRef.current;
-      event.preventDefault();
-      if (key === "back") keys.back();
-      else if (key === "forward") keys.forward();
-      else if (key === "mode") keys.mode();
-      else keys.step(key === "up" ? -1 : 1);
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [offers]);
-
-  useEffect(() => {
-    if (!shellAvailable()) return;
-    void desktopBridge().setNativeMenu(nativeMenuSnapshots).catch((error) => {
-      logUi("error", "failed to update native menu", { error: String(error) });
-    });
-  }, [nativeMenuSnapshots]);
-
-  useEffect(() => {
-    return desktopBridge().onMenuCommand((commandId: string) => {
-      // Dynamic "Open Recent ▸ <project>" entries aren't menu items:
-      // `oxplow.project.open`'s operation opens the trailing path in a
-      // new window. A recent whose `.oxplow/` has since been deleted
-      // errors rather than re-creating it.
-      if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
-        const path = commandId.slice(OPEN_RECENT_PREFIX.length);
-        void Promise.resolve(
-          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human", call: null }),
-        ).catch((e: unknown) => {
-          recordOpError({
-            label: "Open project",
-            message: e instanceof Error ? e.message : String(e),
-          });
-        });
-        return;
-      }
-      const goUri = goUriFromMenuId(commandId);
-      if (goUri !== null) {
-        const ref = refFromTabId(goUri);
-        if (ref) flushSync(() => handleOpenPageRef.current?.(ref));
-        return;
-      }
-      if (commandId === INSTALL_CLI_ID) {
-        installCli().then(
-          (done) => showToast({ message: `Installed ${done.path}. ${done.hint ?? ""}`.trim() }),
-          (e: unknown) => recordOpError({ label: "Install command line", message: e instanceof Error ? e.message : String(e) }),
-        );
-        return;
-      }
-      const command = menuItemById(menuGroups, commandId);
-      if (!command || !command.run) return;
-      // React 18 only auto-flushes effects synchronously for discrete
-      // user input events (click, keydown on webContents). IPC messages
-      // from the main process don't qualify, so setState calls made in
-      // this callback stay queued until the next real input event wakes
-      // the scheduler — users reported menu dispatches stalling 10+
-      // seconds. flushSync commits inside the callback. The commands
-      // that open modals (plan.newTask, etc.) additionally go
-      // through an imperative ref registered by the target pane so the
-      // modal setState also commits here rather than via useEffect.
-      const run = command.run;
-      flushSync(() => { void run(); });
-    });
-  }, [menuGroups]);
-
-  const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-  const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
-  const effectiveCenterActive = availableCenterIds.has(centerActive)
-    ? centerActive
-    : homeTabOf(pageTabsForActiveThread);
 
   // Feed the stall watchdog (logger.ts) the coarse "what's on screen"
   // context so a `main thread stalled` WARN names the active page + the
@@ -1074,101 +363,9 @@ export function App() {
     return () => clearTimeout(deferred);
   }, [effectiveCenterActive, selectedThreadId]);
 
-  // Report what this window shows — every thread's tabs and the one
-  // selected in each, the thread it shows, its focus and visibility, and
-  // the shown page's published detail (a page's params) — so an agent's
-  // `list_tabs` / `get_open_page` see what the person sees. Best-effort
-  // and debounced; see tabs/tabReport.ts and tabs/openPageDetail.ts.
-  const [pageDetailTick, setPageDetailTick] = useState(0);
-  useEffect(() => getPageDetailStore().subscribe(() => setPageDetailTick((t) => t + 1)), []);
-  const [pageRunsTick, setPageRunsTick] = useState(0);
-  useEffect(() => windowPageRuns().subscribeRunIds(() => setPageRunsTick((t) => t + 1)), []);
-  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
-  const [windowVisible, setWindowVisible] = useState(() => document.visibilityState === "visible");
-  useEffect(() => visitTimerRef.current?.setVisible(windowVisible), [windowVisible]);
-  useEffect(() => {
-    const focus = () => setWindowFocused(true);
-    const blur = () => setWindowFocused(false);
-    const visibility = () => setWindowVisible(document.visibilityState === "visible");
-    window.addEventListener("focus", focus);
-    window.addEventListener("blur", blur);
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      window.removeEventListener("focus", focus);
-      window.removeEventListener("blur", blur);
-      document.removeEventListener("visibilitychange", visibility);
-    };
-  }, []);
-  // The last thing told, repeated while nothing changes: the backend forgets
-  // a window that stops reporting (`client_reports::FORGET_AFTER_MS`), and an
-  // idle window with tabs open is still there.
-  const lastTabReportRef = useRef<ReturnType<typeof buildTabReport> | null>(null);
-  const tabReporter = useMemo(
-    () => createTabReporter((report) => reportTabs(report).then((answer) => windowPageRuns().reopen(answer.missingRuns))),
-    [],
-  );
-  useEffect(() => {
-    const beat = setInterval(() => {
-      if (lastTabReportRef.current) {
-        const report = { ...lastTabReportRef.current, runs: windowPageRuns().runIds() };
-        lastTabReportRef.current = report;
-        tabReporter.send(report);
-      }
-    }, TAB_REPORT_HEARTBEAT_MS);
-    return () => clearInterval(beat);
-  }, [tabReporter]);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const ctx = visitContextRef.current;
-      const shown = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
-      const report = buildTabReport({
-        client: getUiClientId(),
-        runs: windowPageRuns().runIds(),
-        focused: windowFocused,
-        visible: windowVisible,
-        shownThread: selectedThreadId ?? null,
-        sessions,
-        titleOf: (tab) => tabLabelByIdRef.current[tab.id] ?? pageTitles[tab.id],
-        detail: shown ? getPageDetailStore().get(shown.id) : null,
-      });
-      lastTabReportRef.current = report;
-      tabReporter.send(report);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, pageRunsTick, windowFocused, windowVisible, tabReporter]);
-
-  const closeDiffTab = (id: string) => closePageTab(id);
 
 
-  const handleOpenKnowledge = useCallback((store: string, id: string) => {
-    const tid = selectedThread?.id ?? null;
-    if (!tid) return;
-    openTab(knowledgePageRef(store, id));
-    const sid = stream?.id ?? null;
-    if (sid) {
-      void recordUsage({
-        kind: "knowledge",
-        key: knowledgeUri(store, id),
-        event: "open",
-        streamId: sid,
-        threadId: tid,
-      }).catch(() => {});
-    }
-  }, [stream?.id, selectedThread?.id, openTab]);
 
-  /**
-   * Open an http(s) URL as an in-app sandboxed external-url tab.
-   * Validates through the scheme allowlist; a URL it refuses opens in
-   * the system browser, so the person still gets to follow the link.
-   */
-  const handleOpenExternalUrl = useCallback((rawUrl: string) => {
-    const verdict = classifyExternalUrl(rawUrl);
-    if (!verdict.ok) {
-      openInBrowser(rawUrl);
-      return;
-    }
-    handleOpenPageRef.current?.(externalUrlRef(verdict.url));
-  }, []);
 
   // Open In ▸ (`openIn.ts`): the stream's worktree, oxplow's web tab, and a
   // new terminal at a directory, shown once it is open.
@@ -1216,259 +413,11 @@ export function App() {
     };
   }, [stream, handleOpenExternalUrl]);
 
-  /** Open the commit page for a wikilink-resolved commit SHA. */
-  const handleOpenCommit = useCallback((sha: string) => {
-    if (!sha) return;
-    handleOpenPageRef.current?.(gitCommitRef(sha));
-  }, []);
 
-  const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
-    // The session's tabs are the strip's order for every kind; pinned tabs
-    // never move (the strip won't drag them), and `reconcileSessionTabs`
-    // keeps them first.
-    if (selectedThread?.id) {
-      updateSession(selectedThread.id, (session) =>
-        sessionReorder(session, orderedIds.flatMap((id) => slotShowing(session, id) ?? [])),
-      );
-    }
-  }, [stream, selectedThread?.id, updateSession]);
 
-  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
-  // A thread's agent-session tabs follow its open sessions (their rows):
-  // each open one's tab leads, a closed one's goes. A thread seen here for
-  // the first time (no tab list yet — they persist) with no session opens
-  // the session picker, where the person chooses which agent to start.
-  // The thread whose first tabs are still being opened: the window isn't
-  // ready for a navigate until they are, or they would push it aside.
-  const [openingThread, setOpeningThread] = useState<string | null>(null);
-  // The threads whose stored tabs were checked against their open sessions.
-  const checkedStored = useRef(new Set<string>());
-  useEffect(() => {
-    if (!selectedThreadId || selectedThreadSessions === null) return;
-    // Tabs the browser kept from before a project reset can name sessions the
-    // thread never had (a new thread gets an old one's id): forget them once,
-    // when the thread is first seen, and open it as a new thread.
-    const stored = sessions[selectedThreadId];
-    if (!checkedStored.current.has(selectedThreadId)) {
-      checkedStored.current.add(selectedThreadId);
-      if (stored !== undefined && storedSessionIsStale(stored, selectedThreadSessions)) {
-        forgetSession(selectedThreadId);
-        return;
-      }
-    }
-    if (sessions[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
-      const threadId = selectedThreadId;
-      updateSession(threadId, (session) => session);
-      setOpeningThread(threadId);
-      void openNewThread(threadId).finally(() => setOpeningThread((now) => (now === threadId ? null : now)));
-      return;
-    }
-    updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
-  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession, forgetSession]);
 
-  async function openNewThread(threadId: string) {
-    try {
-      const opening = await newThreadOpening();
-      if (opening.tabs.length > 0) {
-        updateSession(threadId, (session) =>
-          refsOf(session).some((t) => isPage(t, "new-session")) ? session : setStrip(session, [...opening.tabs, ...refsOf(session)]),
-        );
-      }
 
-    } catch (error) {
-      // Couldn't read the choice or start the agent: ask instead.
-      logUi("warn", "opening a new thread failed; showing the session picker", { error: String(error) });
-      updateSession(threadId, (session) =>
-        refsOf(session).some((t) => isPage(t, "new-session")) ? session : setStrip(session, [newSessionRef(), ...refsOf(session)]),
-      );
-    }
-  }
-
-  const handleOpenPage = useCallback((ref: TabRef) => {
-    // Every kind not handled below opens as a per-thread page tab.
-    const openAsPageTab = () => openTab(ref);
-    // Page-visit recording lives in the central activation effect
-    // below — it fires whenever `effectiveCenterActive` resolves to a
-    // new TabRef, regardless of which handler caused the activation.
-    const handlers: OpenHandlers = {
-      "oxplow/agent_session": (ref) => {
-        // Its tab is there while it's open on this thread
-        // (`reconcileSessionTabs`). A closed session, or another thread's,
-        // has none: its transcript opens instead, with Reopen on it.
-        const sessionId = paramOf(ref.id, "id");
-        // The transcript page takes the session's bare id (`ses3`).
-        const transcript = () =>
-          handleOpenPageRef.current?.({ id: pageUri("session-transcript", { session: sessionId ?? keyOf(ref.id) ?? ref.id }) });
-        if (sessionId && selectedThreadSessions?.some((candidate) => candidate.id === sessionId)) {
-          setCenterActive(ref.id);
-        } else if (sessionId && selectedThread) {
-          // A session opened a moment ago (a form's `open_after`) isn't in
-          // the window's list yet: read the model, and show its tab once the
-          // list has it; a closed one, or another thread's, shows its transcript.
-          void readThreadSessions(selectedThread.id).then(({ sessions: open }) => {
-            if (open.some((candidate) => candidate.id === sessionId)) {
-              pendingSessionRef.current = sessionId;
-              setPendingSessionTick((tick) => tick + 1);
-            }
-            else transcript();
-          });
-        } else {
-          transcript();
-        }
-      },
-      "oxplow/symbol": (ref) => {
-        void openSymbol(identityOf(ref.id) ?? ref.id);
-      },
-      "oxplow/file": (ref) => {
-        const payload = fileOf(ref);
-        if (!payload?.path) return;
-        // The working tree's file is read first (a path that isn't one
-        // opens no tab); the line it lands on is its view (`#lines=`).
-        if (diskFilePath(ref.id) !== null) {
-          void handleOpenFile(payload.path, ref);
-          return;
-        }
-        // A file at a revision, or on another filesystem (the running
-        // extensions'), reads itself.
-        openTab(ref);
-      },
-    };
-    // A page opened again in another view (a diff at another line) is the
-    // tab already showing it, in that view.
-    (openHandlerFor(handlers, typeOf(ref.id)) ?? openAsPageTab)(ref);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenFile, handleOpenKnowledge, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
-
-  /**
-   * Open the ref `ref` (of any kind) where its kind's page says
-   * (`tabs/openRef.ts`, by way of `refOpener`): a tab through `open`, the
-   * thread or stream it names, or an error. The one path every link to a
-   * ref takes — a page's links (`PageNavigation.openRef`), the rail and
-   * palette (the window's opener), a search hit. Kept in a ref so the
-   * page contexts built in a memo always call the latest.
-   */
-  const openRefRef = useRef<(ref: string, how: import("./tabs/openRef.js").OpenHow, open: import("./tabs/openRef.js").RefHost["open"], closePage?: () => void) => void>(() => {});
-  const extensionsRef = useRef<Extension[] | null>(null);
-  openRefRef.current = (ref, how, open, closePage) => {
-    void openRefAt(ref, how, {
-      // The daemon is asked which page draws the tab before the tab is
-      // there, so it usually has an answer when it first draws.
-      open: (tab, h) => {
-        if (extensionsRef.current && drawnByRenderer(tab.id)) {
-          void renderersCache.prefetch(extensionsRef.current, tab.id, stream?.id ?? null);
-        }
-        open(tab, h);
-      },
-      closePage,
-      showThread: async (thread) => {
-        const streamId = streamOfThread(threadStatesRef.current, thread);
-        if (!streamId) return false;
-        await handleSelectThread(streamId, thread);
-        return true;
-      },
-      showStream: async (id) => {
-        if (!threadStatesRef.current[id]) {
-          // A stream just made (New Stream) isn't in the window's state yet:
-          // read it and take it in as the create flow always did.
-          const made = (await listStreams()).find((candidate) => candidate.id === id);
-          if (!made) return false;
-          await handleStreamCreated(made);
-          return true;
-        }
-        if (stream?.id !== id) await handleSwitch(id);
-        return true;
-      },
-      failed: (message) => recordOpError({ label: "Open a reference", message }),
-    });
-  };
-  useEffect(() => {
-    setWindowRefOpener((ref, how) => openRefRef.current(ref, how, (tab) => handleOpenPageRef.current?.(tab)));
-    return () => setWindowRefOpener(null);
-  }, []);
-
-  /** Navigate to a unified-search hit: wherever its ref opens. */
-  const openSearchHit = useCallback((hit: import("./api.js").SearchHit) => {
-    openRefRef.current(hit.uri, { newTab: true }, (tab) => handleOpenPage(tab));
-  }, [handleOpenPage]);
-
-  /** Close the shown thread's tab showing `id`: its title goes with it,
-   *  and a file's buffer once no tab shows the file (`buffers.retainOnly`). */
-  const closePageTab = useCallback((id: string) => {
-    if (!selectedThreadId) return;
-    updateSession(selectedThreadId, (session) => {
-      const slot = slotShowing(session, id);
-      return slot ? sessionClose(session, slot) : session;
-    });
-    setPageTitles((prev) => {
-      if (!(id in prev)) return prev;
-      const { [id]: _drop, ...rest } = prev;
-      return rest;
-    });
-  }, [selectedThreadId, updateSession]);
-
-  /** The collection a page is opened from, as an entry keeps it. */
-  const originOf = (origin: Origin | undefined, ref: TabRef): Origin | undefined => {
-    if (!origin) return undefined;
-    // A live origin has no items; it finds its place when it is resolved.
-    if (origin.live) return origin;
-    const at = origin.items.findIndex((item) => item.ref.id === ref.id);
-    const index = at !== -1 ? at : origin.index;
-    if (index < 0 || index >= origin.items.length) return undefined;
-    return { ...origin, index };
-  };
-
-  /**
-   * Browser-style in-tab navigation: the tab showing `currentTabId` goes
-   * to `ref`, pushed (Back returns) or in its place with `replace`. A tab
-   * id no tab shows opens `ref` in a new tab.
-   */
-  const handleNavigateInTab = useCallback((
-    currentTabId: string,
-    ref: TabRef,
-    origin?: Origin,
-    replace = false,
-  ) => {
-    if (!selectedThreadId) return;
-    const slot = slotShowing(sessions[selectedThreadId] ?? { tabs: [], active: null, mru: [], next: 1 }, currentTabId);
-    // A symbol isn't a page (it opens its file at its line), and an agent
-    // session has its own tab: replacing, the page they replace closes.
-    const resource = typeOf(ref.id);
-    if (resource === "oxplow/symbol" || resource === "oxplow/agent_session" || !slot) {
-      if (replace && slot) closePageTab(currentTabId);
-      handleOpenPage(ref);
-      return;
-    }
-    updateSession(selectedThreadId, (session) =>
-      sessionNavigate(session, slot, { ref, from: originOf(origin, ref) }, { replace }),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closePageTab, handleOpenPage, selectedThreadId, sessions, updateSession]);
-
-  /** Open a diff in the tab showing `currentTabId`; Back returns to the
-   *  page it came from. */
-  const handleOpenDiffInTab = useCallback((currentTabId: string, spec: DiffSpec, origin?: Origin) => {
-    handleNavigateInTab(currentTabId, diffRef(spec), origin);
-  }, [handleNavigateInTab]);
-
-  /** Show item `index` of the collection the tab was opened from, in
-   *  place: history untouched. */
-  // The pages a live origin (a viz node's link column) lists now, by tab slot.
-  const [liveItems, setLiveItems] = useState<Record<string, { key: string; items: OriginItem[] }>>({});
-  const liveItemsRef = useRef(liveItems);
-  liveItemsRef.current = liveItems;
-  const handleStepOrigin = useCallback((slot: string, index: number) => {
-    if (!selectedThreadId) return;
-    updateSession(selectedThreadId, (session) => stepOrigin(session, slot, index, liveItemsOf(liveItemsRef.current, slot, currentEntry(session.tabs.find((t) => t.slot === slot)!).from)));
-  }, [selectedThreadId, updateSession]);
-
-  const handleGoBack = useCallback((slot: string) => {
-    if (selectedThreadId) updateSession(selectedThreadId, (session) => sessionBack(session, slot));
-  }, [selectedThreadId, updateSession]);
-
-  const handleGoForward = useCallback((slot: string) => {
-    if (selectedThreadId) updateSession(selectedThreadId, (session) => sessionForward(session, slot));
-  }, [selectedThreadId, updateSession]);
 
   // What the navigation keys do now: the active tab's Back, Forward and
   // step through its origin. Read at the key press, so the handler below
@@ -1507,638 +456,302 @@ export function App() {
     };
   })();
 
-  // The window as a command host (`clientHost.ts`): what only it can do,
-  // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
-  // the agent's own thread (never switching the thread or stream shown).
-  const windowHandlers = useMemo<ClientHandlers>(() => {
-    const threadOf = (ctx: ClientCallContext) => {
-      const thread = ctx.threadId ?? selectedThreadId;
-      if (!thread) throw new Error("no thread is shown");
-      return thread;
-    };
-    const refOf = (input: unknown) => {
-      const id = (input as { uri?: unknown } | null)?.uri;
-      if (typeof id !== "string") throw new Error("`uri` is a page's URI");
-      const ref = refFromTabId(id);
-      if (!ref) throw new Error(`\`${id}\` isn't a page's ref`);
-      return ref;
-    };
-    const open = async (input: unknown, ctx: ClientCallContext, focus: boolean) => {
-      const thread = threadOf(ctx);
-      const ref = refOf(input);
-      if (thread === selectedThreadId && focus) {
-        handleOpenPageRef.current?.(ref);
-        return { uri: ref.id, focused: true };
-      }
-      // A working-tree file is read first: a path that isn't a file
-      // opens nothing.
-      const path = diskFilePath(ref.id);
-      const fileStream = streams.find((candidate) => candidate.id === streamOfThread(threadStates, thread));
-      if (path !== null && fileStream) {
-        const buffer = await buffers.open(fileStream, path);
-        if (buffer.state === "missing") throw new Error(`\`${path}\` isn't a file in the working tree`);
-        if (buffer.state === "error") throw new Error(buffer.error ?? `couldn't read \`${path}\``);
-      }
-      updateSession(thread, (session) => {
-        const opened = sessionOpen(session, { ref });
-        // Opened without focus, it waits behind what the thread shows.
-        return focus ? opened : { ...opened, active: session.active, mru: [...session.mru, ...opened.mru.filter((m) => !session.mru.includes(m))] };
-      });
-      return { uri: ref.id, focused: focus };
-    };
-    return {
-      "editor.write": {
-        // The file `uri` names, else the one the thread shows.
-        save: async (input, ctx) => {
-          const thread = threadOf(ctx);
-          const id = (input as { uri?: unknown } | null)?.uri;
-          const shown = thread === selectedThreadId ? centerActive : activeRef(sessions[thread])?.id;
-          const tab = typeof id === "string" ? id : shown;
-          const path = tab ? diskFilePath(tab) : null;
-          // The page shown that isn't a file saves through its own Save
-          // (`useTabEditing`): a knowledge page's draft, say.
-          const ownSave = typeof id !== "string" && thread === selectedThreadId && tab ? tabSavesRef.current[tab] : undefined;
-          if (path === null && ownSave) {
-            ownSave();
-            return { saved: tab };
-          }
-          if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "nothing to save on the page shown");
-          const streamId = streamOfThread(threadStates, thread);
-          if (!streamId) throw new Error(`no stream has thread \`${thread}\``);
-          await buffers.save(streamId, path, ctx.call);
-          return { saved: path };
-        },
-      },
-      "window.show": {
-        find: () => {
-          // The page shown finds in what it edits (`useTabEditing`).
-          const find = tabFindsRef.current[centerActive];
-          if (!find) throw new Error("nothing to find in on the page shown");
-          find();
-          return null;
-        },
-        // Past the window (the daemon refuses an agent): the person's
-        // browser, their clipboard.
-        open_url: async (input) => {
-          const url = (input as { url?: unknown } | null)?.url;
-          if (typeof url !== "string") throw new Error("`url` is a web address");
-          await openInSystemBrowser(url);
-          return null;
-        },
-        copy_text: async (input) => {
-          const text = (input as { text?: unknown } | null)?.text;
-          if (typeof text !== "string") throw new Error("`text` is the text to copy");
-          await navigator.clipboard.writeText(text);
-          return { copied: text.length };
-        },
-        quick_open: (input) => {
-          if (!stream) throw new Error("no stream is shown");
-          const query = (input as { query?: unknown } | null)?.query;
-          setQuickOpenQuery(typeof query === "string" ? query : "");
-          setQuickOpenVisible(true);
-          return null;
-        },
-        // Takes the person to a ref (`tabs/navigation.ts`): the page opens
-        // and is focused in the thread it belongs to, then the window
-        // switches to that stream and thread.
-        navigate: async (input) => {
-          const plan = await planNavigation(input, threadStates, stream?.id ?? null, undefined, {
-            current: async () => (await getCurrentStream()).id,
-            threads: async (id) => getThreadState(id),
-          });
-          const { replace, new_tab: newTab } = (input ?? {}) as { replace?: unknown; new_tab?: unknown };
-          if (plan.page) {
-            if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);
-            // As a browser follows a link: the shown tab goes there (Back
-            // returns, or not with `replace`); `new_tab` gives it a tab of
-            // its own.
-            const shownTab = activeRef(sessions[plan.threadId])?.id;
-            if (newTab !== true && shownTab && plan.threadId === selectedThreadId) {
-              handleNavigateInTab(shownTab, plan.page, undefined, replace === true);
-            } else {
-              await open({ uri: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
-            }
-          }
-          if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
-          if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
-          return { opened: plan.page?.id ?? null, stream: plan.streamId };
-        },
-      },
-      "agent_terminal.write": {
-        restart: async (input, ctx) => {
-          if (ctx.actor !== "human") throw new Error("Only a person can restart an agent terminal.");
-          const requested = (input as { uri?: string } | null)?.uri;
-          const uri = requested ?? effectiveCenterActive;
-          if (typeOf(uri) !== "oxplow/agent_session") throw new Error("No agent terminal is selected.");
-          await desktopBridge().restartAgentTerminal(uri);
-          return null;
-        },
-      },
-      // It fills the shown thread's agent input, unsent.
-      "agent_input.write": {
-        draft: (input) => {
-          const text = (input as { text?: unknown } | null)?.text;
-          if (typeof text !== "string") throw new Error("`text` is the draft");
-          insertIntoAgent(text);
-          return null;
-        },
-      },
-      // The app shell's: projects and windows.
-      "projects.write": {
-        create: async () => {
-          await pickAndCreateProject();
-          return null;
-        },
-        open: async (input) => {
-          const { path, new_window } = (input ?? {}) as { path?: unknown; new_window?: unknown };
-          if (typeof path === "string") await openProject(path, new_window === true);
-          else await pickAndOpenProject(new_window === true);
-          return null;
-        },
-      },
-      "tabs.write": {
-        open: (input, ctx) => open(input, ctx, false),
-        focus: (input, ctx) => open(input, ctx, true),
-        close: (input, ctx) => {
-          const thread = threadOf(ctx);
-          const ref = refOf(input);
-          if (thread === selectedThreadId) {
-            closePageTab(ref.id);
-          } else {
-            updateSession(thread, (session) => {
-              const slot = slotShowing(session, ref.id);
-              return slot ? sessionClose(session, slot) : session;
-            });
-          }
-          return { uri: ref.id, closed: true };
-        },
-      },
-    };
-    // getFileSession / mutateFileSession are plain functions over the
-    // session state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, effectiveCenterActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
-  const windowHandlersRef = useRef(windowHandlers);
-  windowHandlersRef.current = windowHandlers;
 
-  // Enforce the page-tab cap on the shown thread: past MAX_PAGE_TABS the
-  // least recently used tabs close (`evictions`). The active tab, pinned
-  // ones and files with unsaved changes stay (a soft cap never discards
-  // work). Eviction is closePageTab — the same cleanup a manual close does.
-  useEffect(() => {
-    if (!selectedThreadId) return;
-    const session = sessions[selectedThreadId];
-    if (!session) return;
-    const dirty = (id: string) => {
-      const path = diskFilePath(id);
-      return !!dirtyTabs[id] || (path !== null && !!stream && isDirty(buffers.get(stream.id, path)));
-    };
-    const victims = evictions(session, MAX_PAGE_TABS, (t) => dirty(currentEntry(t).ref.id));
-    for (const slot of victims) {
-      const tab = session.tabs.find((t) => t.slot === slot);
-      if (tab) closePageTab(currentEntry(tab).ref.id);
-    }
-  }, [sessions, selectedThreadId, stream, closePageTab, dirtyTabs]);
 
-  // A file's buffer lives while a tab of any thread shows the file (any
-  // step of its history): the rest close, their models disposed. Not
-  // until every thread with tabs is placed in a stream, so no buffer is
-  // dropped for a thread not yet loaded.
-  useEffect(() => {
-    const keep: { stream: string; path: string }[] = [];
-    for (const [thread, session] of Object.entries(sessions)) {
-      const files = session.tabs.flatMap((tab) => tab.entries.flatMap((entry) => diskFilePath(entry.ref.id) ?? []));
-      if (files.length === 0) continue;
-      const streamId = streamOfThread(threadStates, thread);
-      if (!streamId) return;
-      for (const path of files) keep.push({ stream: streamId, path });
-    }
-    buffers.retainOnly(keep);
-  }, [sessions, threadStates]);
 
-  // Keep the forward ref in sync with the latest handleOpenPage. Used by
-  // the forms and offers (declared above handleOpenPage) so menu/keyboard
-  // dispatches route through the same page-tab opener.
-  useEffect(() => {
-    handleOpenPageRef.current = handleOpenPage;
-  }, [handleOpenPage]);
-
-  // The terminal link provider hands us absolute paths (resolved against
-  // stream.worktree_path); the open-file path takes a workspace-relative
-  // one, so trim the worktree prefix when present.
-  const openTerminalPath = useCallback(
-    (absPath: string, line?: number, column?: number) => {
-      if (!stream) return;
-      const wt = stream.worktree_path.endsWith("/") ? stream.worktree_path.slice(0, -1) : stream.worktree_path;
-      const rel = absPath.startsWith(wt + "/") ? absPath.slice(wt.length + 1) : absPath;
-      if (typeof line === "number" && line > 0) {
-        void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
-      } else {
-        void handleOpenFile(rel);
-      }
-    },
-    // handleNavigateToLocation / handleOpenFile are plain functions over state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [stream],
-  );
 
   const extensions = useExtensions();
   extensionsRef.current = extensions;
-  // The window takes the daemon's calls (an agent's or a link's navigate,
-  // `clientHost.ts`) once it can do them as asked: its stream and thread
-  // loaded, the thread's first tabs opened, and the extensions that say what
-  // draws a page loaded. Before that a call is refused "no window is open",
-  // never half done. Once ready it stays the host: a later stream switch
-  // or extensions reload doesn't take it away. The page says so on `<html>`
-  // (`data-oxplow-ready`), for whoever waits for the window.
-  const windowReady =
-    stream !== null &&
-    selectedThreadId !== null &&
-    selectedThreadSessions !== null &&
-    sessions[selectedThreadId] !== undefined &&
-    openingThread !== selectedThreadId &&
-    extensions !== null;
-  const [hosting, setHosting] = useState(false);
-  useEffect(() => {
-    if (windowReady) setHosting(true);
-  }, [windowReady]);
-  useEffect(() => {
-    if (!hosting) return;
-    return startClientHost(() => windowHandlersRef.current, undefined, undefined, () => {
-      document.documentElement.dataset.oxplowReady = "true";
-    });
-  }, [hosting]);
-  const foundationErrors = foundationDown(extensions);
-  // Which pages can draw each tab of the thread: the daemon's list
-  // (`pages/useRenderers.ts`), fetched as tabs appear and remembered.
-  const rendererUris = useMemo(
-    () =>
-      (selectedThreadId ? (sessions[selectedThreadId]?.tabs ?? []) : []).flatMap((t) =>
-        bodies(t).map((b) => b.entry.ref.id).filter(drawnByRenderer),
-      ),
-    [sessions, selectedThreadId],
-  );
-  const renderersOf = useRenderers(extensions, rendererUris, stream?.id ?? null);
-  const centerTabs: CenterTab[] = useMemo(() => {
-    const tabs: CenterTab[] = [];
-    // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
-    // sessions and pages alike. A tab keeps a body mounted per page in its
-    // history (`bodies`) so Back shows a page as it was; only the current
-    // one is in the strip. A file's content and unsaved edits are its
-    // buffer's (`editor/openFiles.ts`), its place the session's.
-    const pageTabStartIdx = tabs.length;
-    const threadSession = selectedThreadId ? sessions[selectedThreadId] : undefined;
-    // Tab ids must be unique across the rendered list — the active-tab
-    // lookup and the close button key on them — so a page shows once.
-    const renderedTabIds = new Set<string>();
-    // For each rendered tab: its session tab, its entry's ref, and whether
-    // it is that tab's current entry.
-    const placed: { tab: Tab; ref: TabRef; entry: Entry; current: boolean }[] = [];
-    // A route (`oxplow:oxplow/page?page=…`): its page file; none, a page
-    // no enabled extension has.
-    const routeTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
-      const page = pagePayload(ref)!;
-      // Until the extensions load, nothing says what draws it.
-      if (extensions === null) return { id: ref.id, label: page.page, closable: true, render: () => null };
-      // A shown view is a page file on `oxplow:temp`: the daemon has it, not the extensions.
-      if (page.namespace === TEMP_EXTENSION) {
-        return {
-          id: ref.id,
-          label: "View",
-          closable: true,
-          render: () => <TempPage id={page.page} resource={page.params} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />,
-        };
-      }
-      const file = chooseRoute(extensions, page);
-      // A part or a query has no tab of its own: the tab says what it is
-      // and, for a part, where it is drawn.
-      if (file && file.kind !== "page") return { id: ref.id, label: file.title, closable: true, render: () => <PartNotAPage page={file} extensions={extensions} /> };
-      if (file) return pageFileTab(file, ref, nav, page.params, null);
-      return { id: ref.id, label: page.page, closable: true, render: () => <MissingPage page={page} /> };
-    };
-    // What draws a tab: a route's declaration, else the page that renders
-    // its URI (`pages/renderers.ts`: its resource's, as the URI's view and
-    // the declarations pick), else foundation's fallback, `resource`.
-    const renderTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
-      if (typeOf(ref.id) === "oxplow/page") return routeTab(ref, nav);
-      // A symbol opens its file at its line (openSymbol); it's never a tab.
-      if (typeOf(ref.id) === "oxplow/symbol") return null;
-      // Until the extensions load, nothing says what renders it.
-      if (extensions === null) return { id: ref.id, label: "", closable: true, render: () => null };
-      // The first ask for this URI hasn't answered: a moment of nothing.
-      const renderers = renderersOf(ref.id);
-      if (renderers === undefined) return { id: ref.id, label: "", closable: true, render: () => <TabLoading /> };
-      const file = chooseRenderer(extensions, renderers, viewParamsOf(ref));
-      // A renderer's page file runs with the URI it shows and the
-      // resource's own params; nothing renders it: foundation's fallback.
-      if (file) return pageFileTab(file, ref, nav, { ...renderedParams(ref.id), uri: identityOf(ref.id) ?? ref.id }, ref.id);
-      return builtInPages.resource({ ref, params: renderedParams(ref.id), nav });
-    };
-    // A page file, drawn by the page host: its run's params are the
-    // entry's URI (`PageFileView`).
-    const pageFileTab = (file: PageFile, ref: TabRef, nav: SlotNav, resource: Record<string, SqlCell>, renders: string | null): CenterTab => ({
-      id: ref.id,
-      label: tabLabel(file, resource),
-      hint: tabHint(file, resource),
-      closable: true,
-      ...(file.pinned ? { pinned: true } : {}),
-      render: () => (
-        <PageFileView
-          page={file}
-          resource={resource}
-          renders={renders}
-          stream={stream}
-          threadId={selectedThread?.id ?? null}
-          onOpenPage={nav.navOpen}
-        />
-      ),
-    });
-    // A currently shown page owns its navigation context. The same page
-    // in an earlier tab's Back history must not claim its body first:
-    // links would otherwise navigate that earlier slot instead.
-    const currentBodies = new Set((threadSession?.tabs ?? []).map((t) => pageIdentityOf(currentEntry(t).ref.id)));
-    for (const sessionTab of threadSession?.tabs ?? []) {
-      // Navigation from any of the tab's bodies (a hidden back page too)
-      // moves the tab.
-      const currentId = currentEntry(sessionTab).ref.id;
-      const navOpen = (newRef: TabRef, opts?: import("./tabs/PageNavigationContext.js").NavigateOptions) => {
-        if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
-      };
-      const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
-        if (opts?.newTab) handleOpenPage(fileRef(path));
-        else handleNavigateInTab(currentId, fileRef(path));
-      };
-      // A diff in this tab: Back returns to the page it came from.
-      const navOpenDiff = (spec: DiffSpec, origin?: Origin) => handleOpenDiffInTab(currentId, spec, origin);
-      const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff };
-      for (const body of bodies(sessionTab)) {
-        const ref = body.entry.ref;
-        if (!body.current && currentBodies.has(pageIdentityOf(ref.id))) continue;
-        if (renderedTabIds.has(ref.id)) continue;
-        renderedTabIds.add(ref.id);
-        const tab = renderTab(ref, slotNav);
-        if (!tab) continue;
-        tabs.push({ ...tab, key: body.key, ...(body.current ? {} : { hidden: true }) });
-        placed.push({ tab: sessionTab, ref, entry: body.entry, current: body.current });
-      }
-    }
-    // Wrap each page-tab render with PageNavigationContext so descendants
-    // (BacklinksList, RouteLink, in-page cross-references) can navigate
-    // in-tab and the Page chrome mounts its nav bar.
-    for (let i = pageTabStartIdx; i < tabs.length; i++) {
-      const tab = tabs[i]!;
-      const { tab: sessionTab, ref, entry, current: isCurrent } = placed[i - pageTabStartIdx]!;
-      const slot = sessionTab.slot;
-      const tabId = tab.id;
-      const currentId = currentEntry(sessionTab).ref.id;
-      const stored = isCurrent ? currentEntry(sessionTab).from : undefined;
-      const origin: Origin | null = stored ? resolvedOrigin(stored, liveItemsOf(liveItems, slot, stored), ref) : null;
-      const innerRender = tab.render;
-      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.visibilityScope ?? null;
-      const elsewhere = bookmarkScope === null ? bookmarkedElsewhere(bookmarks, ref) : null;
-      const registeredTitle = pageTitles[tabId] ?? (isCurrent ? currentEntry(sessionTab).title : undefined);
-      const navValue: PageNavigation = {
-        navigate: (newRef, opts) => {
-          // A new tab with history state (a compare's two texts) is its
-          // own tab; without, the tab already showing the page, or a new one.
-          if (opts?.newTab && opts.state) openTab(newRef, { historyState: opts.state });
-          else if (opts?.newTab) handleOpenPage(newRef);
-          else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
-        },
-        openRef: (target, how) =>
-          openRefRef.current(
-            target,
-            how ?? {},
-            (opened, h) => {
-              if (h.newTab) handleOpenPage(opened);
-              else handleNavigateInTab(currentId, opened, h.origin, h.replace);
-            },
-            () => closePageTab(currentId),
-          ),
-        goBack: () => handleGoBack(slot),
-        goForward: () => handleGoForward(slot),
-        close: () => closePageTab(currentId),
-        canGoBack: sessionTab.at > 0,
-        canGoForward: sessionTab.at < sessionTab.entries.length - 1,
-        pinned: !!tab.pinned,
-        origin,
-        stepOrigin: origin ? (index: number) => handleStepOrigin(slot, index) : undefined,
-        setTitle: (t: string) => {
-          setPageTitle(tabId, t);
-          // Kept with the entry, for the strip before this page mounts again.
-          if (isCurrent && selectedThreadId) updateSession(selectedThreadId, (session) => sessionSetTitle(session, slot, t));
-        },
-        title: registeredTitle,
-        setEditing: isCurrent ? editingSetterFor(tabId) : undefined,
-        setTabActions: isCurrent ? actionsSetterFor(tabId) : undefined,
-        ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
-        bookmark: {
-          visibilityScope: bookmarkScope,
-          other: elsewhere ? { visibilityScope: elsewhere.visibilityScope } : null,
-          updateOther: elsewhere
-            ? () => {
-                moveBookmark({ threadId: selectedThreadId, streamId: stream?.id ?? null }, elsewhere, ref, registeredTitle ?? tab.label).catch((e: unknown) =>
-                  recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
-              }
-            : undefined,
-          toggle: (scope: VisibilityScope) => {
-            const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
-            const write = bookmarkScope === scope
-              ? removeBookmark(viewer, ref.id)
-              : setBookmark(viewer, ref, registeredTitle ?? tab.label, scope);
-            write.catch((e: unknown) =>
-              recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
-          },
-        },
-        ref,
-        renderers: drawnByRenderer(ref.id) ? renderersOf(ref.id) : undefined,
-        viewParams: viewParamsOf(ref),
-        // Only the page the tab shows changes the tab; a hidden back page
-        // drawing an older entry can't.
-        setViewParams: isCurrent && selectedThreadId
-          ? (params: Record<string, SqlCell>, opts?: { push?: boolean }) => {
-              const thread = selectedThreadId;
-              // A page writes its own view; the shell's keys (the renderer
-              // pick) stay.
-              updateSession(thread, (session) => changeView(session, slot, (now) => ({ ...shellView(now), ...params }), opts));
-            }
-          : undefined,
-        patchViewParams: isCurrent && selectedThreadId
-          ? (patch: Record<string, SqlCell | undefined>, opts?: { push?: boolean }) => {
-              const thread = selectedThreadId;
-              updateSession(thread, (session) =>
-                changeView(session, slot, (now) => {
-                  const next: Record<string, SqlCell> = { ...now };
-                  for (const [k, v] of Object.entries(patch)) {
-                    if (v === undefined) delete next[k];
-                    else next[k] = v;
-                  }
-                  return next;
-                }, opts),
-              );
-            }
-          : undefined,
-        historyState: entry.historyState && typeof entry.historyState === "object" && !Array.isArray(entry.historyState) ? (entry.historyState as Record<string, unknown>) : undefined,
-        setHistoryState: isCurrent && selectedThreadId
-          ? (patch: Record<string, unknown>) => {
-              const thread = selectedThreadId;
-              updateSession(thread, (session) => sessionPatchHistoryState(session, slot, patch));
-            }
-          : undefined,
-      };
-      if (registeredTitle && registeredTitle !== tab.label) {
-        tab.label = registeredTitle;
-      }
-      if (isCurrent && dirtyTabs[tabId]) tab.dirty = true;
-      // The page's actions are its tab's menu (ahead of the strip's own).
-      const pageActions = isCurrent ? tabActions[tabId] : undefined;
-      if (pageActions) {
-        tab.contextMenu = [
-          ...(tab.contextMenu ?? []),
-          ...pageActions.map((a) => ({ id: a.id, label: a.label, enabled: !a.disabled, run: () => void a.run() })),
-        ];
-      }
-      // A file's, a directory's or a web page's tab: Open In ▸ (`openIn.ts`)
-      // and a file's or folder's Git ▸ (`gitMenu.ts`).
-      tab.menuAtOpen = () => {
-        const elsewhere = openInForRef(ref.id);
-        return withLinkOffers(elsewhere ? [elsewhere] : [], ref.id).then((items) =>
-          // The tab's page menu has the ref's other commands; the tab adds
-          // only its Open In ▸ and Git ▸.
-          items.filter((i) => i.id === "open-in" || i.id === "git"),
-        );
-      };
-      // An agent session's tab: its harness's logo and its status dot.
-      if (typeOf(ref.id) === "oxplow/agent_session") {
-        const sessionId = paramOf(ref.id, "id") ?? "";
-        const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
-        const status = sessionStatuses[sessionId];
-        tab.pinned = true;
-        tab.agentStatus = status?.status ?? "waiting";
-        tab.question = status?.question;
-        tab.icon = session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined;
-        tab.contextMenu = [
-          ...(tab.contextMenu ?? []),
-          {
-            id: "agent_terminal.restart",
-            label: "Restart Terminal",
-            enabled: liveTerminals.has(ref.id),
-            run: () => void offerDeps.run("Restart Terminal", "oxplow.agent_terminal.restart", { uri: ref.id }),
-          },
-        ];
-        if (session && !registeredTitle) tab.label = session.displayName || sessionLabel(harnesses, session);
-      }
-      tab.render = () => (
-        <PageNavigationContext.Provider value={navValue}>
-          {innerRender()}
-        </PageNavigationContext.Provider>
-      );
-    }
-    // Snapshot the resolved labels for the history recorder so RailHud
-    // History shows the same text the tab strip shows.
-    const labelMap: Record<string, string> = {};
-    for (const t of tabs) labelMap[t.id] = t.label;
-    tabLabelByIdRef.current = labelMap;
-    return tabs;
-  }, [
-    selectedThread,
-    agentThreadStatus,
-    selectedThreadSessions,
-    sessionStatuses,
-    liveTerminals,
-    harnesses,
-    openTerminalPath,
-    effectiveCenterActive,
+  // The window as the daemon's host, and its tab report for agents.
+  const { windowHandlersRef, windowVisible } = useWindowHost({
     stream,
-    handleOpenKnowledge,
-    handleOpenCommit,
-    handleOpenExternalUrl,
+    streams,
+    threadStates,
     selectedThreadId,
-    sessions,
-    updateSession,
-    handleOpenPage,
-    handleNavigateInTab,
-    handleOpenDiffInTab,
-    handleGoBack,
-    handleGoForward,
-    handleStepOrigin,
-    closePageTab,
-    pageTitles,
-    setPageTitle,
-    dirtyTabs,
-    editingSetterFor,
-    tabActions,
-    offerDeps,
-    actionsSetterFor,
-    openTab,
-    bookmarks,
-    workspaceContext.vcsEnabled,
-    shownFilePath,
-    centerActive,
+    selectedThreadSessions,
     extensions,
-    renderersOf,
-  ]);
+    tabs: { sessions, sessionsLoaded, updateSession, sessionsKept, closePageTab, centerActive, setCenterActive, tabSavesRef, tabFindsRef, openingThread },
+    openers: { handleOpenPageRef, handleNavigateInTab },
+    switchStream: handleSwitch,
+    selectThread: handleSelectThread,
+    view: { effectiveCenterActive, visitContextRef },
+    openQuickOpen: (query) => {
+      setQuickOpenQuery(query);
+      setQuickOpenVisible(true);
+    },
+  });
+  useEffect(() => visitTimerRef.current?.setVisible(windowVisible), [windowVisible]);
+  // The window's commands: what their `when` reads, the person's offers,
+  // and the keyboard shortcuts that run them.
+  const { liveTerminals, offerDeps, offers } = useWindowCommands({
+    stream,
+    selectedThread,
+    workspaceContext,
+    harnesses,
+    tabs: { centerActive, dirtyTabs, shownFilePath },
+    handleOpenPageRef,
+    windowHandlersRef,
+    navKeysRef,
+  });
+  const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
+  // The native menu and its recent projects are the shell's: a browser
+  // window has neither to ask for.
+  useEffect(() => {
+    if (!shellAvailable()) return;
+    listRecentProjects()
+      .then(setRecentProjects)
+      .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
+  }, []);
+  // Cancel the native WKWebView context menu everywhere except inputs,
+  // contenteditable, Monaco, and the terminal (see context-menu.ts).
+  useEffect(() => installContextMenuSuppressor(), []);
+  // The menu bar (File, Edit) and what search lists: the bus's offers,
+  // and the shell's project commands.
+  // View ▸ Sidebar Panels is the viewer's rail panels (`RailMenuFeed`, inside
+  // the layout's provider, hands them up as the layout changes).
+  const [railMenu, setRailMenu] = useState<RailMenu>({ panels: [], toggle: () => {} });
+  const menuGroups = useMemo(
+    () => [...buildMenuBar(offers), viewMenu(railMenu.panels, railMenu.toggle)],
+    [offers, railMenu],
+  );
+  // The stars the thread sees (a page's star says where it is starred).
+  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
+  // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
+  // panels' provider, hands it up as the pane's run changes).
+  const [goRows, setGoRows] = useState<GoRow[]>([]);
+  const nativeMenuSnapshots = useMemo(
+    () => buildNativeMenuSnapshots(menuGroups, recentProjects, goRows),
+    [menuGroups, recentProjects, goRows],
+  );
+
+
+  useEffect(() => {
+    if (!shellAvailable()) return;
+    void desktopBridge().setNativeMenu(nativeMenuSnapshots).catch((error) => {
+      logUi("error", "failed to update native menu", { error: String(error) });
+    });
+  }, [nativeMenuSnapshots]);
+
+  useEffect(() => {
+    return desktopBridge().onMenuCommand((commandId: string) => {
+      if (commandId === DEVICES_MENU_ID) {
+        handleOpenPage(pageTabRef("devices"));
+        return;
+      }
+      // Dynamic "Open Recent ▸ <project>" entries aren't menu items:
+      // `oxplow.project.open`'s operation opens the trailing path in a
+      // new window. A recent whose `.oxplow/` has since been deleted
+      // errors rather than re-creating it.
+      if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
+        const path = commandId.slice(OPEN_RECENT_PREFIX.length);
+        void Promise.resolve(
+          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human", call: null }),
+        ).catch((e: unknown) => {
+          recordOpError({
+            label: "Open project",
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
+        return;
+      }
+      const goUri = goUriFromMenuId(commandId);
+      if (goUri !== null) {
+        const ref = refFromTabId(goUri);
+        if (ref) flushSync(() => handleOpenPageRef.current?.(ref));
+        return;
+      }
+      if (commandId === INSTALL_CLI_ID) {
+        installCli().then(
+          (done) => showToast({ message: `Installed ${done.path}. ${done.hint ?? ""}`.trim() }),
+          (e: unknown) => recordOpError({ label: "Install command line", message: e instanceof Error ? e.message : String(e) }),
+        );
+        return;
+      }
+      const command = menuItemById(menuGroups, commandId);
+      if (!command || !command.run) return;
+      // React 18 only auto-flushes effects synchronously for discrete
+      // user input events (click, keydown on webContents). IPC messages
+      // from the main process don't qualify, so setState calls made in
+      // this callback stay queued until the next real input event wakes
+      // the scheduler — users reported menu dispatches stalling 10+
+      // seconds. flushSync commits inside the callback. The commands
+      // that open modals (plan.newTask, etc.) additionally go
+      // through an imperative ref registered by the target pane so the
+      // modal setState also commits here rather than via useEffect.
+      const run = command.run;
+      flushSync(() => { void run(); });
+    });
+  }, [menuGroups]);
+  const foundationErrors = foundationDown(extensions);
+  // The shown thread's tabs, as every shell draws them.
+  const { windowTabs: centerTabs, renderersOf } = useWindowPages({
+    stream,
+    selectedThread,
+    selectedThreadSessions,
+    extensions,
+    sessionStatuses,
+    harnesses,
+    liveTerminals,
+    offerDeps,
+    bookmarks,
+    tabs: {
+      sessions,
+      updateSession,
+      openTab,
+      closePageTab,
+      handleGoBack,
+      handleGoForward,
+      handleStepOrigin,
+      liveItems,
+      pageTitles,
+      setPageTitle,
+      dirtyTabs,
+      tabActions,
+      editingSetterFor,
+      actionsSetterFor,
+    },
+    openers: { handleOpenPage, handleNavigateInTab, handleOpenDiffInTab, openRefRef },
+    tabLabelByIdRef,
+  });
+
+  // A tab's close, for every shell: a file's tab closes its file, a diff's
+    // its diff, an agent session's the session (its toast offers Undo), any
+    // other page its tab.
+    const closeTab = (id) => {
+    const path = diskFilePath(id);
+    if (path !== null) handleCloseOpenFile(id, path);
+    else if (id.startsWith("diff:")) closeDiffTab(id);
+    else if (typeOf(id) === "oxplow/agent_session") {
+      // Closing a session's tab closes the session at once, its
+      // toast offering Undo (it reopens on the saved
+      // conversation); its tab goes when its row closes.
+      const ref = refFromTabId(id);
+      const sessionId = ref ? paramOf(ref.id, "id") : null;
+      if (sessionId) {
+        const session = selectedThreadSessions?.find((c) => c.id === sessionId);
+        const name = session ? session.displayName || sessionLabel(harnesses, session) : "session";
+        void personCommands.run(`Close ${name}`, "oxplow.agent_session.close", {
+          session: sessionId,
+        });
+      }
+    }
+    else closePageTab(id);
+  };
+  
+  const shell = useShellKind();
+  // Desktop Layout / Tablet Layout, where a choice makes sense (not the Mac).
+  const layouts = useLayoutItems(shell);
+  // The window as a shell draws it (`shells/shellWindow.ts`).
+  const shellWindow: ShellWindow = {
+    streams,
+    stream,
+    vcsEnabled: workspaceContext.vcsEnabled,
+    threadStates,
+    selectedThread,
+    streamStatuses,
+    agentStatuses,
+    agentQuestions,
+    switchStream: handleSwitch,
+    selectThread: handleSelectThread,
+    // Made where it is listed; a tap on it selects it.
+    createThread: handleCreateThread,
+    renameStream: handleRenameStreamById,
+    renameThread: handleRenameThreadById,
+    markThread: handleMarkThread,
+    closeThread: handleCloseThread,
+    openStreamSettings: (streamId) => handleOpenPage(streamSettingsRef(streamId)),
+    openThreadSettings: (threadId) => handleOpenPage(threadSettingsRef(threadId)),
+    openNewStream: () => handleOpenPage(newStreamRef()),
+    tabs: centerTabs,
+    activeTabId: effectiveCenterActive,
+    besideTabId: centerBeside,
+    setBeside: setCenterBeside,
+    activateTab: (id) => setCenterActive(id),
+    closeTab,
+    reorderTabs: handleReorderCenterTabs,
+    openPage: handleOpenPage,
+    openSearch: () => setQuickOpenVisible(true),
+    // View is the rail's panels; a shell with no rail draws its own.
+    menu: [
+      // View is the panels' on and off: the tray shows the ones turned on.
+      ...shellMenu(menuGroups),
+      ...(layouts.length > 0 ? [{ id: "shell.menu.layout", label: "Layout", enabled: true, submenu: layouts }] : []),
+    ],
+    continueFrom: async () => (selectedThreadId ? continueItems(await listOtherDeviceTabs(selectedThreadId), handleOpenPage) : []),
+    tray: <PanelTray status={<StatusBar />} streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+    aside: <PinnedPanel streamId={stream?.id ?? null} onOpenPage={handleOpenPage} />,
+    gitDialogs: stream ? (
+      <GitDialogs
+        streamId={stream.id}
+        openRef={(ref) => {
+          const tab = refFromTabId(ref);
+          if (tab) handleOpenPageRef.current?.(tab);
+        }}
+      />
+    ) : null,
+    statusBar: <StatusBar />,
+  };
+  // The window's errors, a line above the page in every shell.
+  const errorBar = (
+    <div style={{ borderBottom: error ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
+      {error ? (
+        <div
+          onClick={() => setError(null)}
+          title="Click to dismiss"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "2px 12px",
+            background: "var(--bg-2)",
+            color: "#ff6b6b",
+            fontSize: 11,
+            minHeight: 22,
+            borderBottom: "1px solid var(--border)",
+            cursor: "pointer",
+          }}
+        >
+          <span>{error}</span>
+          <span aria-hidden style={{ opacity: 0.7, paddingLeft: 8 }}>
+            ✕
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
 
   return (
-    // One owner of every extension panel's runs, read by the rail, the
-    // status bar's bell and the Alerts page.
-    <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
-    {/* The viewer's left-nav layout, read by the rail and View ▸ Sidebar Panels. */}
-    <PanelLayoutProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    <WindowProviders
+      streamId={stream?.id ?? null}
+      threadId={selectedThreadId}
+      session={sessions[selectedThreadId ?? ""]}
+      onLiveItems={(slot, key, items) => setLiveItems((prev) => ({ ...prev, [slot]: { key, items } }))}
+      onReviewAlerts={(open) => handleOpenPage((open ? refFromTabId(open) : null) ?? alertsRef())}
+    >
     <GoMenuFeed onRows={setGoRows} />
     <RailMenuFeed onChange={setRailMenu} />
-    {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
-      const live = currentEntry(t).from?.live;
-      return live ? (
-        <LiveOriginResolver
-          key={`${t.slot}/${JSON.stringify(live)}`}
-          live={live}
-          streamId={stream?.id ?? null}
-          onItems={(items) => setLiveItems((prev) => ({ ...prev, [t.slot]: { key: JSON.stringify(live), items } }))}
-        />
-      ) : null;
-    })}
-    <AlertToasts onReview={(open) => handleOpenPage((open ? refFromTabId(open) : null) ?? alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+      {shell === "tablet" ? (
+        <>
+          {errorBar}
+          <TabletShell win={shellWindow} />
+        </>
+      ) : (
+        <>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
           webview reaches the top edge: the title bar is the window's top,
           its empty space drags it and its start leaves room for the
           floating traffic lights. Elsewhere it sits under the menu bar. */}
-      {!isMac ? <Menubar groups={menuGroups} /> : null}
+      {!nativeMenu ? <Menubar groups={withLayouts(menuGroups, layouts)} /> : null}
       <TitleBar
         stream={stream}
         thread={selectedThread ? { id: selectedThread.id, title: selectedThread.title } : null}
         vcsEnabled={workspaceContext.vcsEnabled}
-        leftInset={isMac ? 78 : 10}
+        leftInset={nativeMenu ? 78 : 10}
         onOpenSearch={() => setQuickOpenVisible(true)}
       />
-      <div style={{ borderBottom: error ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
-        {error ? (
-          <div
-            onClick={() => setError(null)}
-            title="Click to dismiss"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "2px 12px",
-              background: "var(--bg-2)",
-              color: "#ff6b6b",
-              fontSize: 11,
-              minHeight: 22,
-              borderBottom: "1px solid var(--border)",
-              cursor: "pointer",
-            }}
-          >
-            <span>{error}</span>
-            <span aria-hidden style={{ opacity: 0.7, paddingLeft: 8 }}>
-              ✕
-            </span>
-          </div>
-        ) : null}
-      </div>
+      {errorBar}
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <Navigator
           streams={streams}
@@ -2149,10 +762,7 @@ export function App() {
           agentQuestions={agentQuestions}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
-          onCreateThread={async (streamId, title) => {
-            if (streamId !== stream?.id) await handleSwitch(streamId);
-            return handleCreateThread(title);
-          }}
+          onCreateThread={handleCreateThread}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}
           onRenameThread={handleRenameThreadById}
@@ -2162,7 +772,7 @@ export function App() {
           onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
           vcsEnabled={workspaceContext.vcsEnabled}
         />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
+        <div data-dock-column="" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0, position: "relative" }}>
         <NarrowRail narrow={narrowWindow}>
           {(closeRail) => (
@@ -2200,45 +810,20 @@ export function App() {
               tabs={centerTabs}
               activeId={effectiveCenterActive}
               onActivate={(id) => setCenterActive(id)}
-              onClose={(id) => {
-                const path = diskFilePath(id);
-                if (path !== null) handleCloseOpenFile(id, path);
-                else if (id.startsWith("diff:")) closeDiffTab(id);
-                else if (typeOf(id) === "oxplow/agent_session") {
-                  // Closing a session's tab closes the session at once, its
-                  // toast offering Undo (it reopens on the saved
-                  // conversation); its tab goes when its row closes.
-                  const ref = refFromTabId(id);
-                  const sessionId = ref ? paramOf(ref.id, "id") : null;
-                  if (sessionId) {
-                    const session = selectedThreadSessions?.find((c) => c.id === sessionId);
-                    const name = session ? session.displayName || sessionLabel(harnesses, session) : "session";
-                    void personCommands.run(`Close ${name}`, "oxplow.agent_session.close", {
-                      session: sessionId,
-                    });
-                  }
-                }
-                else closePageTab(id);
-              }}
+              onClose={closeTab}
               onReorder={handleReorderCenterTabs}
             />
           ) : <TabLoading />}
-          {stream ? (
-            <GitDialogs
-              streamId={stream.id}
-              openRef={(ref) => {
-                const tab = refFromTabId(ref);
-                if (tab) handleOpenPageRef.current?.(tab);
-              }}
-            />
-          ) : null}
+          {shellWindow.gitDialogs}
         </div>
         </div>
         <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage}>
-          <StatusBar />
+          {shellWindow.statusBar}
         </Dock>
         </div>
       </div>
+        </>
+      )}
       <QuickOpenOverlay
         open={quickOpenVisible}
         initialQuery={quickOpenQuery}
@@ -2263,35 +848,8 @@ export function App() {
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
-    </PanelLayoutProvider>
-    </PanelRunsProvider>
+    </WindowProviders>
   );
-}
-
-/** A toast as each new thing needs the person; Review opens Alerts (a badge's, its page). */
-function AlertToasts({ onReview }: { onReview(open?: string): void }) {
-  const { items } = useAlerts();
-  useAlertToasts(items, onReview);
-  return null;
-}
-
-/**
- * Fill empty diff sides with a readable placeholder so the Monaco diff view
- * doesn't just show blank text with no explanation. State flags from the
- * snapshot store tell us why content is missing.
- */
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  if (tag === "TEXTAREA") return true;
-  if (tag === "INPUT") {
-    const type = (target as HTMLInputElement).type;
-    // Checkbox / button / radio inputs shouldn't block the shortcut — they
-    // don't swallow typed characters the way a text field does.
-    return type === "text" || type === "search" || type === "email" || type === "url" || type === "password" || type === "" || type === "tel";
-  }
-  return false;
 }
 
 /**
@@ -2346,7 +904,7 @@ function FoundationDownDialog({ errors }: { errors: string[] }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
-            onClick={() => void navigator.clipboard.writeText(lines.join("\n")).catch(() => {})}
+            onClick={() => void copyText(lines.join("\n"))}
             style={{ ...button, background: "var(--accent)", color: "#fff", border: "none" }}
           >
             Copy

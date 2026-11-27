@@ -3,9 +3,11 @@
 `bun run e2e` drives the built React app in headless Chromium — and the
 custom-component specs in WebKit too — against a real daemon: Playwright
 (`@playwright/test`), no `tauri-driver`. The frontend
-reaches the daemon the way a remote window does: the transport reads its base
-and token from localStorage (`oxplow.remoteBase`, `oxplow.remoteToken`), and
-CORS is permissive for exactly this (`.context/remote-daemon.md`).
+reaches the daemon the way a window the shell opens does: `connectContext`
+(`support/fixtures.ts`) sets `window.__OXPLOW__` (base, token, kind) before
+any script, in the top frame only, and CORS is permissive for exactly this
+(`.context/remote-daemon.md`). The host specs go through a real
+`oxplow-host` instead: the page pairs at the host's home first.
 
 ## How a run is put together
 
@@ -15,9 +17,11 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   is used as it is (see "Running it locally"). Every test boots its own
   daemon, so tests run fully parallel, files included.
 - **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
-  `oxplow-harness-fake` and `oxplow-provider-fake` and hands their paths to the
+  `oxplow-harness-fake`, `oxplow-provider-fake` and `oxplow-host` and hands their paths to the
   workers (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_HARNESS_FAKE`,
-  `OXPLOW_E2E_PROVIDER_FAKE`). With `OXPLOW_E2E_BIN=target/debug` it builds
+  `OXPLOW_E2E_PROVIDER_FAKE`, `OXPLOW_E2E_HOST`). `specs/host/` starts the host
+  (`support/host.ts`: its own home, `--daemon` the sim, `--ui` the built
+  `dist/`) and loads `/p/<project>/` from its origin. With `OXPLOW_E2E_BIN=target/debug` it builds
   nothing and runs the binaries already there.
 - **`fixtures/extension/`** — the test extension `e2e`, copied into every
   project before boot: a fake provider (`bin/provider`, written
@@ -113,7 +117,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
     click opens nothing: a spec that clicked the dock's Alerts as soon as its
     badge showed (the badge comes from the daemon, before the stream) opened
     no page, once in a CI run.
-  - `expandRailSection`, `searchLauncher`, `newSessionPage`, `taskIdOf`.
+  - `openPanel`, `searchLauncher`, `newSessionPage`, `taskIdOf`.
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
   `waitForModels` or `until`, never a sleep. Global setup refuses a spec that
   names `waitForTimeout` or `setTimeout` (`test.setTimeout`, a spec's time
@@ -134,6 +138,24 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **Projects**: `chromium` runs every spec; `webkit` runs
   `specs/components/` (a custom component's frame, the one place the two
   engines are checked apart — the macOS window is WebKit).
+- **Form factors** (`E2E_FORM_FACTORS=1`, off by default: a measurement):
+  adds `tablet` (1180×820), `tablet-portrait` (800×1180, exactly the width
+  where the rail hides) and `phone` (iPhone 13), all with touch, over
+  `specs/pages/` only. Run them with `E2E_FORM_FACTORS=1 bun run e2e specs/pages
+  --project tablet --project tablet-portrait --project phone`. In these
+  projects every passing spec ends with `expectNoHorizontalOverflow`
+  (`support/ui.ts`), which fails the spec when the window scrolls sideways,
+  when an element of the shown tab or of the page's nav bar reaches past the
+  right edge of the window, the tab or its nearest ancestor with
+  `overflow-x: hidden|clip` (the code editor's own box is measured, not what
+  is inside it), or when a box scrolls sideways that is not a table, a code
+  block or the terminal. The allowed boxes are noted on the test as
+  "scrolls sideways" annotations. With no shown tab it returns at once.
+  `specs/harness/overflow-check.spec.ts` draws boxes the check must refuse.
+- **`client(browser, baseURL, daemon, viewport?)`** (`support/fixtures.ts`)
+  is a second client of the spec's daemon: a browser context of its own, so
+  its own storage, connected to the same daemon. The caller closes the
+  returned `context`. `specs/shell/two-clients.spec.ts` uses it.
 - **CI**: the `e2e` job in `.github/workflows/ci.yml` — Chromium and WebKit,
   three workers, the JUnit report uploaded always and traces and daemon
   logs on failure. `daemon-contract` stays browser-free. A failed test is
@@ -159,6 +181,57 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   of your own: one spec then takes about 3 s.
 - `bun run e2e:flake <spec> [times=10]` runs one spec many times at once,
   the way a race fix is confirmed before it is pushed.
+
+## Shell-neutral helpers
+
+A second shell (a tablet shell) draws the same pages with another tab strip,
+rail and dock, so a spec must not name the desktop shell's chrome. It goes
+through `support/ui.ts`, which is the one place that knows which element does
+what. A new shell changes those helpers, not the specs.
+
+**The ids the page layer needs from any shell (the shell contract).** A new
+shell must draw these, as they are:
+
+- `center-tab-body-<tab id>` — the body of each tab; the hidden ones stay in
+  the DOM, the shown one is visible. `shown()` finds the shown tab by it.
+- `data-oxplow-ready` on `<html>` — set when the window has registered as the
+  daemon's command host. `windowReady`, `load`, `reload` and `open` wait for it.
+- `title-bar-search` — the launcher's anchor (`searchLauncher`).
+
+**Desktop chrome ids, only in `support/ui.ts` and in the desktop-only specs:**
+
+- Tab strip: `center-tab-<id>` (`tabOf`, `tabsWith`, `tabUri`, `activeTab`),
+  `center-tab-close-<id>` (`closeTab`), `center-tab-dirty-<id>` (`tabDirty`).
+- Rail: `rail-hud` (`panelsReady`), `rail-section-<id>` (`panel`),
+  `rail-section-toggle-<id>` (`openPanel`, `panelHeader`), `rail-panel-body`
+  (`panelBody`), `rail-section-ext:*` (`extensionPanels`), plus the group
+  dividers, drag handles and remove zone (`rail-group-divider-*`,
+  `rail-section-drag-*`, `rail-section-shown-in-*`, `rail-remove-zone`,
+  `rail-panels`), which only `shell/rail-groups` uses.
+- Dock: `dock-alerts` and `dock-panel-open-page` (`openAlerts`),
+  `dock-alerts-badge` (`alertsBadge`), `dock-context-badge` (`contextBadge`).
+- Title bar: `title-bar-stream` (`streamName`), `title-bar-thread`
+  (`threadName`), `title-bar`.
+- Navigator: `navigator-strip`, `navigator-strip-stream-*` (`streamEntries`),
+  `navigator-strip-thread-*`, `navigator-stream-row-*`,
+  `navigator-thread-row-*`, `navigator-overlay`, `navigator-new-thread-input`.
+
+Not chrome, so not part of this: `page-rail-*` and `viz-rail-*` are a page's
+own rails, drawn inside the tab body by the page layer.
+
+**The helpers:** `openPanel(page, id)` (expand a panel), `panel`, `panelBody`,
+`panelHeader`, `panelsReady`, `extensionPanels`, `tabOf(page, uri)`,
+`tabsWith(page, prefix, { contains, without })`, `tabUri(locator)`,
+`activeTab(page)`, `closeTab(page, uri)`, `tabDirty(page, uri)`,
+`openAlerts(page)`, `alertsBadge`, `contextBadge`, `streamName`,
+`threadName`, `streamEntries`.
+
+**Desktop-only specs.** A spec that really tests the rail, dock, navigator,
+title bar or tab strip carries `// @desktop-only: <what>` as its first line,
+and may use raw chrome ids. Any other spec uses the helpers only. These are
+desktop-only now: `shell/agent-session`, `shell/window`, `shell/two-clients`,
+`shell/rail-groups`, `shell/boot`, `shell/navigation`, `shell/one-tab`,
+`shell/context-basket` and `host/serve`.
 
 ## What the specs cover
 
@@ -189,10 +262,10 @@ sign-in.
 ## Scripts
 
 - **`profile-renderer.mjs`** — CDP V8 CPU profile of the renderer, against an
-  app you bring up by hand (a daemon plus `vite` with `VITE_OXPLOW_REMOTE`).
-  The daemon refuses a page without its UI token, so `APP_URL` carries it:
-  `APP_URL='http://localhost:5199/#oxplow-token=<token>'` (the token the
-  daemon was given with `--token-stdin`).
+  app you bring up by hand: a daemon, and the Vite dev server with
+  `VITE_OXPLOW_REMOTE=<base> VITE_OXPLOW_REMOTE_TOKEN=<token>` (the token the
+  daemon was given with `--token-stdin`), which puts both in the page:
+  `APP_URL='http://localhost:5199/'`.
   `CLICK_TESTID=rail-section-toggle-core:work` expands a collapsed section
   first, so you don't profile an unmounted list by accident.
 

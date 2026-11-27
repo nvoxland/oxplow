@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, panelsReady } from "../../support/ui.js";
 
 // Duplicate Block is the foundation's `duplicate-block` page: two `code`
 // parts (a file each, read-only), their ranges marked, scrolling together.
@@ -12,7 +12,7 @@ test("a duplicate block opens its two files side by side with their ranges marke
   writeFileSync(join(daemon.project, "left.txt"), body);
   writeFileSync(join(daemon.project, "right.txt"), body);
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
-  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+  await panelsReady(page);
 
   const uri =
     "oxplow:oxplow/page?left=left.txt&left_at=working&left_lines=10-14&page=duplicate-block&right=right.txt&right_at=working&right_lines=20-24";

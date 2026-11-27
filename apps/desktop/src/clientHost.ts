@@ -1,6 +1,7 @@
 /// The window as a command host (`.context/commands.md` "Where a command
 /// runs"): it hosts the scopes only it can do — its threads' tabs,
-/// … — and says so under an id of its own (`register_client_host`). A
+/// … — and says so under its window id (`register_client_host`), the one
+/// its event socket, tab reports and logs carry (`uiClientId.ts`). A
 /// command the daemon runs over one (an agent's `oxplow.tab.open`) comes
 /// as a `clientCall` event addressed to one window; that window does it in
 /// the caller's thread and answers. It says when it closes
@@ -14,6 +15,7 @@ import {
   unregisterClientHost,
 } from "./api.js";
 import type { CommandSpec, OxplowEvent } from "./tauri-bridge/generated/bindings.js";
+import { getUiClientId } from "./uiClientId.js";
 
 /** The daemon's call a handler answers: what it runs on the daemon for it
  *  runs as the call's actor (`runCommandForCall`). */
@@ -48,9 +50,11 @@ export interface ClientHostDeps {
 }
 
 const DEPS: ClientHostDeps = {
-  register: registerClientHost,
-  unregister: unregisterClientHost,
-  answer: answerClientCall,
+  // The daemon knows the window from the request itself (its page load), so
+  // the id these take is the one the transport already sends.
+  register: (_client, scopes) => registerClientHost(scopes),
+  unregister: () => unregisterClientHost(),
+  answer: (_client, id, answer) => answerClientCall(id, answer),
   subscribe: subscribeOxplowEvents,
   onReconnect: onRemoteReconnect,
   onClose: (fn) => {
@@ -79,7 +83,7 @@ async function perform(handlers: ClientHandlers, call: ClientCall): Promise<{ re
 export function startClientHost(
   handlers: () => ClientHandlers,
   deps: ClientHostDeps = DEPS,
-  client: string = crypto.randomUUID(),
+  client: string = getUiClientId(),
   onRegistered: () => void = () => {},
 ): () => void {
   let told = false;

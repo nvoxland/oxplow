@@ -1,6 +1,16 @@
 import { expect, test } from "bun:test";
 
-import { exitBanner, failedLaunch, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
+import {
+  canTakeSize,
+  exitBanner,
+  failedLaunch,
+  gridFontSize,
+  gridScale,
+  mayStartNow,
+  ownedElsewhere,
+  readSessionMessage,
+  reopened,
+} from "./terminalSession.js";
 
 // after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
@@ -99,4 +109,51 @@ test("a failed launch reads as an ended pane whose banner gives the reason and a
     kind: "launch_failed",
     message: "refused",
   });
+});
+
+// The terminal's size, as the client typing into it set it: a watching
+// pane draws that grid.
+test("a size message reads as the terminal's grid", () => {
+  expect(readSessionMessage(JSON.stringify({ type: "size", cols: 120, rows: 40 }))).toEqual({ kind: "size", cols: 120, rows: 40, owner: null });
+  expect(readSessionMessage(JSON.stringify({ type: "size", cols: 120, rows: 40, owner: "con-a" }))).toEqual({
+    kind: "size",
+    cols: 120,
+    rows: 40,
+    owner: "con-a",
+  });
+  expect(readSessionMessage(JSON.stringify({ type: "size", cols: "x" }))).toBeNull();
+});
+
+// A pane smaller than the grid scales it down to fit; a larger one draws it
+// as it is.
+test("the grid is scaled down to the pane, never up", () => {
+  expect(gridScale({ cols: 60, rows: 20 }, { cols: 120, rows: 40 })).toBe(0.5);
+  expect(gridScale({ cols: 100, rows: 20 }, { cols: 120, rows: 40 })).toBe(0.5);
+  expect(gridScale({ cols: 200, rows: 80 }, { cols: 120, rows: 40 })).toBe(1);
+});
+
+// A smaller grid-fitting terminal is drawn in a smaller font, not a scaled
+// picture (a transform puts the pointer in the wrong cell): the font follows
+// the scale, to a readable minimum.
+test("the font size follows the scale, down to a readable minimum", () => {
+  expect(gridFontSize(13, 1)).toBe(13);
+  expect(gridFontSize(13, 0.8)).toBe(10);
+  expect(gridFontSize(13, 0.6)).toBe(7.5);
+  expect(gridFontSize(13, 0.4)).toBe(7);
+  expect(gridFontSize(5, 0.5)).toBe(5);
+});
+
+// The daemon names who sets the size; two sizes that differ are not proof.
+test("a terminal is owned elsewhere only when another page load owns it", () => {
+  expect(ownedElsewhere("con-a", "con-b")).toBe(true);
+  expect(ownedElsewhere("con-a", "con-a")).toBe(false);
+  expect(ownedElsewhere(null, "con-a")).toBe(false);
+  expect(ownedElsewhere("con-a", null)).toBe(true);
+});
+
+// The daemon ignores a size under 20 columns or 5 rows.
+test("a pane under 20 by 5 cannot take the size", () => {
+  expect(canTakeSize({ cols: 20, rows: 5 })).toBe(true);
+  expect(canTakeSize({ cols: 19, rows: 24 })).toBe(false);
+  expect(canTakeSize({ cols: 80, rows: 4 })).toBe(false);
 });

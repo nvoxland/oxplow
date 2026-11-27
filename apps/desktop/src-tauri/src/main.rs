@@ -20,8 +20,15 @@ fn main() {
     if let Some(args) = extension_args() {
         std::process::exit(oxplow_sdk::cli::run(&args));
     }
+    if let Some(args) = host_args(std::env::args().skip(1)) {
+        run_host(&args);
+    }
 
     init_tracing();
+    // The port other devices come in on, when the command line names it.
+    if let Some(port) = launch_args().device_port {
+        oxplow_host_access::settings::set_port_flag(port);
+    }
 
     // `generate_context!` embeds the Info.plist and may expand only
     // once per binary.
@@ -164,8 +171,12 @@ fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
         Some("--help" | "-h") => Some(
             "oxplow — opens the Oxplow app\n\n\
              Usage:\n  \
-             oxplow [--init]                        open the app (--init: set up this dir as a project)\n  \
+             oxplow [<dir>] [--init] [--device-port <port>]\n  \
+             \x20                                      open the app (--init: set up <dir> as a project;\n  \
+             \x20                                      --device-port: the port other devices use, over\n  \
+             \x20                                      OXPLOW_DEVICE_PORT and the Devices setting)\n  \
              oxplow extension <new|check|test> ...  the extension SDK\n  \
+             oxplow host <serve|project> ...        a headless host (a server): runs until stopped\n  \
              oxplow component-harness <url>         a component harness's page (extension test opens it)\n  \
              oxplow --version | --help"
                 .to_string(),
@@ -185,10 +196,91 @@ fn extension_args() -> Option<Vec<String>> {
     }
 }
 
-/// `--init`: create `.oxplow/` for a fresh project dir and boot straight
-/// in, instead of showing the setup-confirmation screen.
+/// `oxplow host <serve|project> …`: oxplow with no app, as on a server.
+/// Everything after `host` is the `oxplow-host` sidecar's argv. A host
+/// started so is headless: it runs until it is stopped (a signal, or
+/// `POST /host/shutdown`), and the app never uses or stops it.
+fn host_args(mut args: impl Iterator<Item = String>) -> Option<Vec<String>> {
+    match args.next().as_deref() {
+        Some("host") => Some(args.collect()),
+        _ => None,
+    }
+}
+
+/// Become the `oxplow-host` beside this binary with `args` (never returns).
+fn run_host(args: &[String]) -> ! {
+    let binary = oxplow_host::client::binary_beside_exe();
+    let mut cmd = std::process::Command::new(&binary);
+    cmd.args(args);
+    #[cfg(unix)]
+    let err = {
+        use std::os::unix::process::CommandExt;
+        cmd.exec()
+    };
+    #[cfg(not(unix))]
+    let err = match cmd.status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(e) => e,
+    };
+    eprintln!("oxplow: cannot run {}: {err}", binary.display());
+    std::process::exit(1);
+}
+
+/// The app's own command line (after the subcommands it hands off).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppArgs {
+    /// The project folder: the first argument that is no flag.
+    project: Option<String>,
+    /// `--init`: create `.oxplow/` for a fresh project dir and boot straight
+    /// in, instead of showing the setup-confirmation screen.
+    init: bool,
+    /// `--device-port <port>`: the port other devices come in on, over
+    /// `OXPLOW_DEVICE_PORT` and the saved setting.
+    device_port: Option<u16>,
+}
+
+/// Read the app's command line. Pure over `args` (without the program).
+fn app_args(args: impl Iterator<Item = String>) -> Result<AppArgs, String> {
+    let mut out = AppArgs {
+        project: None,
+        init: false,
+        device_port: None,
+    };
+    let mut it = args;
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--init" => out.init = true,
+            "--device-port" => {
+                let text = it.next().ok_or("--device-port needs a port")?;
+                out.device_port = Some(
+                    oxplow_host_access::settings::parse_port(&text).map_err(|e| e.to_string())?,
+                );
+            }
+            // A flag of the OS's (macOS's `-psn_…`) is no folder.
+            flag if flag.starts_with('-') => {}
+            folder => {
+                if out.project.is_none() {
+                    out.project = Some(folder.to_string());
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The app's command line, read once; a bad one ends the launch with why.
+fn launch_args() -> &'static AppArgs {
+    static ARGS: std::sync::OnceLock<AppArgs> = std::sync::OnceLock::new();
+    ARGS.get_or_init(|| {
+        app_args(std::env::args().skip(1)).unwrap_or_else(|e| {
+            eprintln!("oxplow: {e}");
+            std::process::exit(2);
+        })
+    })
+}
+
 fn init_flag() -> bool {
-    std::env::args().skip(1).any(|a| a == "--init")
+    launch_args().init
 }
 
 /// What the shell shows when it starts.
@@ -210,11 +302,8 @@ enum Startup {
 /// launcher rather than silently adopting whatever directory it was
 /// started from.
 fn resolve_project_dir() -> Option<PathBuf> {
-    if let Some(arg) = std::env::args().nth(1) {
-        // Skip flag-like args (e.g. macOS may pass `-psn_…`).
-        if !arg.starts_with('-') {
-            return Some(absolutize_project_dir(PathBuf::from(arg)));
-        }
+    if let Some(arg) = &launch_args().project {
+        return Some(absolutize_project_dir(PathBuf::from(arg)));
     }
     std::env::var_os("OXPLOW_PROJECT_DIR")
         .map(PathBuf::from)
@@ -276,23 +365,34 @@ fn run_shell(ctx: tauri::Context) {
         .setup(move |app| {
             specta.mount_events(app);
             install_recent_projects(app.handle());
-            oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            oxplow_tauri_ipc::commands::menu::install_menu_handler(
+                app.handle(),
+                std::sync::Arc::new(request_quit),
+            );
             open_startup_windows(app.handle(), startup);
+            start_host(app.handle());
             Ok(())
         })
         .build(ctx)
         .expect("error while building tauri application")
         .run(move |app, event| match event {
-            // Every route out of the app comes through here (Cmd-Q, OS
+            // Every route out of the app comes through here (Quit, OS
             // shutdown, the launcher closing). Freeze the restore set so
             // the per-window teardown doesn't empty it window by window.
             //
-            // Nothing is prevented: closing the last *project* window
-            // already put the launcher up (see `handle_window_event`), so
-            // reaching this point means the user closed the launcher
-            // itself — which is how you quit.
-            tauri::RunEvent::ExitRequested { .. } => {
-                app.state::<windows::ShellWindows>().begin_quit();
+            // Closing the last *project* window already put the launcher up
+            // (see `handle_window_event`), so an exit with no code is the
+            // person closing the launcher, which is how you quit. Quitting
+            // ends the host for every device, so it asks first, as Quit does
+            // (`request_quit`); an exit with a code is that one going on.
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                let shell = app.state::<windows::ShellWindows>();
+                if code.is_none() && !shell.quit_confirmed() {
+                    api.prevent_exit();
+                    request_quit(app);
+                    return;
+                }
+                shell.begin_quit();
             }
             // Dock-icon click with nothing on screen. The variant only
             // exists on macOS — there is no dock to click elsewhere —
@@ -315,10 +415,59 @@ fn run_shell(ctx: tauri::Context) {
                 icon_tint::install_bundle_icon();
                 icon_tint::apply(icon_tint.as_deref());
             }
-            // Last chance to take the daemons down with us.
-            tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().stop_all_daemons(),
+            // The app ends: so does its host, every project with it.
+            tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().end(),
             _ => {}
         });
+}
+
+/// The host starts with the app, not at the first open: it holds "Allow
+/// other devices" (in its `host.db`, which only it opens), so a tablet can
+/// reach it before any project is open here.
+fn start_host(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = app.state::<windows::ShellWindows>().host_client() {
+            tracing::warn!(error = %e, "the app's host did not start");
+        }
+    });
+}
+
+/// Quit, asking first when another device has a window open on the app's
+/// host (quitting ends it, and their projects with it). Off the main thread:
+/// the question to the host and the dialog both wait. Dock ▸ Quit and a
+/// logout do not come here; nothing can ask then.
+fn request_quit(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+        let shell = app.state::<windows::ShellWindows>();
+        if !shell.begin_asking_quit() {
+            return; // the question is on screen already
+        }
+        if let Some(question) = shell.quit_question_now() {
+            let quit = app
+                .dialog()
+                .message(question)
+                .title("Quit Oxplow?")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Quit".into(),
+                    "Cancel".into(),
+                ))
+                .blocking_show();
+            if !quit {
+                shell.end_asking_quit();
+                // Closing the launcher got here: never leave no window.
+                if app.webview_windows().is_empty() {
+                    let handle = app.clone();
+                    let _ = app.run_on_main_thread(move || show_launcher(&handle));
+                }
+                return;
+            }
+        }
+        shell.confirm_quit();
+        app.exit(0);
+    });
 }
 
 /// The configured dock tint for `dir`, read straight off disk — the
@@ -356,6 +505,21 @@ fn open_startup_windows(app: &tauri::AppHandle, startup: Startup) {
                     }
                 }
             }
+            // Projects on another machine's host: the work went on there;
+            // their windows come back.
+            for (origin, project) in windows::ShellWindows::remote_restorable(&entries) {
+                match app
+                    .state::<windows::ShellWindows>()
+                    .open_remote(app, &origin, &project)
+                {
+                    Ok(_) => opened += 1,
+                    Err(e) => {
+                        tracing::warn!(error = %e, origin, project, "a window on another machine was not restored");
+                        app.state::<windows::ShellWindows>()
+                            .keep_unrestored(&origin, &project);
+                    }
+                }
+            }
             if opened == 0 {
                 show_launcher(app);
             }
@@ -386,6 +550,7 @@ fn show_launcher(app: &tauri::AppHandle) {
             token: None,
             kind: windows::KIND_LAUNCHER,
             project_dir: None,
+            device: None,
         },
     ) {
         tracing::error!(error = %e, "could not open the launcher window");
@@ -406,6 +571,7 @@ fn show_setup(app: &tauri::AppHandle, dir: &Path) {
             token: None,
             kind: windows::KIND_SETUP,
             project_dir: Some(&dir_str),
+            device: None,
         },
     ) {
         tracing::error!(error = %e, "could not open the setup window");
@@ -487,6 +653,19 @@ mod tests {
         info_arg(args.iter().map(|a| a.to_string()))
     }
 
+    /// `oxplow host …` hands everything after `host` to the host sidecar.
+    #[test]
+    fn host_passes_its_arguments_to_the_sidecar() {
+        let host = |args: &[&str]| host_args(args.iter().map(|a| a.to_string()));
+        assert_eq!(
+            host(&["host", "serve", "--bind", "0.0.0.0:7400"]),
+            Some(vec!["serve".into(), "--bind".into(), "0.0.0.0:7400".into()])
+        );
+        assert_eq!(host(&["extension", "test"]), None);
+        assert_eq!(host(&["/some/project"]), None);
+        assert!(info(&["--help"]).unwrap().contains("oxplow host"));
+    }
+
     /// `oxplow component-harness <url>` opens a harness's loopback page,
     /// and nothing else is one.
     #[test]
@@ -504,6 +683,40 @@ mod tests {
         assert_eq!(harness(&["component-harness"]), None);
         assert_eq!(harness(&["extension", "test"]), None);
         assert_eq!(harness(&[]), None);
+    }
+
+    /// The app's own command line: a project folder, `--init`, and
+    /// `--device-port <port>` (the port other devices come in on, over the
+    /// saved setting), in any order; macOS's `-psn_…` is no folder.
+    #[test]
+    fn the_app_reads_its_folder_init_and_device_port() {
+        let args = |a: &[&str]| app_args(a.iter().map(|s| s.to_string()));
+        assert_eq!(
+            args(&["."]),
+            Ok(AppArgs {
+                project: Some(".".into()),
+                init: false,
+                device_port: None
+            })
+        );
+        assert_eq!(
+            args(&["--device-port", "7401", "/p", "--init"]),
+            Ok(AppArgs {
+                project: Some("/p".into()),
+                init: true,
+                device_port: Some(7401)
+            })
+        );
+        assert_eq!(
+            args(&["-psn_0_123"]),
+            Ok(AppArgs {
+                project: None,
+                init: false,
+                device_port: None
+            })
+        );
+        assert!(args(&["--device-port"]).is_err());
+        assert!(args(&["--device-port", "nope", "."]).is_err());
     }
 
     #[test]

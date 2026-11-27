@@ -3,7 +3,8 @@
 //! viewer — a thread and its stream — sees its thread's panels, then its
 //! stream's, then the project's (`.context/pages-and-tabs.md` "Left-nav
 //! panels"). Panels are named by id (`ext:<extension>/<panel>`); one no
-//! list names shows expanded at the end of the project's. Local to this
+//! list names shows expanded at the end of the project's. Each device has its
+//! own three lists, and the rules hold within one device's. Local to this
 //! project's database, never the repo.
 //!
 //! The rules, kept on every write:
@@ -14,7 +15,7 @@
 //!   stream's list keeps a hidden project row, so it isn't new for
 //!   another viewer. Only a project row can be hidden.
 
-use oxplow_domain::{DomainError, StreamId};
+use oxplow_domain::{DeviceId, DomainError, StreamId};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -51,16 +52,27 @@ impl SqlitePanelLayoutStore {
         Self { db }
     }
 
-    /// What `viewer` sees.
-    pub async fn get(&self, viewer: Viewer) -> Result<ScopedPanelLayout, DomainError> {
-        self.db.read(move |c| get_tx(c, viewer)).await
+    /// What `viewer` sees on `device`.
+    pub async fn get(
+        &self,
+        device: &DeviceId,
+        viewer: Viewer,
+    ) -> Result<ScopedPanelLayout, DomainError> {
+        let device = device.clone();
+        self.db.read(move |c| get_tx(c, &device, viewer)).await
     }
 
-    /// Replace the lists `viewer` sees with `layout`, each in its order,
-    /// and keep the rules (module doc) for every other viewer.
-    pub async fn set(&self, viewer: Viewer, layout: ScopedPanelLayout) -> Result<(), DomainError> {
+    /// Replace the lists `viewer` sees on `device` with `layout`, each in its
+    /// order, and keep the rules (module doc) for the device's other viewers.
+    pub async fn set(
+        &self,
+        device: &DeviceId,
+        viewer: Viewer,
+        layout: ScopedPanelLayout,
+    ) -> Result<(), DomainError> {
+        let device = device.clone();
         self.db
-            .transaction(move |tx| set_tx(tx, viewer, &layout))
+            .transaction(move |tx| set_tx(tx, &device, viewer, &layout))
             .await
     }
 }
@@ -94,6 +106,7 @@ pub fn viewer_tx(
 
 fn list_tx(
     conn: &Connection,
+    device: &DeviceId,
     scope: VisibilityScope,
     owner: Option<i64>,
 ) -> Result<Vec<PanelPlacement>, DomainError> {
@@ -105,11 +118,11 @@ fn list_tx(
     let mut stmt = conn
         .prepare(&format!(
             "SELECT panel, hidden, collapsed FROM panel_layout
-             WHERE visibility_scope = ?1 AND {column} ORDER BY position"
+             WHERE device_id = ?3 AND visibility_scope = ?1 AND {column} ORDER BY position"
         ))
         .map_err(map_sql_err)?;
     let rows = stmt
-        .query_map(params![scope.as_str(), owner], |r| {
+        .query_map(params![scope.as_str(), owner, device.as_str()], |r| {
             Ok(PanelPlacement {
                 panel: r.get(0)?,
                 hidden: r.get::<_, i64>(1)? == 1,
@@ -122,25 +135,31 @@ fn list_tx(
     Ok(rows)
 }
 
-pub fn get_tx(conn: &Connection, viewer: Viewer) -> Result<ScopedPanelLayout, DomainError> {
+pub fn get_tx(
+    conn: &Connection,
+    device: &DeviceId,
+    viewer: Viewer,
+) -> Result<ScopedPanelLayout, DomainError> {
     Ok(ScopedPanelLayout {
         thread: match viewer.thread {
-            Some(t) => list_tx(conn, VisibilityScope::Thread, Some(t.value()))?,
+            Some(t) => list_tx(conn, device, VisibilityScope::Thread, Some(t.value()))?,
             None => Vec::new(),
         },
         stream: match viewer.stream {
-            Some(s) => list_tx(conn, VisibilityScope::Stream, Some(s.value()))?,
+            Some(s) => list_tx(conn, device, VisibilityScope::Stream, Some(s.value()))?,
             None => Vec::new(),
         },
-        project: list_tx(conn, VisibilityScope::Project, None)?,
+        project: list_tx(conn, device, VisibilityScope::Project, None)?,
     })
 }
 
 pub fn set_tx(
     conn: &Connection,
+    device: &DeviceId,
     viewer: Viewer,
     layout: &ScopedPanelLayout,
 ) -> Result<(), DomainError> {
+    let device = device.as_str();
     // What the viewer would see: each panel once.
     let mut seen = std::collections::HashSet::new();
     let shown = layout
@@ -185,21 +204,21 @@ pub fn set_tx(
     };
 
     conn.execute(
-        "DELETE FROM panel_layout WHERE visibility_scope = 'project'",
-        [],
+        "DELETE FROM panel_layout WHERE device_id = ?1 AND visibility_scope = 'project'",
+        [device],
     )
     .map_err(map_sql_err)?;
     if let Some(t) = thread_id {
         conn.execute(
-            "DELETE FROM panel_layout WHERE visibility_scope = 'thread' AND thread_id = ?1",
-            [t],
+            "DELETE FROM panel_layout WHERE device_id = ?2 AND visibility_scope = 'thread' AND thread_id = ?1",
+            params![t, device],
         )
         .map_err(map_sql_err)?;
     }
     if let Some(s) = stream_id {
         conn.execute(
-            "DELETE FROM panel_layout WHERE visibility_scope = 'stream' AND stream_id = ?1",
-            [s],
+            "DELETE FROM panel_layout WHERE device_id = ?2 AND visibility_scope = 'stream' AND stream_id = ?1",
+            params![s, device],
         )
         .map_err(map_sql_err)?;
     }
@@ -211,9 +230,9 @@ pub fn set_tx(
         };
         for (i, p) in list.iter().enumerate() {
             conn.execute(
-                "INSERT INTO panel_layout (panel, visibility_scope, thread_id, stream_id, position, hidden, collapsed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![p.panel, scope.as_str(), t, s, i as i64, p.hidden as i64, p.collapsed as i64],
+                "INSERT INTO panel_layout (device_id, panel, visibility_scope, thread_id, stream_id, position, hidden, collapsed)
+                 VALUES (?8, ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![p.panel, scope.as_str(), t, s, i as i64, p.hidden as i64, p.collapsed as i64, device],
             )
             .map_err(map_sql_err)?;
         }
@@ -226,8 +245,8 @@ pub fn set_tx(
     // The rules for every other viewer.
     for p in project.iter().filter(|p| !p.hidden) {
         conn.execute(
-            "DELETE FROM panel_layout WHERE panel = ?1 AND visibility_scope <> 'project'",
-            [&p.panel],
+            "DELETE FROM panel_layout WHERE device_id = ?2 AND panel = ?1 AND visibility_scope <> 'project'",
+            params![p.panel, device],
         )
         .map_err(map_sql_err)?;
     }
@@ -235,9 +254,9 @@ pub fn set_tx(
         for p in &layout.stream {
             conn.execute(
                 "DELETE FROM panel_layout
-                 WHERE panel = ?1 AND visibility_scope = 'thread'
+                 WHERE device_id = ?3 AND panel = ?1 AND visibility_scope = 'thread'
                    AND thread_id IN (SELECT id FROM threads WHERE stream_id = ?2)",
-                params![p.panel, s],
+                params![p.panel, s, device],
             )
             .map_err(map_sql_err)?;
         }
@@ -249,6 +268,11 @@ pub fn set_tx(
 mod tests {
     use super::*;
     use oxplow_domain::ThreadId;
+
+    /// The device every test but one places panels on.
+    fn mac() -> DeviceId {
+        DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427").unwrap()
+    }
 
     fn shown(panel: &str) -> PanelPlacement {
         PanelPlacement {
@@ -316,32 +340,32 @@ mod tests {
             async move { db.read(move |c| Ok(at(c, t))).await.unwrap() }
         };
         let (a, y, c, other_x, z) = (v(1).await, v(2).await, v(3).await, v(4).await, v(5).await);
-        let mut base = store.get(a).await.unwrap();
+        let mut base = store.get(&mac(), a).await.unwrap();
         base.project = vec![shown("go")];
         base.thread = vec![shown("p")];
-        store.set(a, base).await.unwrap();
-        let mut on_c = store.get(c).await.unwrap();
+        store.set(&mac(), a, base).await.unwrap();
+        let mut on_c = store.get(&mac(), c).await.unwrap();
         on_c.thread = vec![shown("p")];
-        store.set(c, on_c).await.unwrap();
-        let mut on_y = store.get(y).await.unwrap();
+        store.set(&mac(), c, on_c).await.unwrap();
+        let mut on_y = store.get(&mac(), y).await.unwrap();
         on_y.stream = vec![shown("p")];
-        store.set(y, on_y).await.unwrap();
+        store.set(&mac(), y, on_y).await.unwrap();
 
         for (viewer, thread, stream) in [
             (a, vec!["p"], vec![]),
             (c, vec!["p"], vec![]),
             (y, vec![], vec!["p"]),
         ] {
-            let got = store.get(viewer).await.unwrap();
+            let got = store.get(&mac(), viewer).await.unwrap();
             assert_eq!((names(&got.thread), names(&got.stream)), (thread, stream));
         }
         for viewer in [other_x, z] {
-            let got = store.get(viewer).await.unwrap();
+            let got = store.get(&mac(), viewer).await.unwrap();
             assert!(got.thread.is_empty() && got.stream.is_empty(), "{got:?}");
         }
         // Everyone's project list names it, hidden: placed, not new.
         assert_eq!(
-            store.get(z).await.unwrap().project,
+            store.get(&mac(), z).await.unwrap().project,
             vec![shown("go"), hidden("p")]
         );
     }
@@ -353,6 +377,7 @@ mod tests {
         let (a, y) = db.read(|c| Ok((at(c, 1), at(c, 2)))).await.unwrap();
         store
             .set(
+                &mac(),
                 a,
                 ScopedPanelLayout {
                     thread: vec![shown("p")],
@@ -361,15 +386,18 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut on_y = store.get(y).await.unwrap();
+        let mut on_y = store.get(&mac(), y).await.unwrap();
         on_y.stream = vec![shown("p")];
-        store.set(y, on_y).await.unwrap();
-        let mut from_a = store.get(a).await.unwrap();
+        store.set(&mac(), y, on_y).await.unwrap();
+        let mut from_a = store.get(&mac(), a).await.unwrap();
         from_a.thread.clear();
         from_a.project = vec![shown("p")];
-        store.set(a, from_a).await.unwrap();
-        assert!(store.get(y).await.unwrap().stream.is_empty());
-        assert_eq!(store.get(a).await.unwrap().project, vec![shown("p")]);
+        store.set(&mac(), a, from_a).await.unwrap();
+        assert!(store.get(&mac(), y).await.unwrap().stream.is_empty());
+        assert_eq!(
+            store.get(&mac(), a).await.unwrap().project,
+            vec![shown("p")]
+        );
     }
 
     /// In a stream's list, a panel leaves that stream's threads' lists,
@@ -382,16 +410,22 @@ mod tests {
             .await
             .unwrap();
         for viewer in [c, y] {
-            let mut l = store.get(viewer).await.unwrap();
+            let mut l = store.get(&mac(), viewer).await.unwrap();
             l.thread = vec![shown("p")];
-            store.set(viewer, l).await.unwrap();
+            store.set(&mac(), viewer, l).await.unwrap();
         }
-        let mut on_x = store.get(a).await.unwrap();
+        let mut on_x = store.get(&mac(), a).await.unwrap();
         on_x.stream = vec![shown("p")];
-        store.set(a, on_x).await.unwrap();
-        assert!(store.get(c).await.unwrap().thread.is_empty());
-        assert_eq!(names(&store.get(c).await.unwrap().stream), vec!["p"]);
-        assert_eq!(names(&store.get(y).await.unwrap().thread), vec!["p"]);
+        store.set(&mac(), a, on_x).await.unwrap();
+        assert!(store.get(&mac(), c).await.unwrap().thread.is_empty());
+        assert_eq!(
+            names(&store.get(&mac(), c).await.unwrap().stream),
+            vec!["p"]
+        );
+        assert_eq!(
+            names(&store.get(&mac(), y).await.unwrap().thread),
+            vec!["p"]
+        );
     }
 
     /// A viewer sees a panel once; a narrower row is never hidden; a
@@ -416,11 +450,12 @@ mod tests {
                 ..Default::default()
             },
         ] {
-            let err = store.set(a, bad).await.unwrap_err();
+            let err = store.set(&mac(), a, bad).await.unwrap_err();
             assert!(matches!(err, DomainError::Invalid(_)), "{err:?}");
         }
         let err = store
             .set(
+                &mac(),
                 Viewer::default(),
                 ScopedPanelLayout {
                     thread: vec![shown("p")],
@@ -448,6 +483,7 @@ mod tests {
         ];
         store
             .set(
+                &mac(),
                 a,
                 ScopedPanelLayout {
                     thread: vec![shown("t")],
@@ -459,7 +495,7 @@ mod tests {
             .unwrap();
         let mut want = project.clone();
         want.push(hidden("t"));
-        assert_eq!(store.get(a).await.unwrap().project, want);
+        assert_eq!(store.get(&mac(), a).await.unwrap().project, want);
         db.transaction(|c| {
             c.execute("DELETE FROM threads WHERE id = 1", [])
                 .map_err(map_sql_err)?;
@@ -479,5 +515,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    /// Each device keeps its own lists: one device's placing changes nothing
+    /// another sees.
+    #[tokio::test]
+    async fn each_device_keeps_its_own_layout() {
+        let (store, db) = store().await;
+        let a = db.read(move |c| Ok(at(c, 1))).await.unwrap();
+        let tablet = DeviceId::generate();
+        let mut on_mac = store.get(&mac(), a).await.unwrap();
+        on_mac.project = vec![shown("go"), shown("tasks")];
+        on_mac.thread = vec![shown("notes")];
+        store.set(&mac(), a, on_mac.clone()).await.unwrap();
+        let on_tablet = store.get(&tablet, a).await.unwrap();
+        assert_eq!(
+            on_tablet,
+            ScopedPanelLayout::default(),
+            "the tablet starts from the defaults"
+        );
+        store
+            .set(
+                &tablet,
+                a,
+                ScopedPanelLayout {
+                    // `notes` is one of the Mac's thread panels: the tablet's
+                    // rule for it must not reach the Mac's row.
+                    project: vec![shown("notes")],
+                    ..ScopedPanelLayout::default()
+                },
+            )
+            .await
+            .unwrap();
+        let mac_now = store.get(&mac(), a).await.unwrap();
+        assert_eq!(names(&mac_now.thread), vec!["notes"]);
+        assert_eq!(names(&mac_now.project), vec!["go", "tasks", "notes"]);
     }
 }

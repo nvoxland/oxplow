@@ -5832,6 +5832,8 @@ mod tests {
         for (actions, grouped, says) in [
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, form: true }"], true, "a drag action can't be a form"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, key: f }"], true, "a drag action can't have a `key`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, bulk: true }"], true, "a drag action can't be `bulk`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { o: '{{order.uri}}' } }"], true, "`{{order.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the viz to have a `group`"),
@@ -6621,6 +6623,7 @@ view:
         let here = || ViewContext {
             stream_id: Some(2),
             thread_id: Some(5),
+            device_id: None,
             active: None,
         };
         let run = run_page(&svc, "review/mine", BTreeMap::new(), here())
@@ -6656,18 +6659,37 @@ view:
         let expect = ViewContext {
             stream_id: Some(thread.stream_id.value()),
             thread_id: Some(f.thread.value()),
+            device_id: None,
             active: Some(
                 f.svc
                     .capabilities
                     .snapshot(&crate::config_service::read_config(&f.svc.config)),
             ),
         };
-        assert_eq!(view_context(&f.svc, None, None).await, expect);
-        assert_eq!(view_context(&f.svc, None, Some(f.thread)).await, expect);
+        assert_eq!(view_context(&f.svc, None, None, None).await, expect);
         assert_eq!(
-            view_context(&f.svc, Some(thread.stream_id), None).await,
+            view_context(&f.svc, None, None, Some(f.thread)).await,
             expect
         );
+        assert_eq!(
+            view_context(&f.svc, None, Some(thread.stream_id), None).await,
+            expect
+        );
+    }
+
+    /// The viewing device rides in the context, as the `device_id` param.
+    #[tokio::test]
+    async fn view_context_carries_the_viewing_device() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let device = oxplow_domain::DeviceId::generate();
+        let ctx = view_context(&f.svc, Some(&device), None, None).await;
+        assert_eq!(ctx.device_id.as_deref(), Some(device.as_str()));
+        assert_eq!(
+            ctx.value("device_id"),
+            Some(SqlCell::Text(device.as_str().to_string()))
+        );
+        assert!(ViewContext::supplies("device_id"));
+        assert_eq!(view_context(&f.svc, None, None, None).await.device_id, None);
     }
 
     /// A misspelt param is refused, naming it; a loader whose query fails
@@ -7293,6 +7315,7 @@ commands:
                 "knowledge_ref",
                 "knowledge_touch",
                 "request_link",
+                "review_change_name",
                 "review_check",
                 "review_signal",
                 "review_signal_api",

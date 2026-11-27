@@ -233,3 +233,102 @@ test("a board card's right-click opens the card's menu, not its page", async () 
 afterAll(() => {
   mock.module("../api.js", () => realApi);
 });
+
+// A touch screen has no Cmd or Shift: Select in a row's menu marks it, and
+// while rows are marked a tap marks or unmarks a row; Clear ends it. With a
+// mouse the menu has no Select.
+test("on a touch screen Select marks a row, then a tap marks or unmarks one", async () => {
+  const real = globalThis.matchMedia;
+  const fingers = (query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList;
+  globalThis.matchMedia = fingers;
+  try {
+    const view = render(<VizView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
+    fireEvent.click(await view.findByTestId("menu-item-viz.select"));
+    expect(view.getByTestId("viz-row-0").getAttribute("data-marked")).toBe("true");
+    fireEvent.click(view.getByTestId("viz-row-2"));
+    expect(view.getByTestId("viz-marks-count").textContent).toBe("2 selected");
+    fireEvent.click(view.getByTestId("viz-row-0"));
+    expect(view.getByTestId("viz-row-0").getAttribute("data-marked")).toBeNull();
+    expect(view.getByTestId("viz-marks-count").textContent).toBe("1 selected");
+    fireEvent.click(view.getByTestId("viz-bulk-finish"));
+    await waitFor(() => expect(ran.map((r) => r.row)).toEqual([record(2)]));
+    fireEvent.click(view.getByTestId("viz-marks-clear"));
+    expect(view.queryByTestId("viz-marks")).toBeNull();
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});
+
+test("with a mouse a row's menu has no Select", async () => {
+  const view = render(<VizView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+  fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
+  await view.findByTestId("menu-item-add-row-to-context");
+  expect(view.queryByTestId("menu-item-viz.select")).toBeNull();
+});
+
+// After a bulk action the marked rows change (their cells are their key),
+// the bar goes, and a tap is a tap again, not a mark.
+test("on a touch screen marks that are no longer shown leave taps alone", async () => {
+  const real = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
+  try {
+    const run = runOf({ actions: [finish] });
+    const view = render(<VizView run={run} onOpenPage={() => {}} />);
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
+    fireEvent.click(await view.findByTestId("menu-item-viz.select"));
+    expect(view.getByTestId("viz-marks-count").textContent).toBe("1 selected");
+    // The row it marked is done now: its cells, so its key, changed.
+    const after: VizRun = { ...run, result: { ...run.result, rows: [["u1", "One", "done"], rows[1]!, rows[2]!] } } as VizRun;
+    view.rerender(<VizView run={after} onOpenPage={() => {}} />);
+    expect(view.queryByTestId("viz-marks")).toBeNull();
+    fireEvent.click(view.getByTestId("viz-row-1"));
+    expect(view.getByTestId("viz-row-1").getAttribute("data-marked")).toBeNull();
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});
+
+// A finger cannot drag on iPad: a row's menu moves it as a drop would, and
+// offers only what a drag action takes.
+test("on a touch screen a row's menu moves it up or down as a drop would", async () => {
+  const real = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
+  try {
+    const view = render(<VizView run={runOf({ actions: [reorder] })} onOpenPage={() => {}} />);
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
+    expect(view.queryByTestId("menu-item-viz.move.up")).toBeNull();
+    fireEvent.click(await view.findByTestId("menu-item-viz.move.down"));
+    await waitFor(() => expect(ran).toHaveLength(1));
+    expect(ran[0]).toMatchObject({ action: "reorder", row: record(0), drop: { before: record(2), after: record(1), order: [record(1), record(0), record(2)] } });
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});
+
+// Review E2 M2: in a `depth` list an epic steps past its children, not
+// between them.
+test("on a touch screen Move Down on a parent row passes its children", async () => {
+  const real = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) =>
+    ({ matches: query.includes("coarse"), addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList) as typeof matchMedia;
+  try {
+    const cols = ["uri", "title", "d"];
+    const deep: SqlCell[][] = [["e", "Epic", 0], ["c1", "child", 1], ["t", "Task", 0]];
+    const run = {
+      config: { ...base, depth: "d", actions: [reorder] },
+      params: {},
+      result: { columns: cols, rows: deep, truncated: false, reads: { datasets: [], tables: [], measures: [] } },
+    } as unknown as VizRun;
+    const view = render(<VizView run={run} onOpenPage={() => {}} />);
+    fireEvent.contextMenu(view.getByTestId("viz-row-0"), { clientX: 5, clientY: 5 });
+    fireEvent.click(await view.findByTestId("menu-item-viz.move.down"));
+    await waitFor(() => expect(ran).toHaveLength(1));
+    expect(ran[0]).toMatchObject({ row: { uri: "e" }, drop: { after: { uri: "t" }, before: null } });
+  } finally {
+    globalThis.matchMedia = real;
+  }
+});

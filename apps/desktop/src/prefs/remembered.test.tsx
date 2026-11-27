@@ -10,6 +10,7 @@ import {
   pageMemoryScope,
   RememberedContext,
   useAppPreference,
+  useAppPreferenceValue,
   usePageMemory,
   usePanelMemory,
 } from "./remembered.js";
@@ -45,6 +46,42 @@ test("the store reads what was kept, writes a change once after a pause, and ign
   await waitFor(() => expect(b.saves).toEqual([["app", "railWidth", "410"]]));
   store.set("app", "railWidth", undefined);
   await waitFor(() => expect(b.saves.at(-1)).toEqual(["app", "railWidth", null]));
+});
+
+test("a save that failed is sent again, and a reload does not bring the old value back", async () => {
+  const daemon = new Map<string, string>([["app\u0000railWidth", "320"]]);
+  let down = true;
+  let reload: () => void = () => {};
+  const saves: (string | null)[] = [];
+  const store = createRememberedStore(
+    {
+      load: async () => [...daemon].map(([id, valueJson]) => ({ scope: "app", key: id.split("\u0000")[1]!, valueJson })),
+      save: async (scope, key, valueJson) => {
+        saves.push(valueJson);
+        if (down) throw new Error("daemon away");
+        daemon.set(`${scope}\u0000${key}`, valueJson ?? "");
+      },
+      watch: (r) => {
+        reload = r;
+        return () => {};
+      },
+    },
+    5,
+    20,
+  );
+  await store.ready;
+  store.set("app", "railWidth", 500);
+  await waitFor(() => expect(saves[0]).toBe("500"));
+  // The daemon is still away: a reload (a reconnect) keeps the person's value.
+  reload();
+  await new Promise((r) => setTimeout(r, 10));
+  expect(store.get("app", "railWidth")).toBe(500);
+  // It comes back: the value is sent again, by delay or by the next read.
+  down = false;
+  await waitFor(() => expect(daemon.get("app\u0000railWidth")).toBe("500"));
+  reload();
+  await new Promise((r) => setTimeout(r, 10));
+  expect(store.get("app", "railWidth")).toBe(500);
 });
 
 function Wide() {
@@ -116,4 +153,97 @@ test("outside a tab, page memory is the component's own", () => {
   fireEvent.click(view.getByTestId("mode"));
   expect(view.getByTestId("mode").textContent).toBe("rebase");
   expect(store.get("oxplow:oxplow/page?page=tasks", "mergeMode")).toBeUndefined();
+});
+
+// A value another device (or a forgetting) changed arrives when the store is told to read again.
+test("the store reads again when told to, keeping what is waiting to be saved over what comes back", async () => {
+  let stored: UiPreference[] = [{ scope: "app", key: "railWidth", valueJson: "320" }];
+  let reload = () => {};
+  const saves: [string, string, string | null][] = [];
+  const store = createRememberedStore(
+    {
+      load: async () => stored,
+      save: async (scope, key, valueJson) => void saves.push([scope, key, valueJson]),
+      watch: (run) => {
+        reload = run;
+        return () => {};
+      },
+    },
+    10,
+  );
+  await store.ready;
+  let heard = 0;
+  store.subscribe(() => (heard += 1));
+  stored = [
+    { scope: "app", key: "railWidth", valueJson: "500" },
+    { scope: "app", key: "dockHeight", valueJson: "200" },
+  ];
+  reload();
+  await waitFor(() => expect(store.get("app", "railWidth")).toBe(500));
+  expect(store.get("app", "dockHeight")).toBe(200);
+  // What the other side forgot is forgotten here.
+  stored = [{ scope: "app", key: "railWidth", valueJson: "500" }];
+  reload();
+  await waitFor(() => expect(store.get("app", "dockHeight")).toBeUndefined());
+  // A change waiting to be saved wins over the reloaded value.
+  store.set("app", "railWidth", 700);
+  stored = [{ scope: "app", key: "railWidth", valueJson: "100" }];
+  reload();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(store.get("app", "railWidth")).toBe(700);
+  await waitFor(() => expect(saves).toEqual([["app", "railWidth", "700"]]));
+  // Nothing changed: nobody is told.
+  stored = [{ scope: "app", key: "railWidth", valueJson: "700" }];
+  const before = heard;
+  reload();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(heard).toBe(before);
+});
+
+// A read that a newer one replaces doesn't count as loaded: `ready` waits
+// for the values to be there, so a component never reads its memory as
+// empty and writes its default over it.
+test("ready waits for a read that is applied, not the first one", async () => {
+  const answers: Array<(rows: UiPreference[]) => void> = [];
+  let watch: (() => void) | null = null;
+  const store = createRememberedStore({
+    load: () => new Promise<UiPreference[]>((resolve) => answers.push(resolve)),
+    save: async () => {},
+    watch: (reload) => {
+      watch = reload;
+      return () => {};
+    },
+  });
+  let ready = false;
+  void store.ready.then(() => (ready = true));
+  watch!(); // the socket opened: a second read replaces the first
+  answers[0]!([{ scope: "component:acme/x", key: "k", valueJson: "1" }]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(ready).toBe(false);
+  answers[1]!([{ scope: "component:acme/x", key: "k", valueJson: "2" }]);
+  await store.ready;
+  expect(store.get("component:acme/x", "k")).toBe(2);
+});
+
+// A component high in the tree (the window choosing its shell) reads one
+// preference without re-rendering on every other write (a rail drag).
+test("useAppPreferenceValue re-renders only when its own value changes", async () => {
+  const store = createRememberedStore(backend(), 10);
+  await store.ready;
+  let renders = 0;
+  function Reader() {
+    renders++;
+    return <span data-testid="v">{String(useAppPreferenceValue("shell") ?? "none")}</span>;
+  }
+  const view = render(
+    <RememberedContext.Provider value={store}>
+      <Reader />
+    </RememberedContext.Provider>,
+  );
+  const first = renders;
+  act(() => store.set("app", "railWidth", 300));
+  act(() => store.set("app", "railWidth", 310));
+  expect(renders).toBe(first);
+  act(() => store.set("app", "shell", "tablet"));
+  expect(view.getByTestId("v").textContent).toBe("tablet");
 });

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { fileTask, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, reload, shown, taskIdOf } from "../../support/ui.js";
+import { open, reload, shown, taskIdOf, tabOf } from "../../support/ui.js";
 
 // What a page lists, filters, writes and says is a fixture of
 // oxplow-bundled (`knowledge-*`). These specs are what only the app's shell
@@ -74,7 +74,7 @@ test("a knowledge page is edited in place and saved", async ({ page, daemon }) =
 test("a knowledge page's tab shows its title", async ({ page, daemon }) => {
   await run(daemon, "oxwiki.page.write", { title: "Pangolin facts", body: "# Pangolin facts\n\nScaly.\n" });
   await open(page, daemon, uriOf("pangolin-facts"));
-  await expect(page.getByTestId(`center-tab-${uriOf("pangolin-facts")}`)).toContainText("Pangolin facts");
+  await expect(tabOf(page, uriOf("pangolin-facts"))).toContainText("Pangolin facts");
 });
 
 // In the editor a bare link shows its page's title, as the viewer does,
@@ -186,6 +186,6 @@ test("New page on the Knowledge index writes a page and opens it", async ({ page
   const title = shown(page).getByTestId("viz-form-fields-title");
   await title.fill("Lemur facts");
   await title.press("Enter");
-  await expect(page.getByTestId(`center-tab-${uriOf("lemur-facts")}`)).toBeVisible();
+  await expect(tabOf(page, uriOf("lemur-facts"))).toBeVisible();
   await expect(page.locator('[data-node="body"]:visible')).toContainText("They like the sun.");
 });

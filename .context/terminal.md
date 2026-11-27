@@ -130,13 +130,57 @@ session (resuming its saved conversation). Leaving the tab never stops the
 process, and nothing is typed on restore. Shell terminals open at once.
 The deciding rule is `mayStartNow` in `terminalSession.ts`.
 
-**A reattach takes the pane's size.** `attach_or_create` resizes a live
-PTY to the cols/rows the attaching pane measured before it replays. The
-pane's first `ResizeObserver` callback fires before its session id is
-back, so it sends no resize; without this, an agent that outlived an app
-restart kept the old window's size and drew its input and status lines
-past the pane's bottom, on top of each other, until the window was
-resized. Locked by `reattaching_resizes_the_live_session_to_the_new_pane`.
+**The client that last typed owns the PTY's size.** A terminal is shared
+by every client, so its size is one thing, as tmux's `window-size latest`.
+Each `SessionEntry` keeps an `owner` (a page load, `ConnectionId`) and
+`asked`, the size each page load last asked for. An attach records the
+pane's size in `asked` and resizes the PTY only by the registry's size rule
+(`size_rule`): the owner applies; with no owner, or an owner away for 30 s or
+more (`OWNER_GRACE`, longer than the page's reconnect backoff), the attacher
+takes it; otherwise the size is only noted. So an owner whose socket drops
+for a moment (a network blip, the daemon's close of a window that missed an
+answer) keeps the terminal. A `resize` message is recorded and applied under
+the same rule. A page load's `asked` is kept while it is away up to ten
+minutes. Input takes the terminal only when it is **typed**: the frame
+carries `"typed": true` when it came from a key, a paste, an IME commit or
+the touch bar (`TerminalSurface` marks them; `useTerminalSession.input`
+sends the mark). xterm's own replies to a program's queries (device
+attributes, cursor reports) and its focus reports reach `onData` too: they
+are written to the PTY but take nothing, so a pane that only watches
+never takes the size. Typed input from a page load that is not the owner
+makes it the owner and resizes the PTY to its `asked` size first (a failed
+resize is logged; the keys are still written). A `resize` with
+`"take": true` ("Fit to this device") makes the sender the owner and applies
+at once. A request with no connection (a script, a test) always resizes.
+Start Again and a restart hand the old terminal's owner and `asked` sizes to
+the new one (`ownership` / `inherit`), so no pane has to win the size again.
+Every change of size or owner emits a `{"type":"size","cols","rows","owner"}`
+bridge event, and `AttachResult` carries the PTY's `cols` and `rows`, its
+`owner`, and `you` (the caller's own page load): a pane is the owner when
+they are equal. A size under 20 columns or 5 rows is ignored (`canTakeSize`
+in `terminalSession.ts`; the pane's Fit button is disabled and says why).
+Locked by the `TerminalSessionRegistry` ownership tests and the `two-clients`
+e2e spec.
+
+**A pane draws the terminal's grid.** `useTerminalSession` keeps the PTY's
+`grid` and `ownedElsewhere` (from the open's answer, and again from a
+same-session reopen after a reconnect, and from each `size` message), and
+`TerminalSurface` keeps its xterm at that grid. The pane measures its room
+at the base font (`FitAddon.proposeDimensions`, with the font set back to
+13 px for the measure) and reports that as its asked size, never `term.cols`
+(the owner's grid): the open and each reopen send it. A pane with less room
+than the grid draws it in a smaller font (`gridFontSize`, the base times the
+scale, down to 7 px), not a CSS transform: xterm finds the cell under the
+pointer from its own measure, and a transform makes selection, links and
+mouse reports land in the wrong cell. At the 7 px floor the rest of the grid
+is **clipped** (the mount has `overflow: hidden`); Fit to this device is the
+way out. One with more room draws the grid as it is. When another page load
+owns the size (the daemon says so, not a guess from two sizes) and the grid
+differs from the pane, the view shows a chip in its top-right corner,
+"Sized for another device", with **Fit to this device** (`terminal-fit`),
+which sends a `resize` with `take`; the chip is out of the flow, so it does
+not change the pane's size and does not cover the touch bar or the bottom
+rows.
 
 **A reattach replays a tail, not the whole ring.** The daemon keeps up to
 4 MB of a pane's output, but `open_terminal_session` answers with the last
@@ -400,6 +444,47 @@ Locked by `input_written_before_the_session_exists_arrives_once_it_does`,
 Each `onData` is its own message, so a bare Escape and the Enter after it
 are two PTY writes, as they were typed. Nothing merges keys any more.
 
+## On a touch screen: the touch bar
+
+An on-screen keyboard has no Esc, Tab, Ctrl or arrow keys, and an agent's
+prompts need them (Claude's "trust this folder" is answered with the
+arrows). So while the main pointer is coarse (`useCoarsePointer`,
+`(pointer: coarse)`, following a change), `TerminalView` draws
+`TerminalTouchBar` under the surface, for a shell and an agent alike.
+
+- **Keys** (`terminal/touchKeys.ts`): Esc, Shift+Tab, Tab, Ctrl and the four
+  arrows, sent through the session's `input` as the bytes a hardware
+  keyboard sends. The arrows follow the program's cursor-key mode
+  (`term.modes.applicationCursorKeysMode`: `ESC O A` in a full-screen
+  program or menu, `ESC [ A` in a shell). Esc also calls the agent's
+  `onInterrupt`, as a typed Escape does.
+- **Ctrl** is a toggle: the next key typed becomes its control character
+  (`ctrlOf`: a letter or one of `@[\]^_` and space), then it turns off. A
+  whole word that a keyboard's suggestion types at once goes as it is.
+- **The focus stays in the terminal:** each key cancels its pointer and mouse
+  down, so the on-screen keyboard stays open.
+- **Compose** opens a real text field, where the keyboard's dictation and its
+  long-press paste work (the terminal's own paste needs the clipboard API,
+  which a page on plain HTTP lacks). Insert pastes the text with `term.paste`
+  (bracketed when the program asked) and presses no Enter: what the person
+  composes waits in the input until they send it. In the field Enter adds a
+  line, Cmd/Ctrl+Enter inserts, Escape cancels.
+
+**A finger scrolls.** A one-finger drag over the terminal is whole lines of
+wheel (`terminal/touchScroll.ts`: `touchScrollStep` keeps the part of a
+line left over), and does what xterm does with a wheel in each mode
+(`wheelAction`), since xterm takes a wheel only from a real pointer: a
+shell scrolls its scrollback (`term.scrollLines`), an alternate screen
+with no mouse gets the arrows (in its cursor-key mode), and a program that
+took the mouse gets SGR wheel reports (`ESC [ < 64|65 ; col ; row M`, as
+Claude Code asks for) at the finger's cell. A scroll is not typing: it never
+takes the terminal's size. The page does not scroll under the drag.
+
+Locked by `touchKeys.test.ts`, `touchScroll.test.ts`,
+`TerminalTouchBar.test.tsx` and the e2e `agent/terminal-touch.spec.ts` (a
+touch context: Up recalls history, Ctrl then c interrupts, Compose inserts
+without Enter, a swipe scrolls a shell back; a mouse gets no bar).
+
 ## When a session ends or goes away
 
 **Restart Terminal** is available in Quick Open while an agent terminal
@@ -582,7 +667,7 @@ ends in `/` is a directory, any other a file (the terminal can't tell).
   correctly. **Caveat:** only the `shell` pane benefits — its child *is*
   the shell, so the pid's cwd tracks `cd`; an agent pane's child is the
   agent, which doesn't `cd`, so its cwd is the worktree anyway.
-- A missing target is benign: `handleOpenFile` (App.tsx) shows a
+- A missing target is benign: `handleOpenFile` (`window/useWindowOpeners.ts`) shows a
   friendly "File not found: <path>" at `warn`, not an error with the
   raw OS code — so a stale link doesn't look like a crash.
 - Absolute paths outside the worktree open as-is — the App.tsx

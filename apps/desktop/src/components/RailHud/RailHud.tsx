@@ -1,4 +1,3 @@
-import { iconFor } from "../../icons.js";
 import type { ReactNode } from "react";
 import { Fragment } from "react";
 import { useAppPreference } from "../../prefs/remembered.js";
@@ -15,8 +14,8 @@ import type { PanelGroup } from "../Panels/panelLayout.js";
 import { visibilityScopeLabel } from "../../visibilityScope.js";
 import { railPanelItems } from "../../menuBar.js";
 import { useDragAutoScroll } from "./dragAutoScroll.js";
-import { type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
-import { PageTree } from "../../pages/PageTree.js";
+import { type PanelRuns } from "../Panels/usePanelRuns.js";
+import { PanelBody, PanelChoiceToggle, PanelCollapsed } from "../Panels/PanelParts.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
@@ -378,7 +377,7 @@ function RailSection({
           style={{
             cursor: "grab",
             color: "var(--text-muted)",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
             lineHeight: 1,
             padding: "0 2px",
             flexShrink: 0,
@@ -404,7 +403,7 @@ function RailSection({
             cursor: "pointer",
             padding: 0,
             textAlign: "left",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 600,
             color: titleColor,
             textTransform: "uppercase",
@@ -425,7 +424,7 @@ function RailSection({
             </span>
           ) : null}
           {count != null && count > 0 ? (
-            <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500 }}>{count}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", fontWeight: 500 }}>{count}</span>
           ) : null}
         </button>
         {headerAction}
@@ -555,7 +554,7 @@ export function RailHud({
                 margin: "2px 6px 6px",
                 padding: "10px 6px",
                 textAlign: "center",
-                fontSize: 11,
+                fontSize: "var(--text-xs)",
                 color: "var(--text-muted)",
                 borderRadius: 6,
                 border: `1px dashed ${sections.groupDropTarget === "remove" ? "var(--accent)" : "var(--border-subtle)"}`,
@@ -597,7 +596,7 @@ function GroupDivider({
         display: "flex",
         alignItems: "center",
         gap: 6,
-        fontSize: 10,
+        fontSize: "var(--text-xs)",
         fontWeight: 600,
         textTransform: "uppercase",
         letterSpacing: 0.4,
@@ -742,19 +741,9 @@ function ExtensionPanelSection({
   // line is stats.
   const openRef = panelOpenRef(panel, extensions);
   const body = runs.body ? (
-    <div
-      data-testid="rail-panel-body"
-      className="ox-compact"
-      style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)", ...(filled ? { flex: 1, minHeight: 0, overflowY: "auto" as const } : {}) }}
-    >
-      <PageTree run={runs.body.run} runId={runs.body.runId} compact partButtons uncapped={filled} onMore={filled ? () => onOpenPage(openRef) : onFill} streamId={streamId} onOpenPage={onOpenPage} />
-    </div>
+    <PanelBody body={runs.body} filled={filled} streamId={streamId} onOpenPage={onOpenPage} onMore={filled ? () => onOpenPage(openRef) : onFill} />
   ) : null;
-  const collapsed = runs.collapsed ? (
-    <div data-testid="rail-panel-collapsed" className="ox-compact" style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
-      <PageTree run={runs.collapsed.run} runId={runs.collapsed.runId} compact partButtons={false} streamId={streamId} onOpenPage={onOpenPage} />
-    </div>
-  ) : undefined;
+  const collapsed = runs.collapsed ? <PanelCollapsed collapsed={runs.collapsed} streamId={streamId} onOpenPage={onOpenPage} /> : undefined;
   return (
     <RailSection
       id={extensionPanelId(panel)}
@@ -786,48 +775,3 @@ function ExtensionPanelSection({
     </RailSection>
   );
 }
-
-/** A panel's choice param in its header: one small button per
- *  option, the one in force pressed. */
-function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(value: string): void }) {
-  return (
-    <span role="group" aria-label={choice.label ?? choice.name} style={{ display: "inline-flex", gap: 2 }}>
-      {choice.options.map((o) => {
-        const active = o.value === choice.value;
-        // An option that names an icon is the icon alone, its label the
-        // hover and the button's name.
-        const Icon = iconFor(o.icon);
-        return (
-          <button
-            key={o.value}
-            type="button"
-            data-testid={`rail-panel-choice-${choice.name}-${o.value}`}
-            aria-pressed={active}
-            title={Icon ? o.label : undefined}
-            aria-label={Icon ? o.label : undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!active) onPick(o.value);
-            }}
-            style={{
-              // The one in force is boxed in the accent over a faint
-              // accent wash, so it reads as picked against the header.
-              background: active ? "var(--rail-panel-choice-bg)" : "transparent",
-              border: `1px solid ${active ? "var(--accent)" : "transparent"}`,
-              borderRadius: 4,
-              color: active ? "var(--text-primary)" : "var(--text-secondary)",
-              cursor: active ? "default" : "pointer",
-              fontSize: 10,
-              padding: Icon ? "2px 3px" : "0 4px",
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-          >
-            {Icon ? <Icon size={13} aria-hidden /> : o.label}
-          </button>
-        );
-      })}
-    </span>
-  );
-}
-

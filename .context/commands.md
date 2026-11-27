@@ -222,7 +222,7 @@ a boolean key; a string or a regular expression for a string key) — so a
 typo is a refusal (`Invalid` at `/ui/when`), never a silently hidden
 command; the window only evaluates. Both read the same cases
 (`crates/oxplow-domain/fixtures/when_cases.json`). A new key goes in
-`CONTEXT_KEYS` and the window's `whenContext` (`App.tsx`) together.
+`CONTEXT_KEYS` and the window's `whenContext` (`window/useWindowCommands.ts`) together.
 
 A page's `open: <column>` action is not a command: it runs nothing on the
 bus (no command run, no `command.executed`), so it appears in no command list and
@@ -386,13 +386,27 @@ in `CommandSpec::op`.
 - **A run on the daemon** (an agent's through MCP, a script's) reaches
   the window through `client_host::ClientHost`: an
   `OxplowEvent::ClientCall { id, client, thread_id, actor, scope, op, input }`
-  addressed to one window — the last registered that hosts the
-  scope — which does it and answers `answer_client_call { client,
-  id, result | error }` (another window's answer is ignored); the run
-  waits (15 s), its answer the run's result. A window mints an id when it
-  starts and says it's open — and what it hosts — with
-  `register_client_host { client, scopes }` once it is ready to do a
-  call as asked (App.tsx `windowReady`: its stream and thread loaded,
+  addressed to one window that hosts the scope — the window of the device
+  the run was asked from (its caller; a person's run has no other), else, for
+  a run with no caller, the window the person used last
+  (`ClientDevices::last_used`, `.context/remote-daemon.md` "Last used"),
+  else the last registered — which does it and answers `answer_client_call { id,
+  result | error }` (another window's answer is ignored); the run
+  waits (15 s; 10 min for a call that waits on a person, such as a folder
+  pick, `client_host::PERSON_TIMEOUT`), its answer the run's result. A window that misses the answer
+  stops hosting and its event socket is closed (a normal close): a live page
+  reconnects and registers again; a frozen one is away until it does. A
+  person's run goes only to its own device's window, never another's. A window uses its own id for
+  one page load (`uiClientId.ts`, the id its socket, tab reports and logs
+  carry; a reload is a new window). The window is the request's own page
+  load (its `Oxplow-Connection`,
+  `.context/remote-daemon.md` "Who is asking"), and a request with none is
+  refused. An agent's `oxplow.window.navigate` and `oxplow.page.show` may
+  name a `client` (a device id or a connected device's name): the call goes to that device's window (`ClientHost::call_on`),
+  or waits for it when it is away (`.context/remote-daemon.md` "An agent's
+  tab on a device"). It says it's open — and what it hosts — with
+  `register_client_host { scopes }` once it is ready to do a
+  call as asked (`window/useWindowHost.ts` `windowReady`: its stream and thread loaded,
   the thread's first tabs opened, the extensions loaded; before that a
   navigate was refused, pushed aside by those first tabs, or drawn by
   nothing). Once ready it stays the host, and `<html data-oxplow-ready>`
@@ -405,7 +419,7 @@ in `CommandSpec::op`.
   is refused at once rather than waiting out another timeout.
 - **What the window runs to answer a call runs as the caller.** A
   window handler that writes through the daemon — Save writing
-  `oxplow.file.save` — calls `run_command_for_call { client, call, id,
+  `oxplow.file.save` — calls `run_command_for_call { call, id,
   input }`, which runs as the waiting call's actor (`ClientHost::caller`;
   only the window the call went to, only while it waits), never as the
   person at the window: an agent's Save is the agent's write, under its
@@ -551,7 +565,13 @@ skipping.
    `command_run` detail row linked by `run_id`
    (`command_run_store::insert_tx`). The shared row holds the actor,
    anchors, timing, outcome, error, cost and authority. The detail row
-   holds the command's input, result, inverse, event link and undo marker.
+   holds the command's input, result, inverse, event link and undo marker,
+   and the device a person asked from (`device_id`): a run's context carries
+   the request's caller (`RunContext::with_caller`; its children inherit it),
+   and the RPC commands that run as the person (`run_command`, `undo_command`,
+   `decide_proposal`, page actions and forms, component commands) set it
+   from the request (`.context/remote-daemon.md` "Who is asking"). An agent's,
+   an effect's or a job's run has none.
    For a `Tx` write, the handler, both rows, `command.executed@6` and the
    handler's effects commit together. The event's `command_run_id` names the
    detail row's integer ID. The handler's events take the executed event

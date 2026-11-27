@@ -116,6 +116,7 @@ pub async fn open_project(
     path: String,
     new_window: bool,
 ) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     resolve_open_target(&path)?;
     open_and_maybe_replace(window, PathBuf::from(&path), new_window).await
 }
@@ -131,6 +132,7 @@ pub async fn open_project(
 #[tauri::command]
 #[specta::specta]
 pub async fn create_project(window: tauri::Window, path: String) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     let dir = resolve_create_target(&path)?;
     oxplow_app::ensure_state_dir(&dir.join(".oxplow"))
         .map_err(|e| IpcError::internal(format!("create .oxplow: {e}")))?;
@@ -142,6 +144,7 @@ pub async fn create_project(window: tauri::Window, path: String) -> Result<(), I
 #[tauri::command]
 #[specta::specta]
 pub async fn setup_project(window: tauri::Window, path: String) -> Result<(), IpcError> {
+    super::local_window_only(&window)?;
     let dir = Path::new(&path);
     if !dir.is_dir() {
         return Err(IpcError::invalid(format!(

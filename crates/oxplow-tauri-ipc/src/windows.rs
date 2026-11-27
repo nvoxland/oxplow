@@ -70,22 +70,81 @@ pub fn project_window_title(project_dir: &Path) -> String {
 pub struct WindowRegistry {
     /// A Vec, not a map: the order is the open order, and the session
     /// restores in it.
-    open: Mutex<Vec<(String, PathBuf)>>,
+    open: Mutex<Vec<OpenWindow>>,
+}
+
+/// One open project window: its label, its folder, and the host's id for
+/// the project (what the window holds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenWindow {
+    pub label: String,
+    /// The project's folder here; for a project on another machine's host,
+    /// its address (`<origin>/p/<id>`), which is also its restore entry.
+    pub dir: PathBuf,
+    pub project: String,
+    /// The origin of the host on another machine it is on; `None`: the
+    /// app's own host.
+    pub remote: Option<String>,
+}
+
+/// The restore entry of a project on another machine's host. Pure.
+pub fn remote_entry(origin: &str, project: &str) -> String {
+    format!("{origin}/p/{project}")
+}
+
+/// A restore entry that names a project on another machine's host: its
+/// origin and project id. Pure.
+pub fn parse_remote_entry(entry: &str) -> Option<(String, String)> {
+    if !(entry.starts_with("https://") || entry.starts_with("http://")) {
+        return None;
+    }
+    let (origin, project) = entry.rsplit_once("/p/")?;
+    (!project.is_empty() && !project.contains('/'))
+        .then(|| (origin.to_string(), project.to_string()))
 }
 
 impl WindowRegistry {
-    pub fn insert(&self, label: &str, project_dir: &Path) {
+    pub fn insert(&self, label: &str, project_dir: &Path, project: &str) {
         let dir = canonical(project_dir);
         let mut open = self.lock();
-        open.retain(|(l, _)| l != label);
-        open.push((label.to_string(), dir));
+        open.retain(|w| w.label != label);
+        open.push(OpenWindow {
+            label: label.to_string(),
+            dir,
+            project: project.to_string(),
+            remote: None,
+        });
     }
 
-    /// Forget a closed window, returning the project it was showing.
-    pub fn remove(&self, label: &str) -> Option<PathBuf> {
+    /// A window on `project` of the host at `origin` (another machine).
+    pub fn insert_remote(&self, label: &str, origin: &str, project: &str) {
         let mut open = self.lock();
-        let idx = open.iter().position(|(l, _)| l == label)?;
-        Some(open.remove(idx).1)
+        open.retain(|w| w.label != label);
+        open.push(OpenWindow {
+            label: label.to_string(),
+            dir: PathBuf::from(remote_entry(origin, project)),
+            project: project.to_string(),
+            remote: Some(origin.to_string()),
+        });
+    }
+
+    /// Forget a closed window, returning what it was showing.
+    pub fn remove(&self, label: &str) -> Option<OpenWindow> {
+        let mut open = self.lock();
+        let idx = open.iter().position(|w| w.label == label)?;
+        Some(open.remove(idx))
+    }
+
+    /// Whether the window `label` is on a host on another machine.
+    pub fn is_remote(&self, label: &str) -> bool {
+        self.lock()
+            .iter()
+            .any(|w| w.label == label && w.remote.is_some())
+    }
+
+    /// Every open window, in the order they were opened.
+    pub fn windows(&self) -> Vec<OpenWindow> {
+        self.lock().clone()
     }
 
     /// The window already showing `project_dir`, if any. Canonicalized
@@ -95,14 +154,14 @@ impl WindowRegistry {
         let wanted = canonical(project_dir);
         self.lock()
             .iter()
-            .find(|(_, dir)| *dir == wanted)
-            .map(|(label, _)| label.clone())
+            .find(|w| w.dir == wanted)
+            .map(|w| w.label.clone())
     }
 
     /// Every open project, in the order the windows were opened. This is
     /// the session set.
     pub fn project_dirs(&self) -> Vec<PathBuf> {
-        self.lock().iter().map(|(_, dir)| dir.clone()).collect()
+        self.lock().iter().map(|w| w.dir.clone()).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -113,7 +172,7 @@ impl WindowRegistry {
         self.len() == 0
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(String, PathBuf)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<OpenWindow>> {
         self.open.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
@@ -146,6 +205,10 @@ pub struct WindowContext<'a> {
     /// The project this window is for — the dir being opened, or the
     /// dir being offered for setup.
     pub project_dir: Option<&'a str>,
+    /// This install's device (`oxplow_config::this_device`): the Mac app is
+    /// one device for all its windows, and a project window sends it on
+    /// every request. `None` for the launcher and setup screens.
+    pub device: Option<&'a oxplow_config::ThisDevice>,
 }
 
 /// The `initialization_script` for a window. Built through `serde_json`
@@ -156,6 +219,7 @@ pub fn initialization_script(ctx: &WindowContext<'_>) -> String {
         "token": ctx.token,
         "kind": ctx.kind,
         "projectDir": ctx.project_dir,
+        "device": ctx.device,
     });
     // Frozen: this is the shell's statement about the window, not
     // renderer state.
@@ -194,37 +258,76 @@ pub fn build_shell_window(
     builder.build()
 }
 
-/// How long a daemon whose app just quit gets to release the project
-/// lock before a new launch defers to it as another app's.
-const DAEMON_EXIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// The shell's lifecycle: which windows are open, the daemon behind
-/// each, and the global session that follows from them.
+/// The shell's lifecycle: which windows are open, the project each holds
+/// on the app's host, and the global session that follows from them.
 ///
-/// Every project window is one `oxplow-daemon` child. Opening a project
-/// starts the daemon, waits for its endpoint, then creates a window
-/// carrying that endpoint — the base has to be known before the window
-/// exists, because it is injected at creation.
+/// The app's host is the app's child (`oxplow_host::client::start_own_host`,
+/// see `.context/host.md` "The Mac app"), started at the first open, with a
+/// token made for this run. Opening a project registers and holds it there
+/// and waits for its daemon, then creates a window carrying `<host>/p/<id>`
+/// and the token: the base has to be known before the window exists,
+/// because it is injected at creation. Closing a window releases its hold;
+/// the host stops a daemon no device holds. Quitting ends the host (its
+/// stdin lifeline closes), and every device's projects with it: the app is
+/// the whole of oxplow to the person.
 pub struct ShellWindows {
     pub registry: WindowRegistry,
-    supervisor: oxplow_app::daemon_supervisor::DaemonSupervisor,
+    /// The app's host once started; started again at the next open if it
+    /// has ended (crashed).
+    host: Mutex<Option<oxplow_host::client::OwnHost>>,
     /// The global restore set, or `None` when the config dir can't be
     /// resolved (then the session simply isn't persisted).
     session: Option<oxplow_config::SessionProjects>,
+    /// This install's device, made once and kept in the global config dir;
+    /// `None` when that dir can't be resolved or written.
+    device: Option<oxplow_config::ThisDevice>,
     /// Set once the whole app is quitting, so the per-window teardown
     /// stops rewriting the restore set — Cmd-Q with three windows open
     /// must bring all three back.
     quitting: std::sync::atomic::AtomicBool,
+    /// The person said Quit (or nothing needed asking): the exit goes on.
+    quit_confirmed: std::sync::atomic::AtomicBool,
+    /// A quit is being asked about now: a second Quit asks nothing more.
+    asking_quit: std::sync::atomic::AtomicBool,
+    /// Restore entries of windows on another machine that did not open.
+    unrestored: Mutex<Vec<String>>,
+}
+
+/// The name a person gave this Mac (System Settings › General › About),
+/// else its host name: the device's name until the person renames it.
+fn computer_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Ok(out) = std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+    {
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if out.status.success() && !name.is_empty() {
+            return name;
+        }
+    }
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "This computer".into())
 }
 
 impl Default for ShellWindows {
     fn default() -> Self {
         Self {
             registry: WindowRegistry::default(),
-            supervisor: oxplow_app::daemon_supervisor::DaemonSupervisor::default(),
+            host: Mutex::new(None),
             session: oxplow_config::global_config_dir()
                 .map(|d| oxplow_config::SessionProjects::new(d.join("session.json"))),
+            device: oxplow_config::global_config_dir().and_then(|d| {
+                oxplow_config::this_device(&d.join("device.json"), computer_name)
+                    .map_err(|e| tracing::warn!(error = %e, "could not keep this install's device"))
+                    .ok()
+            }),
             quitting: std::sync::atomic::AtomicBool::new(false),
+            quit_confirmed: std::sync::atomic::AtomicBool::new(false),
+            asking_quit: std::sync::atomic::AtomicBool::new(false),
+            unrestored: Mutex::new(Vec::new()),
         }
     }
 }
@@ -233,10 +336,10 @@ impl ShellWindows {
     /// Open `project_dir` in a window, or focus the window that already
     /// has it. Returns the window label.
     ///
-    /// **Blocking**: the daemon boots (recovery, watchers, indexers)
-    /// before it reports an endpoint, and the endpoint is injected at
-    /// window creation. Call it off the main thread for anything but
-    /// the first window.
+    /// **Blocking**: the host may have to start, and the project's daemon
+    /// boots (recovery, watchers, indexers) before it runs, and the base is
+    /// injected at window creation. Call it off the main thread for
+    /// anything but the first window.
     pub fn open_project(
         &self,
         app: &tauri::AppHandle,
@@ -253,43 +356,18 @@ impl ShellWindows {
                 let _ = win.set_focus();
                 return Ok(label);
             }
-            // Registered but gone — a window we lost track of. Drop it
-            // and open a fresh one rather than refusing.
-            self.registry.remove(&label);
-            self.supervisor.stop(&dir);
-        }
-
-        // A project with a live backend is open in another app process
-        // (or a daemon someone started by hand): defer to it rather than
-        // take it down. Its app quitting a moment ago is the exception —
-        // that daemon is on its way out (the stdin lifeline), so wait for
-        // its lock before giving up.
-        if let Some(running) = oxplow_app::daemon_supervisor::live_daemon(&dir) {
-            if !oxplow_app::wait_for_project_unlock(&dir, DAEMON_EXIT_TIMEOUT) {
-                return Err(format!(
-                    "{} is already open in another Oxplow (its backend is process {}). \
-                     Use that window, or quit it first.",
-                    dir.display(),
-                    running.pid
-                ));
+            // Registered but gone — a window we lost track of. Let go of
+            // it and open a fresh one rather than refusing.
+            if let Some(lost) = self.registry.remove(&label) {
+                self.release(lost.project);
             }
         }
 
-        let endpoint = self.supervisor.start(&dir).map_err(|e| {
-            let binary = oxplow_app::daemon_supervisor::BundledDaemon::binary_path();
-            if !binary.is_file() {
-                // The usual cause in a dev checkout: the shell was built
-                // but its sidecar wasn't. Say so instead of surfacing a
-                // bare "No such file or directory".
-                format!(
-                    "no oxplow-daemon next to the app ({}). \
-                     In a dev checkout: cargo build -p oxplow-daemon",
-                    binary.display()
-                )
-            } else {
-                format!("could not start the backend for {}: {e}", dir.display())
-            }
-        })?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or("this install has no device (its config folder can't be written)")?;
+        let (host, opened) = tauri::async_runtime::block_on(self.open_on_host(&dir, device))?;
 
         let label = next_project_label();
         let title = project_window_title(&dir);
@@ -299,40 +377,209 @@ impl ShellWindows {
             &label,
             &title,
             &WindowContext {
-                base: Some(&endpoint.base_url),
-                token: Some(&endpoint.token),
+                base: Some(&opened.base),
+                token: Some(host.token()),
                 kind: KIND_PROJECT,
                 project_dir: Some(&dir_str),
+                device: Some(device),
             },
         );
         if let Err(e) = built {
-            // No window means nothing will ever close this daemon.
-            self.supervisor.stop(&dir);
+            // No window means nothing will ever let go of this hold.
+            self.release(opened.id);
             return Err(format!("could not create the window: {e}"));
         }
 
-        self.registry.insert(&label, &dir);
+        self.registry.insert(&label, &dir, &opened.id);
         recents.record(&dir);
         self.write_session();
-        tracing::info!(project = %dir.display(), label, base = %endpoint.base_url, "opened project window");
+        tracing::info!(project = %dir.display(), label, base = %opened.base, "opened project window");
         Ok(label)
     }
 
-    /// A project window closed: forget it, stop its daemon, and update
+    /// Hold `dir` on the app's host and wait for its daemon.
+    async fn open_on_host(
+        &self,
+        dir: &Path,
+        device: &oxplow_config::ThisDevice,
+    ) -> Result<
+        (
+            oxplow_host::client::HostClient,
+            oxplow_host::client::OpenedProject,
+        ),
+        String,
+    > {
+        let host = self.host()?;
+        let opened = host
+            .open(dir, device.id.as_str())
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok((host, opened))
+    }
+
+    /// The app's host, started the first time it is needed, and again when
+    /// it has ended (the windows it served stay on their dead socket).
+    /// **Blocking** while it starts.
+    fn host(&self) -> Result<oxplow_host::client::HostClient, String> {
+        let mut slot = self.host.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(own) = slot.as_mut() {
+            if !own.ended() {
+                return Ok(own.client.clone());
+            }
+            tracing::warn!("the host ended; starting another (see logs/host.*.log)");
+        }
+        let binary = oxplow_host::client::binary_beside_exe();
+        if !binary.is_file() {
+            // The usual cause in a dev checkout: the shell was built but
+            // its sidecars weren't staged.
+            return Err(format!(
+                "no oxplow-host next to the app ({}). In a dev checkout: bun run build:dev",
+                binary.display()
+            ));
+        }
+        // The host keeps "Allow other devices" itself; the app's own
+        // `--device-port` is for this run only.
+        let extra: Vec<String> = oxplow_host_access::settings::port_flag()
+            .map(|port| vec!["--device-port".to_string(), port.to_string()])
+            .unwrap_or_default();
+        tracing::info!(binary = %binary.display(), "starting the host");
+        let own = oxplow_host::client::start_own_host(std::process::Command::new(&binary), &extra)
+            .map_err(|e| e.to_string())?;
+        let client = own.client.clone();
+        *slot = Some(own);
+        Ok(client)
+    }
+
+    /// The app's host, started if it is not running ("Allow other devices"
+    /// at launch, a window's open). **Blocking** while it starts.
+    pub fn host_client(&self) -> Result<oxplow_host::client::HostClient, String> {
+        self.host()
+    }
+
+    /// The app's host if it runs now; nothing is started, and a host that is
+    /// starting now (its lock held) is none: nothing waits on it.
+    pub fn running_host(&self) -> Option<oxplow_host::client::HostClient> {
+        let mut slot = match self.host.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        let own = slot.as_mut()?;
+        (!own.ended()).then(|| own.client.clone())
+    }
+
+    /// This install's device (the Mac app is one device).
+    pub fn device(&self) -> Option<&oxplow_config::ThisDevice> {
+        self.device.as_ref()
+    }
+
+    /// Open (or focus) `project` of the host at `origin` on another machine,
+    /// as the device this Mac is there. **Blocking** while its daemon starts.
+    pub fn open_remote(
+        &self,
+        app: &tauri::AppHandle,
+        origin: &str,
+        project: &str,
+    ) -> Result<String, String> {
+        use tauri::Manager;
+        let entry = PathBuf::from(remote_entry(origin, project));
+        if let Some(label) = self.registry.label_for(&entry) {
+            if let Some(win) = app.get_webview_window(&label) {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+                return Ok(label);
+            }
+            self.registry.remove(&label);
+        }
+        let config_dir = oxplow_config::global_config_dir()
+            .ok_or("no config folder for this user; set OXPLOW_HOME")?;
+        let paired = oxplow_host::remote::list(&config_dir)
+            .into_iter()
+            .find(|h| h.origin == origin)
+            .ok_or_else(|| format!("this Mac is not paired with {origin}; connect to it first"))?;
+        let host = oxplow_host::remote::client(&oxplow_ai::secrets::KeychainSecrets, origin)?;
+        let opened = tauri::async_runtime::block_on(host.open_held(project, ""))
+            .map_err(|e| e.to_string())?;
+        let label = next_project_label();
+        let device = oxplow_config::ThisDevice {
+            id: oxplow_domain::DeviceId::parse(&paired.device_id)
+                .map_err(|_| format!("the id {origin} gave this Mac is not a device id"))?,
+            name: paired.device_name.clone(),
+        };
+        let host_name = origin.split("://").nth(1).unwrap_or(origin);
+        let built = build_shell_window(
+            app,
+            &label,
+            &format!("{} — {host_name}", opened.name),
+            &WindowContext {
+                base: Some(&opened.base),
+                token: Some(host.token()),
+                kind: KIND_PROJECT,
+                // Its files are on that machine, not this one.
+                project_dir: None,
+                device: Some(&device),
+            },
+        );
+        if let Err(e) = built {
+            self.release_remote(origin.to_string(), opened.id);
+            return Err(format!("could not create the window: {e}"));
+        }
+        self.registry.insert_remote(&label, origin, &opened.id);
+        self.write_session();
+        tracing::info!(origin, project = %opened.id, label, "opened a project on another machine");
+        Ok(label)
+    }
+
+    /// Let go of `project` on the host at `origin`, in the background.
+    fn release_remote(&self, origin: String, project: String) {
+        let Ok(host) = oxplow_host::remote::client(&oxplow_ai::secrets::KeychainSecrets, &origin)
+        else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = host.release(&project, "").await {
+                tracing::warn!(origin, project, error = %e, "could not release the project there");
+            }
+        });
+    }
+
+    /// Let go of `project` on the host, in the background.
+    fn release(&self, project: String) {
+        let host = self.running_host();
+        let (Some(host), Some(device)) = (host, self.device.clone()) else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = host.release(&project, device.id.as_str()).await {
+                tracing::warn!(project, error = %e, "could not release the project on the host");
+            }
+        });
+    }
+
+    /// A project window closed: forget it, release its hold, and update
     /// the restore set. Returns whether it was a project window at all
     /// (the launcher, setup and external-URL webviews are not).
     ///
-    /// **Stopping the daemon kills that project's agents.** Deliberate:
-    /// closing the window is the user saying they're done with the
-    /// project, and a backend still churning behind a window that no
-    /// longer exists is worse than a clean stop. Reattaching to a
-    /// surviving daemon is the feature to build if that changes.
+    /// **The project's agents stop** when no other device holds it: closing
+    /// the window is the person saying they're done with the project here.
+    /// A tablet that holds it keeps it running. During a quit nothing is
+    /// released: the host ends with the app.
     pub fn on_window_closed(&self, label: &str) -> bool {
-        let Some(dir) = self.registry.remove(label) else {
+        let Some(closed) = self.registry.remove(label) else {
             return false; // not a project window (launcher, setup, ext-url)
         };
-        self.supervisor.stop(&dir);
-        tracing::info!(project = %dir.display(), label, "closed project window");
+        match &closed.remote {
+            // On another machine's host: closing the window is letting go
+            // there; a quit lets go of nothing (the work goes on).
+            Some(origin) if !self.is_quitting() => {
+                self.release_remote(origin.clone(), closed.project.clone())
+            }
+            Some(_) => {}
+            None if !self.is_quitting() => self.release(closed.project.clone()),
+            None => {}
+        }
+        tracing::info!(project = %closed.dir.display(), label, "closed project window");
         // Closing one window while others are open means "I'm done with
         // this project" → drop it. Closing the LAST window is how you
         // exit, and the set you left behind is what should come back —
@@ -370,6 +617,17 @@ impl ShellWindows {
             .collect()
     }
 
+    /// Session entries that name a project on another machine's host, in
+    /// order, once each. Pure.
+    pub fn remote_restorable(entries: &[String]) -> Vec<(String, String)> {
+        let mut seen = std::collections::HashSet::new();
+        entries
+            .iter()
+            .filter_map(|e| parse_remote_entry(e))
+            .filter(|r| seen.insert(r.clone()))
+            .collect()
+    }
+
     /// The restore set recorded at last exit.
     pub fn session_entries(&self) -> Vec<String> {
         self.session.as_ref().map(|s| s.list()).unwrap_or_default()
@@ -381,20 +639,185 @@ impl ShellWindows {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// The quit was asked and said yes (or needed no asking).
+    pub fn confirm_quit(&self) {
+        self.quit_confirmed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Start asking about a quit; false when one is being asked already.
+    pub fn begin_asking_quit(&self) -> bool {
+        !self
+            .asking_quit
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The question was answered "Cancel".
+    pub fn end_asking_quit(&self) {
+        self.asking_quit
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn quit_confirmed(&self) -> bool {
+        self.quit_confirmed
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// What to ask before quitting, if another device has a window open
+    /// on the app's host now. **Blocking** (one call to the host).
+    pub fn quit_question_now(&self) -> Option<String> {
+        let host = self.running_host()?;
+        let connected = tauri::async_runtime::block_on(host.connected()).ok()?;
+        quit_question(&connected, self.device().map(|d| d.id.as_str()))
+    }
+
     /// Whether a full app quit is under way.
     pub fn is_quitting(&self) -> bool {
         self.quitting.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Stop every daemon (the shell is exiting).
-    pub fn stop_all_daemons(&self) {
-        self.supervisor.stop_all();
+    /// The app is ending: so is its host. Dropping it closes the host's
+    /// lifeline; the host stops every daemon on its own. Nothing waits.
+    pub fn end(&self) {
+        // A host starting now holds the lock: never waited on. It ends with
+        // the app anyway (its lifeline is this process's).
+        let mut slot = match self.host.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        if slot.take().is_some() {
+            tracing::info!("the app is ending; so is its host");
+        }
+    }
+
+    /// A window on another machine that did not open at the start (its host
+    /// was away): kept in the restore set, so the next start tries again.
+    pub fn keep_unrestored(&self, origin: &str, project: &str) {
+        let entry = remote_entry(origin, project);
+        let mut kept = self.unrestored.lock().unwrap_or_else(|e| e.into_inner());
+        if !kept.contains(&entry) {
+            kept.push(entry);
+        }
+    }
+
+    /// Forget the windows of `origin` that did not open (the host was
+    /// forgotten).
+    pub fn forget_unrestored(&self, origin: &str) {
+        self.unrestored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|e| parse_remote_entry(e).is_none_or(|(o, _)| o != origin));
+        self.write_session();
     }
 
     fn write_session(&self) {
         if let Some(session) = &self.session {
-            session.replace(&self.registry.project_dirs());
+            let mut entries = self.registry.project_dirs();
+            let opened: Vec<String> = entries.iter().map(|d| d.display().to_string()).collect();
+            for kept in self
+                .unrestored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+            {
+                if !opened.contains(kept) {
+                    entries.push(PathBuf::from(kept));
+                }
+            }
+            session.replace(&entries);
         }
+    }
+}
+
+/// What quitting asks first, when another device than this Mac (`own`) has
+/// a window open on its host: quitting ends the host, and their projects
+/// with it. `None`: nothing to ask. Pure.
+pub fn quit_question(
+    connected: &[oxplow_host::access::Connected],
+    own: Option<&str>,
+) -> Option<String> {
+    let others: Vec<&str> = connected
+        .iter()
+        .filter(|c| Some(c.device.as_str()) != own)
+        .map(|c| c.name.as_str())
+        .collect();
+    let names = match others.as_slice() {
+        [] => return None,
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let verb = if others.len() == 1 { "is" } else { "are" };
+    Some(format!(
+        "{names} {verb} using Oxplow on this computer. Quitting stops their projects and agents too."
+    ))
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+
+    /// A window on another machine's project is kept in the session as its
+    /// address, and only such an entry reads back as one.
+    #[test]
+    fn a_remote_window_is_its_address_in_the_session() {
+        let entry = remote_entry("https://server.ts.net:7400", "prj-1");
+        assert_eq!(entry, "https://server.ts.net:7400/p/prj-1");
+        assert_eq!(
+            parse_remote_entry(&entry),
+            Some(("https://server.ts.net:7400".into(), "prj-1".into()))
+        );
+        assert_eq!(parse_remote_entry("/Users/me/src/p"), None);
+        assert_eq!(parse_remote_entry("https://x/p/"), None);
+        let entries = vec![entry.clone(), "/Users/me/a".into(), entry];
+        assert_eq!(ShellWindows::remote_restorable(&entries).len(), 1);
+        assert!(ShellWindows::restorable(&entries, &|_| false).is_empty());
+
+        let reg = WindowRegistry::default();
+        reg.insert_remote("project-9", "https://server.ts.net:7400", "prj-1");
+        reg.insert("project-1", Path::new("/a"), "prj-2");
+        // What may act on this Mac asks this (`local_window_only`).
+        assert!(reg.is_remote("project-9"));
+        assert!(!reg.is_remote("project-1"));
+        let w = reg.remove("project-9").unwrap();
+        assert_eq!(w.remote.as_deref(), Some("https://server.ts.net:7400"));
+    }
+}
+
+#[cfg(test)]
+mod quit_tests {
+    use super::*;
+    use oxplow_host::access::Connected;
+
+    fn on(device: &str, name: &str) -> Connected {
+        Connected {
+            device: device.into(),
+            name: name.into(),
+            kind: None,
+        }
+    }
+
+    /// Quitting ends the host, every device's projects with it: when
+    /// another device has a window open, the app asks first and names it.
+    #[test]
+    fn quit_asks_first_only_when_another_device_is_connected() {
+        assert_eq!(quit_question(&[], Some("dev-mac")), None);
+        assert_eq!(
+            quit_question(&[on("dev-mac", "Studio")], Some("dev-mac")),
+            None,
+            "the Mac itself"
+        );
+        let asked = quit_question(
+            &[
+                on("dev-mac", "Studio"),
+                on("dev-tab", "Tab S9"),
+                on("dev-phone", "Phone"),
+            ],
+            Some("dev-mac"),
+        )
+        .unwrap();
+        assert!(asked.contains("Tab S9 and Phone"), "{asked}");
+        assert!(!asked.contains("Studio"), "{asked}");
     }
 }
 
@@ -405,8 +828,8 @@ mod registry_tests {
     #[test]
     fn a_window_can_be_found_by_the_project_it_shows() {
         let reg = WindowRegistry::default();
-        reg.insert("project-1", Path::new("/a"));
-        reg.insert("project-2", Path::new("/b"));
+        reg.insert("project-1", Path::new("/a"), "prj-1");
+        reg.insert("project-2", Path::new("/b"), "prj-1");
         assert_eq!(reg.label_for(Path::new("/b")).as_deref(), Some("project-2"));
         assert_eq!(reg.label_for(Path::new("/nope")), None);
     }
@@ -427,7 +850,7 @@ mod registry_tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
         let reg = WindowRegistry::default();
-        reg.insert("project-1", &real);
+        reg.insert("project-1", &real, "prj-1");
         assert_eq!(
             reg.label_for(&link).as_deref(),
             Some("project-1"),
@@ -440,8 +863,10 @@ mod registry_tests {
     #[test]
     fn closing_a_window_returns_its_project_and_forgets_it() {
         let reg = WindowRegistry::default();
-        reg.insert("project-1", Path::new("/a"));
-        assert_eq!(reg.remove("project-1").as_deref(), Some(Path::new("/a")));
+        reg.insert("project-1", Path::new("/a"), "prj-1");
+        let closed = reg.remove("project-1").unwrap();
+        assert_eq!(closed.dir, Path::new("/a"));
+        assert_eq!(closed.project, "prj-1", "the hold it let go of");
         assert!(reg.is_empty());
         assert_eq!(reg.remove("project-1"), None, "removing twice is a no-op");
     }
@@ -509,7 +934,7 @@ mod registry_tests {
             ("project-2", "/two"),
             ("project-3", "/three"),
         ] {
-            reg.insert(label, Path::new(dir));
+            reg.insert(label, Path::new(dir), "prj-1");
         }
         assert_eq!(
             reg.project_dirs(),
@@ -586,8 +1011,10 @@ mod tests {
             token: None,
             kind: KIND_LAUNCHER,
             project_dir: None,
+            device: None,
         });
         assert!(script.contains("window.__OXPLOW__ ="), "{script}");
+        assert!(script.contains("\"device\":null"), "{script}");
         assert!(script.contains("\"base\":null"), "{script}");
         assert!(script.contains("\"kind\":\"launcher\""), "{script}");
         assert!(script.contains("\"projectDir\":null"), "{script}");
@@ -595,12 +1022,25 @@ mod tests {
 
     #[test]
     fn initialization_script_carries_the_daemon_base_and_project() {
+        let device = oxplow_config::ThisDevice {
+            id: oxplow_domain::DeviceId::parse("dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427").unwrap(),
+            name: "Studio".into(),
+        };
         let script = initialization_script(&WindowContext {
             base: Some("http://127.0.0.1:60331"),
             token: Some("t0k"),
             kind: KIND_PROJECT,
             project_dir: Some("/Users/me/src/oxplow"),
+            device: Some(&device),
         });
+        // The Mac app is one device for all its windows: each project
+        // window is told which, and sends it on every request.
+        assert!(
+            script.contains(
+                "\"device\":{\"id\":\"dev-1b4e28ba-2fa1-11d2-883f-0016d3cca427\",\"name\":\"Studio\"}"
+            ),
+            "{script}"
+        );
         assert!(
             script.contains("\"base\":\"http://127.0.0.1:60331\""),
             "{script}"
@@ -623,6 +1063,7 @@ mod tests {
             token: None,
             kind: KIND_LAUNCHER,
             project_dir: None,
+            device: None,
         });
         let payload = script
             .strip_prefix("window.__OXPLOW__ = Object.freeze(")

@@ -93,22 +93,51 @@ pub(crate) enum Prepared {
     Open(String),
 }
 
+/// A run as `actor` that `caller` asked for (a person's press from a device):
+/// its command run keeps the device.
+pub(crate) fn pressed_run(
+    actor: Actor,
+    caller: Option<&oxplow_domain::Caller>,
+) -> oxplow_domain::run::RunContext {
+    oxplow_domain::run::RunContext::core(actor, oxplow_domain::run::Mode::External)
+        .with_caller(caller.cloned())
+}
+
 impl Prepared {
-    pub(crate) async fn run(self, svc: &crate::Services) -> Result<CommandOutcome, CommandError> {
+    /// Run it, as `caller` asked (none for a press no device made).
+    pub(crate) async fn run(
+        self,
+        svc: &crate::Services,
+        caller: Option<&oxplow_domain::Caller>,
+    ) -> Result<CommandOutcome, CommandError> {
         match self {
             Prepared::Command {
                 actor,
                 command,
                 input,
                 confirmed,
-            } => svc.commands.run(&actor, &command, input, confirmed).await,
+            } => {
+                svc.commands
+                    .run_in(&pressed_run(actor, caller), &command, input, confirmed)
+                    .await
+            }
             Prepared::Point {
                 actor,
                 point,
                 context,
                 command,
                 confirmed,
-            } => run_page_point(svc, actor, &point, &context, command.as_deref(), confirmed).await,
+            } => {
+                run_page_point(
+                    svc,
+                    &pressed_run(actor, caller),
+                    &point,
+                    &context,
+                    command.as_deref(),
+                    confirmed,
+                )
+                .await
+            }
             Prepared::Open(uri) => Ok(CommandOutcome {
                 result: serde_json::json!({ "opened": uri }),
                 command_run_id: None,
@@ -629,6 +658,8 @@ pub struct ComponentInvoke {
     /// ([`crate::component_bundles`]): what is running, and what must be
     /// approved.
     pub version: String,
+    /// The device and page load the press came from, if any.
+    pub caller: Option<oxplow_domain::Caller>,
 }
 
 /// Run `call`'s command as the component acting for its viewer, so every
@@ -641,11 +672,12 @@ pub async fn invoke_component_command(
     project_root: &Path,
     call: ComponentInvoke,
 ) -> Result<CommandOutcome, CommandError> {
+    let call_caller = call.caller.clone();
     svc.sql
         .read_generation(async { prepare_component_command(svc, project_root, call) })
         .await
         .map_err(CommandError::from)??
-        .run(svc)
+        .run(svc, call_caller.as_ref())
         .await
 }
 
@@ -709,6 +741,8 @@ pub struct ComponentPointInvoke {
     pub confirmed: bool,
     /// The bundle version the frame was loaded at.
     pub version: String,
+    /// The device and page load the press came from, if any.
+    pub caller: Option<oxplow_domain::Caller>,
 }
 
 /// Run the command that answers `call.point` for `call.context`, as the
@@ -728,10 +762,13 @@ pub async fn invoke_component_point(
         .map_err(CommandError::from)??;
     run_point(
         svc,
-        Actor::Component {
-            component: call.component,
-            on_behalf_of: Box::new(call.on_behalf_of),
-        },
+        &pressed_run(
+            Actor::Component {
+                component: call.component,
+                on_behalf_of: Box::new(call.on_behalf_of),
+            },
+            call.caller.as_ref(),
+        ),
         &call.point,
         &call.context,
         call.command.as_deref(),
@@ -788,7 +825,7 @@ async fn answer_of(
 /// (`Invalid` when nothing does).
 async fn run_point(
     svc: &crate::Services,
-    actor: Actor,
+    run: &oxplow_domain::run::RunContext,
     point: &str,
     context: &Value,
     command: Option<&str>,
@@ -801,7 +838,7 @@ async fn run_point(
             message: format!("nothing answers `{point}` for this context"),
         })?;
     svc.commands
-        .run(&actor, &chosen.id, chosen.input, confirmed)
+        .run_in(run, &chosen.id, chosen.input, confirmed)
         .await
 }
 
@@ -810,7 +847,7 @@ async fn run_point(
 /// one row of a bulk run doesn't fail the rest.
 async fn run_page_point(
     svc: &crate::Services,
-    actor: Actor,
+    run: &oxplow_domain::run::RunContext,
     point: &str,
     context: &Value,
     command: Option<&str>,
@@ -819,7 +856,7 @@ async fn run_page_point(
     match answer_of(svc, point, context, command).await? {
         Some(chosen) => {
             svc.commands
-                .run(&actor, &chosen.id, chosen.input, confirmed)
+                .run_in(run, &chosen.id, chosen.input, confirmed)
                 .await
         }
         None => Ok(CommandOutcome {
@@ -1210,6 +1247,7 @@ view:
                     option: self.option.map(str::to_string),
                     on_behalf_of: self.on_behalf_of,
                     confirmed: false,
+                    caller: None,
                 },
             )
             .await
@@ -1272,6 +1310,7 @@ view:
             input,
             Actor::Human,
             false,
+            None,
         )
         .await
     }
@@ -1962,6 +2001,7 @@ view:
             json!({}),
             Actor::Human,
             false,
+            None,
         )
         .await
         .unwrap_err();
@@ -2010,6 +2050,7 @@ view:
             on_behalf_of: Actor::Human,
             confirmed: false,
             version: version.into(),
+            caller: None,
         }
     }
 
@@ -2111,6 +2152,7 @@ view:
             on_behalf_of: Actor::Human,
             confirmed: false,
             version: version.into(),
+            caller: None,
         }
     }
 
@@ -2508,6 +2550,7 @@ view:
                     on_behalf_of: Actor::Human,
                     confirmed: false,
                     version: version.clone(),
+                    caller: None,
                 },
             )
             .await
