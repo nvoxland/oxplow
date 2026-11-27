@@ -29,6 +29,8 @@ finish.
 - **Session history.** `v_agent_session`, `v_agent_session_status`,
   `v_agent_turn`, `v_tool_call`, `v_subagent`. A session that lost its
   conversation comes back with `oxplow.agent_session.reopen { session }`.
+  `v_agent_conversation` is every saved conversation a harness lists (begun
+  in oxplow or not): what it is, and the oxplow session that ran it, if any.
 - **Standing instructions.** What the person set for every session of
   your stream and of your thread is `v_stream.prompt` and `v_thread.prompt`
   (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =
