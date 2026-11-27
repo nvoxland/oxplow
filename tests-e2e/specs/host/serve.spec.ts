@@ -87,7 +87,20 @@ test("the Devices page shows this device and makes a pairing code", async ({ pag
   await expect(devices.getByText(/^On: a device opens/)).toBeVisible();
   await expect(devices.getByText("None yet")).toBeVisible();
   await devices.getByTestId("viz-action-pair-device").click();
-  await expect(devices.getByText(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/)).toBeVisible();
+  const shownCode = devices.getByText(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/);
+  await expect(shownCode).toBeVisible();
+
+  // Another device pairs with that code, on its own: the open page shows
+  // it with no reload, and the code is used up.
+  const code = (await shownCode.textContent())!;
+  const paired = await fetch(`${host.base}/host/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, name: "Garage tablet", kind: "tablet" }),
+  });
+  expect(paired.status).toBe(200);
+  await expect(devices.getByText("Garage tablet")).toBeVisible();
+  await expect(devices.getByText("None yet")).toBeVisible();
 });
 
 test("a project that is not held has no daemon to reach", async () => {

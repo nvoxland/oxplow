@@ -146,6 +146,7 @@ pub fn router(cfg: ApiConfig) -> Router {
         .route("/host/projects", get(projects).post(add_project))
         .route("/host/projects/{id}", delete(remove_project))
         .route("/host/settings", get(settings).put(save_settings))
+        .route("/host/changes", get(changes))
         .route("/host/holds", post(hold).delete(release))
         .route("/host/shutdown", post(shutdown))
         .route("/host/pairing", get(pairing_now).post(pairing))
@@ -378,6 +379,33 @@ async fn add_project(
     }
 }
 
+#[derive(Deserialize)]
+struct ChangesQuery {
+    after: Option<u64>,
+}
+
+/// How long `/host/changes` waits for a change before it answers anyway.
+const CHANGES_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// `GET /host/changes?after=<n>`: the count of changes a Devices page shows
+/// (`{ n }`), at once when it is past `after` (or none is given), else when
+/// it next moves, or after a while. A daemon keeps one asked, and reads
+/// its host datasets again when the count moves.
+async fn changes(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<ChangesQuery>,
+) -> Response {
+    check!(owner(&s, &headers));
+    let mut changes = s.access.changes();
+    let now = *changes.borrow_and_update();
+    if q.after.is_some_and(|after| after == now) {
+        let _ = tokio::time::timeout(CHANGES_WAIT, changes.changed()).await;
+    }
+    let n = *changes.borrow();
+    Json(serde_json::json!({ "n": n })).into_response()
+}
+
 /// "Allow other devices": saved, and in force under this run's flags.
 async fn settings(State(s): State<ApiState>, headers: HeaderMap) -> Response {
     check!(owner(&s, &headers));
@@ -395,7 +423,10 @@ async fn save_settings(
     let wanted: oxplow_host_access::settings::HostSettings = check!(body(&bytes));
     let server = s.access.public_server.get().map(|p| p.as_ref());
     match s.access.other_devices.apply(wanted, server).await {
-        Ok(_) => Json(s.access.other_devices.view()).into_response(),
+        Ok(_) => {
+            s.access.changed();
+            Json(s.access.other_devices.view()).into_response()
+        }
         Err(crate::other_devices::SaveError::Invalid(e)) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": e.to_string(), "field": e.field() })),
@@ -481,6 +512,7 @@ async fn pairing(State(s): State<ApiState>, headers: HeaderMap) -> Response {
         .unwrap_or_else(|e| e.into_inner())
         .new_code(now);
     tracing::info!("a pairing code was made");
+    s.access.changed();
     Json(Code::of(&code, expires, now)).into_response()
 }
 
@@ -552,6 +584,7 @@ async fn pair(State(s): State<ApiState>, headers: HeaderMap, bytes: axum::body::
     match s.access.devices.pair(&req.name, req.kind) {
         Ok((device, token)) => {
             tracing::info!(device = %device.id, name = %device.name, "a device paired");
+            s.access.changed();
             Json(Paired { device, token }).into_response()
         }
         Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -584,7 +617,9 @@ async fn rename_device(
     check!(owner(&s, &headers));
     let req: Rename = check!(body(&bytes));
     let id = check!(device_id(&id));
-    device_answer(s.access.devices.rename(&id, &req.name))
+    let renamed = s.access.devices.rename(&id, &req.name);
+    s.access.changed();
+    device_answer(renamed)
 }
 
 async fn remove_device(
@@ -1200,6 +1235,60 @@ mod tests {
         assert_eq!(released.status(), 200);
         let released: serde_json::Value = released.json().await.unwrap();
         assert_eq!(released["holds"], 0);
+    }
+
+    /// A daemon learns that the host's devices or settings changed (a
+    /// pairing made on the device itself, a new code): `/host/changes`
+    /// answers at once when it has moved past what the caller saw, else when
+    /// it next moves.
+    #[tokio::test]
+    async fn the_owner_is_told_when_devices_or_settings_change() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let http = reqwest::Client::new();
+        let seen = |after: Option<u64>| {
+            let url = match after {
+                Some(n) => format!("{}/host/changes?after={n}", api.url),
+                None => format!("{}/host/changes", api.url),
+            };
+            let http = http.clone();
+            async move {
+                let answer: serde_json::Value = http
+                    .get(url)
+                    .bearer_auth(TOKEN)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                answer["n"].as_u64().unwrap()
+            }
+        };
+        let now = seen(None).await;
+        let waiting = tokio::spawn(seen(Some(now)));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished(), "nothing changed yet");
+        code(&api).await;
+        let moved = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .expect("told of the new code")
+            .unwrap();
+        assert!(moved > now);
+        assert_eq!(seen(Some(now)).await, moved, "behind: told at once");
+
+        let (_device, token) = api
+            .access
+            .devices
+            .pair("Tab", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let by_device = http
+            .get(format!("{}/host/changes", api.public))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(by_device.status(), 403);
     }
 
     /// The owner reads and saves "Allow other devices"; what cannot work

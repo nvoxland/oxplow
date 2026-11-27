@@ -12,7 +12,9 @@
 //!   there is a root to trust, the code in force), from [`read`].
 //! - Write: `oxplow.host.pair`, `rename_device`, `remove_device`,
 //!   `set_settings`; each posts `HostChanged`, so the datasets are read
-//!   again.
+//!   again. So does a change the host makes itself (a pairing finished on
+//!   the device, a device connecting): [`watch_host`] waits on the host's
+//!   `/host/changes`.
 //!
 //! The writes are a person's only (or a page a person pressed): they let a
 //! device in. An agent, an effect or a job is refused. The datasets are as
@@ -287,6 +289,54 @@ pub fn open_on_device(public: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Read the host datasets again whenever the host says its devices or
+/// settings changed: a pairing finished on the device, a code made by the
+/// CLI, a device connecting, another window's change. One wait on the
+/// host's `/host/changes` at a time (it answers when the count moves); with
+/// no host (a daemon run alone, or before its host is up) it asks again
+/// now and then. Stops with the services.
+pub fn watch_host(state: &Arc<crate::Services>) {
+    let services = Arc::downgrade(state);
+    let stopping = state.stopping();
+    tokio::spawn(async move {
+        let mut seen: Option<u64> = None;
+        loop {
+            let Some(svc) = services.upgrade() else {
+                return;
+            };
+            let home = svc.global_config_dir.clone();
+            let events = svc.events.clone();
+            drop(svc);
+            let path = match seen {
+                Some(n) => format!("/host/changes?after={n}"),
+                None => "/host/changes".to_string(),
+            };
+            let wait = tokio::select! {
+                _ = stopping.cancelled() => return,
+                answer = call(home, "GET", path, None) => match answer {
+                    Ok(answer) => {
+                        let now = answer["n"].as_u64();
+                        if now.is_some() && now != seen {
+                            seen = now;
+                            events.emit(OxplowEvent::HostChanged);
+                        }
+                        std::time::Duration::ZERO
+                    }
+                    Err(OwnerCallError::NoHost(_)) => {
+                        seen = None;
+                        std::time::Duration::from_secs(10)
+                    }
+                    Err(_) => std::time::Duration::from_secs(2),
+                },
+            };
+            tokio::select! {
+                _ = stopping.cancelled() => return,
+                _ = tokio::time::sleep(wait) => {}
+            }
+        }
+    });
+}
+
 /// The command's answer; once it has run, the host datasets are read again
 /// (a Devices page open shows it).
 fn output(services: &ServicesSlot, result: Value) -> HandlerOutput {
@@ -498,6 +548,13 @@ mod tests {
     }
 
     fn host_answers(method: &str, path: &str, body: &str) -> (u16, Value) {
+        if path.starts_with("/host/changes") {
+            // The host waits for a change before it answers the same count.
+            if path.contains("after=") {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            return (200, json!({ "n": 3 }));
+        }
         match (method, path) {
             ("GET", "/host/settings") => (
                 200,
@@ -760,6 +817,43 @@ mod tests {
         .await
         .unwrap_err();
         assert!(format!("{in_use:?}").contains("in use"), "{in_use:?}");
+    }
+
+    /// A pairing finished on the device happens in the host: the daemon
+    /// hears of it (`/host/changes`) and reads its host datasets again, so
+    /// an open Devices page shows the new device.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_daemon_reads_the_host_again_when_its_devices_change() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let home = fx.svc.global_config_dir.clone();
+        std::fs::create_dir_all(&home).unwrap();
+        let seen = stand_in(&home, host_answers);
+        let mut events = fx.svc.events.subscribe_ui();
+        super::watch_host(&fx.svc);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if matches!(
+                    events.recv().await,
+                    Ok(crate::events::OxplowEvent::HostChanged)
+                ) {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("told to read the host again");
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|s| s == "GET /host/changes?after=3")
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("then waits for the next change");
     }
 
     #[test]

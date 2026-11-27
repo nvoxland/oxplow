@@ -189,6 +189,7 @@ impl PublicServer {
 
     fn set_public(&self, state: PublicListener) {
         *self.access.public.lock().unwrap_or_else(|e| e.into_inner()) = state;
+        self.access.changed();
     }
 }
 

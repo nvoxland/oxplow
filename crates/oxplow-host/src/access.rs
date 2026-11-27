@@ -63,6 +63,10 @@ pub struct Access {
     /// The listener for other devices, once `serve` has made it: a saved
     /// change applies to it at once.
     pub public_server: std::sync::OnceLock<Arc<crate::public::PublicServer>>,
+    /// Moves at each change a Devices page shows: a pairing, a code, a
+    /// rename or removal, a device's socket opening or closing, the
+    /// settings or the listener for other devices (`/host/changes`).
+    changes: tokio::sync::watch::Sender<u64>,
 }
 
 /// The state of the listener for other devices (`serve --public-bind`).
@@ -100,11 +104,22 @@ impl Access {
             devices: Devices::new(db.clone()),
             other_devices: crate::other_devices::OtherDevices::new(db, overrides),
             public_server: std::sync::OnceLock::new(),
+            changes: tokio::sync::watch::channel(0).0,
             pairing: Mutex::new(Pairing::default()),
             tunnels: Tunnels::default(),
             wrong_code_wait,
             public: Mutex::new(PublicListener::Off),
         })
+    }
+
+    /// Something a Devices page shows changed.
+    pub fn changed(&self) {
+        self.changes.send_modify(|n| *n += 1);
+    }
+
+    /// How many changes there have been, and a watch on the next.
+    pub fn changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changes.subscribe()
     }
 
     /// Who `token`, on `listener`, is.
@@ -153,6 +168,7 @@ pub struct TunnelLease {
 impl Drop for TunnelLease {
     fn drop(&mut self) {
         self.access.tunnels.lock().remove(&self.id);
+        self.access.changed();
     }
 }
 
@@ -212,6 +228,7 @@ impl Access {
                 close,
             },
         );
+        self.changed();
         TunnelLease {
             id,
             access: self.clone(),
@@ -235,6 +252,7 @@ impl Access {
             }
         }
         self.tunnels.close_device(device, DEVICE_REMOVED_CLOSE_CODE);
+        self.changed();
         tracing::info!(device = %device, name = %removed.name, "a device was removed");
         Ok(removed)
     }

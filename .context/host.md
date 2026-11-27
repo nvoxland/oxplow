@@ -137,7 +137,14 @@ The app's host is a child of the app, as a daemon is a child of the host
   (confirm) and `set_settings` (`commands/host_devices.rs`: checked there
   first, so a refusal names its field, then `PUT /host/settings`), a person's
   only (an agent, an effect or a job is refused), each posting `HostChanged`
-  so the datasets are read again. The datasets are as readable as any: an
+  so the datasets are read again. **What changes in the host itself** (a
+  pairing finished on the device, a code the CLI made, a device's socket
+  opening or closing, the listener for other devices) reaches the page too:
+  the host counts each change (`Access::changed`), `GET /host/changes?after=<n>`
+  (owner only) answers when the count moves past `n` (or after 20 s), and
+  each daemon keeps one such call open over `host.sock`
+  (`host_devices::watch_host`, started at boot), posting `HostChanged` when
+  the count moves; with no host it asks again every 10 s. The datasets are as readable as any: an
   agent on this machine could reach `host.sock` from its shell anyway
   (owner and device are roles, not a wall).
 - **Allow other devices** is the host's: `host.db`'s `other_devices` row

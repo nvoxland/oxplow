@@ -109,7 +109,11 @@ fn production_part(text: &str) -> &str {
     let mut at = 0;
     while let Some(i) = text[at..].find("#[cfg(test)]") {
         let start = at + i;
-        let rest = text[start + "#[cfg(test)]".len()..].trim_start();
+        let mut rest = text[start + "#[cfg(test)]".len()..].trim_start();
+        // Other attributes may stand between (`#[cfg(unix)]`).
+        while rest.starts_with("#[") {
+            rest = rest.find(']').map_or("", |end| rest[end + 1..].trim_start());
+        }
         if rest.starts_with("mod tests") || rest.starts_with("pub(crate) mod tests") {
             return &text[..start];
         }
@@ -427,6 +431,19 @@ fn every_ui_event_has_an_emitter() {
         .filter(|k| !emitted.contains(k))
         .collect();
     assert_eq!(silent, Vec::<String>::new());
+}
+
+/// The scan's own rule: a file's tests are cut off at its `#[cfg(test)]`
+/// test module, whatever other attributes stand before `mod tests` (a
+/// module that runs on Unix only).
+#[test]
+fn a_files_test_module_is_not_production_whatever_its_attributes() {
+    let plain = "fn a() {}\n#[cfg(test)]\nmod tests { fn b() {} }\n";
+    assert_eq!(production_part(plain), "fn a() {}\n");
+    let unix = "fn a() {}\n#[cfg(test)]\n#[cfg(unix)]\nmod tests { fn b() {} }\n";
+    assert_eq!(production_part(unix), "fn a() {}\n");
+    let not_a_module = "fn a() {}\n#[cfg(test)]\nfn helper() {}\n";
+    assert_eq!(production_part(not_a_module), not_a_module);
 }
 
 /// P7.B6's guard: nothing listens to the in-memory bus but the `/events`
