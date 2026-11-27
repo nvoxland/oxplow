@@ -4302,6 +4302,11 @@ export type Node_Deserialize = {
 	/**  Its heading folds it; the person's choice is the tab's. */
 	collapsible: boolean,
 	/**
+	 *  It starts folded (and folds at its heading): what most never need,
+	 *  such as settings for an unusual setup.
+	 */
+	collapsed: boolean,
+	/**
 	 *  The page an arrow beside its heading opens (`<extension>/<slug>`; a
 	 *  bare slug is this extension's).
 	 */
@@ -4349,6 +4354,11 @@ export type Node_Serialize = {
 	icon: string | null,
 	/**  Its heading folds it; the person's choice is the tab's. */
 	collapsible: boolean,
+	/**
+	 *  It starts folded (and folds at its heading): what most never need,
+	 *  such as settings for an unusual setup.
+	 */
+	collapsed: boolean,
 	/**
 	 *  The page an arrow beside its heading opens (`<extension>/<slug>`; a
 	 *  bare slug is this extension's).

@@ -1269,6 +1269,9 @@ function GroupHeading({
   );
 }
 
+/** How wide a page's form grows. */
+export const FORM_WIDTH = "36rem";
+
 type RowMenuProps = {
   tabIndex: number;
   onKeyDown(e: React.KeyboardEvent): void;
@@ -1524,7 +1527,9 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
   if (!start || !schema) return null;
   const mode = run.config.form?.mode ?? "create";
   return (
-    <div data-testid="viz-form">
+    // A form reads down one column, never the page's whole width: a port or
+    // an address in a field as wide as a table is hard to read.
+    <div data-testid="viz-form" style={{ maxWidth: FORM_WIDTH }}>
       {form.pending ? (
         <CommandConfirm
           label={run.config.title}

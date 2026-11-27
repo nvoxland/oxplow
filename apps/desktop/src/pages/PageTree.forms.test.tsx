@@ -63,6 +63,8 @@ test("a form node starts from page_form on the open run and submits with submit_
   const field = (await findByTestId("viz-form-fields-title")) as HTMLInputElement;
   expect(field.value).toBe("Old");
   expect(calls[0]).toEqual(["start", "run-1", "edit"]);
+  // A form reads down one column, never the page's whole width.
+  expect(getByTestId("viz-form").style.maxWidth).toBe("36rem");
   fireEvent.change(field, { target: { value: "New" } });
   fireEvent.click(getByTestId("viz-form-fields-submit"));
   await waitFor(() => expect(calls.some((c) => c[0] === "submit")).toBe(true));

@@ -124,3 +124,16 @@ describe("withSubfields", () => {
     expect(withSubfields(schema, { nope: sub })).toEqual(schema);
   });
 });
+
+describe("a yes-or-no field's starting value", () => {
+  // A page form starts from its loader's row, and SQL has no booleans: a
+  // saved yes is 1. It still starts ticked, and Save sends true.
+  test("is ticked from true or 1, and not from false or 0", () => {
+    const fields = fieldsOf({ type: "object", properties: { on: { type: "boolean" } } });
+    expect(draftsFrom(fields, { on: 1 })).toEqual({ on: "true" });
+    expect(draftsFrom(fields, { on: true })).toEqual({ on: "true" });
+    expect(draftsFrom(fields, { on: 0 })).toEqual({ on: "false" });
+    expect(draftsFrom(fields, { on: false })).toEqual({ on: "false" });
+    expect(valueOf(fields, draftsFrom(fields, { on: 1 })).value).toEqual({ on: true });
+  });
+});

@@ -320,6 +320,19 @@ test("a collapsible section folds at its heading and its link is an arrow beside
   expect(section.querySelector('[data-testid="viz-detail"], table, ul')).toBeNull();
 });
 
+// A `collapsed` section starts folded: its heading opens it.
+test("a collapsed section starts folded and its heading opens it", () => {
+  const page = fakePage(node.stack("stack", [node.viz("list", "items", { columns: [{ key: "id" }] }, { title: "Advanced", collapsed: true })]));
+  const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
+  const { container } = render(<PageTree run={run} runId="run-1" />);
+  const section = container.querySelector('[data-node="list"] section.ox-section')!;
+  const toggle = section.querySelector<HTMLButtonElement>("button.ox-section-toggle")!;
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(section.textContent).toContain("a");
+});
+
 // A button on a fact's line sits with what it acts on, not with the rest
 // under the section; a button with no fact stays where buttons go.
 test("a detail's action with a fact is drawn on that fact's line", () => {

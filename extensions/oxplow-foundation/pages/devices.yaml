@@ -98,23 +98,12 @@ view:
         fields:
         - { name: allow_other_devices, label: Let other devices use oxplow on this computer }
         - name: address
-          label: This computer's address for them
-          help: One of its addresses on your network.
+          label: Address
+          help: This computer's address on your network.
           visible_if: { allow_other_devices: true }
         - name: port
           label: Port
-          help: Leave it empty for 7400.
-          visible_if: { allow_other_devices: true }
-        - name: names
-          label: Other names your network gives this computer (optional)
-          help: One per line, such as a name your own DNS or VPN gives it. Its .local name is added on its own.
-          visible_if: { allow_other_devices: true }
-        - name: tls_cert
-          label: Your own certificate (optional)
-          help: A PEM file signed by a CA your devices trust. Leave it empty and oxplow makes its own.
-          visible_if: { allow_other_devices: true }
-        - name: tls_key
-          label: Its key
+          help: Empty means 7400.
           visible_if: { allow_other_devices: true }
         choices:
           address: oxplow/devices#address_choices
@@ -180,5 +169,23 @@ view:
       help: Its key stops working and it is disconnected at once; it pairs again with a new code.
       input:
         id: '{{row.id}}'
+  # What few setups need: names of their own, a certificate of their own.
+  - id: advanced
+    title: Advanced
+    collapsed: true
+    viz: form
+    from: settings
+    form:
+      command: oxplow.host.set_settings
+      mode: edit
+      fields:
+      - name: names
+        label: Other names for this computer
+        help: One per line, such as a name your own DNS or VPN gives it. Its .local name is added on its own.
+      - name: tls_cert
+        label: Your own certificate
+        help: A PEM file signed by a CA your devices trust. Empty means oxplow makes its own.
+      - name: tls_key
+        label: Its key
 see_also:
 - { page: oxplow/settings }

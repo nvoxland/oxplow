@@ -554,7 +554,9 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   schema says `writeOnly: true` is masked without the flag
   ([commands.md](./commands.md) "Secrets"). The command must keep a secret
   out of its record (`unrecorded`), or the form refuses to open
-  (`form_start`). `mode: edit` edits what is saved: it starts from the
+  (`form_start`). A form is at most 36rem wide (`FORM_WIDTH`), one column however wide the page; a
+  checkbox's starting value is ticked from `true` or `1` (a loader's row:
+  SQL has no booleans). `mode: edit` edits what is saved: it starts from the
   saved values, Save is enabled only when the form is changed, Discard (or
   Escape) puts them back, and it lists its `fields`. `create`, the
   default, gathers something new. `choices` maps a field to a page of the
@@ -589,8 +591,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   `fact: <column>` on that fact's line (any `detail`'s)
   (`.ox-section[data-callout]`); one fact's label is left to the title, and
   with `hide_title` it is one line. `title_from: <column>` names it from its first row (`title` stands with
-  no row; agents' text reads `title`). `collapsible: true` folds at the heading,
-  remembered in the tab's history state (`PageTree` is the outermost
+  no row; agents' text reads `title`). `collapsible: true` folds at the heading (`collapsed: true` starts
+  it folded: an Advanced section), remembered in the tab's history state (`PageTree` is the outermost
   `CollapsibleSections`). `link: <page id>` is the arrow beside the heading
   (`RefSite::SectionLink`: it must name a page). It opens that page with
   this page's params of the names it declares (the run resolves it:
