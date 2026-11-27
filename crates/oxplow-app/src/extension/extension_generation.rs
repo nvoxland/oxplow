@@ -192,10 +192,16 @@ impl PreparedExtensionDatabase {
             .filter(|extension| extension.enabled)
             .flat_map(|extension| extension.contributions.iter().cloned())
             .collect();
-        let (mut pages, mut page_answers, mut page_params) = (Vec::new(), Vec::new(), Vec::new());
+        let mut listing = PageListing::default();
         for extension in snapshot.extensions().iter().filter(|e| e.enabled) {
-            page_rows(extension, &mut pages, &mut page_answers, &mut page_params);
+            page_rows(extension, &mut listing);
         }
+        let PageListing {
+            pages,
+            answers: page_answers,
+            params: page_params,
+            sections: page_sections,
+        } = listing;
         let listed = snapshot.extensions().iter().map(extension_row).collect();
         let mut settings = std::collections::BTreeMap::new();
         for definition in oxplow_config::core_settings::definitions("")
@@ -272,6 +278,7 @@ impl PreparedExtensionDatabase {
                 pages,
                 page_answers,
                 page_params,
+                page_sections,
                 extensions: listed,
                 config_keys,
             },
@@ -427,15 +434,75 @@ fn variant_name(value: &impl serde::Serialize) -> String {
     }
 }
 
-/// An extension's page files as listed rows, with their answers and
-/// params, pushed onto the three lists.
-fn page_rows(
-    extension: &crate::extension::extensions::Extension,
-    pages: &mut Vec<oxplow_db::catalog_listing_store::PageRow>,
-    answers: &mut Vec<oxplow_db::catalog_listing_store::PageAnswerRow>,
-    params: &mut Vec<oxplow_db::catalog_listing_store::PageParamRow>,
-) {
+/// The page files as listed rows: the pages, their answers, params and
+/// switch sections.
+#[derive(Default)]
+struct PageListing {
+    pages: Vec<oxplow_db::catalog_listing_store::PageRow>,
+    answers: Vec<oxplow_db::catalog_listing_store::PageAnswerRow>,
+    params: Vec<oxplow_db::catalog_listing_store::PageParamRow>,
+    sections: Vec<oxplow_db::catalog_listing_store::PageSectionRow>,
+}
+
+/// The switch a page's view shows its sections by: its view, or the first
+/// in a stack of it.
+fn page_switch(node: &crate::pages::schema::Node) -> Option<(&str, &[crate::pages::schema::Node])> {
+    use crate::pages::schema::NodeKind;
+    match &node.kind {
+        NodeKind::Switch { param, children } => Some((param.as_str(), children.as_slice())),
+        NodeKind::Stack { children } => children.iter().find_map(page_switch),
+        _ => None,
+    }
+}
+
+/// Each section of `page` beside the one it opens on (its switch param's
+/// default, else its first), as rows: titled "<page>: <section>", each
+/// the page's URI showing it.
+fn page_sections(
+    page: &crate::pages::schema::Page,
+    uri: &str,
+) -> Vec<oxplow_db::catalog_listing_store::PageSectionRow> {
+    let Some((param, children)) = page_switch(&page.view) else {
+        return Vec::new();
+    };
+    let Ok(base) = uri.parse::<oxplow_domain::uri::OxplowUri>() else {
+        return Vec::new();
+    };
+    let first = page
+        .params
+        .iter()
+        .find(|p| p.name == param)
+        .and_then(|p| match p.default.as_ref()? {
+            oxplow_db::SqlCell::Null(_) => None,
+            oxplow_db::SqlCell::Text(text) => Some(text.clone()),
+            other => Some(json_text(other).trim_matches('"').to_string()),
+        })
+        .or_else(|| children.first().map(|c| c.id.clone()));
+    children
+        .iter()
+        .filter(|c| Some(&c.id) != first.as_ref())
+        .enumerate()
+        .map(|(i, c)| oxplow_db::catalog_listing_store::PageSectionRow {
+            page_uri: uri.to_string(),
+            position: i as i64 + 1,
+            section: c.id.clone(),
+            title: format!("{}: {}", page.title, c.title.as_deref().unwrap_or(&c.id)),
+            uri: base
+                .with_view([(param.to_string(), c.id.clone())].into())
+                .to_string(),
+        })
+        .collect()
+}
+
+/// An extension's page files as listed rows, pushed onto `listing`.
+fn page_rows(extension: &crate::extension::extensions::Extension, listing: &mut PageListing) {
     use oxplow_db::catalog_listing_store::{PageAnswerRow, PageParamRow, PageRow};
+    let PageListing {
+        pages,
+        answers,
+        params,
+        sections,
+    } = listing;
     for page in &extension.page_files {
         let uri = oxplow_domain::uri::build::extension_page_uri(page.namespace(), &page.slug);
         pages.push(PageRow {
@@ -459,6 +526,7 @@ fn page_rows(
             deployment: deployment_name(&extension.deployment).to_string(),
             running_uri: page.origin.running_uri.clone(),
         });
+        sections.extend(page_sections(page, &uri));
         answers.extend(page.answers.iter().enumerate().map(|(i, a)| PageAnswerRow {
             page_uri: uri.clone(),
             position: i as i64 + 1,

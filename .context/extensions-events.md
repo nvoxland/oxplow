@@ -343,7 +343,12 @@ resource, so the launcher finds a pull request by its title or text and
 the hit opens the resource's page as any URI of it does (the row shows the
 resource's icon and label). A feed may add a `version` column (a row's
 `updated_at`): a recompute then reads every row's version and the title
-and body of the changed rows only.
+and body of the changed rows only. A feed may add a `name` column: what a
+person types for a row when it isn't the title (a command's label, where
+the title is longer; NULL for a row with nothing to type, which then
+ranks only by its title and body). The name is what ranks first: a query that is or
+starts the name, or starts its words, comes before a match in the title
+or body (`search_rank`).
 
 - **What is searchable (the rule).** The named things a person looks up
   are: oxplow-foundation's tasks, knowledge pages, threads, commits,

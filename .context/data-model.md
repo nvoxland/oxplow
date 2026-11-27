@@ -2154,41 +2154,47 @@ anchored-comment feature is gone; the person's remark for the agent is the
 note on a context-basket item (`context_item.note`, V44).
 (A shared model's child comments, such as a task's, are not these tables.)
 
-### `search_entry` + `search_fts` — `SqliteSearchStore` (`crates/oxplow-db/src/search_store.rs`, migration `V25__search_index.sql`)
+### `search_entry` + `search_fts` + `search_name` — `SqliteSearchStore` (`crates/oxplow-db/src/search_store.rs`; V1, `search_name` V82)
 
-The unified site-wide search index (FTS5/BM25). `search_fts` is a standalone
-FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
-`(title, body)` for every searchable entity; `search_entry` maps
-`(kind, uri, stream_id)` (resource, URI, stream) → the FTS rowid so a single entity can be updated
-or removed in place (a `UNIQUE` index over `(kind, uri, COALESCE(stream_id,''))`
-enforces identity, treating global rows' `NULL` stream as `''`).
+The unified site-wide search index. Three tables share one rowid per entry:
 
-- `kind` holds a resource (`oxplow/knowledge`) that `v_resource` lists as
-  `searchable` (oxplow's `oxplow/task`,
-  `oxplow/knowledge`, `oxplow/thread`,
-  `oxplow/agent_session`, `oxplow/turn`,
-  `oxplow/commit`, `oxplow/page`; an
-  extension's, P9.D3), or
-  `oxplow/file`; `uri` is the thing's URI, and a hit is that URI.
-  Every resource but `oxplow/file` is derived from a model by an asset per kind
-  (`kind_search.rs`: `plan_restate_tx` decides from each entry's `version`
-  — the feed's own `version` column, else its title-and-body hash; V77
-  renamed V164's `content_hash` — and `apply_restate_tx` writes only
-  entries added, changed or gone); bundled's read `v_oxplow_search_task`
-  (every store's tasks) / `v_oxplow_search_knowledge` and the feeds for the other resources named above
-  (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
-  how a resource gets one, and the models' docs say
-  what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from
-  `snapshot.taken` (`indexer.rs`).
-- `stream_id` is `NULL` for project-global rows (knowledge pages, a backlog task) and
-  the owning stream otherwise. Search filters `stream_id = ?  OR stream_id
-  IS NULL`; BM25 weights title above body (`bm25(search_fts, 5.0, 1.0)`).
-- The store is a **derived cache**, never a source of truth: those two
-  writers are its only ones. `purge_stream_files` is called when a stream
-  is archived.
-- `sanitize_query` turns arbitrary user input into a safe MATCH expression
-  (each token double-quoted + `*` prefix), so junk input can't throw FTS5
-  syntax errors. Exposed as the `search` IPC command + MCP `oxplow_search` tool.
+- `search_entry(kind, uri, stream_id, version)`: the identity. A `UNIQUE`
+  index over `(kind, uri, COALESCE(stream_id,''))` enforces it, treating a
+  global row's `NULL` stream as `''`. `uri` is the URI a hit opens, its
+  view included (a page's switch section is the page `#area=…`).
+- `search_fts(title, body)`: FTS5, `tokenize = 'porter unicode61'`,
+  `prefix = '2 3'`. BM25 weights the title above the body
+  (`bm25(search_fts, 5.0, 1.0)`).
+- `search_name(name)`: FTS5, `tokenize = 'trigram'`. What a person types
+  for the entry: a file's name, a page's title, a command's label.
+
+- `kind` holds a resource that `v_resource` lists as `searchable` (oxplow's
+  tasks, knowledge, threads, commits, pages, commands, …; an extension's,
+  P9.D3), or `oxplow/file`.
+- **Every kind is restated, never upserted one by one.** `plan_restate_tx`
+  decides from each entry's `version` (the feed's own `version` column,
+  else the hash of its name, title and body) what to write, and
+  `apply_restate_tx` writes only the entries added, changed or gone. A
+  dataset kind is restated whole by its asset (`kind_search.rs`) from its
+  `search_<kind>` feed, whose optional `name` column names each entry
+  (else its title). Files are restated one stream at a time
+  (`plan_restate_tx(…, Some(stream), …)`) to that stream's working tree
+  by the `search.index` pump consumer (`indexer.rs`), each file versioned
+  by its snapshot blob (or name-only); `purge_stream_files` restates a stream's files to none when
+  it is archived. (`upsert` writes one entry; tests seed with it.)
+- `stream_id` is `NULL` for project-global rows (knowledge pages, a backlog
+  task) and the owning stream otherwise. Only files are scoped: a search
+  for a stream keeps `kind <> 'oxplow/file' OR stream_id = ?`.
+- `search` ranks: candidates from `search_fts` (each word a prefix of a
+  title or body word; `sanitize_query` quotes each token and adds `*`, so
+  junk input can't throw FTS5 syntax errors) and from `search_name` (names
+  holding every word, those starting with the first word first), each
+  given a tier by
+  `search_rank` (exact, name prefix, word starts in the name, inside the
+  name, word starts in the title, body only). A hit is
+  `{ resource, uri, stream_id, title, snippet, tier, score }`. Exposed as
+  the `search` IPC command and the MCP `oxplow_search` tool.
+- The store is a **derived cache**, never a source of truth.
 
 ## Assignment queues
 

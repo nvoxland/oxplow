@@ -194,6 +194,10 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         d.source = entry("commands", "name", written);
         d.description = Some(c.summary.clone());
         d.global = Some(c.name.clone());
+        if let Some(ui) = &c.ui {
+            d.label = Some(ui.label.clone());
+            d.keywords = ui.group.iter().chain(&ui.keywords).cloned().collect();
+        }
         out.push(d);
     }
     for job in &ext.jobs {

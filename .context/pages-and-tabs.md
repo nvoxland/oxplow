@@ -1462,19 +1462,22 @@ The launcher does everything in one box:
     its default-open state doesn't disturb the category choice. The
     effective expanded set is `expandedCategories ∪ {Recent unless
     collapsed}`.
-- **Typing** → ranked results, pages → **commands** → files → body hits.
-  Commands are the bus's offers (`commandOffers`, passed in as `offers`)
-  that can run now (`searchableCommands`); the same offers feed the menu
-  bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over every
-  searchable kind and file contents: tasks with their comments,
-  knowledge pages, thread notes, threads, agent sessions, turns,
-  requests, commits, pages (dashboards among them); the thread-shaped kinds
-  include archived work); each row shows its kind's icon and name
-  (`pageKindIconComponent` / `pageKindLabel`); a hit is a ref, opened through the
-  ref opener (`openSearchHit` → `openRef` → `tabs/refOpener.ts`),
-  which may select a thread or switch stream. The ordering is a pure helper —
-  `buildQuickOpenResults` in `components/quickOpenResults.ts` — so it's
-  unit-tested without mounting React.
+- **Typing** → one ranked list from the backend (`searchSite` with the
+  current stream; `ipc-and-stores.md` "Search index"): pages and their
+  switch sections, commands, this stream's files (by name, and by contents
+  when the content policy keeps them), tasks with their comments,
+  knowledge pages, threads, agent sessions, turns, requests, commits and
+  every extension's searchable kind, ranked on one scale by name, then
+  title, then body. Commands are the bus's offers (`commandOffers`,
+  passed in as `offers`) that can run now (`searchableCommands`); the same
+  offers feed the menu bar (`menuBar.ts`). A command hit whose offer
+  can't run here is left out. Each row shows its kind's icon and name
+  (`pageKindIconComponent` / `pageKindLabel`); a hit is a ref, opened
+  through the ref opener (`openSearchHit` → `openRef` →
+  `tabs/refOpener.ts`), which may select a thread or switch stream. How
+  hits become rows is a pure helper — `buildQuickOpenResults` in
+  `components/quickOpenResults.ts` — so it's unit-tested without
+  mounting React.
 
 Because the launcher lists every page (including Code Quality, Hook
 Events, Local History), no page needs a bespoke `CommandId` to be

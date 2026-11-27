@@ -1,6 +1,8 @@
 //! `search.read/search { query, stream_id?, resources?, limit? }`: site-wide
-//! BM25 search over every searchable resource (`v_resource.searchable`) and
-//! a stream's files, best first; each hit names the URI it found.
+//! search over every searchable resource (`v_resource.searchable`) and a
+//! stream's files, by name and by text, ranked on one scale
+//! (`oxplow_db::search_rank`), best first; each hit names the URI it found
+//! and its tier.
 
 use std::sync::Arc;
 
@@ -18,10 +20,13 @@ pub const SEARCH_FIND: &str = "oxplow.search.find";
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SiteSearchInput {
-    /// Free text. Tokens are matched as prefixes (stemmed); ranking is BM25.
+    /// Free text. A hit whose name is or starts with it ranks first, then
+    /// one whose name or title holds each word, then one whose body does
+    /// (BM25); each hit's `tier` says which (0 exact … 5 body only).
     pub query: String,
-    /// Scope file/stream-bound hits to one worktree (project-global hits like
-    /// knowledge are always included). Omit to search every stream.
+    /// Keep one worktree's files. Only files belong to a stream: tasks,
+    /// knowledge, threads and every other hit are found whatever stream
+    /// they are in. Omit to search every stream's files.
     #[serde(default)]
     pub stream_id: Option<String>,
     /// Restrict to these resources: any `v_resource` lists as `searchable`

@@ -25,8 +25,8 @@ pub fn reset_tx(
             "INSERT OR REPLACE INTO contribution
                (id, extension, kind, local, origin, version, contract_version,
                 runs_on_json, needs_json, after_json, order_level, global_name, file, line, description,
-                namespace)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                namespace, label, keywords)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         )
         .map_err(map_sql_err)?;
     for d in descriptors {
@@ -47,6 +47,8 @@ pub fn reset_tx(
             d.source.line,
             d.description,
             d.id.namespace,
+            d.label,
+            (!d.keywords.is_empty()).then(|| d.keywords.join(" ")),
         ])
         .map_err(map_sql_err)?;
     }

@@ -64,6 +64,20 @@ pub struct PageParamRow {
     pub options_json: String,
 }
 
+/// One section a page shows by its switch param, beside the one it opens
+/// on, as `v_page_section` lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageSectionRow {
+    pub page_uri: String,
+    /// From 1, in the page's order.
+    pub position: i64,
+    /// The section's id: the switch param's value that shows it.
+    pub section: String,
+    pub title: String,
+    /// The page's URI showing it (`…#area=integrations`).
+    pub uri: String,
+}
+
 /// One extension, as `v_extension` lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtensionRow {
@@ -102,6 +116,7 @@ pub struct CatalogListing {
     pub pages: Vec<PageRow>,
     pub page_answers: Vec<PageAnswerRow>,
     pub page_params: Vec<PageParamRow>,
+    pub page_sections: Vec<PageSectionRow>,
     pub extensions: Vec<ExtensionRow>,
     /// In catalog order: each row's position is its index, from 1.
     pub config_keys: Vec<ConfigKeyRow>,
@@ -209,7 +224,7 @@ fn insert_extensions(
 }
 
 fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result<(), DomainError> {
-    for table in ["page", "page_answer", "page_param"] {
+    for table in ["page", "page_answer", "page_param", "page_section"] {
         conn.execute(&format!("DELETE FROM {table}"), [])
             .map_err(map_sql_err)?;
     }
@@ -282,6 +297,17 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
                 p.default_json,
                 p.options_json
             ])
+            .map_err(map_sql_err)?;
+    }
+    let mut section = conn
+        .prepare(
+            "INSERT OR REPLACE INTO page_section (page_uri, position, section, title, uri)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .map_err(map_sql_err)?;
+    for s in &listing.page_sections {
+        section
+            .execute(params![s.page_uri, s.position, s.section, s.title, s.uri])
             .map_err(map_sql_err)?;
     }
     Ok(())

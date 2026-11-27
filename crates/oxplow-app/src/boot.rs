@@ -482,6 +482,13 @@ pub async fn run_boot_orchestration(
         });
     }
 
+    // Each stream's files in the search index, restated to its latest
+    // snapshot once at boot; `snapshot.taken` keeps them after.
+    {
+        let state = state.clone();
+        tokio::spawn(async move { crate::indexer::reconcile_all(&state).await });
+    }
+
     // Commit indexer + branch refresh: walk the most-recent N commits
     // and restate the branch list at boot, then again whenever git refs
     // change. Idempotent.

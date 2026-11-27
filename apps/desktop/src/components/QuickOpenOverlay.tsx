@@ -6,10 +6,7 @@ import type { CSSProperties } from "react";
 import { useResources } from "../resources.js";
 import { formatShortcut } from "../keybindings.js";
 import { useListNav } from "../kit/index.js";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NO_READS, useRerunOnChange } from "../viz/rerun.js";
-import { readWorkspaceIndex, type WorkspaceIndexedFile } from "../workspaceFiles.js";
-import type { Reads } from "../tauri-bridge/generated/bindings.js";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
 import {
   listRecentPageVisits,
@@ -63,18 +60,10 @@ type Result = QuickOpenResult;
  *  results (while searching). */
 type Row = LauncherNavRow;
 
-// Below this query length the launcher filters only the in-memory
-// pages/commands/files (fast, client-side) and skips the backend BM25
-// round-trip — a single character isn't a meaningful content search and
-// firing one per keystroke is pure noise.
-const MIN_BODY_QUERY_LEN = 2;
-
-// Over-fetch the project-wide body search. The search is project-wide
-// (searchSite(q, null)) but buildQuickOpenResults discards other streams'
-// FILE hits client-side; at the default limit of 50 those discarded hits
-// could eat the budget and starve current-stream results that rank below
-// 50. A larger ceiling leaves headroom after the client-side filter.
-const BODY_SEARCH_LIMIT = 200;
+// How many ranked results one search shows.
+const SEARCH_LIMIT = 100;
+// How long typing pauses before the search runs.
+const SEARCH_DEBOUNCE_MS = 60;
 
 // Recent visits to load for the "Recent" section (10 most recent pages).
 const RECENT_LIMIT = 10;
@@ -86,14 +75,14 @@ const rowA11y = ({ onMouseEnter: _hover, ...rest }: ReturnType<ReturnType<typeof
 
 export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selectedFilePath, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
-  const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
   // A hit of an extension's ref kind is drawn with that kind's icon and
   // label: redraw when the kinds change.
   useResources();
   const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The query the search last answered: "No matches." only once it has.
+  const [answered, setAnswered] = useState<string | null>(null);
   const [expandedList, setExpandedList] = useAppPreference<PageCategory[]>("quickOpen.expandedCategories", []);
   const expandedCategories = useMemo(() => new Set(expandedList), [expandedList]);
   const [recentCollapsed, setRecentCollapsed] = useAppPreference<boolean>("quickOpen.recentCollapsed", false);
@@ -164,64 +153,34 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
     if (open && stream) inputRef.current?.focus();
   }, [open, stream?.id]);
 
-  // The stream's files (`v_file`, a walk of the tree): read once
-  // when it opens, and again when what the read read changes.
-  const [fileReads, setFileReads] = useState<Reads>(NO_READS);
-  const loadFiles = useCallback(() => {
-    if (!open || !stream) return;
-    setLoading(true);
-    setError(null);
-    const streamId = stream.id;
-    readWorkspaceIndex(streamId)
-      .then((result) => {
-        if (streamRef.current !== streamId) return;
-        setFiles(result.files);
-        setFileReads(result.reads);
-      })
-      .catch((e) => {
-        if (streamRef.current !== streamId) return;
-        setError(String(e));
-      })
-      .finally(() => {
-        if (streamRef.current !== streamId) return;
-        setLoading(false);
-      });
-  }, [open, stream?.id]);
-  const streamRef = useRef(stream?.id ?? null);
-  streamRef.current = open ? stream?.id ?? null : null;
-  useEffect(() => {
-    setFileReads(NO_READS);
-    loadFiles();
-  }, [loadFiles]);
-  useRerunOnChange(open ? fileReads : NO_READS, loadFiles);
-
-  // Body search (unified BM25 index: knowledge/task/note/file
-  // contents), debounced. This is what makes a multi-word phrase like
-  // "workspace isolation" surface the knowledge page it appears in — the
-  // filename fuzzy-match alone can never see bodies.
+  // The one search: the backend ranks pages, commands, this stream's
+  // files, tasks, knowledge and every other searchable kind on one scale
+  // (`search_rank`), by name and by contents; the launcher keeps its
+  // order. Files are this stream's (`stream.id`); tasks and knowledge
+  // belong to the project.
   useEffect(() => {
     if (!open || !stream) return;
     const q = query.trim();
-    // Skip the backend round-trip on a too-short query (a single char is
-    // noise); the in-memory pages/commands/files still filter live.
-    if (q.length < MIN_BODY_QUERY_LEN) {
+    if (!q) {
       setSiteHits([]);
+      setError(null);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      // Project-wide (null): the launcher is the single discovery surface,
-      // so cross-stream tasks/knowledge pages/notes are findable. File hits
-      // are re-scoped to the current stream client-side in
-      // buildQuickOpenResults (another worktree's files aren't openable here).
-      searchSite(q, null, null, BODY_SEARCH_LIMIT)
+      searchSite(q, stream.id, null, SEARCH_LIMIT)
         .then((rows) => {
-          if (!cancelled) setSiteHits(rows);
+          if (cancelled) return;
+          setSiteHits(rows);
+          setAnswered(q);
+          setError(null);
         })
-        .catch(() => {
-          if (!cancelled) setSiteHits([]);
+        .catch((e) => {
+          if (cancelled) return;
+          setSiteHits([]);
+          setError(String(e));
         });
-    }, 150);
+    }, SEARCH_DEBOUNCE_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -271,15 +230,12 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
   const commands = useMemo(() => searchableCommands(offers), [offers]);
 
   // Empty input = launcher mode (pages only, grouped by category in the
-  // render below). With a query: exact matches first, then pages →
-  // commands → files → body hits. The ordering + stream scoping + cap
-  // accounting live in a pure helper so they're unit-testable.
-  const build = useMemo(
-    () => buildQuickOpenResults({ query, pages: exts === null ? null : pages, commands, files, siteHits, currentStreamId: stream?.id ?? null }),
-    [exts, pages, commands, files, siteHits, query, stream?.id],
+  // render below). With a query: the backend's ranked hits, in its order,
+  // each drawn as its kind's row (a pure helper, unit-testable).
+  const results: Result[] = useMemo(
+    () => buildQuickOpenResults({ query, pages: exts === null ? null : pages, commands, siteHits }),
+    [exts, pages, commands, siteHits, query],
   );
-  const results: Result[] = build.results;
-  const truncated = build.truncated;
   const launcherMode = query.trim() === "";
 
   // Effective expanded sections: the persisted static categories, plus
@@ -311,6 +267,17 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
     id: "quick-open",
   });
   const { cursor: selectedIndex, setCursor: setSelectedIndex } = nav;
+  // The rows showing answer an earlier query while the search for what
+  // was typed runs: Enter then waits for its answer and takes its first
+  // row, never a row of the earlier query.
+  const stale = !launcherMode && answered !== query.trim();
+  const [pickWhenAnswered, setPickWhenAnswered] = useState(false);
+  useEffect(() => {
+    if (!pickWhenAnswered || stale) return;
+    setPickWhenAnswered(false);
+    const row = rows[0];
+    if (row) confirm(row);
+  }, [pickWhenAnswered, stale, rows]);
   // A fresh query each time it opens starts at the first row.
   useEffect(() => {
     if (open) setSelectedIndex(0);
@@ -341,7 +308,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
       // restoration the command performs.
       setTimeout(result.entry.run, 0);
       return;
-    } else if (result.kind === "file") onOpenFile(result.file.path);
+    } else if (result.kind === "file") onOpenFile(result.path);
     else onOpenSearchHit(result.hit);
     onClose();
   }
@@ -382,7 +349,10 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
           }}
           {...nav.inputProps}
           onKeyDown={(event) => {
-            if (event.key === "Tab") {
+            if (event.key === "Enter" && stale) {
+              event.preventDefault();
+              setPickWhenAnswered(true);
+            } else if (event.key === "Tab") {
               // Section jump: launcher mode hops header-to-header, search
               // mode hops between result groups (page→command→file→hit).
               event.preventDefault();
@@ -402,11 +372,10 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
         />
         <div style={metaStyle}>
           <span>{stream.title}</span>
-          <span>{loading ? "Indexing files…" : `${pages.length} pages · ${files.length} files`}</span>
         </div>
         {error ? <div style={errorStyle}>{error}</div> : null}
         <div ref={resultsRef} style={resultsStyle}>
-          {rows.length === 0 && !loading ? (
+          {rows.length === 0 && query.trim() !== "" && answered === query.trim() ? (
             <div style={emptyStyle}>No matches.</div>
           ) : (
             rows.map((result, index) => {
@@ -528,53 +497,41 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
               }
               return (
                 <button type="button"
-                  key={fileUri(result.file.path)}
+                  key={fileUri(result.path)}
                   data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
                   onClick={() => confirm(result)}
                   style={{
                     ...resultStyle,
                     background: active ? "var(--accent-soft-bg)" : "transparent",
-                    color: result.file.path === selectedFilePath ? "var(--accent)" : "var(--fg)",
+                    color: result.path === selectedFilePath ? "var(--accent)" : "var(--fg)",
                   }}
                 >
                   <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
                     <PageKindIcon kind="file" size={14} style={{ color: "var(--text-secondary)" }} />
                   </span>
-                  <FilePath path={result.file.path} />
-                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.status)}</span>
+                  <FilePath path={result.path} />
+                  {result.snippet ? (
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
+                      {snippetParts(result.snippet).map((part, i) =>
+                        part.hit ? (
+                          <strong key={i} style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                            {part.text}
+                          </strong>
+                        ) : (
+                          part.text
+                        ),
+                      )}
+                    </span>
+                  ) : null}
                 </button>
               );
             })
           )}
-          {truncated > 0 ? (
-            <div style={moreStyle} data-testid="launcher-more">
-              +{truncated} more — refine your search
-            </div>
-          ) : null}
         </div>
       </div>
     </div>
   );
-}
-
-function shortStatus(status: WorkspaceIndexedFile["status"]): string {
-  switch (status) {
-    case "modified":
-      return "M";
-    case "added":
-      return "A";
-    case "deleted":
-      return "D";
-    case "renamed":
-      return "R";
-    case "untracked":
-      return "U";
-    case "conflicted":
-      return "C";
-    default:
-      return "";
-  }
 }
 
 // Transparent full-screen layer: it captures the outside-click that
@@ -656,15 +613,6 @@ const emptyStyle: CSSProperties = {
   color: "var(--muted)",
   padding: "8px 10px",
   fontSize: "var(--text-xs)",
-};
-
-// Non-selectable footer shown when a section hit its row cap — a missing
-// result then reads as "narrow the query," not "not found."
-const moreStyle: CSSProperties = {
-  color: "var(--muted)",
-  padding: "6px 10px",
-  fontSize: 11,
-  fontStyle: "italic",
 };
 
 const categoryRowStyle: CSSProperties = {
