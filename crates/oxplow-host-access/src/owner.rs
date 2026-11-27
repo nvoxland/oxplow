@@ -88,7 +88,9 @@ pub fn owner_call(
     ))
 }
 
-#[cfg(all(test, unix))]
+// The stand-in host is a Unix socket.
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
