@@ -4613,7 +4613,7 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
 ({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The host's devices or its settings changed (a pairing, a rename, a
- *  removal, `host-settings.json`): `v_host_device` and
+ *  removal, "Allow other devices"): `v_host_device` and
  *  `v_host_settings` are read again.
  */
 ({ kind: "hostChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |

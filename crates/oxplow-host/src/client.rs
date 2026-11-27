@@ -95,8 +95,7 @@ pub fn binary_beside_exe() -> PathBuf {
 /// `listening on` line. It inherits the environment, so it serves the app's
 /// `OXPLOW_HOME`. A host that cannot start (another host has the home) ends,
 /// and its last stderr lines are the error. **Blocking.**
-/// `extra` are more `serve` flags ("Allow other devices",
-/// `crate::settings::HostSettings::serve_args`).
+/// `extra` are more `serve` flags (the app's own `--device-port`).
 pub fn start_own_host(mut host: Command, extra: &[String]) -> Result<OwnHost, ClientError> {
     let token = new_token();
     let program = PathBuf::from(host.get_program());
@@ -429,12 +428,13 @@ pub(crate) mod tests {
             host: fx.host.clone(),
             access: crate::access::Access::new(
                 token.into(),
-                crate::devices::Devices::new(fx.db.clone()),
+                fx.db.clone(),
+                Default::default(),
                 Duration::from_millis(10),
             ),
             listener: crate::access::Listener::Loopback,
             ui_dir: None,
-            allow_hosts: vec![],
+            allow_hosts: Default::default(),
             boot_wait: Duration::from_secs(5),
             stop: stop.clone(),
             scheme: Default::default(),

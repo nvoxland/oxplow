@@ -370,7 +370,7 @@ fn run_shell(ctx: tauri::Context) {
                 std::sync::Arc::new(request_quit),
             );
             open_startup_windows(app.handle(), startup);
-            start_host_for_other_devices(app.handle());
+            start_host(app.handle());
             Ok(())
         })
         .build(ctx)
@@ -421,19 +421,14 @@ fn run_shell(ctx: tauri::Context) {
         });
 }
 
-/// With "Allow other devices" on, the host starts with the app, not at the
-/// first open: a tablet can reach it before any project is open here.
-fn start_host_for_other_devices(app: &tauri::AppHandle) {
-    let on = oxplow_config::global_config_dir().is_some_and(|dir| {
-        oxplow_host_access::settings::HostSettings::load(&dir).allow_other_devices
-    });
-    if !on {
-        return;
-    }
+/// The host starts with the app, not at the first open: it holds "Allow
+/// other devices" (in its `host.db`, which only it opens), so a tablet can
+/// reach it before any project is open here.
+fn start_host(app: &tauri::AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         if let Err(e) = app.state::<windows::ShellWindows>().host_client() {
-            tracing::warn!(error = %e, "the host for other devices did not start");
+            tracing::warn!(error = %e, "the app's host did not start");
         }
     });
 }

@@ -145,6 +145,7 @@ pub fn router(cfg: ApiConfig) -> Router {
         .route("/host/status", get(status))
         .route("/host/projects", get(projects).post(add_project))
         .route("/host/projects/{id}", delete(remove_project))
+        .route("/host/settings", get(settings).put(save_settings))
         .route("/host/holds", post(hold).delete(release))
         .route("/host/shutdown", post(shutdown))
         .route("/host/pairing", get(pairing_now).post(pairing))
@@ -286,11 +287,14 @@ async fn events(
         return unauthorized();
     };
     let lease = match &who {
-        Caller::Device(d) => Some(s.access.open_tunnel(Connected {
-            device: d.id.to_string(),
-            name: d.name.clone(),
-            kind: Some(d.kind),
-        })),
+        Caller::Device(d) => Some(s.access.open_tunnel(
+            Connected {
+                device: d.id.to_string(),
+                name: d.name.clone(),
+                kind: Some(d.kind),
+            },
+            s.listener,
+        )),
         Caller::Owner => None,
     };
     ws.on_upgrade(move |socket| send_events(socket, s.host, who, lease))
@@ -371,6 +375,38 @@ async fn add_project(
             | crate::registry::RegistryError::Unreadable(..)),
         ) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// "Allow other devices": saved, and in force under this run's flags.
+async fn settings(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    Json(s.access.other_devices.view()).into_response()
+}
+
+/// Keep "Allow other devices"; what cannot work is refused with its field
+/// and nothing is kept.
+async fn save_settings(
+    State(s): State<ApiState>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> Response {
+    check!(owner(&s, &headers));
+    let wanted: oxplow_host_access::settings::HostSettings = check!(body(&bytes));
+    let server = s.access.public_server.get().map(|p| p.as_ref());
+    match s.access.other_devices.apply(wanted, server).await {
+        Ok(_) => Json(s.access.other_devices.view()).into_response(),
+        Err(crate::other_devices::SaveError::Invalid(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string(), "field": e.field() })),
+        )
+            .into_response(),
+        Err(crate::other_devices::SaveError::Unapplied(e)) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": e, "field": "address" })),
+        )
+            .into_response(),
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
@@ -618,7 +654,8 @@ mod tests {
     async fn api(fx: &Fixture) -> Api {
         let access = Access::new(
             TOKEN.into(),
-            crate::devices::Devices::new(fx.db.clone()),
+            fx.db.clone(),
+            Default::default(),
             std::time::Duration::from_millis(200),
         );
         let stop = Arc::new(tokio::sync::Notify::new());
@@ -1163,6 +1200,68 @@ mod tests {
         assert_eq!(released.status(), 200);
         let released: serde_json::Value = released.json().await.unwrap();
         assert_eq!(released["holds"], 0);
+    }
+
+    /// The owner reads and saves "Allow other devices"; what cannot work
+    /// is refused with the field it is about, and a device may not.
+    #[tokio::test]
+    async fn the_owner_reads_and_saves_the_settings_for_other_devices() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let http = reqwest::Client::new();
+        let read = || async {
+            http.get(format!("{}/host/settings", api.url))
+                .bearer_auth(TOKEN)
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        };
+        let first = read().await;
+        assert_eq!(first["saved"]["allowOtherDevices"], false);
+        assert_eq!(first["effective"]["port"]["port"], 7400);
+        let put = |body: serde_json::Value| {
+            http.put(format!("{}/host/settings", api.url))
+                .bearer_auth(TOKEN)
+                .json(&body)
+                .send()
+        };
+        let saved =
+            put(json!({ "allowOtherDevices": true, "address": "192.168.1.20", "port": 7401 }))
+                .await
+                .unwrap();
+        assert_eq!(saved.status(), 200);
+        let now = read().await;
+        assert_eq!(now["saved"]["address"], "192.168.1.20");
+        assert_eq!(now["effective"]["allowOtherDevices"], true);
+        assert_eq!(now["effective"]["port"]["port"], 7401);
+
+        let refused = put(json!({ "allowOtherDevices": true, "address": "" }))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 400);
+        let why: serde_json::Value = refused.json().await.unwrap();
+        assert_eq!(why["field"], "address", "{why}");
+        assert_eq!(
+            read().await["saved"]["address"],
+            "192.168.1.20",
+            "nothing kept"
+        );
+
+        let (_device, token) = api
+            .access
+            .devices
+            .pair("Tab", oxplow_domain::DeviceKind::Tablet)
+            .unwrap();
+        let by_device = http
+            .get(format!("{}/host/settings", api.public))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(by_device.status(), 403);
     }
 
     /// The owner removes a project it no longer wants listed; one a device

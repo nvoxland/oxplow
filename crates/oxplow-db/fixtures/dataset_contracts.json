@@ -40403,6 +40403,108 @@
       "key": [
         "hosted"
       ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "hosted",
+          "type": "INT",
+          "doc": "1 when a host started this oxplow and answers."
+        },
+        {
+          "name": "problem",
+          "type": "TEXT",
+          "doc": "Why the host did not answer, when it did not."
+        },
+        {
+          "name": "allow_other_devices",
+          "type": "INT",
+          "doc": "1 when the saved settings let other devices in."
+        },
+        {
+          "name": "address",
+          "type": "TEXT",
+          "doc": "The IP address of this computer's other devices use (saved)."
+        },
+        {
+          "name": "names",
+          "type": "TEXT",
+          "doc": "Names a device may use besides the address (`studio.local`), as a JSON array (saved)."
+        },
+        {
+          "name": "saved_port",
+          "type": "INT",
+          "doc": "The saved port; NULL for the default."
+        },
+        {
+          "name": "port",
+          "type": "INT",
+          "doc": "The port in force: the host's `--device-port`, else `OXPLOW_DEVICE_PORT`, else the saved one, else 7400. NULL when the settings cannot be in force (`port_problem`)."
+        },
+        {
+          "name": "port_from",
+          "type": "TEXT",
+          "doc": "Where it came from: `flag`, `env`, `saved` or `default`."
+        },
+        {
+          "name": "port_problem",
+          "type": "TEXT",
+          "doc": "Why the settings cannot be in force: a port the environment names that is no port, the listener for other devices failing to start as they say (an address no longer this computer's, a port in use), or the host not saying them."
+        },
+        {
+          "name": "tls_cert",
+          "type": "TEXT",
+          "doc": "A certificate of the person's own (a PEM file) in place of the host's (saved)."
+        },
+        {
+          "name": "tls_key",
+          "type": "TEXT",
+          "doc": "Its key (saved)."
+        },
+        {
+          "name": "overrides",
+          "type": "TEXT",
+          "doc": "The flags (and environment variable) of the host's run that replace what is saved for that run and are never kept, as a JSON array: `--public-bind`, `--device-port`, `OXPLOW_DEVICE_PORT`, `--allow-host`, `--tls-cert`. (v4)"
+        },
+        {
+          "name": "open_on_device",
+          "type": "TEXT",
+          "doc": "What a device opens, as the host runs: its address (`https://<address>:<port>/`) first, then each name it answers to (this computer's `.local` name among them, which works only where the network passes it), as a JSON array; empty while it doesn't listen for other devices. (v3: from the running host, the address first.)"
+        },
+        {
+          "name": "addresses",
+          "type": "TEXT",
+          "doc": "This computer's addresses on private networks, the ones the address may be, as a JSON array."
+        },
+        {
+          "name": "local_name",
+          "type": "TEXT",
+          "doc": "The name it answers to on its local network (`<local hostname>.local`)."
+        },
+        {
+          "name": "root_certificate",
+          "type": "INT",
+          "doc": "1 when a device has the host's own root to trust (`/host/ca.pem`); 0 with a certificate of the person's own."
+        },
+        {
+          "name": "pairing_code",
+          "type": "TEXT",
+          "doc": "The pairing code in force (`ABCD-EFGH`), good once; NULL when none."
+        },
+        {
+          "name": "pairing_until",
+          "type": "INT",
+          "doc": "When it ends, in Unix milliseconds."
+        },
+        {
+          "name": "listening",
+          "type": "TEXT",
+          "doc": "Where the host listens for other devices now, by address (`https://<address>:<port>/`), as it runs, whatever the saved settings say (a headless host takes flags); NULL when it doesn't. (v2)"
+        }
+      ],
+      "key": [
+        "hosted"
+      ]
     }
   }
 }

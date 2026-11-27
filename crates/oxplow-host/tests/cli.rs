@@ -138,3 +138,61 @@ fn the_cli_adds_lists_and_removes_projects_with_or_without_a_host() {
         "{said}"
     );
 }
+
+/// "Allow other devices" from a terminal: saved in `host.db` with no host
+/// running, in force when a host starts, and changed live through it.
+#[test]
+fn the_cli_sets_other_devices_and_a_running_host_applies_them_at_once() {
+    let home = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let (ok, said) = cli(
+        home.path(),
+        &[
+            "settings",
+            "set",
+            "allow=on",
+            "address=127.0.0.1",
+            &format!("port={port}"),
+        ],
+    );
+    assert!(ok, "{said}");
+    let (ok, said) = cli(home.path(), &["settings", "set", "address="]);
+    assert!(!ok && said.contains("address"), "refused: {said}");
+
+    let mut host = Command::new(env!("CARGO_BIN_EXE_oxplow-host"))
+        .args(["serve"])
+        .env("OXPLOW_HOME", home.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(host.stdout.take().unwrap());
+    let mut lines = String::new();
+    while !lines.contains("for other devices") {
+        let mut line = String::new();
+        assert!(out.read_line(&mut line).unwrap() > 0, "{lines}");
+        lines.push_str(&line);
+    }
+    assert!(
+        lines.contains(&format!("https://127.0.0.1:{port}")),
+        "{lines}"
+    );
+
+    let (ok, said) = cli(home.path(), &["settings", "set", "allow=off"]);
+    assert!(ok, "{said}");
+    let (ok, status) = cli(home.path(), &["status"]);
+    assert!(ok && status.contains("\"off\""), "off at once: {status}");
+    std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free again");
+    let (ok, said) = cli(home.path(), &["settings"]);
+    assert!(
+        ok && said.contains("\"allowOtherDevices\": false"),
+        "{said}"
+    );
+
+    host.kill().unwrap();
+    host.wait().unwrap();
+}

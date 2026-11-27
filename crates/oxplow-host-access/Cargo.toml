@@ -9,7 +9,7 @@ description = "What the host and its daemons share: the host's settings, this ma
 
 # The host (`oxplow-host`) depends on `oxplow-app` for its supervisor, so a
 # daemon cannot use the host's crate. What both sides need lives here:
-# `host-settings.json`, the address and name helpers, and a call to the
+# the settings' types and checks, the address and name helpers, and a call to the
 # running host as its owner over `host.sock`. See .context/host.md.
 
 [dependencies]

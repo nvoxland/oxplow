@@ -176,7 +176,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "port_problem",
             "tls_cert",
             "tls_key",
-            "applied",
+            "overrides",
             "open_on_device",
             "addresses",
             "local_name",

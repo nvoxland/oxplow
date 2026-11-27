@@ -1815,9 +1815,9 @@ datasets:
     - { name: "paired_at", type: "INT", doc: "When it paired, in Unix milliseconds." }
     - { name: "connected", type: "INT", doc: "1 while it has a page of this host open." }
 - name: host_settings
-  version: 3
+  version: 4
   key: [hosted]
-  description: "This computer's host and whether other devices may reach it, as one row: the saved settings (`host-settings.json`, written by `oxplow.host.set_settings`), the port in force and where it came from, whether the host runs with them now, the addresses a device opens, and the pairing code in force. Read live; `hosted = 0` when no host started this oxplow."
+  description: "This computer's host and whether other devices may reach it, as one row: the saved settings (the host's `host.db`, changed by `oxplow.host.set_settings`, which the host applies at once), the port in force and where it came from, the flags of the host's run that replace what is saved, the addresses a device opens, and the pairing code in force. Read live; `hosted = 0` when no host started this oxplow. (v4: `applied` gives way to `overrides`: a saved change is in force at once.)"
   fields:
     - { name: "hosted", type: "INT", doc: "1 when a host started this oxplow and answers." }
     - { name: "problem", type: "TEXT", doc: "Why the host did not answer, when it did not." }
@@ -1825,12 +1825,12 @@ datasets:
     - { name: "address", type: "TEXT", doc: "The IP address of this computer's other devices use (saved)." }
     - { name: "names", type: "TEXT", doc: "Names a device may use besides the address (`studio.local`), as a JSON array (saved)." }
     - { name: "saved_port", type: "INT", doc: "The saved port; NULL for the default." }
-    - { name: "port", type: "INT", doc: "The port in force: `--device-port`, else `OXPLOW_DEVICE_PORT`, else the saved one, else 7400. NULL when the one given is no port (`port_problem`)." }
+    - { name: "port", type: "INT", doc: "The port in force: the host's `--device-port`, else `OXPLOW_DEVICE_PORT`, else the saved one, else 7400. NULL when the settings cannot be in force (`port_problem`)." }
     - { name: "port_from", type: "TEXT", doc: "Where it came from: `flag`, `env`, `saved` or `default`." }
-    - { name: "port_problem", type: "TEXT", doc: "Why the port given is no port." }
+    - { name: "port_problem", type: "TEXT", doc: "Why the settings cannot be in force: a port the environment names that is no port, the listener for other devices failing to start as they say (an address no longer this computer's, a port in use), or the host not saying them." }
     - { name: "tls_cert", type: "TEXT", doc: "A certificate of the person's own (a PEM file) in place of the host's (saved)." }
     - { name: "tls_key", type: "TEXT", doc: "Its key (saved)." }
-    - { name: "applied", type: "INT", doc: "1 when the host runs with the saved settings (its listener for other devices is on that address and port, or off when they are off); 0 until the next start after a change." }
+    - { name: "overrides", type: "TEXT", doc: "The flags (and environment variable) of the host's run that replace what is saved for that run and are never kept, as a JSON array: `--public-bind`, `--device-port`, `OXPLOW_DEVICE_PORT`, `--allow-host`, `--tls-cert`. (v4)" }
     - { name: "open_on_device", type: "TEXT", doc: "What a device opens, as the host runs: its address (`https://<address>:<port>/`) first, then each name it answers to (this computer's `.local` name among them, which works only where the network passes it), as a JSON array; empty while it doesn't listen for other devices. (v3: from the running host, the address first.)" }
     - { name: "addresses", type: "TEXT", doc: "This computer's addresses on private networks, the ones the address may be, as a JSON array." }
     - { name: "local_name", type: "TEXT", doc: "The name it answers to on its local network (`<local hostname>.local`)." }

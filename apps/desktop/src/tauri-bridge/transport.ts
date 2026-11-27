@@ -339,7 +339,7 @@ let reconnectDelayMs = 500;
 /// daemon keeps one per device, `client_reports::devices`) — after which
 /// the socket isn't opened or retried either.
 /// Local mode never fires any.
-export type RemoteConnectionState = "up" | "down" | "refused" | "replaced" | "ended";
+export type RemoteConnectionState = "up" | "down" | "refused" | "replaced" | "ended" | "closed";
 
 /// The close code the daemon gives a replaced page load's socket
 /// (`client_reports::devices::REPLACED_CLOSE_CODE`).
@@ -348,18 +348,23 @@ export const REPLACED_CLOSE_CODE = 4001;
 export const HOST_ENDING_CLOSE_CODE = 4002;
 /// The host's owner removed this device: its token is gone.
 export const DEVICE_REMOVED_CLOSE_CODE = 4003;
+/// Other devices were turned off on the host's computer, or the address
+/// they come in on changed (`oxplow_host::access`).
+export const OTHER_DEVICES_OFF_CLOSE_CODE = 4004;
 
 /// What a socket's close means: this page load was replaced, the daemon
-/// refused the token, this device was removed (pair again), the host is
+/// refused the token, this device was removed (pair again), other devices
+/// were turned off there (say so, try again slowly), the host is
 /// ending (say so, try again slowly), or a drop to wait out and retry.
 /// Pure; exported for tests.
 export function socketCloseMeaning(
   code: number,
   tokenRefused: boolean,
-): "replaced" | "refused" | "removed" | "ended" | "retry" {
+): "replaced" | "refused" | "removed" | "ended" | "closed" | "retry" {
   if (code === REPLACED_CLOSE_CODE) return "replaced";
   if (code === DEVICE_REMOVED_CLOSE_CODE) return "removed";
   if (code === HOST_ENDING_CLOSE_CODE) return "ended";
+  if (code === OTHER_DEVICES_OFF_CLOSE_CODE) return "closed";
   if (tokenRefused) return "refused";
   return "retry";
 }
@@ -517,15 +522,17 @@ function ensureSocket(): void {
       forgetHostToken();
       return;
     }
-    // The app that runs the host quit: say so, and wait for it longer.
-    if (meaning === "ended") reconnectDelayMs = Math.max(reconnectDelayMs, 5_000);
-    notifyConnectionState(meaning === "ended" ? "ended" : "down");
+    // The app that runs the host quit, or other devices were turned off
+    // there: say so, and wait for it longer.
+    const away = meaning === "ended" || meaning === "closed";
+    if (away) reconnectDelayMs = Math.max(reconnectDelayMs, 5_000);
+    notifyConnectionState(meaning === "ended" || meaning === "closed" ? meaning : "down");
     if (meaning === "retry") void checkHost();
     // Backoff reconnect; the RemoteConnectionBanner drives the
     // user-facing state off the notifications above.
     if (channelHandlers.size > 0) {
       setTimeout(ensureSocket, reconnectDelayMs);
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, meaning === "ended" ? 30_000 : 10_000);
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, away ? 30_000 : 10_000);
     }
   };
   ws.onclose = (event) => down(event.code);

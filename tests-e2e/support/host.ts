@@ -36,7 +36,17 @@ export type Host = {
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "desktop", "dist");
 
-export async function startHost(): Promise<Host> {
+/** How a test host starts. */
+export type HostOptions = {
+  /** Listen for other devices from the start (`--public-bind 127.0.0.1`),
+   *  whatever is saved: the default. Without it the host follows what
+   *  `settings` keeps, as the Mac app's does. */
+  publicBind?: boolean;
+  /** `oxplow-host settings set …` before it starts (`address=127.0.0.1`). */
+  settings?: string[];
+};
+
+export async function startHost(options: HostOptions = {}): Promise<Host> {
   const bin = process.env.OXPLOW_E2E_HOST;
   const daemon = process.env.OXPLOW_E2E_DAEMON;
   const harnessFake = process.env.OXPLOW_E2E_HARNESS_FAKE;
@@ -45,9 +55,14 @@ export async function startHost(): Promise<Host> {
   const env = isolated(dir, harnessFake);
   for (const d of [env.HOME!, env.OXPLOW_HOME!]) mkdirSync(d, { recursive: true });
   const token = randomUUID();
-  // A listener for other devices too (HTTPS, on any free port), as a host
-  // that lets them in has: the Devices page offers pairing only then.
-  const args = ["serve", "--bind", "127.0.0.1:0", "--token-stdin", "--public-bind", "127.0.0.1", "--device-port", "0"];
+  if (options.settings?.length) {
+    execFileSync(bin, ["settings", "set", ...options.settings], { env, stdio: "ignore" });
+  }
+  // Other devices on any free port; by default a listener for them from the
+  // start (HTTPS), as a host that lets them in has: the Devices page offers
+  // pairing only then.
+  const others = options.publicBind === false ? [] : ["--public-bind", "127.0.0.1"];
+  const args = ["serve", "--bind", "127.0.0.1:0", "--token-stdin", ...others, "--device-port", "0"];
   const child: ChildProcess = spawn(bin, [...args, "--daemon", daemon, "--ui", DIST], {
     env,
     stdio: ["pipe", "pipe", "inherit"],

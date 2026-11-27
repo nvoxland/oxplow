@@ -1,6 +1,6 @@
 //! What the host and its daemons share (`oxplow-host` depends on
 //! `oxplow-app`, so a daemon cannot use the host's crate): the host's
-//! settings (`host-settings.json`), this machine on its networks, and a call
+//! settings' types and checks (the host keeps them), this machine on its networks, and a call
 //! to the running host as its owner. See `.context/host.md`.
 
 use std::path::{Path, PathBuf};

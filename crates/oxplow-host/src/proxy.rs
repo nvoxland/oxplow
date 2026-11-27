@@ -321,7 +321,7 @@ pub(crate) async fn events(
             return refuse(StatusCode::BAD_GATEWAY, "the daemon did not answer");
         }
     };
-    let lease = web.access.open_tunnel(connected);
+    let lease = web.access.open_tunnel(connected, web.listener);
     // Removed while this socket was being set up (the daemon's boot can take
     // a minute): its removal closed nothing, so ask again now it counts.
     if let Caller::Device(d) = &who {

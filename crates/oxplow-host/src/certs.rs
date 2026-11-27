@@ -250,7 +250,9 @@ mod tests {
         let acceptor = crate::tls::acceptor(&c, &k).unwrap();
         let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = tcp.local_addr().unwrap().port();
-        let listener = crate::tls::TlsListener::new(tcp, acceptor).unwrap();
+        let listener =
+            crate::tls::TlsListener::new(tcp, acceptor, tokio_util::sync::CancellationToken::new())
+                .unwrap();
         let app = axum::Router::new().route("/", axum::routing::get(|| async { "secure" }));
         tokio::spawn(async move { axum::serve(listener, app).await });
 

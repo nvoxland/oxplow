@@ -437,16 +437,12 @@ impl ShellWindows {
                 binary.display()
             ));
         }
-        // "Allow other devices", as saved: a setting that cannot work is
-        // said, and the host starts for this machine only.
-        let settings = oxplow_config::global_config_dir()
-            .map(|dir| oxplow_host_access::settings::HostSettings::load(&dir))
+        // The host keeps "Allow other devices" itself; the app's own
+        // `--device-port` is for this run only.
+        let extra: Vec<String> = oxplow_host_access::settings::port_flag()
+            .map(|port| vec!["--device-port".to_string(), port.to_string()])
             .unwrap_or_default();
-        let extra = settings.serve_args().unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "Allow other devices is on but cannot work; this machine only");
-            Vec::new()
-        });
-        tracing::info!(binary = %binary.display(), others = !extra.is_empty(), "starting the host");
+        tracing::info!(binary = %binary.display(), "starting the host");
         let own = oxplow_host::client::start_own_host(std::process::Command::new(&binary), &extra)
             .map_err(|e| e.to_string())?;
         let client = own.client.clone();

@@ -10,28 +10,28 @@ answers:
 - question: May other devices reach this computer, and at which address?
   params: {}
 loaders:
-  # Where things stand, when it says more than the checkbox does: on (and
-  # the address a device opens; `listening` is the host as it runs, a
-  # headless host's from its flags), on after the next start, or a
-  # problem. Nothing while it is plainly off.
+  # Where things stand, when it says more than the checkbox does: where a
+  # device opens (`listening`: the host as it runs), why other devices
+  # cannot come in, and the flags of the host's run that replace what is
+  # saved here. Nothing while it is plainly off.
   status:
     sql: |
       SELECT text FROM (
         SELECT CASE
           WHEN NOT hosted THEN coalesce('**The host does not answer.** ' || problem,
                                         '**No host runs for this oxplow**, so no device can reach it.')
+          WHEN port_problem IS NOT NULL THEN '**Other devices cannot reach this computer.** ' || port_problem
           WHEN listening IS NOT NULL THEN 'On: a device opens **' || listening || '**.' ||
             coalesce((SELECT ' On many home networks **' || value || '** works too, and keeps working when the address changes.'
-                      FROM json_each(open_on_device) WHERE key = 1), '') ||
-            CASE WHEN allow_other_devices AND NOT applied THEN ' Your changes apply the next time oxplow starts.'
-                 WHEN NOT allow_other_devices AND NOT applied THEN ' Off the next time oxplow starts.' ELSE '' END ||
-            CASE port_from WHEN 'flag' THEN ' (Port ' || port || ' is set by `--device-port`.)'
-                           WHEN 'env' THEN ' (Port ' || port || ' is set by `OXPLOW_DEVICE_PORT`.)' ELSE '' END
-          WHEN port IS NULL THEN '**The port is not one.** ' || port_problem
-          WHEN allow_other_devices THEN '**On after the next start.** Quit oxplow and open it again to use these settings.'
-        END AS text
+                      FROM json_each(open_on_device) WHERE key = 1), '')
+        END ||
+        CASE WHEN hosted AND overrides <> '[]' THEN
+          ' The host was started with ' ||
+          (SELECT group_concat('`' || value || '`', ', ') FROM json_each(overrides)) ||
+          ', which replace what is saved here until it starts again.'
+        ELSE '' END AS text
         FROM v_host_settings
-      ) WHERE text IS NOT NULL
+      ) WHERE text IS NOT NULL AND text <> ''
   # The saved settings, as the form edits them (names one per line).
   settings:
     sql: |

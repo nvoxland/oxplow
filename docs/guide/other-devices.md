@@ -14,12 +14,13 @@ so is a private network such as Tailscale or WireGuard.
 
 1. On the Mac, open a project and choose **Oxplow ▸ Devices…** (or
    Settings ▸ Devices): the Devices page.
-2. Under **Allow other devices**, turn it on and pick the Mac's address
-   (the one on your home network, say `192.168.1.20`). To open it by name
-   instead, add your Mac's `.local` name under *Names* (it is offered); a
-   device that cannot find the name uses the address. The port is 7400
-   unless you set another. **Save**, then quit Oxplow and open it again:
-   the settings apply at the next start. (`oxplow --device-port <port>` or
+2. Tick **Let other devices use oxplow on this computer** and pick the
+   Mac's address (the one on your home network, say `192.168.1.20`). The
+   port is 7400 unless you set another. **Save**: it is on at once, and the
+   page says the address a device opens. On many home networks the Mac's
+   `.local` name works too, and keeps working when the address changes.
+   Other names your network gives the Mac and a certificate of your own are
+   under **Advanced**. (`oxplow --device-port <port>` or
    `OXPLOW_DEVICE_PORT` set the port for one run, over the setting.)
 3. The first time on a tablet, make it trust the Mac. Open
    `https://192.168.1.20:7400/host/ca.pem` there (past the browser's
@@ -54,16 +55,20 @@ already an Oxplow project (it has a `.oxplow/` folder):
 
 ```bash
 oxplow host project add ~/src/myproject
-oxplow host serve --bind 127.0.0.1:7400 --public-bind <private-address>
+oxplow host settings set allow=on address=<private-address>
+oxplow host serve --bind 127.0.0.1:7400
 ```
 
-Other devices come in on port 7400; `--device-port <port>` or
-`OXPLOW_DEVICE_PORT` choose another.
+Other devices come in on port 7400 (`port=<port>` chooses another). The
+settings are kept and apply at once on a running host: `oxplow host
+settings` shows them, and the Devices page changes them too. Flags given to
+`serve` (`--public-bind <address>`, `--device-port`, `--allow-host <name>`,
+`--tls-cert`/`--tls-key`) replace them for that run only.
 
 It makes its own certificate as the Mac does; a device trusts it once from
 `https://<private-address>:7400/host/ca.pem`. For a name that is not on a
-private network, give a certificate of your own (`--tls-cert`,
-`--tls-key`, signed by any CA) and `--allow-host <name>`.
+private network, give a certificate of your own (`tls-cert=`, `tls-key=`,
+signed by any CA) and the name (`names=<name>`).
 
 This host runs until you stop it (`oxplow host stop`). Run it under
 systemd or tmux to keep it past your SSH session. `oxplow host pair`

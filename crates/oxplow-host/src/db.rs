@@ -159,7 +159,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(tables, ["device", "hold", "project"]);
+        assert_eq!(tables, ["device", "hold", "other_devices", "project"]);
         assert_eq!(db.path(), home.path().join(FILE));
     }
 

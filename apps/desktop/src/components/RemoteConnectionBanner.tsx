@@ -19,7 +19,9 @@ import {
 /// not a drop, so sticky — only reconnecting with the right token helps.
 /// `ended` when the host said it is ending (the app that runs it quit): the
 /// page keeps trying, slowly, until it starts again.
-export type BannerState = "hidden" | "down" | "restored" | "refused" | "ended";
+/// `closed` when other devices were turned off on the computer that runs it
+/// (or their address changed): the page keeps trying, slowly.
+export type BannerState = "hidden" | "down" | "restored" | "refused" | "ended" | "closed";
 
 /// How long the "reconnected" confirmation lingers before it
 /// auto-dismisses (ms). Non-blocking — purely informational.
@@ -30,9 +32,9 @@ export const RESTORED_AUTO_DISMISS_MS = 4000;
 /// initial connect) stays hidden.
 export function nextBannerState(prev: BannerState, event: RemoteConnectionState): BannerState {
   if (prev === "refused" || event === "refused") return "refused";
-  if (event === "ended") return "ended";
-  if (event === "down") return prev === "ended" ? "ended" : "down";
-  return prev === "down" || prev === "ended" ? "restored" : prev;
+  if (event === "ended" || event === "closed") return event;
+  if (event === "down") return prev === "ended" || prev === "closed" ? prev : "down";
+  return prev === "down" || prev === "ended" || prev === "closed" ? "restored" : prev;
 }
 
 /// Top-of-window strip shown only in remote mode. Mounted once in App.
@@ -77,6 +79,17 @@ export function RemoteConnectionBanner() {
         <span>
           Oxplow was quit on the computer that runs it, so its projects stopped. This page connects
           again when Oxplow starts there.
+        </span>
+      </div>
+    );
+  }
+
+  if (state === "closed") {
+    return (
+      <div data-testid="remote-banner-closed" style={{ ...stripStyle, ...downStyle }}>
+        <span>
+          Other devices were turned off on the computer that runs Oxplow, or its address changed.
+          This page connects again when they are turned back on there.
         </span>
       </div>
     );

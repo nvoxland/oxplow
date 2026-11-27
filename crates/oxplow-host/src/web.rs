@@ -31,8 +31,9 @@ pub struct ServeConfig {
     pub listener: crate::access::Listener,
     /// The built UI (`apps/desktop/dist`), read at run time. `None`: no UI.
     pub ui_dir: Option<PathBuf>,
-    /// Names, besides loopback, a request may reach the host by.
-    pub allow_hosts: Vec<String>,
+    /// Names, besides loopback, a request may reach the host by: shared by
+    /// every listener, and changed when the settings for other devices do.
+    pub allow_hosts: AllowedHosts,
     /// How long a request for a `starting` project waits for its daemon.
     pub boot_wait: Duration,
     /// Told when a client asks the host to stop (`POST /host/shutdown`).
@@ -45,6 +46,32 @@ pub struct ServeConfig {
     /// listener for other devices. The page's base and a component's CSP
     /// say it.
     pub scheme: Scheme,
+}
+
+/// The names besides loopback a request may reach the host by (the `Host`
+/// check), shared by every listener and swapped as a whole.
+#[derive(Clone, Default)]
+pub struct AllowedHosts(Arc<std::sync::RwLock<Arc<Vec<String>>>>);
+
+impl AllowedHosts {
+    pub fn new(names: Vec<String>) -> Self {
+        let hosts = Self::default();
+        hosts.set(names);
+        hosts
+    }
+
+    /// Allow these names (any case) in place of the ones before.
+    pub fn set(&self, names: Vec<String>) {
+        let names = names
+            .iter()
+            .map(|h| h.trim().to_ascii_lowercase())
+            .collect();
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(names);
+    }
+
+    pub fn get(&self) -> Arc<Vec<String>> {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
 }
 
 /// The scheme a listener serves.
@@ -70,7 +97,7 @@ pub(crate) struct Web {
     pub access: Arc<crate::access::Access>,
     pub listener: crate::access::Listener,
     pub ui_dir: Option<Arc<PathBuf>>,
-    pub allow_hosts: Arc<Vec<String>>,
+    pub allow_hosts: AllowedHosts,
     pub boot_wait: Duration,
     pub client: reqwest::Client,
     pub scheme: Scheme,
@@ -82,12 +109,7 @@ pub fn app(cfg: ServeConfig) -> Router {
         access: cfg.access.clone(),
         listener: cfg.listener,
         ui_dir: cfg.ui_dir.clone().map(Arc::new),
-        allow_hosts: Arc::new(
-            cfg.allow_hosts
-                .iter()
-                .map(|h| h.to_ascii_lowercase())
-                .collect(),
-        ),
+        allow_hosts: cfg.allow_hosts.clone(),
         boot_wait: cfg.boot_wait,
         scheme: cfg.scheme,
         // No redirect is followed and no body is read whole: the browser
@@ -151,7 +173,7 @@ async fn check_host(State(web): State<Web>, req: Request, next: Next) -> Respons
         .headers()
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|h| host_allowed(h, &web.allow_hosts));
+        .is_some_and(|h| host_allowed(h, &web.allow_hosts.get()));
     if allowed {
         next.run(req).await
     } else {
@@ -385,7 +407,8 @@ mod tests {
             std::fs::write(ui.path().parent().unwrap().join("secret.txt"), "no").ok();
             let access = crate::access::Access::new(
                 HOST_TOKEN.into(),
-                crate::devices::Devices::new(fx.db.clone()),
+                fx.db.clone(),
+                Default::default(),
                 Duration::from_millis(10),
             );
             let app = app(ServeConfig {
@@ -393,7 +416,7 @@ mod tests {
                 access: access.clone(),
                 listener: crate::access::Listener::Loopback,
                 ui_dir: Some(ui.path().to_path_buf()),
-                allow_hosts: allow.iter().map(|s| s.to_string()).collect(),
+                allow_hosts: AllowedHosts::new(allow.iter().map(|s| s.to_string()).collect()),
                 boot_wait,
                 stop: Default::default(),
                 scheme: Default::default(),
@@ -1073,7 +1096,7 @@ mod tests {
             access: rig.access.clone(),
             listener: crate::access::Listener::Public,
             ui_dir: None,
-            allow_hosts: vec![],
+            allow_hosts: Default::default(),
             boot_wait: Duration::from_secs(5),
             stop: Default::default(),
             scheme: Default::default(),
@@ -1116,12 +1139,13 @@ mod tests {
             host: fx.host.clone(),
             access: crate::access::Access::new(
                 HOST_TOKEN.into(),
-                crate::devices::Devices::new(fx.db.clone()),
+                fx.db.clone(),
+                Default::default(),
                 Duration::from_millis(10),
             ),
             listener: crate::access::Listener::Loopback,
             ui_dir: None,
-            allow_hosts: vec![],
+            allow_hosts: Default::default(),
             boot_wait: Duration::from_secs(1),
             stop: Default::default(),
             scheme: Default::default(),

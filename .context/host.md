@@ -83,9 +83,10 @@ or nobody is connected:
   `--allow-host <name>` (repeatable), `--daemon <path>` (another daemon
   binary, as `BinaryDaemon`: the browser suite runs `oxplow-daemon-sim`) and
   `--for-app` (the app's host: needs `--token-stdin`; stdin after the token
-  line is its lifeline), and `--public-bind <ip>` with `--device-port
-  <port>` (else `OXPLOW_DEVICE_PORT`, else 7400; 0 is a free port, a
-  test's) and `--tls-cert <pem> --tls-key <pem>` (see "HTTPS").
+  line is its lifeline), and, over the saved "Allow other devices" for that
+  run only, `--public-bind <ip>`, `--device-port <port>` (0 is a free port,
+  a test's), `--allow-host` and `--tls-cert <pem> --tls-key <pem>` (see
+  "Allow other devices" and "HTTPS").
 - **Logs:** stderr and `<global_config_dir>/logs/host.<date>.log`, daily, a
   week kept. Stdout carries only the `oxplow-host listening on <url>` line (and
   a generated token).
@@ -122,50 +123,72 @@ The app's host is a child of the app, as a daemon is a child of the host
   both sides use; `oxplow-host` depends on `oxplow-app`, so a daemon cannot
   use the host's crate). It reads the live datasets `v_host_device` (the
   paired devices, which are connected) and `v_host_settings` (one row: the
-  saved settings, the port in force and where it came from, whether the
-  host runs with them — its own listener checked against them — the
-  addresses a device opens, this machine's private addresses and `.local`
+  saved settings, the port in force and where it came from, the flags of
+  the host's run over them, why they cannot be in force, the addresses a
+  device opens, this machine's private addresses and `.local`
   name, whether there is a root to trust, the pairing code in force from
   `GET /host/pairing`, and `listening`: where the host listens for other
-  devices as it runs, a headless host's from its flags); a daemon no host
-  started reads `hosted = 0`. The page leads with the checkbox; its status
-  line shows only what the checkbox doesn't say (on and where, after the
-  next start, a problem), and Connect a device offers pairing only while
-  the host listens for other devices. It
+  devices as it runs); a daemon no host started reads `hosted = 0`. The
+  page leads with the checkbox; its status line shows only what the
+  checkbox doesn't say (on and where, a problem, the flags in force), and
+  Connect a device offers pairing only while the host listens for other
+  devices. It
   writes with `oxplow.host.pair`, `rename_device`, `remove_device`
-  (confirm) and `set_settings` (`commands/host_devices.rs`), a person's
+  (confirm) and `set_settings` (`commands/host_devices.rs`: checked there
+  first, so a refusal names its field, then `PUT /host/settings`), a person's
   only (an agent, an effect or a job is refused), each posting `HostChanged`
   so the datasets are read again. The datasets are as readable as any: an
   agent on this machine could reach `host.sock` from its shell anyway
   (owner and device are roles, not a wall).
-- **Allow other devices** is the shell's own file in the home,
-  `host-settings.json` (`oxplow_host_access::settings`, beside `device.json`):
-  `{ allowOtherDevices, address, port, names, tlsCert, tlsKey }`. The app
-  reads it when it starts its host and passes `--public-bind <address>` (an
-  IP of this Mac's) and `--device-port <port>`, an
-  `--allow-host` for the address and each other name the person gives (a
-  name their own DNS or VPN gives the Mac; the address is one of this Mac's
-  private ones), and a certificate of the person's own when given (else the
-  host issues its own; private names only). **With its own certificate the
-  host adds the Mac's `<local hostname>.local` itself** (`network::with_local_name`
-  over `network::local_name`: `scutil --get LocalHostName` on macOS,
-  `hostname` elsewhere; a public name is left out), to the certificate and
-  the names it answers to, and reports the names with its listener
-  (`PublicListener::Listening { url, names }`). A `.local` name is mDNS:
-  the devices answer for themselves, so it works only where the network
-  passes multicast (not on guest Wi-Fi or with client isolation) and the
-  device asks (iPads do, Android varies). The Devices page therefore leads
-  with the address and offers the name as also working on many home
-  networks (`v_host_settings.open_on_device`, v3: the running host's, the
-  address first). **The port** other devices come in on is the app's own
-  `--device-port <port>` (`oxplow --device-port 7401 .`), else
-  `OXPLOW_DEVICE_PORT`, else the saved `port`, else 7400
-  (`settings::device_port`; the Devices page says when the flag or the environment
-  overrides the setting). It stays fixed across starts, since a browser's
-  origin holds its token. Never every network by default: the person picks one of this Mac's
-  private addresses (`network::private_addresses`). A change
-  applies at the next app start (the page says whether the host runs with
-  it). On, the host starts with the app, not at the first open.
+- **Allow other devices** is the host's: `host.db`'s `other_devices` row
+  (`other_devices.rs`; the type and its check, `HostSettings::checked`, in
+  `oxplow_host_access::settings`, shared with the daemon), `{
+  allowOtherDevices, address, port, names, tlsCert, tlsKey }`; none saved is
+  off. The host reads and changes it (`GET|PUT /host/settings`, owner only;
+  `oxplow-host settings [set key=value…]` from a terminal, through the
+  running host, else straight into `host.db`) and **applies a change at
+  once** (see "The listener for other devices"). **`serve`'s flags replace
+  what is saved for that run only and are never kept** (`Overrides`,
+  `settings::effective`): `--public-bind <ip>` (on, at that address),
+  `--device-port <port>` (else `OXPLOW_DEVICE_PORT`), `--allow-host
+  <name>`… (the names), `--tls-cert`/`--tls-key`; the settings in force say
+  which flags did (`Effective.overridden`, `v_host_settings.overrides`), and
+  the Devices page names them. The Mac app's host is started with none of
+  them but the app's own `--device-port` (`oxplow --device-port 7401 .`),
+  and starts with the app, always: the settings are the host's, so a tablet
+  can reach it before any project is open here. The address is an IP of
+  this machine's (the page offers its private ones,
+  `network::private_addresses`: never every network by default); other
+  names are ones the person's own DNS or VPN gives it; a certificate of
+  their own is optional (else the host issues its own: private names only).
+  **With its own certificate the host adds the Mac's `<local hostname>.local`
+  itself** (`network::with_local_name` over `network::local_name`: `scutil
+  --get LocalHostName` on macOS, `hostname` elsewhere; a public name is left
+  out), to the certificate and the names it answers to, and reports the
+  names with its listener (`PublicListener::Listening { url, names }`). A
+  `.local` name is mDNS: the devices answer for themselves, so it works only
+  where the network passes multicast (not on guest Wi-Fi or with client
+  isolation) and the device asks (iPads do, Android varies). The Devices
+  page therefore leads with the address and offers the name as also working
+  on many home networks (`v_host_settings.open_on_device`: the running
+  host's, the address first). **The port** stays fixed across starts, since
+  a browser's origin holds its token (7400 by default).
+- **The listener for other devices** (`public.rs` `PublicServer`) is made
+  at start from the settings in force and switched while the host runs:
+  `PUT /host/settings` checks, makes the listener so, then keeps them; a
+  certificate or bind that fails is the answer (`409`, nothing kept,
+  nothing changed). Unchanged settings change nothing. A new listener is
+  prepared (its certificate, its bind) before the old one stops; moving to
+  the address and port it already has frees them first. The old one's
+  sockets close with `4004` (`OTHER_DEVICES_OFF_CLOSE_CODE`: tunnels know
+  their listener, `Tunnels::close_listener`; the page says other devices
+  were turned off there and keeps trying slowly), then it is cut
+  (`tls::TlsListener`'s `CancellationToken`): its accept loop ends, freeing
+  the port, and every connection that came in on it ends at its next read
+  or write (`tls::Cuttable`), so nothing stays open. The names every
+  listener answers to (`web::AllowedHosts`, shared) change with it. A
+  listener that fails at start is `PublicListener::Failed`, which the page
+  shows (`v_host_settings.port_problem`).
 - **Quit asks first** when another device has a window open (`/host/status`
   `connected`): "<names> are using Oxplow on this computer. Quitting stops
   their projects and agents too." The app menu's Quit is a custom item
@@ -202,15 +225,15 @@ The app's host is a child of the app, as a daemon is a child of the host
 ## HTTPS
 
 Other devices come in over HTTPS only, and need nothing installed but a
-certificate trusted once. `--public-bind <addr>` listens a second time, for
-them; `--bind` stays plain HTTP on loopback for this machine (the Mac app's
+certificate trusted once. Their listener is a second one (see "The listener
+for other devices"); `--bind` stays plain HTTP on loopback for this machine (the Mac app's
 windows, where no certificate is needed).
 
 - **The host's own certificate** (`certs.rs`, the default). The home gets a
   root once (`host-ca.pem`; its key `host-ca-key.pem`, mode 0600; its name in
-  `host-ca-name.txt`), and at each start the host issues a certificate from
-  it for the listener's address (every private address of this machine when
-  it is `0.0.0.0`) and the `--allow-host` names, for 397 days. The root may
+  `host-ca-name.txt`), and each time the listener is made the host issues a
+  certificate from it for the listener's address (every private address of
+  this machine when it is `0.0.0.0`) and its names, for 397 days. The root may
   vouch only for private networks (name constraints: 10/8, 172.16/12,
   192.168/16, 100.64/10, 169.254/16, 127/8, fc00::/7, fe80::/10, and names
   under `local`, `lan`, `home.arpa`, `internal`, `ts.net`), so its key, should
@@ -292,13 +315,18 @@ loads again when it changed.
 
 Every request, whatever its route, must carry a `Host` the host allows: the
 loopback names (`127.0.0.1`, `localhost`, optional port; the same
-`component_http::loopback_host` the daemon uses) and the names given with
-`--allow-host` (name only, any port, case ignored). Anything else is `403`.
+`component_http::loopback_host` the daemon uses) and the names of the
+settings in force (`web::AllowedHosts`, shared by every listener: the
+address and names of the listener for other devices, or, with it off, the
+names alone, for a proxy in front of loopback; name only, any port, case
+ignored). Anything else is `403`.
 Without it a page whose name flips to this machine (DNS rebinding) could call
 the host as a same-origin page and act with a token kept there. `--bind` is
 loopback only (the owner's token is good there; `serve` refuses another
-address); other devices come in on `--public-bind`: `oxplow-host serve
---public-bind 100.101.102.103 --device-port 7400 --allow-host mac.tailnet.ts.net`.
+address); other devices come in on their own listener: `oxplow-host settings
+set allow=on address=100.101.102.103 names=mac.tailnet.ts.net`, or for one
+run `oxplow-host serve --public-bind 100.101.102.103 --allow-host
+mac.tailnet.ts.net`.
 
 ## Routing: `/p/<project>/…`
 

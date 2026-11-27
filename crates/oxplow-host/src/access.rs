@@ -23,6 +23,9 @@ use crate::devices::{Devices, PairedDevice, Pairing};
 pub const HOST_ENDING_CLOSE_CODE: u16 = 4002;
 /// The close code a page's socket gets when its device was removed.
 pub const DEVICE_REMOVED_CLOSE_CODE: u16 = 4003;
+/// The close code a page's socket on the listener for other devices gets
+/// when other devices were turned off here, or that listener moved.
+pub const OTHER_DEVICES_OFF_CLOSE_CODE: u16 = 4004;
 
 /// The listener a request came in on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +58,11 @@ pub struct Access {
     pub wrong_code_wait: std::time::Duration,
     /// The listener for other devices: listening where, or why not.
     pub public: Mutex<PublicListener>,
+    /// "Allow other devices": saved, and what this run's flags put over it.
+    pub other_devices: crate::other_devices::OtherDevices,
+    /// The listener for other devices, once `serve` has made it: a saved
+    /// change applies to it at once.
+    pub public_server: std::sync::OnceLock<Arc<crate::public::PublicServer>>,
 }
 
 /// The state of the listener for other devices (`serve --public-bind`).
@@ -83,12 +91,15 @@ impl Access {
     /// `wrong_code_wait` is [`WRONG_CODE_WAIT`] but in a test.
     pub fn new(
         owner_token: String,
-        devices: Devices,
+        db: Arc<crate::db::HostDb>,
+        overrides: oxplow_host_access::settings::Overrides,
         wrong_code_wait: std::time::Duration,
     ) -> Arc<Self> {
         Arc::new(Self {
             owner_token,
-            devices,
+            devices: Devices::new(db.clone()),
+            other_devices: crate::other_devices::OtherDevices::new(db, overrides),
+            public_server: std::sync::OnceLock::new(),
             pairing: Mutex::new(Pairing::default()),
             tunnels: Tunnels::default(),
             wrong_code_wait,
@@ -119,6 +130,8 @@ pub struct Connected {
 
 struct Open {
     connected: Connected,
+    /// The listener it came in on.
+    listener: Listener,
     close: tokio::sync::watch::Sender<Option<u16>>,
 }
 
@@ -169,6 +182,15 @@ impl Tunnels {
         }
     }
 
+    /// Close the sockets that came in on `listener` with `code`.
+    pub fn close_listener(&self, listener: Listener, code: u16) {
+        for open in self.lock().values() {
+            if open.listener == listener {
+                let _ = open.close.send(Some(code));
+            }
+        }
+    }
+
     /// Close every socket with `code` (the host is ending).
     pub fn close_all(&self, code: u16) {
         for open in self.lock().values() {
@@ -179,10 +201,17 @@ impl Tunnels {
 
 impl Access {
     /// A socket opens for `connected`.
-    pub fn open_tunnel(self: &Arc<Self>, connected: Connected) -> TunnelLease {
+    pub fn open_tunnel(self: &Arc<Self>, connected: Connected, listener: Listener) -> TunnelLease {
         let (close, closed) = tokio::sync::watch::channel(None);
         let id = self.tunnels.next.fetch_add(1, Ordering::Relaxed);
-        self.tunnels.lock().insert(id, Open { connected, close });
+        self.tunnels.lock().insert(
+            id,
+            Open {
+                connected,
+                listener,
+                close,
+            },
+        );
         TunnelLease {
             id,
             access: self.clone(),
@@ -217,10 +246,15 @@ mod tests {
 
     fn access() -> (tempfile::TempDir, Arc<Access>) {
         let home = tempfile::tempdir().unwrap();
-        let devices = Devices::new(crate::db::HostDb::open(home.path()).unwrap());
+        let db = crate::db::HostDb::open(home.path()).unwrap();
         (
             home,
-            Access::new("owner-secret".into(), devices, WRONG_CODE_WAIT),
+            Access::new(
+                "owner-secret".into(),
+                db,
+                Default::default(),
+                WRONG_CODE_WAIT,
+            ),
         )
     }
 
@@ -257,9 +291,9 @@ mod tests {
             name: name.into(),
             kind: Some(DeviceKind::Tablet),
         };
-        let first = access.open_tunnel(tab("Tab S9", tablet.id.as_str()));
-        let second = access.open_tunnel(tab("Tab S9", tablet.id.as_str()));
-        let mac = access.open_tunnel(tab("Mac", "dev-mac"));
+        let first = access.open_tunnel(tab("Tab S9", tablet.id.as_str()), Listener::Public);
+        let second = access.open_tunnel(tab("Tab S9", tablet.id.as_str()), Listener::Loopback);
+        let mac = access.open_tunnel(tab("Mac", "dev-mac"), Listener::Loopback);
         assert_eq!(access.tunnels.connected().len(), 2, "one entry per device");
 
         access
@@ -272,5 +306,24 @@ mod tests {
         assert_eq!(access.tunnels.connected(), vec![tab("Mac", "dev-mac")]);
         access.tunnels.close_all(HOST_ENDING_CLOSE_CODE);
         assert_eq!(*mac.closed.borrow(), Some(HOST_ENDING_CLOSE_CODE));
+    }
+
+    /// Other devices turned off: the sockets that came in on their listener
+    /// close, and this machine's stay.
+    #[test]
+    fn turning_other_devices_off_closes_only_their_listeners_sockets() {
+        let (_home, access) = access();
+        let tab = |id: &str| Connected {
+            device: id.into(),
+            name: id.into(),
+            kind: Some(DeviceKind::Tablet),
+        };
+        let away = access.open_tunnel(tab("dev-tab"), Listener::Public);
+        let here = access.open_tunnel(tab("dev-mac"), Listener::Loopback);
+        access
+            .tunnels
+            .close_listener(Listener::Public, OTHER_DEVICES_OFF_CLOSE_CODE);
+        assert_eq!(*away.closed.borrow(), Some(OTHER_DEVICES_OFF_CLOSE_CODE));
+        assert_eq!(*here.closed.borrow(), None);
     }
 }

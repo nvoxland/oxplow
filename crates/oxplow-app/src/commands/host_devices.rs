@@ -6,8 +6,8 @@
 //! reads `hosted: false`.
 //!
 //! - Read: the live datasets `v_host_device` (who is paired and connected)
-//!   and `v_host_settings` (one row: the settings and whether the host runs
-//!   with them, the port and where it came from, the addresses a device
+//!   and `v_host_settings` (one row: the saved settings, the port in force
+//!   and the flags of the host's run over them, the addresses a device
 //!   opens, this machine's private addresses and `.local` name, whether
 //!   there is a root to trust, the code in force), from [`read`].
 //! - Write: `oxplow.host.pair`, `rename_device`, `remove_device`,
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use oxplow_domain::commands::Confirm;
 use oxplow_domain::{Actor, CommandError};
 use oxplow_host_access::owner::{owner_call, OwnerCallError};
-use oxplow_host_access::settings::HostSettings;
+use oxplow_host_access::settings::{Effective, HostSettings};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -142,11 +142,9 @@ fn json_cell(v: &impl serde::Serialize) -> SqlCell {
 /// host (a daemon run alone) is `hosted = 0`, and one that does not answer
 /// says why (`problem`).
 pub async fn read(home: &Path) -> HostRead {
-    let saved = HostSettings::load(home);
-    let (port, port_problem) = match saved.device_port() {
-        Ok(p) => (Some(p), None),
-        Err(e) => (None, Some(e.to_string())),
-    };
+    let mut saved = HostSettings::default();
+    let mut in_force: Option<Effective> = None;
+    let mut settings_problem: Option<String> = None;
     let mut hosted = false;
     let mut problem: Option<String> = None;
     let mut devices = Vec::new();
@@ -193,6 +191,18 @@ pub async fn read(home: &Path) -> HostRead {
                 .await
                 .ok()
                 .filter(|v| !v.is_null());
+            match call(home.to_path_buf(), "GET", "/host/settings".into(), None).await {
+                Ok(view) => {
+                    saved = serde_json::from_value(view["saved"].clone()).unwrap_or_default();
+                    in_force = serde_json::from_value(view["effective"].clone()).ok();
+                    settings_problem = view["problem"].as_str().map(str::to_string);
+                }
+                Err(e) => settings_problem = Some(e.to_string()),
+            }
+            // The listener for other devices could not start as they say.
+            if public["state"].as_str() == Some("failed") {
+                settings_problem = public["error"].as_str().map(str::to_string);
+            }
         }
         Err(OwnerCallError::NoHost(_)) => {}
         Err(e) => problem = Some(e.to_string()),
@@ -211,22 +221,32 @@ pub async fn read(home: &Path) -> HostRead {
             .port
             .map(|p| SqlCell::Int(i64::from(p)))
             .unwrap_or(SqlCell::Null(())),
-        port.map(|p| SqlCell::Int(i64::from(p.port)))
+        in_force
+            .as_ref()
+            .map(|e| SqlCell::Int(i64::from(e.port.port)))
             .unwrap_or(SqlCell::Null(())),
-        opt_text(port.map(|p| {
-            serde_json::to_value(p.from)
+        opt_text(in_force.as_ref().map(|e| {
+            serde_json::to_value(e.port.from)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
                 .unwrap_or_default()
         })),
-        opt_text(port_problem),
+        opt_text(settings_problem),
         opt_text(saved.tls_cert.as_ref().map(|p| p.display().to_string())),
         opt_text(saved.tls_key.as_ref().map(|p| p.display().to_string())),
-        flag(hosted && applied(&saved, port.map(|p| p.port), &public)),
+        json_cell(
+            &in_force
+                .as_ref()
+                .map(|e| e.overridden.clone())
+                .unwrap_or_default(),
+        ),
         json_cell(&open_on_device(&public)),
         json_cell(&addresses),
         opt_text(oxplow_host_access::network::local_name()),
-        flag(saved.tls_cert.is_none() && oxplow_host_access::root_path(home).is_file()),
+        flag(
+            in_force.as_ref().is_some_and(|e| e.tls_cert.is_none())
+                && oxplow_host_access::root_path(home).is_file(),
+        ),
         opt_text(
             pairing
                 .as_ref()
@@ -265,28 +285,6 @@ pub fn open_on_device(public: &Value) -> Vec<String> {
                 .map(|n| format!("https://{n}:{port}/")),
         )
         .collect()
-}
-
-/// Whether the host runs with `settings` now: its listener for other
-/// devices is on the saved address and port when they are allowed, off
-/// when not. Pure.
-pub fn applied(settings: &HostSettings, port: Option<u16>, public: &Value) -> bool {
-    let state = public["state"].as_str().unwrap_or("off");
-    if !settings.allow_other_devices {
-        return state == "off";
-    }
-    let (Some(port), "listening") = (port, state) else {
-        return false;
-    };
-    let address = settings.address.trim();
-    public["url"].as_str().is_some_and(|url| {
-        let host = if address.contains(':') {
-            format!("[{address}]")
-        } else {
-            address.to_string()
-        };
-        url.contains(&format!("{host}:{port}"))
-    })
 }
 
 /// The command's answer; once it has run, the host datasets are read again
@@ -399,7 +397,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                             .filter(|p| !p.is_empty())
                             .map(PathBuf::from)
                     };
-                    let settings = HostSettings {
+                    let wanted = HostSettings {
                         allow_other_devices: input.allow_other_devices,
                         address: input.address.trim().to_string(),
                         names: input
@@ -412,14 +410,23 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         tls_key: path(input.tls_key),
                         port: input.port,
                     };
-                    settings
-                        .save(&home(&services)?)
-                        .map_err(|words| super::util::invalid("/address", words))?;
-                    // They apply when the host starts next.
-                    Ok(output(
-                        &services,
-                        json!({ "saved": true, "applies": "at the next start" }),
-                    ))
+                    // What cannot work is said here, at its field; the host
+                    // checks again, applies them at once and keeps them.
+                    let kept = wanted.checked().map_err(|e| {
+                        super::util::invalid(&format!("/{}", e.field()), e.to_string())
+                    })?;
+                    let body = serde_json::to_value(&kept).map_err(|e| CommandError::Failed {
+                        message: e.to_string(),
+                    })?;
+                    let view = call(home(&services)?, "PUT", "/host/settings".into(), Some(body))
+                        .await
+                        .map_err(|e| match e {
+                            OwnerCallError::Refused(words) => {
+                                super::util::invalid("/address", words)
+                            }
+                            other => host_error(other),
+                        })?;
+                    Ok(output(&services, view))
                 })
             })),
         )
@@ -490,11 +497,31 @@ mod tests {
         seen
     }
 
-    fn host_answers(method: &str, path: &str, _body: &str) -> (u16, Value) {
+    fn host_answers(method: &str, path: &str, body: &str) -> (u16, Value) {
         match (method, path) {
+            ("GET", "/host/settings") => (
+                200,
+                json!({
+                    "saved": { "allowOtherDevices": true, "address": "192.168.1.20", "names": [], "port": null, "tlsCert": null, "tlsKey": null },
+                    "effective": {
+                        "allowOtherDevices": true, "address": "192.168.1.20", "names": [],
+                        "port": { "port": 7500, "from": "flag" }, "tlsCert": null, "tlsKey": null,
+                        "overridden": ["--device-port"]
+                    },
+                    "problem": null
+                }),
+            ),
+            ("PUT", "/host/settings") if body.contains("7999") => (
+                409,
+                json!({ "error": "bind 192.168.1.20:7999 failed: in use", "field": "address" }),
+            ),
+            ("PUT", "/host/settings") => (200, json!({})),
             ("GET", "/host/status") => (
                 200,
-                json!({ "connected": [{ "device": "dev-1", "name": "Tab S9" }], "public": { "state": "off" } }),
+                json!({
+                    "connected": [{ "device": "dev-1", "name": "Tab S9" }],
+                    "public": { "state": "failed", "error": "bind 192.168.1.20:7500 failed: in use" }
+                }),
             ),
             ("GET", "/host/devices") => (
                 200,
@@ -573,12 +600,17 @@ mod tests {
         );
         let standing = rows(
             &fx,
-            "SELECT hosted, applied, pairing_code, pairing_until FROM v_host_settings",
+            "SELECT hosted, address, port, port_from, overrides, port_problem, pairing_code, pairing_until FROM v_host_settings",
         )
         .await;
         assert_eq!(
             standing,
-            [json!({ "hosted": 1, "applied": 1, "pairing_code": "ABCD-EFGH", "pairing_until": 1 })]
+            [json!({
+                "hosted": 1, "address": "192.168.1.20", "port": 7500, "port_from": "flag",
+                "overrides": "[\"--device-port\"]",
+                "port_problem": "bind 192.168.1.20:7500 failed: in use",
+                "pairing_code": "ABCD-EFGH", "pairing_until": 1
+            })]
         );
         assert!(seen
             .lock()
@@ -655,14 +687,29 @@ mod tests {
         }
     }
 
-    /// The settings are kept in the home's `host-settings.json`; one that
-    /// cannot work is refused and nothing is kept.
+    /// The settings go to the host, which keeps and applies them; one that
+    /// cannot work is refused here with its field, before the host is asked,
+    /// and the host's own refusal (a port in use) is its words.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_settings_are_kept_or_refused() {
+    async fn the_settings_go_to_the_host_or_are_refused() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let home = fx.svc.global_config_dir.clone();
         std::fs::create_dir_all(&home).unwrap();
         let me = Actor::Human;
+        let none = run(
+            &fx,
+            &me,
+            super::SET_SETTINGS,
+            json!({ "allow_other_devices": true, "address": "192.168.1.20" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(none, CommandError::Denied { .. }),
+            "no host: {none:?}"
+        );
+
+        let seen = stand_in(&home, host_answers);
         run(
             &fx,
             &me,
@@ -671,10 +718,18 @@ mod tests {
         )
         .await
         .unwrap();
-        let kept = oxplow_host_access::settings::HostSettings::load(&home);
-        assert!(kept.allow_other_devices);
-        assert_eq!(kept.port, Some(7401));
-        assert_eq!(kept.names, ["studio.local"]);
+        let sent = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.starts_with("PUT"))
+            .cloned()
+            .unwrap();
+        let body: Value =
+            serde_json::from_str(sent.trim_start_matches("PUT /host/settings ")).unwrap();
+        assert_eq!(body["port"], 7401);
+        assert_eq!(body["names"], json!(["studio.local"]));
+
         let refused = run(
             &fx,
             &me,
@@ -684,14 +739,27 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            matches!(refused, CommandError::Invalid { .. }),
+            matches!(&refused, CommandError::Invalid { field: Some(f), .. } if f == "/address"),
             "{refused:?}"
         );
-        assert_eq!(
-            oxplow_host_access::settings::HostSettings::load(&home).port,
-            Some(7401),
-            "unchanged"
-        );
+        let puts = || {
+            seen.lock()
+                .unwrap()
+                .iter()
+                .filter(|s| s.starts_with("PUT"))
+                .count()
+        };
+        assert_eq!(puts(), 1, "refused here, the host never asked");
+
+        let in_use = run(
+            &fx,
+            &me,
+            super::SET_SETTINGS,
+            json!({ "allow_other_devices": true, "address": "192.168.1.20", "port": 7999 }),
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{in_use:?}").contains("in use"), "{in_use:?}");
     }
 
     #[test]
@@ -712,29 +780,5 @@ mod tests {
             ["https://[fd7a::1]:7401/"]
         );
         assert!(super::open_on_device(&json!({ "state": "off" })).is_empty());
-    }
-
-    #[test]
-    fn applied_is_the_hosts_listener_matching_the_settings() {
-        use oxplow_host_access::settings::HostSettings;
-        let on = HostSettings {
-            allow_other_devices: true,
-            address: "192.168.1.20".into(),
-            ..Default::default()
-        };
-        let listening = json!({ "state": "listening", "url": "https://192.168.1.20:7400/" });
-        assert!(super::applied(&on, Some(7400), &listening));
-        assert!(!super::applied(&on, Some(7401), &listening), "another port");
-        assert!(!super::applied(&on, Some(7400), &json!({ "state": "off" })));
-        assert!(super::applied(
-            &HostSettings::default(),
-            Some(7400),
-            &json!({ "state": "off" })
-        ));
-        assert!(!super::applied(
-            &HostSettings::default(),
-            Some(7400),
-            &listening
-        ));
     }
 }

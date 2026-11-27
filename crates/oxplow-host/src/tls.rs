@@ -8,15 +8,20 @@
 //! Handshakes run in their own tasks, so a client that stalls in one never
 //! holds up the others.
 
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 /// How long a client gets to finish its handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -76,19 +81,32 @@ pub fn acceptor_pem(
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
-/// A TCP listener whose connections are TLS, for `axum::serve`.
+/// A TCP listener whose connections are TLS, for `axum::serve`. Its `cut`
+/// stops it: the accept loop ends (the port is free again) and every
+/// connection that came in on it ends at its next read or write, an open
+/// socket included, so turning other devices off leaves nothing open.
 pub struct TlsListener {
     local: std::net::SocketAddr,
     ready: tokio::sync::mpsc::Receiver<(TlsStream<TcpStream>, std::net::SocketAddr)>,
+    cut: CancellationToken,
 }
 
 impl TlsListener {
-    pub fn new(tcp: TcpListener, acceptor: TlsAcceptor) -> std::io::Result<Self> {
+    pub fn new(
+        tcp: TcpListener,
+        acceptor: TlsAcceptor,
+        cut: CancellationToken,
+    ) -> std::io::Result<Self> {
         let local = tcp.local_addr()?;
         let (done, ready) = tokio::sync::mpsc::channel(WAITING);
+        let stop = cut.clone();
         tokio::spawn(async move {
             loop {
-                let (stream, peer) = match tcp.accept().await {
+                let accepted = tokio::select! {
+                    _ = stop.cancelled() => return,
+                    accepted = tcp.accept() => accepted,
+                };
+                let (stream, peer) = match accepted {
                     Ok(accepted) => accepted,
                     Err(e) => {
                         tracing::warn!(error = %e, "accept failed");
@@ -112,19 +130,22 @@ impl TlsListener {
                 }
             }
         });
-        Ok(Self { local, ready })
+        Ok(Self { local, ready, cut })
     }
 }
 
 impl axum::serve::Listener for TlsListener {
-    type Io = TlsStream<TcpStream>;
+    type Io = Cuttable<TlsStream<TcpStream>>;
     type Addr = std::net::SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        match self.ready.recv().await {
-            Some(conn) => conn,
-            // The accept loop ended (it never does while the listener
-            // lives): no connection will come.
+        let conn = tokio::select! {
+            conn = self.ready.recv() => conn,
+            _ = self.cut.cancelled() => None,
+        };
+        match conn {
+            Some((io, peer)) => (Cuttable::new(io, &self.cut), peer),
+            // Cut (or the accept loop ended): no connection will come.
             None => std::future::pending().await,
         }
     }
@@ -134,9 +155,76 @@ impl axum::serve::Listener for TlsListener {
     }
 }
 
+/// A connection that ends when its listener is cut: its next read or write
+/// fails, which ends whatever it carries.
+pub struct Cuttable<S> {
+    inner: S,
+    cut: Pin<Box<WaitForCancellationFutureOwned>>,
+}
+
+impl<S> Cuttable<S> {
+    fn new(inner: S, cut: &CancellationToken) -> Self {
+        Self {
+            inner,
+            cut: Box::pin(cut.clone().cancelled_owned()),
+        }
+    }
+
+    /// Whether the listener was cut (registering the waker, so a task
+    /// waiting on this connection wakes when it is).
+    fn is_cut(&mut self, cx: &mut Context<'_>) -> bool {
+        self.cut.as_mut().poll(cx).is_ready()
+    }
+}
+
+fn cut_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::ConnectionAborted,
+        "other devices were turned off here",
+    )
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Cuttable<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if self.is_cut(cx) {
+            return Poll::Ready(Err(cut_error()));
+        }
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Cuttable<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        if self.is_cut(cx) {
+            return Poll::Ready(Err(cut_error()));
+        }
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        if self.is_cut(cx) {
+            return Poll::Ready(Err(cut_error()));
+        }
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
 
     fn testdata(name: &str) -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -153,7 +241,7 @@ mod tests {
         .unwrap();
         let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = tcp.local_addr().unwrap().port();
-        let listener = TlsListener::new(tcp, acceptor).unwrap();
+        let listener = TlsListener::new(tcp, acceptor, CancellationToken::new()).unwrap();
         let app = axum::Router::new().route("/", axum::routing::get(|| async { "secure" }));
         tokio::spawn(async move { axum::serve(listener, app).await });
 
@@ -178,6 +266,57 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body, "secure");
+    }
+
+    /// Other devices turned off: the listener stops at once, its port is
+    /// free again, and a connection that came in on it is cut, not left
+    /// open for its next request.
+    #[tokio::test]
+    async fn a_cut_listener_frees_its_port_and_ends_its_connections() {
+        let acceptor = acceptor(
+            &testdata("localhost-cert.pem"),
+            &testdata("localhost-key.pem"),
+        )
+        .unwrap();
+        let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let cut = tokio_util::sync::CancellationToken::new();
+        let listener = TlsListener::new(tcp, acceptor, cut.clone()).unwrap();
+        // An answer that never ends, as an open socket's.
+        let endless = || async {
+            let chunks = futures::stream::once(async { Ok::<_, std::io::Error>("open") })
+                .chain(futures::stream::pending());
+            axum::body::Body::from_stream(chunks)
+        };
+        let app = axum::Router::new().route("/", axum::routing::get(endless));
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        let url = format!("https://localhost:{}/", addr.port());
+        let mut open = client.get(&url).send().await.unwrap();
+        assert_eq!(open.chunk().await.unwrap().unwrap(), "open");
+
+        cut.cancel();
+        let ended = tokio::time::timeout(Duration::from_secs(5), open.chunk()).await;
+        assert!(
+            matches!(ended, Ok(Err(_)) | Ok(Ok(None))),
+            "the open answer is cut: {ended:?}"
+        );
+        let started = std::time::Instant::now();
+        let freed = loop {
+            match TcpListener::bind(addr).await {
+                Ok(again) => break again,
+                Err(_) if started.elapsed() < Duration::from_secs(5) => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(e) => panic!("the port stayed taken: {e}"),
+            }
+        };
+        drop(freed);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //!   [--allow-host <name>]… [--daemon <path>] [--for-app]
 //!   [--public-bind <ip> [--device-port <port>] [--tls-cert <pem> --tls-key <pem>]]`
 //! `oxplow-host project <add <dir> | list | remove <id>>`
+//! `oxplow-host settings [set key=value…]`
 //!
 //! A headless host (no `--for-app`) runs until it is stopped: a signal or
 //! `POST /host/shutdown`. The app's own host (`--for-app`) is a child of the
@@ -29,6 +30,8 @@ fn usage() -> ! {
          \x20      oxplow-host project add <dir>\n\
          \x20      oxplow-host project list\n\
          \x20      oxplow-host project remove <id>\n\
+         \x20      oxplow-host settings [set allow=on|off address=<ip> port=<port>\n\
+         \x20                        names=<a,b> tls-cert=<pem> tls-key=<pem>]\n\
          \x20      oxplow-host pair | devices [remove <id>] | status | stop\n\
          \n\
          One host runs per OXPLOW_HOME. --token-stdin reads the host token from\n\
@@ -38,10 +41,12 @@ fn usage() -> ! {
          loopback. --daemon runs another daemon binary (the browser suite's).\n\
          --for-app makes it the Mac app's host: stdin after the token is its\n\
          lifeline, and it ends with the app. Without it the host is headless\n\
-         and runs until it is stopped. --public-bind listens a second time, for\n\
-         other devices (HTTPS, with the home's own certificate or --tls-cert and\n\
-         --tls-key), on --device-port, else OXPLOW_DEVICE_PORT, else 7400; --bind\n\
-         stays for this machine."
+         and runs until it is stopped. Other devices come in on a second listener\n\
+         (HTTPS, with the home's own certificate or one of yours) as `settings`\n\
+         says; a change applies at once. --public-bind, --device-port (else\n\
+         OXPLOW_DEVICE_PORT), --allow-host and --tls-cert/--tls-key replace what\n\
+         `settings` keeps for this run only, and are never kept. --bind stays for\n\
+         this machine."
     );
     std::process::exit(2);
 }
@@ -69,6 +74,78 @@ fn projects_call<E: std::fmt::Display>(
         Err(OwnerCallError::NoHost(_)) => {
             let db = oxplow_host::db::HostDb::open(config_dir).unwrap_or_else(|e| fail(e));
             alone(&Registry::new(db)).unwrap_or_else(|e| fail(e))
+        }
+        Err(e) => fail(e),
+    }
+}
+
+/// "Allow other devices" as the running host has them, else as `host.db`
+/// keeps them (no run, so no flags over them).
+fn settings_view(config_dir: &std::path::Path) -> serde_json::Value {
+    use oxplow_host_access::owner::{owner_call, OwnerCallError};
+    match owner_call(config_dir, "GET", "/host/settings", None) {
+        Ok(view) => view,
+        Err(OwnerCallError::NoHost(_)) => {
+            let db = oxplow_host::db::HostDb::open(config_dir).unwrap_or_else(|e| fail(e));
+            let other = oxplow_host::other_devices::OtherDevices::new(db, Default::default());
+            serde_json::to_value(other.view()).unwrap_or_default()
+        }
+        Err(e) => fail(e),
+    }
+}
+
+/// `settings set key=value…` over what is saved: `allow=on|off`,
+/// `address=<ip>`, `port=<port>` (empty: 7400), `names=<a,b>`,
+/// `tls-cert=<pem>`, `tls-key=<pem>` (empty: the host's own). Through the
+/// running host, which applies them at once, else into `host.db`.
+fn set_settings(config_dir: &std::path::Path, changes: &[&str]) {
+    use oxplow_host_access::owner::{owner_call, OwnerCallError};
+    use oxplow_host_access::settings::HostSettings;
+    let view = settings_view(config_dir);
+    let mut wanted: HostSettings =
+        serde_json::from_value(view["saved"].clone()).unwrap_or_default();
+    let path = |v: &str| (!v.trim().is_empty()).then(|| PathBuf::from(v.trim()));
+    for change in changes {
+        let Some((key, value)) = change.split_once('=') else {
+            fail(format!("\"{change}\" is not key=value"));
+        };
+        match key {
+            "allow" => {
+                wanted.allow_other_devices = match value {
+                    "on" | "yes" | "true" => true,
+                    "off" | "no" | "false" => false,
+                    _ => fail("allow is on or off"),
+                }
+            }
+            "address" => wanted.address = value.trim().to_string(),
+            "port" => {
+                wanted.port = match value.trim() {
+                    "" => None,
+                    text => Some(
+                        oxplow_host_access::settings::parse_port(text).unwrap_or_else(|e| fail(e)),
+                    ),
+                }
+            }
+            "names" => wanted.names = value.split(',').map(|n| n.trim().to_string()).collect(),
+            "tls-cert" => wanted.tls_cert = path(value),
+            "tls-key" => wanted.tls_key = path(value),
+            _ => fail(format!(
+                "no setting {key}: allow, address, port, names, tls-cert, tls-key"
+            )),
+        }
+    }
+    let wanted = wanted
+        .checked()
+        .unwrap_or_else(|e| fail(format!("{}: {e}", e.field())));
+    let body = serde_json::to_value(&wanted).unwrap_or_default();
+    match owner_call(config_dir, "PUT", "/host/settings", Some(&body)) {
+        Ok(_) => println!("saved; in force now"),
+        Err(OwnerCallError::NoHost(_)) => {
+            let db = oxplow_host::db::HostDb::open(config_dir).unwrap_or_else(|e| fail(e));
+            oxplow_host::other_devices::OtherDevices::new(db, Default::default())
+                .save(wanted)
+                .unwrap_or_else(|e| fail(e));
+            println!("saved; in force when the host starts");
         }
         Err(e) => fail(e),
     }
@@ -122,6 +199,16 @@ fn main() {
                     .map(|p| serde_json::to_value(p).unwrap_or_default())
             });
             println!("removed {}", project_line(&p));
+        }
+        ["settings"] => {
+            let view = settings_view(&config_dir);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&view).unwrap_or_default()
+            );
+        }
+        ["settings", "set", ref changes @ ..] if !changes.is_empty() => {
+            set_settings(&config_dir, changes);
         }
         ["pair"] => {
             let code = owner_call(&config_dir, "POST", "/host/pairing");
@@ -231,60 +318,25 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
         fail("--bind is for this machine (a loopback address); other devices come in on --public-bind");
     }
 
-    // Other devices' listener: an address of this machine's, on the port
-    // `--device-port` names, else `OXPLOW_DEVICE_PORT`, else 7400.
-    let public_bind: Option<SocketAddr> = public_bind.map(|b| {
-        let ip: std::net::IpAddr = b.parse().unwrap_or_else(|e| {
-            fail(format!(
-                "invalid --public-bind address (an IP address; the port is --device-port): {e}"
-            ))
-        });
-        let env = std::env::var(oxplow_host_access::settings::PORT_ENV).ok();
-        let port =
-            oxplow_host_access::settings::device_port(device_port_flag, env.as_deref(), None)
-                .unwrap_or_else(|e| fail(e.to_string()));
-        SocketAddr::new(ip, port.port)
-    });
-    if device_port_flag.is_some() && public_bind.is_none() {
-        fail("--device-port is for --public-bind");
-    }
-    // Other devices come in over HTTPS only: with the certificate given
-    // (signed by any CA), else one the home's own root issues for this
-    // listener (`certs.rs`; a device trusts that root once). One that cannot
-    // be had leaves the listener for other devices out, never a plain one in
-    // its place; this machine's windows still work, and the Devices window
-    // says why.
-    let own_cert = match (tls_cert, tls_key) {
-        (None, None) => None,
-        (Some(_), Some(_)) if public_bind.is_none() => {
-            fail("--tls-cert and --tls-key are for --public-bind")
-        }
-        (Some(cert), Some(key)) => Some((cert, key)),
-        _ => fail("--tls-cert and --tls-key go together"),
+    // What this run was told about other devices, over what is saved
+    // (`host.db`): never kept.
+    let overrides = oxplow_host_access::settings::Overrides {
+        address: public_bind.map(|b| {
+            b.parse().unwrap_or_else(|e| {
+                fail(format!(
+                    "invalid --public-bind address (an IP address; the port is --device-port): {e}"
+                ))
+            })
+        }),
+        port: device_port_flag,
+        port_env: std::env::var(oxplow_host_access::settings::PORT_ENV).ok(),
+        names: (!allow_hosts.is_empty()).then_some(allow_hosts),
+        tls: match (tls_cert, tls_key) {
+            (None, None) => None,
+            (Some(cert), Some(key)) => Some((cert, key)),
+            _ => fail("--tls-cert and --tls-key go together"),
+        },
     };
-    // With its own certificate the host answers to this machine's `.local`
-    // name too, unasked: where the network passes it, a device may open
-    // that, and it outlasts an address that changes.
-    let allow_hosts = if public_bind.is_some() && own_cert.is_none() {
-        oxplow_host_access::network::with_local_name(
-            &allow_hosts,
-            oxplow_host_access::network::local_name().as_deref(),
-        )
-    } else {
-        allow_hosts
-    };
-    // The names a device may open besides the address.
-    let device_names: Vec<String> = allow_hosts
-        .iter()
-        .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty() && h.parse::<std::net::IpAddr>().is_err())
-        .collect();
-    let tls = public_bind.map(|addr| match &own_cert {
-        Some((cert, key)) => oxplow_host::tls::acceptor(cert, key)
-            .map(|a| (a, None))
-            .map_err(|e| e.to_string()),
-        None => issued_acceptor(config_dir, addr, &allow_hosts),
-    });
     if for_app && !token_stdin {
         fail("--for-app needs --token-stdin: the app's stdin is the host's lifeline");
     }
@@ -339,10 +391,10 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 HoldsKept::InFile
             };
             let host = Host::open(db.clone(), supervisor, kept).unwrap_or_else(|e| fail(e));
-            let devices = oxplow_host::devices::Devices::new(db.clone());
             let access = oxplow_host::access::Access::new(
                 token.clone(),
-                devices,
+                db.clone(),
+                overrides,
                 oxplow_host::access::WRONG_CODE_WAIT,
             );
             use oxplow_host::access::Listener;
@@ -369,17 +421,25 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
             // The home's own root, once the listener for other devices has a
             // certificate from it: a device downloads it to trust the host.
             let root_for_devices: Arc<std::sync::Mutex<Option<String>>> = Default::default();
-            let config = |scheme, listener| oxplow_host::web::ServeConfig {
-                root_pem: root_for_devices.clone(),
-                host: host.clone(),
-                access: access.clone(),
-                listener,
-                ui_dir: ui_dir.clone(),
-                allow_hosts: allow_hosts.clone(),
-                // A daemon that boots no faster than this is a crash.
-                boot_wait: DEFAULT_STARTUP_TIMEOUT,
-                stop: stop.clone(),
-                scheme,
+            // The names every listener answers to; the listener for other
+            // devices sets them as the settings change.
+            let allowed = oxplow_host::web::AllowedHosts::default();
+            let config = {
+                let (root_pem, host, access) =
+                    (root_for_devices.clone(), host.clone(), access.clone());
+                let (ui_dir, allowed, stop) = (ui_dir.clone(), allowed.clone(), stop.clone());
+                move |scheme, listener| oxplow_host::web::ServeConfig {
+                    root_pem: root_pem.clone(),
+                    host: host.clone(),
+                    access: access.clone(),
+                    listener,
+                    ui_dir: ui_dir.clone(),
+                    allow_hosts: allowed.clone(),
+                    // A daemon that boots no faster than this is a crash.
+                    boot_wait: DEFAULT_STARTUP_TIMEOUT,
+                    stop: stop.clone(),
+                    scheme,
+                }
             };
             let app =
                 oxplow_host::web::app(config(oxplow_host::web::Scheme::Http, Listener::Loopback));
@@ -401,69 +461,47 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 println!("  host token: {token}");
             }
             tracing::info!(%base_url, "oxplow-host listening");
-            // Other devices, on their own listener: HTTPS when a certificate
-            // was given.
-            // One that cannot bind is said and left out: this machine's
-            // windows still work.
-            let left_out = |error: String| {
-                eprintln!("oxplow-host: other devices cannot reach this host: {error}");
-                tracing::error!(%error, "the listener for other devices is left out");
-                *access.public.lock().unwrap_or_else(|e| e.into_inner()) =
-                    oxplow_host::access::PublicListener::Failed { error };
+            // Other devices, on their own listener (HTTPS only), as the
+            // settings in force say; a saved change applies at once. One
+            // that cannot be had is said and left out: this machine's
+            // windows still work, and the Devices page says why.
+            let public = {
+                let config = config.clone();
+                oxplow_host::public::PublicServer::new(
+                    config_dir,
+                    access.clone(),
+                    root_for_devices.clone(),
+                    allowed.clone(),
+                    Box::new(move || {
+                        oxplow_host::web::app(config(
+                            oxplow_host::web::Scheme::Https,
+                            Listener::Public,
+                        ))
+                    }),
+                )
             };
-            let (tls, root_pem) = match tls {
-                Some(Err(e)) => {
-                    left_out(e);
-                    (None, None)
-                }
-                Some(Ok((acceptor, root))) => (Some(acceptor), root),
-                None => (None, None),
+            let _ = access.public_server.set(public.clone());
+            let started = match access.other_devices.effective() {
+                Ok(in_force) => public.apply(&in_force).await,
+                Err(e) => Err(e.to_string()),
             };
-            *root_for_devices.lock().unwrap_or_else(|e| e.into_inner()) = root_pem;
-            let public_tcp = match public_bind {
-                None => None,
-                Some(_) if tls.is_none() => None,
-                Some(addr) => match tokio::net::TcpListener::bind(addr).await {
-                    Ok(tcp) => Some(tcp),
-                    Err(e) => {
-                        left_out(format!("bind {addr} failed: {e}"));
-                        None
-                    }
-                },
-            };
-            let public = match public_tcp {
-                None => None,
-                Some(tcp) => {
-                    let at = tcp.local_addr().unwrap_or_else(|e| fail(e));
-                    let scheme = oxplow_host::web::Scheme::Https;
-                    println!(
-                        "oxplow-host listening for other devices on {}://{at}",
-                        scheme.as_str()
-                    );
+            match started {
+                Err(error) => {
+                    eprintln!("oxplow-host: other devices cannot reach this host: {error}");
+                    tracing::error!(%error, "the listener for other devices is left out");
                     *access.public.lock().unwrap_or_else(|e| e.into_inner()) =
-                        oxplow_host::access::PublicListener::Listening {
-                            url: format!("{}://{at}", scheme.as_str()),
-                            names: device_names.clone(),
-                        };
-                    tracing::info!(%at, scheme = scheme.as_str(), "listening for other devices");
-                    let public_app = oxplow_host::web::app(config(scheme, Listener::Public));
-                    let acceptor = tls.clone().expect("a public listener has its TLS");
-                    let listener = oxplow_host::tls::TlsListener::new(tcp, acceptor)
-                        .unwrap_or_else(|e| fail(e));
-                    Some(tokio::spawn(async move {
-                        axum::serve(listener, public_app).await
-                    }))
+                        oxplow_host::access::PublicListener::Failed { error };
                 }
-            };
-            let public_ended = async {
-                match public {
-                    Some(task) => format!("the public listener stopped: {:?}", task.await),
-                    None => std::future::pending().await,
+                Ok(()) => {
+                    if let oxplow_host::access::PublicListener::Listening { url, .. } =
+                        &*access.public.lock().unwrap_or_else(|e| e.into_inner())
+                    {
+                        println!("oxplow-host listening for other devices on {url}");
+                    }
                 }
-            };
+            }
             let reason = tokio::select! {
                 served = axum::serve(listener, app) => format!("the server stopped: {served:?}"),
-                ended = public_ended => ended,
                 signal = terminated() => format!("received {signal}"),
                 _ = stop.notified() => "asked to stop".to_string(),
             };
@@ -513,37 +551,6 @@ impl Drop for OwnerSocket {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
-}
-
-/// TLS for the listener for other devices at `addr`, from the home's own
-/// root: a certificate for that address (every private address of this
-/// machine when it is unspecified) and the allowed names, issued now. The
-/// root's PEM comes too, for devices to download (`/host/ca.pem`).
-fn issued_acceptor(
-    config_dir: &std::path::Path,
-    addr: SocketAddr,
-    names: &[String],
-) -> Result<(tokio_rustls::TlsAcceptor, Option<String>), String> {
-    use oxplow_host::certs;
-    let root = certs::LocalRoot::load_or_make(config_dir).map_err(|e| e.to_string())?;
-    let ips = if addr.ip().is_unspecified() {
-        oxplow_host_access::network::private_addresses()
-    } else {
-        vec![addr.ip()]
-    };
-    let (cert, key) = root.issue(&ips, names).map_err(|e| {
-        format!("{e}; give a certificate of your own (--tls-cert, --tls-key) for that")
-    })?;
-    let acceptor = oxplow_host::tls::acceptor_pem(
-        cert.as_bytes(),
-        key.as_bytes(),
-        "the issued certificate",
-        "its key",
-    )
-    .map_err(|e| e.to_string())?;
-    let root_pem = std::fs::read_to_string(oxplow_host_access::root_path(config_dir))
-        .map_err(|e| e.to_string())?;
-    Ok((acceptor, Some(root_pem)))
 }
 
 /// The built UI when `--ui` is not given: a `ui` folder beside the binary

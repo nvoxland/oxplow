@@ -6,6 +6,7 @@ import {
   REPLACED_CLOSE_CODE,
   DEVICE_REMOVED_CLOSE_CODE,
   HOST_ENDING_CLOSE_CODE,
+  OTHER_DEVICES_OFF_CLOSE_CODE,
   socketCloseMeaning,
   invokeRoute,
   ipcRequest,
@@ -305,6 +306,9 @@ test("what a socket's close means", () => {
   // quit): say so, and keep trying slowly.
   expect(socketCloseMeaning(DEVICE_REMOVED_CLOSE_CODE, false)).toBe("removed");
   expect(socketCloseMeaning(HOST_ENDING_CLOSE_CODE, false)).toBe("ended");
+  // Other devices were turned off there (or moved): say so, keep trying
+  // slowly.
+  expect(socketCloseMeaning(OTHER_DEVICES_OFF_CLOSE_CODE, false)).toBe("closed");
 });
 
 test("a REPLACED answer is the replaced page load's", () => {
