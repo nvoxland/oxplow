@@ -1,7 +1,7 @@
 title: Devices
 label: Devices
 description: Use this computer's oxplow from a tablet or another computer — pair a device, see which are connected, and choose whether and how other devices reach it.
-icon: tablet-smartphone
+icon: assets/tablet-smartphone.svg
 category: System
 keywords: devices tablet phone ipad android pair pairing code other devices remote host certificate port address
 answers:

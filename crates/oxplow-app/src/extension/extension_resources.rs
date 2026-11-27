@@ -77,7 +77,6 @@ pub const ICONS: &[&str] = &[
     "shield",
     "sparkles",
     "star",
-    "tablet-smartphone",
     "tag",
     "terminal",
     "ticket",
