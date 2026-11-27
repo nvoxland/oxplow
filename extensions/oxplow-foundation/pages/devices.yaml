@@ -1,0 +1,154 @@
+title: Devices
+label: Devices
+description: Use this computer's oxplow from a tablet or another computer — pair a device, see which are connected, and choose whether and how other devices reach it.
+icon: tablet-smartphone
+category: System
+keywords: devices tablet phone ipad android pair pairing code other devices remote host certificate port address
+answers:
+- question: Which devices are paired with this computer, and which are connected now?
+  params: {}
+- question: May other devices reach this computer, and at which address?
+  params: {}
+loaders:
+  # This computer's standing: one row (v_host_settings), whether a host
+  # runs, and what the settings say and do.
+  standing:
+    sql: |
+      SELECT CASE WHEN NOT hosted THEN coalesce('The host does not answer: ' || problem, 'No host runs for this oxplow, so no device can reach it.')
+                  WHEN NOT allow_other_devices THEN 'Off: only this computer uses oxplow.'
+                  WHEN applied THEN 'On'
+                  ELSE 'On after the next start (quit oxplow and open it again)' END AS other_devices,
+             CASE WHEN hosted AND allow_other_devices THEN
+                    coalesce((SELECT group_concat(value, '  ') FROM json_each(open_on_device)), '') END AS open_at,
+             CASE WHEN port IS NULL THEN port_problem
+                  ELSE port || CASE port_from WHEN 'flag' THEN ' (set by --device-port)'
+                                              WHEN 'env' THEN ' (set by OXPLOW_DEVICE_PORT)'
+                                              ELSE '' END END AS port
+      FROM v_host_settings
+  # The code in force, while there is one.
+  pairing:
+    sql: |
+      SELECT pairing_code AS code,
+             strftime('%H:%M', pairing_until / 1000, 'unixepoch', 'localtime') AS until,
+             coalesce((SELECT group_concat(value, '  ') FROM json_each(open_on_device)), '') AS open_at
+      FROM v_host_settings
+      WHERE pairing_code IS NOT NULL
+  devices:
+    sql: |
+      SELECT id, name,
+             CASE kind WHEN 'tablet' THEN 'Tablet' WHEN 'phone' THEN 'Phone' ELSE 'Computer' END AS kind,
+             CASE WHEN connected THEN 'Connected' ELSE '' END AS connected,
+             strftime('%Y-%m-%dT%H:%M:%SZ', paired_at / 1000, 'unixepoch') AS paired_at
+      FROM v_host_device
+      ORDER BY name
+  # The saved settings, as the form edits them.
+  settings:
+    sql: |
+      SELECT allow_other_devices, address, saved_port AS port,
+             coalesce((SELECT group_concat(value, char(10)) FROM json_each(names)), '') AS names,
+             coalesce(tls_cert, '') AS tls_cert, coalesce(tls_key, '') AS tls_key
+      FROM v_host_settings
+  # The address's choices: this computer's private addresses (and the saved
+  # one, should it be gone).
+  address_choices:
+    sql: |
+      SELECT value, value AS label FROM v_host_settings, json_each(v_host_settings.addresses)
+      UNION SELECT address, address || ' (not on this computer now)' FROM v_host_settings
+        WHERE address <> '' AND NOT EXISTS (SELECT 1 FROM json_each(v_host_settings.addresses) WHERE value = address)
+  # A name a device may use: this computer's own .local name.
+  name_choices:
+    sql: "SELECT local_name AS value, local_name AS label FROM v_host_settings WHERE local_name IS NOT NULL"
+  trust:
+    sql: |
+      SELECT CASE WHEN root_certificate THEN
+        'Once on each device, trust this computer: open **' ||
+        coalesce((SELECT value FROM json_each(open_on_device) LIMIT 1), 'https://<address>:<port>/') ||
+        'host/ca.pem** there (past the browser''s warning) and install it.' || char(10) || char(10) ||
+        '- Android: Settings ▸ Security ▸ More ▸ Install a certificate ▸ CA certificate.' || char(10) ||
+        '- iPhone, iPad: install the downloaded profile, then turn it on under Settings ▸ General ▸ About ▸ Certificate Trust Settings.' || char(10) || char(10) ||
+        'The certificate can vouch only for addresses and names on private networks, never for a real website.'
+      ELSE 'This computer uses a certificate of your own: a device that trusts its CA needs nothing more.' END AS text
+      FROM v_host_settings
+view:
+  stack:
+  - id: standing
+    title: This computer
+    viz: detail
+    from: standing
+    columns:
+    - { key: other_devices, label: Other devices }
+    - { key: open_at, label: Devices open }
+    - { key: port, label: Port }
+    empty: Nothing is known about this computer's host.
+  - id: pair
+    title: Pair a device
+    description: A device types the code at the address above. It is good once, for ten minutes.
+    viz: detail
+    from: pairing
+    columns:
+    - { key: code, label: Code }
+    - { key: until, label: Good until }
+    - { key: open_at, label: Open }
+    empty: No code now. Pair a Device makes one.
+    actions:
+    - id: pair-device
+      label: Pair a Device
+      command: oxplow.host.pair
+      prominent: true
+  - id: devices
+    title: Paired devices
+    viz: table
+    from: devices
+    columns:
+    - { key: name, label: Name }
+    - { key: kind, label: Kind, width: 100 }
+    - { key: connected, label: Now, width: 110 }
+    - { key: paired_at, label: Paired, format: relative, width: 120 }
+    empty: No device is paired yet.
+    actions:
+    - id: rename-device
+      label: Rename…
+      command: oxplow.host.rename_device
+      form: true
+      row: true
+      primary: true
+      submit: Rename
+      about: name
+      fixed: [id]
+      input:
+        id: '{{row.id}}'
+        name: '{{row.name}}'
+      fields:
+      - { name: name, label: Name }
+    - id: remove-device
+      label: Remove
+      command: oxplow.host.remove_device
+      row: true
+      help: Its key stops working and it is disconnected at once; it pairs again with a new code.
+      input:
+        id: '{{row.id}}'
+  - id: settings
+    title: Allow other devices
+    description: These apply the next time oxplow starts.
+    viz: form
+    from: settings
+    form:
+      command: oxplow.host.set_settings
+      mode: edit
+      fields:
+      - allow_other_devices
+      - address
+      - port
+      - names
+      - tls_cert
+      - tls_key
+      choices:
+        address: oxplow/devices#address_choices
+        names: { from: oxplow/devices#name_choices, open: true }
+  - id: trust
+    title: Trust this computer on a device
+    viz: markdown
+    from: trust
+    empty: ''
+see_also:
+- { page: oxplow/settings }

@@ -53,6 +53,7 @@ loaders:
     rows:
     - { title: Language servers, description: Install, remove or restart language servers., uri: 'oxplow:oxplow/page?page=management#area=lsp' }
     - { title: AI, description: Set up providers and the model each AI role uses., uri: 'oxplow:oxplow/page?page=ai-settings' }
+    - { title: Devices, description: Use oxplow from a tablet or another computer — pair a device and let other devices in., uri: 'oxplow:oxplow/page?page=devices' }
     - { title: Integrations, description: Manage capabilities, stores and connected services., uri: 'oxplow:oxplow/page?page=management#area=integrations' }
     - { title: Data delivery, description: Inspect collectors, effects and failed deliveries., uri: 'oxplow:oxplow/page?page=management#area=data' }
 view:
