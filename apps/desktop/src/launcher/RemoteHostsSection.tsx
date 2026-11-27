@@ -33,7 +33,14 @@ export const COLLECT_PAUSE_MS = 500;
  *  `oxplow host serve`): connect with its address, and type the code this
  *  Mac shows there (`oxplow host pair <code>`), then open its projects here. A project there runs
  *  there: quitting here leaves it running. */
-export function RemoteHostsSection({ api = REMOTE_HOSTS_API }: { api?: RemoteHostsApi }) {
+export function RemoteHostsSection({
+  api = REMOTE_HOSTS_API,
+  pause = COLLECT_PAUSE_MS,
+}: {
+  api?: RemoteHostsApi;
+  /** The pause between two collects (a test's is 0). */
+  pause?: number;
+}) {
   const [hosts, setHosts] = useState<RemoteHostView[]>([]);
   const [address, setAddress] = useState("");
   /** This Mac's ask, while it waits for the person there to type its code. */
@@ -63,7 +70,7 @@ export function RemoteHostsSection({ api = REMOTE_HOSTS_API }: { api?: RemoteHos
         while (live && !(await api.collectHost(asking.origin, asking.request))) {
           // Still waiting (the host waits a while each time): ask again,
           // never in a tight loop.
-          await new Promise((r) => setTimeout(r, COLLECT_PAUSE_MS));
+          await new Promise((r) => setTimeout(r, pause));
         }
         if (!live) return;
         setAsking(null);
@@ -78,7 +85,7 @@ export function RemoteHostsSection({ api = REMOTE_HOSTS_API }: { api?: RemoteHos
     return () => {
       live = false;
     };
-  }, [asking, api, read]);
+  }, [asking, pause, api, read]);
 
   const run = async (f: () => Promise<unknown>) => {
     setBusy(true);
