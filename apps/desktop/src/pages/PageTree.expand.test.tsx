@@ -138,12 +138,12 @@ test("a lazy branch runs the node's page with the lazy param set to its id; its 
   // A branch row's action presses on the branch's run; a root row's on the root's.
   const rows = view.getAllByTestId("viz-tree-row");
   const lib = rows.find((r) => r.textContent?.includes("lib.rs"))!;
-  fireEvent.click(within(lib).getByLabelText("Actions"));
+  fireEvent.contextMenu(lib);
   fireEvent.click(within(document.body).getByTestId("menu-item-viz-action-rename"));
   await waitFor(() => expect(calls.length).toBe(1));
   expect(calls[0]!.slice(0, 4)).toEqual(["run-1", "tree", "rename", { id: "src/lib.rs", parent: "src", name: "lib.rs", opens: 0 }]);
   const a = rows.find((r) => r.textContent?.includes("a.rs"))!;
-  fireEvent.click(within(a).getByLabelText("Actions"));
+  fireEvent.contextMenu(a);
   fireEvent.click(within(document.body).getByTestId("menu-item-viz-action-rename"));
   await waitFor(() => expect(calls.length).toBe(2));
   expect(calls[1]!.slice(0, 2)).toEqual(["run-0", "tree"]);

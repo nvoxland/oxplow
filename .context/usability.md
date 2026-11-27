@@ -773,17 +773,17 @@ not a pick and isn't in the address.
 
 ## Per-row actions (right-click menus)
 
-> **A page row's menu is its ☰ button, not a right-click.** Every row a
-> page draws (a table, list, board, tree, timeline, steps, hunks, detail
-> or sections row) ends in a ☰ (lucide `Menu`, `rowMenu.button` in
-> `viz/VizView.tsx`, testid `viz-row-menu-<i>`, label "Actions") that
-> opens its whole menu: Add to Context, the page's row actions
-> (`row: true`), Open In and the commands about what the row links to. A
-> right-click on a page row opens nothing of its own. The reason is the
-> tablet client: a touch screen has no right-click, and a button shows
-> where a row's actions are. (The IA redesign's `⋯` kebab was removed
-> for the row space it took; the ☰ came back for touch.) The keyboard
-> keeps Menu / Shift+F10 on the focused row. A primary form action has no
+> **A page row's menu opens on a right-click; a table row also has a ☰.**
+> Every row a page draws (a table, list, board, tree, timeline, steps,
+> hunks, detail or sections row) opens its whole menu on a right-click
+> and on Menu / Shift+F10 when focused: Add to Context, the page's row
+> actions (`row: true`), Open In and the commands about what the row
+> links to. Only a table row ends in a ☰ button that opens the same menu
+> (lucide `Menu`, `rowMenu.button` in `viz/VizView.tsx`, testid
+> `viz-row-menu-<i>`, label "Actions"), so a touch screen reaches a
+> table's actions. The other rows draw none: a ☰ on every line of a
+> tree or a dense list (the Git panel's files) was more chrome than
+> content. A primary form action has no
 > icon of its own: the row's click opens it and the ☰ holds it. Surfaces that are not page
 > rows (the Navigator, tab strips, the terminal, dashboard tiles,
 > selected text) keep their right-click menus below; a page's body has
@@ -1342,7 +1342,7 @@ caller may bypass the bus to write to the terminal.
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   offered with no thread selected too), the editor's menu (**Add Selection to Context** with a selection, else
   **Add File to Context**, `editorContextEntry`), a diff's right side, a
-  page row's ☰, a backlink's menu, the terminal's menu (**Add Selection
+  page row's menu, a backlink's menu, the terminal's menu (**Add Selection
   to Context**, else **Add to Context** for the session; `terminalMenu.ts`,
   which also carries Copy and Paste — the OS menu is suppressed there now)
   and a page's menu over its selected text (**Add Selection to

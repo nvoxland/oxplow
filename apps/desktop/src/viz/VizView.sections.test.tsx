@@ -153,10 +153,10 @@ test("a row action is in the subsection's right-click menu, offered by `when`, a
     />,
   );
   // Alpha's `broken` is 0: not offered. Beta's is 1.
-  fireEvent.click(within(view.getByTestId("viz-section-a")).getByLabelText("Actions"));
+  fireEvent.contextMenu(view.getByTestId("viz-section-a"));
   expect(view.queryByTestId("menu-item-viz-action-fix")).toBeNull();
   fireEvent.keyDown(document.body, { key: "Escape" });
-  fireEvent.click(within(view.getByTestId("viz-section-b")).getByLabelText("Actions"));
+  fireEvent.contextMenu(view.getByTestId("viz-section-b"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-viz-action-fix")));
   await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["fix"]));
   expect((actionRuns[0]!.row as Record<string, unknown>).id).toBe("b");

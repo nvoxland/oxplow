@@ -1178,7 +1178,7 @@ out and the ☰ itself hidden when it would be empty:
    bar's modes control swaps in one click);
 
 A right-click on the page's body opens no menu of the page's: this ☰
-and each row's ☰ hold everything, and a touch screen has no right-click
+and each row's menu (its right-click, a table row's ☰) hold everything
 (usability.md "Per-row actions"). Selected text keeps its own right-click
 menu (Add Selection to Context).
 4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which

@@ -463,7 +463,7 @@ heading level is one below the enclosing section (`SectionLevelContext`:
 (`keepEmpty`), and a `data-node` of `<viz node>/<row key>`. The key is the
 `sections.id` column, else a column named `id`, else the title (a repeat
 gets `-2`, `-3`) — so give a `sections` loader a stable `id`. Row `actions`
-are in the ☰ at each subsection's heading (and a `primary` one on click),
+are in each subsection's right-click menu (and a `primary` one on click),
 as for a `list` row. Contents lists subsections under their parent up to
 `CONTENTS_SUBSECTIONS_MAX` (10; `viz/Contents.tsx`, the one constant): the
 viz's root carries `data-sections=<rows>`; past ten, one "… N more" entry
@@ -846,9 +846,9 @@ is gone, is the toast's (usability.md "A person's command that fails").
   person"). Without it the button is the label without its `…`. Load
   refuses it on an action that isn't a form, and blank.
 - `primary: true` (a row action) is what a click on the row, or Enter,
-  runs: the first one the row is offered (`when`). It is also in the ☰
-  every row ends in (no button of its own), which opens the row's whole menu (a right-click on a page row
-  opens nothing: `usability.md` "Per-row actions"). `prominent: true`
+  runs: the first one the row is offered (`when`). It is also in the
+  row's menu (no button of its own): a right-click on any row, or a
+  table row's ☰ (`usability.md` "Per-row actions"). `prominent: true`
   keeps a page action a button in the nav bar; the rest go in the ☰ menu
   (`submenu` groups them). `bulk` runs once per marked row; `key` runs on
   the cursor row; `group: <value>` puts the button in that group's

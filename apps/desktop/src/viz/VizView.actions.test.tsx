@@ -119,10 +119,10 @@ test("a row action's confirmation shows wherever the row is", async () => {
 });
 
 // Every row of every row component has the row menu (Add to Context and
-// the viz's row actions): from the ☰ button at its end, and from the
-// keyboard — Menu key or Shift+F10 on the focused row. A right-click on a
-// row opens nothing: the button is where its actions are.
-test("rows are focusable and open their menu from their button and the keyboard, in every row component", () => {
+// the viz's row actions): from a right-click, and from the keyboard —
+// Menu key or Shift+F10 on the focused row. A table row also ends in a ☰
+// button that opens it; the other row components draw none.
+test("rows open their menu from a right-click and the keyboard; only a table row has a menu button", () => {
   const { getByTestId, queryByTestId, unmount } = render(<VizView run={run} onOpenPage={() => {}} />);
   const row = getByTestId("viz-row-0");
   expect(row.tabIndex).toBe(0);
@@ -133,20 +133,23 @@ test("rows are focusable and open their menu from their button and the keyboard,
 
   const table = render(<VizView run={run} onOpenPage={() => {}} />);
   fireEvent.contextMenu(table.getByTestId("viz-row-0"));
-  expect(table.queryByTestId("menu-item-viz-action-finish")).toBeNull();
-  const button = table.getByTestId("viz-row-menu-0");
-  expect(button.getAttribute("aria-label")).toBe("Actions");
-  fireEvent.click(button);
   expect(table.queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
   table.unmount();
+  const again = render(<VizView run={run} onOpenPage={() => {}} />);
+  const button = again.getByTestId("viz-row-menu-0");
+  expect(button.getAttribute("aria-label")).toBe("Actions");
+  fireEvent.click(button);
+  expect(again.queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
+  again.unmount();
 
-  for (const config of [
-    { ...viz, viz: "list" },
-    { ...viz, viz: "steps", steps: { label: "uri", status: null } },
-    { ...viz, viz: "timeline", timeline: { at: "uri", label: "uri", uri: null } },
-  ] as VizConfig[]) {
+  for (const [config, rowId] of [
+    [{ ...viz, viz: "list" }, "viz-row-0"],
+    [{ ...viz, viz: "steps", steps: { label: "uri", status: null } }, "viz-step-0"],
+    [{ ...viz, viz: "timeline", timeline: { at: "uri", label: "uri", uri: null } }, "viz-timeline-entry-0"],
+  ] as [VizConfig, string][]) {
     const view = render(<VizView run={{ ...run, config }} onOpenPage={() => {}} />);
-    fireEvent.click(view.getByTestId("viz-row-menu-0"));
+    expect(view.queryByTestId("viz-row-menu-0")).toBeNull();
+    fireEvent.contextMenu(view.getByTestId(rowId));
     expect(view.queryByTestId("menu-item-viz-action-finish")).not.toBeNull();
     view.unmount();
   }

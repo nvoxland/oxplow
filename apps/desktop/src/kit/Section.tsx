@@ -41,9 +41,6 @@ export interface SectionProps {
    *  says it on hover (and to screen readers); the page stays quiet. */
   help?: string;
   actions?: readonly PageAction[];
-  /** A control at the heading's end, after its actions: a row's ☰ when
-   *  the section is a row's (`SectionsViz`). */
-  menu?: ReactNode;
   /** The extension it comes from, when it isn't the page's own: said by
    *  the heading, so added content is never mistaken for the page's. */
   source?: string;
@@ -75,7 +72,6 @@ export function Section({
   description,
   help,
   actions,
-  menu,
   source,
   testId,
   collapsible = false,
@@ -103,7 +99,7 @@ export function Section({
         data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}
         style={fill ? (hideTitle ? hiddenFillStyle : fillStyle) : undefined}
       >
-        <div className={hideTitle && !actions && !source && !menu ? "ox-section-head ox-sr-only" : "ox-section-head"}>
+        <div className={hideTitle && !actions && !source ? "ox-section-head ox-sr-only" : "ox-section-head"}>
           <Heading className={hideTitle ? "ox-section-title ox-sr-only" : "ox-section-title"}>
             {Icon ? <Icon size={14} aria-hidden className="ox-section-icon" /> : null}
             {collapse ? (
@@ -137,7 +133,6 @@ export function Section({
             </span>
           ) : null}
           {actions ? <ActionButtons actions={actions} /> : null}
-          {menu ?? null}
         </div>
         {open ? (
           collapse ? (
