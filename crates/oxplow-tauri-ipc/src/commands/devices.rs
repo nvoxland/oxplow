@@ -31,7 +31,7 @@ pub struct DevicesView {
     pub this_device: String,
     pub devices: Vec<DeviceView>,
     /// "Allow other devices", as saved.
-    pub settings: oxplow_host::settings::HostSettings,
+    pub settings: oxplow_host_access::settings::HostSettings,
     /// Whether the host runs with them now (they apply at the next start).
     pub settings_applied: bool,
     /// The addresses a device opens: `https://<name>:<port>/`.
@@ -39,7 +39,7 @@ pub struct DevicesView {
     /// The port other devices come in on and where it came from (the app's
     /// `--device-port` or `OXPLOW_DEVICE_PORT` win over the setting); none
     /// when the one given is no port (`port_problem` says).
-    pub port: Option<oxplow_host::settings::DevicePort>,
+    pub port: Option<oxplow_host_access::settings::DevicePort>,
     pub port_problem: Option<String>,
     /// Where the host listens for other devices now, or why it cannot.
     pub public: Option<oxplow_host::access::PublicListener>,
@@ -65,7 +65,10 @@ pub struct RenameDevice {
 
 /// The addresses a device opens for `settings` on `port` (the one in
 /// force): each name (else the address) with the port, over HTTPS. Pure.
-pub fn open_on_device(settings: &oxplow_host::settings::HostSettings, port: u16) -> Vec<String> {
+pub fn open_on_device(
+    settings: &oxplow_host_access::settings::HostSettings,
+    port: u16,
+) -> Vec<String> {
     if !settings.allow_other_devices {
         return Vec::new();
     }
@@ -127,7 +130,7 @@ pub async fn host_devices(
         .unwrap_or_else(|| "This computer".into());
     // The settings first: a host that does not answer (a setting that
     // cannot work, say) must not hide the form that fixes it.
-    let settings = oxplow_host::settings::HostSettings::load(&config_dir()?);
+    let settings = oxplow_host_access::settings::HostSettings::load(&config_dir()?);
     let answer = with_host(app.clone(), |host| async move {
         let (connected, public) = host.status_parts().await?;
         Ok((host.devices().await?, connected, public))
@@ -223,14 +226,14 @@ pub async fn host_remove_device(
 #[specta::specta]
 pub async fn set_host_settings(
     window: tauri::Window,
-    settings: oxplow_host::settings::HostSettings,
+    settings: oxplow_host_access::settings::HostSettings,
 ) -> Result<(), IpcError> {
     super::local_window_only(&window)?;
     settings.save(&config_dir()?).map_err(IpcError::invalid)
 }
 
 /// What the settings offer: this machine's addresses on private networks
-/// (`oxplow_host::certs::private_addresses`) and the name it answers to on
+/// (`oxplow_host_access::network::private_addresses`) and the name it answers to on
 /// its local network (`<local hostname>.local`).
 #[derive(Clone, Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -243,11 +246,11 @@ pub struct HostAddresses {
 #[specta::specta]
 pub async fn host_addresses() -> Result<HostAddresses, IpcError> {
     Ok(HostAddresses {
-        ips: oxplow_host::certs::private_addresses()
+        ips: oxplow_host_access::network::private_addresses()
             .into_iter()
             .map(|ip| ip.to_string())
             .collect(),
-        local_name: oxplow_host::certs::local_name(),
+        local_name: oxplow_host_access::network::local_name(),
     })
 }
 
@@ -257,13 +260,13 @@ pub async fn host_addresses() -> Result<HostAddresses, IpcError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn host_root_certificate() -> Result<Option<String>, IpcError> {
-    Ok(std::fs::read_to_string(oxplow_host::certs::root_path(&config_dir()?)).ok())
+    Ok(std::fs::read_to_string(oxplow_host_access::root_path(&config_dir()?)).ok())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_host::settings::HostSettings;
+    use oxplow_host_access::settings::HostSettings;
 
     #[test]
     fn a_device_opens_each_name_with_the_port_over_https() {

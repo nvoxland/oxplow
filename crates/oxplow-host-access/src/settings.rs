@@ -206,7 +206,7 @@ impl HostSettings {
                     .names
                     .iter()
                     .map(|n| n.trim())
-                    .find(|n| !n.is_empty() && !crate::certs::is_private_name(n))
+                    .find(|n| !n.is_empty() && !crate::network::is_private_name(n))
                 {
                     return Err(SettingsError::PublicName(public.to_string()));
                 }

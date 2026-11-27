@@ -15,6 +15,7 @@ path = "src/main.rs"
 tauri-build = { workspace = true }
 
 [dependencies]
+oxplow-host-access = { workspace = true }
 oxplow-app = { workspace = true }
 oxplow-sdk = { workspace = true }
 oxplow-config = { workspace = true }

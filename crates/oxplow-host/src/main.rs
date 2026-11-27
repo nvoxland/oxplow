@@ -49,7 +49,7 @@ fn usage() -> ! {
 
 /// A call to the running host over its owner socket; fails with its words.
 fn owner_call(config_dir: &std::path::Path, method: &str, path: &str) -> serde_json::Value {
-    match oxplow_host::client::owner_call(config_dir, method, path) {
+    match oxplow_host_access::owner::owner_call(config_dir, method, path, None) {
         Ok(value) => value,
         Err(e) => fail(e),
     }
@@ -198,9 +198,10 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
                 "invalid --public-bind address (an IP address; the port is --device-port): {e}"
             ))
         });
-        let env = std::env::var(oxplow_host::settings::PORT_ENV).ok();
-        let port = oxplow_host::settings::device_port(device_port_flag, env.as_deref(), None)
-            .unwrap_or_else(|e| fail(e.to_string()));
+        let env = std::env::var(oxplow_host_access::settings::PORT_ENV).ok();
+        let port =
+            oxplow_host_access::settings::device_port(device_port_flag, env.as_deref(), None)
+                .unwrap_or_else(|e| fail(e.to_string()));
         SocketAddr::new(ip, port.port)
     });
     if device_port_flag.is_some() && public_bind.is_none() {
@@ -435,7 +436,7 @@ fn serve(config_dir: &std::path::Path, rest: &[&str]) {
 #[cfg(unix)]
 fn owner_socket(config_dir: &std::path::Path, app: axum::Router) -> Option<OwnerSocket> {
     use std::os::unix::fs::PermissionsExt;
-    let path = oxplow_host::client::owner_socket_path(config_dir);
+    let path = oxplow_host_access::owner::owner_socket_path(config_dir);
     // The lock is ours, so a socket file here is a killed host's.
     let _ = std::fs::remove_file(&path);
     let listener = match tokio::net::UnixListener::bind(&path) {
@@ -476,7 +477,7 @@ fn issued_acceptor(
     use oxplow_host::certs;
     let root = certs::LocalRoot::load_or_make(config_dir).map_err(|e| e.to_string())?;
     let ips = if addr.ip().is_unspecified() {
-        certs::private_addresses()
+        oxplow_host_access::network::private_addresses()
     } else {
         vec![addr.ip()]
     };
@@ -490,8 +491,8 @@ fn issued_acceptor(
         "its key",
     )
     .map_err(|e| e.to_string())?;
-    let root_pem =
-        std::fs::read_to_string(certs::root_path(config_dir)).map_err(|e| e.to_string())?;
+    let root_pem = std::fs::read_to_string(oxplow_host_access::root_path(config_dir))
+        .map_err(|e| e.to_string())?;
     Ok((acceptor, Some(root_pem)))
 }
 

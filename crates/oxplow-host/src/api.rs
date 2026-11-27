@@ -2,6 +2,7 @@
 //! (`crate::access`):
 //!
 //! - owner only: `POST /host/pairing` (a code for a device), `GET
+//!   /host/pairing` (the code in force, or `null`), `GET
 //!   /host/devices`, `PATCH /host/devices/<id>` `{ name }`, `DELETE
 //!   /host/devices/<id>`, `POST /host/projects` `{ path }` (register a folder,
 //!   or find it registered), `POST /host/shutdown`;
@@ -102,6 +103,23 @@ struct Code {
     code: String,
     /// Seconds it is good for.
     expires_in: u64,
+    /// When it ends, in Unix milliseconds (a page shows the time).
+    expires_at: u64,
+}
+
+impl Code {
+    fn of(code: &str, ends: Instant, now: Instant) -> Code {
+        let left = ends.saturating_duration_since(now);
+        let unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        Code {
+            code: show_code(code),
+            expires_in: left.as_secs(),
+            expires_at: unix_ms + left.as_millis() as u64,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -126,7 +144,7 @@ pub fn router(cfg: ApiConfig) -> Router {
         .route("/host/projects", get(projects).post(add_project))
         .route("/host/holds", post(hold).delete(release))
         .route("/host/shutdown", post(shutdown))
-        .route("/host/pairing", post(pairing))
+        .route("/host/pairing", get(pairing_now).post(pairing))
         .route("/host/pair", post(pair))
         .route("/host/devices", get(devices))
         .route(
@@ -400,11 +418,21 @@ async fn pairing(State(s): State<ApiState>, headers: HeaderMap) -> Response {
         .unwrap_or_else(|e| e.into_inner())
         .new_code(now);
     tracing::info!("a pairing code was made");
-    Json(Code {
-        code: show_code(&code),
-        expires_in: expires.duration_since(now).as_secs(),
-    })
-    .into_response()
+    Json(Code::of(&code, expires, now)).into_response()
+}
+
+/// `GET /host/pairing`: the code in force, for the owner to show again (a
+/// page that reloads), or `null`.
+async fn pairing_now(State(s): State<ApiState>, headers: HeaderMap) -> Response {
+    check!(owner(&s, &headers));
+    let now = Instant::now();
+    let current = s
+        .access
+        .pairing
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .current(now);
+    Json(current.map(|(code, ends)| Code::of(&code, ends, now))).into_response()
 }
 
 /// Whether `headers` say a JSON body and, if they name an origin, this
@@ -612,6 +640,44 @@ mod tests {
             .send()
             .await
             .unwrap()
+    }
+
+    /// The code in force reads back for the owner (a page shows it), with
+    /// when it ends; none before one is made, and a device may not read it.
+    #[tokio::test]
+    async fn the_code_in_force_reads_back_for_the_owner() {
+        let fx = Fixture::new(RUNS);
+        let api = api(&fx).await;
+        let read = || async {
+            reqwest::Client::new()
+                .get(format!("{}/host/pairing", api.url))
+                .bearer_auth(TOKEN)
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        };
+        assert_eq!(read().await, serde_json::Value::Null);
+        let made = code(&api).await;
+        let now = read().await;
+        assert_eq!(now["code"], made);
+        let ends = now["expires_at"].as_u64().unwrap();
+        let unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!(
+            ends > unix_ms && ends <= unix_ms + 10 * 60 * 1000 + 1000,
+            "{ends} vs {unix_ms}"
+        );
+        let refused = reqwest::Client::new()
+            .get(format!("{}/host/pairing", api.url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 401);
     }
 
     /// A tablet pairs over the public listener with a code the owner made,

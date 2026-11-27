@@ -5096,6 +5096,7 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-host",
+ "oxplow-host-access",
  "oxplow-mcp",
  "oxplow-provider-fake",
  "oxplow-sdk",
@@ -5235,6 +5236,7 @@ dependencies = [
  "oxplow-app",
  "oxplow-config",
  "oxplow-domain",
+ "oxplow-host-access",
  "oxplow-unified-deps",
  "rcgen",
  "reqwest",
@@ -5254,6 +5256,20 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "oxplow-host-access"
+version = "0.9.0"
+dependencies = [
+ "if-addrs",
+ "oxplow-config",
+ "oxplow-unified-deps",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5539,6 +5555,7 @@ dependencies = [
  "oxplow-fs-watch",
  "oxplow-git",
  "oxplow-host",
+ "oxplow-host-access",
  "oxplow-oauth-redirect",
  "oxplow-rpc",
  "oxplow-sdk",

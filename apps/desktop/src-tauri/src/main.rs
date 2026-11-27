@@ -27,7 +27,7 @@ fn main() {
     init_tracing();
     // The port other devices come in on, when the command line names it.
     if let Some(port) = launch_args().device_port {
-        oxplow_host::settings::set_port_flag(port);
+        oxplow_host_access::settings::set_port_flag(port);
     }
 
     // `generate_context!` embeds the Info.plist and may expand only
@@ -252,8 +252,9 @@ fn app_args(args: impl Iterator<Item = String>) -> Result<AppArgs, String> {
             "--init" => out.init = true,
             "--device-port" => {
                 let text = it.next().ok_or("--device-port needs a port")?;
-                out.device_port =
-                    Some(oxplow_host::settings::parse_port(&text).map_err(|e| e.to_string())?);
+                out.device_port = Some(
+                    oxplow_host_access::settings::parse_port(&text).map_err(|e| e.to_string())?,
+                );
             }
             // A flag of the OS's (macOS's `-psn_…`) is no folder.
             flag if flag.starts_with('-') => {}
@@ -423,8 +424,9 @@ fn run_shell(ctx: tauri::Context) {
 /// With "Allow other devices" on, the host starts with the app, not at the
 /// first open: a tablet can reach it before any project is open here.
 fn start_host_for_other_devices(app: &tauri::AppHandle) {
-    let on = oxplow_config::global_config_dir()
-        .is_some_and(|dir| oxplow_host::settings::HostSettings::load(&dir).allow_other_devices);
+    let on = oxplow_config::global_config_dir().is_some_and(|dir| {
+        oxplow_host_access::settings::HostSettings::load(&dir).allow_other_devices
+    });
     if !on {
         return;
     }

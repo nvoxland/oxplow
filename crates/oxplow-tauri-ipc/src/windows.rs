@@ -276,7 +276,7 @@ pub struct ShellWindows {
     /// has ended (crashed).
     host: Mutex<Option<oxplow_host::client::OwnHost>>,
     /// The "Allow other devices" settings the running host started with.
-    started_with: Mutex<Option<oxplow_host::settings::HostSettings>>,
+    started_with: Mutex<Option<oxplow_host_access::settings::HostSettings>>,
     /// The global restore set, or `None` when the config dir can't be
     /// resolved (then the session simply isn't persisted).
     session: Option<oxplow_config::SessionProjects>,
@@ -443,7 +443,7 @@ impl ShellWindows {
         // "Allow other devices", as saved: a setting that cannot work is
         // said, and the host starts for this machine only.
         let settings = oxplow_config::global_config_dir()
-            .map(|dir| oxplow_host::settings::HostSettings::load(&dir))
+            .map(|dir| oxplow_host_access::settings::HostSettings::load(&dir))
             .unwrap_or_default();
         let extra = settings.serve_args().unwrap_or_else(|e| {
             tracing::warn!(error = %e, "Allow other devices is on but cannot work; this machine only");
@@ -478,7 +478,7 @@ impl ShellWindows {
 
     /// Whether the running host started with `settings` (a change applies
     /// at the next start).
-    pub fn settings_applied(&self, settings: &oxplow_host::settings::HostSettings) -> bool {
+    pub fn settings_applied(&self, settings: &oxplow_host_access::settings::HostSettings) -> bool {
         self.running_host().is_some()
             && self
                 .started_with

@@ -15,7 +15,6 @@ pub mod logging;
 pub mod proxy;
 pub mod registry;
 pub mod remote;
-pub mod settings;
 pub mod tls;
 pub mod ui;
 pub mod web;

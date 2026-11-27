@@ -228,6 +228,16 @@ impl Pairing {
         (code, expires)
     }
 
+    /// The code in force (the last to end), for the owner to show again;
+    /// none when every code ended or was used.
+    pub fn current(&self, now: Instant) -> Option<(String, Instant)> {
+        self.codes
+            .iter()
+            .filter(|(_, ends)| **ends > now)
+            .max_by_key(|(_, ends)| **ends)
+            .map(|(code, ends)| (code.clone(), *ends))
+    }
+
     /// Use `given` (any case, dashes and spaces ignored): it is good once,
     /// until it expires.
     pub fn take(&mut self, given: &str, now: Instant) -> bool {
@@ -243,6 +253,32 @@ impl Pairing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The code in force is the one that lasts longest; none once every
+    /// code ended or was used.
+    #[test]
+    fn the_code_in_force_is_the_last_to_end() {
+        let mut pairing = Pairing::default();
+        let t0 = Instant::now();
+        assert_eq!(pairing.current(t0), None);
+        let (first, _) = pairing.new_code(t0);
+        let (second, ends) = pairing.new_code(t0 + std::time::Duration::from_secs(5));
+        assert_eq!(
+            pairing.current(t0 + std::time::Duration::from_secs(6)),
+            Some((second.clone(), ends))
+        );
+        assert!(pairing.take(&second, t0 + std::time::Duration::from_secs(7)));
+        assert_eq!(
+            pairing
+                .current(t0 + std::time::Duration::from_secs(7))
+                .map(|c| c.0),
+            Some(first)
+        );
+        assert_eq!(
+            pairing.current(t0 + CODE_LIFETIME + std::time::Duration::from_secs(10)),
+            None
+        );
+    }
 
     #[test]
     fn a_paired_device_is_known_by_its_token_until_it_is_removed() {
