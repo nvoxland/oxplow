@@ -161,6 +161,17 @@ or order panels, for one).
   page as a column (`PinnedPanel`), by the device's `tablet.pinnedPanel`
   preference, until its pin is pressed again.
 
+**A tab beside the page.** A thread's session can show one tab beside the
+active one (`Session.beside`, read through `besideSlot`: none once that
+tab closes or is the active one, so no closing operation needs to know;
+kept in the stored session). The window maps it to tab ids
+(`useWindowTabs`: `centerBeside`, `setCenterBeside`; `ShellWindow`:
+`besideTabId`, `setBeside`), and `TabBodies` draws the beside body after
+the active one, both shown, under a header. The tablet offers it on a
+tab's menu (Show Beside / Stop Showing Beside) and the beside column's
+header has its name and a ×: an agent's session beside the page it shows.
+The desktop strip has no item for it yet.
+
 **Choosing the layout.** Where a choice makes sense (a device that is no
 desktop, or one that chose the tablet's), both shells offer Desktop Layout
 and Tablet Layout (`layoutItems`): the tablet's ☰ under Layout ▸, the

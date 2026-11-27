@@ -40,6 +40,8 @@ function win(over: Partial<ShellWindow> = {}): ShellWindow & { log: string[] } {
     openThreadSettings: noop,
     openNewStream: noop,
     tabs: [tab("session", { pinned: true, agentStatus: "working" }), tab("a"), tab("b")],
+    besideTabId: null,
+    setBeside: (id) => log.push(`beside ${id}`),
     activeTabId: "a",
     activateTab: (id) => log.push(`activate ${id}`),
     closeTab: (id) => log.push(`close ${id}`),
@@ -129,6 +131,25 @@ test("the menu has Continue from ▸ another device's pages", async () => {
   fireEvent.click(view.getByTestId("tablet-menu"));
   fireEvent.click(await view.findByTestId("menu-item-shell.menu.continue"));
   expect((await view.findByTestId("menu-item-continue.dev-1")).textContent).toContain("Mac");
+});
+
+// An agent's session beside the page it shows: from a tab's menu, drawn
+// beside the active tab under its name and a way to stop.
+test("a tab's menu shows it beside the page, and the beside column stops it", async () => {
+  const w = win();
+  const view = render(<TabletShell win={w} />);
+  fireEvent.contextMenu(view.getByTestId("tablet-tab-session"), { clientX: 10, clientY: 10 });
+  fireEvent.click(await view.findByTestId("menu-item-tab.beside"));
+  expect(w.log).toEqual(["beside session"]);
+  cleanup();
+  const shown = win({ besideTabId: "session" });
+  const v2 = render(<TabletShell win={shown} />);
+  expect(v2.getByTestId("center-tab-body-session").style.display).toBe("flex");
+  expect(v2.getByTestId("center-tab-body-a").style.display).toBe("flex");
+  fireEvent.click(v2.getByTestId("tablet-beside-stop"));
+  expect(shown.log).toEqual(["beside null"]);
+  fireEvent.contextMenu(v2.getByTestId("tablet-tab-session"), { clientX: 10, clientY: 10 });
+  expect((await v2.findByTestId("menu-item-tab.beside")).textContent).toContain("Stop Showing Beside");
 });
 
 // The contract: every contribution has a place in each shell, or is a

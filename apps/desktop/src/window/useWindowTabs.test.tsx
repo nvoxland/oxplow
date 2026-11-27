@@ -92,3 +92,20 @@ test("a thread whose stored tabs name a session closed elsewhere keeps its page 
     stored = [];
   }
 });
+
+// A tab beside the active one (the agent's session beside its page): by its
+// id, none for an id no tab shows, and none once it is the active tab.
+test("a tab can be shown beside the active one", () => {
+  const hook = setup(null);
+  act(() => hook.result.current.openTab(page(1)));
+  act(() => hook.result.current.openTab(page(2)));
+  act(() => hook.result.current.setCenterBeside(page(1).id));
+  expect(hook.result.current.centerBeside).toBe(page(1).id);
+  act(() => hook.result.current.setCenterActive(page(1).id));
+  expect(hook.result.current.centerBeside).toBeNull();
+  act(() => hook.result.current.setCenterBeside(page(2).id));
+  act(() => hook.result.current.setCenterBeside(null));
+  expect(hook.result.current.centerBeside).toBeNull();
+  act(() => hook.result.current.setCenterBeside("oxplow:oxplow/page?page=nope"));
+  expect(hook.result.current.centerBeside).toBeNull();
+});

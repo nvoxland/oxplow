@@ -78,6 +78,9 @@ export interface Session {
   mru: string[];
   /** The next slot's number. */
   next: number;
+  /** A tab shown beside the active one (an agent's session beside the page
+   *  it shows): its slot. Read through `besideSlot`. */
+  beside?: string | null;
 }
 
 /** The most tabs a thread keeps open; pinned tabs don't count. */
@@ -395,6 +398,24 @@ export function serializeSession(s: Session): string {
   return JSON.stringify({ ...s, tabs: s.tabs.map((t) => ({ ...t, entries: t.entries.map(storable) })) });
 }
 
+/** The tab shown beside the active one: its slot, while it is open and is
+ *  not the active tab itself (then nothing is beside: it is shown once).
+ *  Every operation that closes a tab leaves this right without knowing it. */
+export function besideSlot(s: Session): string | null {
+  const slot = s.beside ?? null;
+  return slot !== null && slot !== s.active && s.tabs.some((t) => t.slot === slot) ? slot : null;
+}
+
+/** Show tab `slot` beside the active one, or none (`null`). */
+export function setBeside(s: Session, slot: string | null): Session {
+  if ((s.beside ?? null) === slot) return s;
+  if (slot === null) {
+    const { beside: _gone, ...rest } = s;
+    return rest;
+  }
+  return { ...s, beside: slot };
+}
+
 /** A stored session, or null when the text isn't one. */
 export function parseSession(text: string): Session | null {
   let v: unknown;
@@ -410,5 +431,6 @@ export function parseSession(text: string): Session | null {
       !!t && typeof t.slot === "string" && Array.isArray(t.entries) && t.entries.length > 0 && Number.isInteger(t.at) && t.at >= 0 && t.at < t.entries.length,
   );
   const active = typeof s.active === "string" && tabs.some((t) => t.slot === s.active) ? s.active : null;
-  return { tabs, active, mru: s.mru.filter((m) => tabs.some((t) => t.slot === m)), next: s.next };
+  const beside = typeof s.beside === "string" ? { beside: s.beside } : {};
+  return { tabs, active, mru: s.mru.filter((m) => tabs.some((t) => t.slot === m)), next: s.next, ...beside };
 }

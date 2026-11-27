@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 
 import { TabVisibleContext } from "../../tabs/TabVisible.js";
 import type { WindowTab } from "../../window/windowTab.js";
@@ -13,21 +13,41 @@ import { ErrorBoundary } from "../ErrorBoundary.js";
  * the DOM reloads any frame in it (a custom component's iframe), so a
  * reorder of the strip moves none. Each body is `center-tab-body-<id>`, the
  * id every shell draws (the e2e `shown()` helper reads it).
+ *
+ * A tab shown beside the active one (`besideId`, the session's `beside`) is
+ * drawn too, after it (the parent lays the two out side by side), under
+ * `besideHeader` (its name and a way to stop).
  */
-export function TabBodies({ tabs, activeId }: { tabs: readonly WindowTab[]; activeId: string | null }) {
+export function TabBodies({
+  tabs,
+  activeId,
+  besideId = null,
+  besideHeader,
+}: {
+  tabs: readonly WindowTab[];
+  activeId: string | null;
+  besideId?: string | null;
+  besideHeader?: ReactNode;
+}) {
   const shownKeys = useRef(new Set<string>());
   const active = tabs.find((t) => t.id === activeId) ?? null;
+  const beside = besideId !== null && besideId !== active?.id ? (tabs.find((t) => t.id === besideId) ?? null) : null;
   if (active) shownKeys.current.add(byKey(active));
+  if (beside) shownKeys.current.add(byKey(beside));
   return (
     <>
       {[...tabs].sort((a, b) => byKey(a).localeCompare(byKey(b))).map((tab) => {
         const isActive = tab.id === active?.id;
-        if (!isActive && !shownKeys.current.has(byKey(tab))) return null;
+        const isBeside = tab.id === beside?.id;
+        const isShown = isActive || isBeside;
+        if (!isShown && !shownKeys.current.has(byKey(tab))) return null;
         return (
           <div
             key={byKey(tab)}
             style={{
-              display: isActive ? "flex" : "none",
+              display: isShown ? "flex" : "none",
+              order: isBeside ? 2 : 1,
+              ...(isBeside ? { borderLeft: "1px solid var(--border-strong)" } : null),
               flex: 1,
               minHeight: 0,
               minWidth: 0,
@@ -36,10 +56,12 @@ export function TabBodies({ tabs, activeId }: { tabs: readonly WindowTab[]; acti
               position: "relative",
             }}
             data-testid={`center-tab-body-${tab.id}`}
-            aria-hidden={!isActive}
+            aria-hidden={!isShown}
+            data-beside={isBeside ? "" : undefined}
           >
+            {isBeside ? besideHeader : null}
             <ErrorBoundary label={tab.label}>
-              <TabVisibleContext.Provider value={isActive}>{tab.render()}</TabVisibleContext.Provider>
+              <TabVisibleContext.Provider value={isShown}>{tab.render()}</TabVisibleContext.Provider>
             </ErrorBoundary>
           </div>
         );

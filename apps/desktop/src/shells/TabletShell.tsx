@@ -67,6 +67,9 @@ export function TabletShell({ win, host: given }: { win: ShellWindow; host?: Swi
   // Other threads whose agent waits on the person: the switcher shows which.
   const waitingElsewhere = Object.entries(win.agentStatuses).filter(([id, status]) => status === "awaiting" && id !== win.selectedThread?.id).length;
   const active = win.tabs.find((t) => t.id === win.activeTabId) ?? shown[0] ?? null;
+  // The tab shown beside the active one, if any (never the active itself).
+  const besideId = win.besideTabId !== null && win.besideTabId !== active?.id ? win.besideTabId : null;
+  const beside = besideId ? (win.tabs.find((t) => t.id === besideId) ?? null) : null;
   const bulkClosable = shown.map((t) => ({ id: t.id, closable: t.closable && !t.pinned }));
   return (
     <div data-testid="tablet-shell" data-dock-column="" style={frame}>
@@ -87,7 +90,15 @@ export function TabletShell({ win, host: given }: { win: ShellWindow; host?: Swi
               key={tab.id}
               tab={tab}
               active={tab.id === active?.id}
-              menu={() => withMoves(buildTabMenu({ tab, bulkClosable, activeId: active?.id ?? "", onClose: win.closeTab, onActivate: win.activateTab }), tab, shown, win.reorderTabs)}
+              menu={() =>
+                withBeside(
+                  withMoves(buildTabMenu({ tab, bulkClosable, activeId: active?.id ?? "", onClose: win.closeTab, onActivate: win.activateTab }), tab, shown, win.reorderTabs),
+                  tab,
+                  besideId,
+                  active?.id ?? null,
+                  win.setBeside,
+                )
+              }
               onActivate={() => win.activateTab(tab.id)}
               onClose={() => win.closeTab(tab.id)}
             />
@@ -118,9 +129,24 @@ export function TabletShell({ win, host: given }: { win: ShellWindow; host?: Swi
         </button>
       </div>
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <div style={pageArea}>
+        <div style={{ ...pageArea, ...(beside ? { flexDirection: "row" } : null) }}>
           {/* Per stream: its threads' tab keys repeat across streams. */}
-          <TabBodies key={win.stream?.id ?? ""} tabs={win.tabs} activeId={active?.id ?? null} />
+          <TabBodies
+            key={win.stream?.id ?? ""}
+            tabs={win.tabs}
+            activeId={active?.id ?? null}
+            besideId={besideId}
+            besideHeader={
+              beside ? (
+                <div data-testid="tablet-beside-head" style={besideHead}>
+                  <span style={{ ...tabLabel, flex: 1 }}>{beside.label}</span>
+                  <button type="button" className="ox-icon-button" aria-label={`Stop showing ${beside.label} beside`} data-testid="tablet-beside-stop" onClick={() => win.setBeside(null)}>
+                    <X size={14} aria-hidden />
+                  </button>
+                </div>
+              ) : null
+            }
+          />
           {win.gitDialogs}
         </div>
         {win.aside}
@@ -144,6 +170,27 @@ export function TabletShell({ win, host: given }: { win: ShellWindow; host?: Swi
       {commands.menu}
     </div>
   );
+}
+
+/** Show Beside: the tab beside the page shown (an agent's session beside
+ *  what it shows, the two read at once); on the tab already beside, Stop
+ *  Showing Beside. */
+function withBeside(
+  items: MenuItem[] | Promise<MenuItem[]>,
+  tab: WindowTab,
+  besideId: string | null,
+  activeId: string | null,
+  setBeside: (id: string | null) => void,
+): MenuItem[] | Promise<MenuItem[]> {
+  const isBeside = tab.id === besideId;
+  const item: MenuItem = {
+    id: "tab.beside",
+    label: isBeside ? "Stop Showing Beside" : "Show Beside",
+    // The shown tab is beside nothing but itself.
+    enabled: isBeside || tab.id !== activeId,
+    run: () => setBeside(isBeside ? null : tab.id),
+  };
+  return items instanceof Promise ? items.then((list) => [item, ...list]) : [item, ...items];
 }
 
 /** A finger cannot drag a tab: its menu moves it a place left or right
@@ -251,5 +298,16 @@ const tabStyle: CSSProperties = {
 };
 const activeTab: CSSProperties = { background: "var(--surface-app)", color: "var(--text-primary)" };
 const tabLabel: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const besideHead: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  minHeight: "var(--hit-min)",
+  padding: "0 var(--space-2)",
+  borderBottom: "1px solid var(--border-strong)",
+  color: "var(--text-secondary)",
+  fontSize: "var(--text-sm)",
+  flexShrink: 0,
+};
 const pageArea: CSSProperties = { flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative", background: "var(--surface-app)" };
 const trayLine: CSSProperties = { flexShrink: 0, borderTop: "1px solid var(--border-strong)" };

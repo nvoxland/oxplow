@@ -37,6 +37,8 @@ function win(log: string[]): ShellWindow {
     openNewStream: say("new stream"),
     tabs: [],
     activeTabId: null,
+    besideTabId: null,
+    setBeside: say("beside"),
     activateTab: say("activate"),
     closeTab: say("close"),
     reorderTabs: say("order"),

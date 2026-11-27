@@ -37,6 +37,10 @@ export interface ShellWindow {
   /** The shown thread's tabs, agent sessions first. */
   tabs: WindowTab[];
   activeTabId: string | null;
+  /** The tab shown beside the active one (an agent's session beside the
+   *  page it shows), or none; `setBeside` chooses it (`null`: none). */
+  besideTabId: string | null;
+  setBeside(id: string | null): void;
   activateTab(id: string): void;
   closeTab(id: string): void;
   /** The strip's new order (every tab id), as the desktop strip's drag gives it. */

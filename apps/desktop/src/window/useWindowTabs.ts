@@ -22,6 +22,8 @@ import {
   open as sessionOpen,
   refsOf,
   reorder as sessionReorder,
+  besideSlot,
+  setBeside,
   setStrip,
   slotShowing,
   stepOrigin,
@@ -149,6 +151,23 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
         if (id === HOME_TAB) return activate(session, null);
         const slot = slotShowing(session, id);
         return slot ? activate(session, slot) : session;
+      });
+    },
+    [selectedThreadId, updateSession],
+  );
+  // The tab shown beside the active one in the shown thread, by page id.
+  const shownSession = selectedThreadId ? sessions[selectedThreadId] : undefined;
+  const besideTab = shownSession ? shownSession.tabs.find((t) => t.slot === besideSlot(shownSession)) : undefined;
+  const centerBeside = besideTab ? currentEntry(besideTab).ref.id : null;
+  /** Show the tab showing `id` beside the active one (`null`: none). An id
+   *  no tab shows changes nothing. */
+  const setCenterBeside = useCallback(
+    (id: string | null) => {
+      if (!selectedThreadId) return;
+      updateSession(selectedThreadId, (session) => {
+        if (id === null) return setBeside(session, null);
+        const slot = slotShowing(session, id);
+        return slot ? setBeside(session, slot) : session;
       });
     },
     [selectedThreadId, updateSession],
@@ -312,6 +331,8 @@ export function useWindowTabs({ selectedThreadId, stream, threadStates, selected
     effectiveCenterActive,
     shownFilePath,
     setCenterActive,
+    centerBeside,
+    setCenterBeside,
     openTab,
     pendingSessionRef,
     setPendingSessionTick,
