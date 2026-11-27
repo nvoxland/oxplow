@@ -1650,7 +1650,7 @@ commands:
     example: {"uri": "oxplow:oxplow/knowledge?id=architecture&store=oxwiki", "path": "src/app/main.py"}
   # search.read
   - name: search.find
-    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (knowledge pages etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
+    summary: "Site-wide search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, pages, commands, an extension's) and a stream's files, by name and by contents, ranked on one scale: a hit whose name is the query or starts with it first, then one whose name or title holds each word, then one whose body does (BM25). Each hit's `tier` says which (0 exact … 5 body only). Only files belong to a stream: `stream_id` keeps that worktree's files, and every other hit is found whatever stream it is in; omit it for every stream's files. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
     scope: search.read
     op: search
     tool: search
