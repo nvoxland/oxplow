@@ -5,6 +5,7 @@
 /// and nothing about a session. What the person types comes out through
 /// `onData` / `onBinary`, a fit through `onResize`; `onOpened` hands the
 /// opened terminal to whoever writes to it (`useTerminalSession`).
+import { installTouchScroll, wheelAction } from "./touchScroll.js";
 import { useCallback, useEffect, useRef, type MouseEvent } from "react";
 import { gridFontSize, gridScale, type Grid } from "../components/terminalSession.js";
 import { Terminal } from "@xterm/xterm";
@@ -380,6 +381,39 @@ export function TerminalSurface({
     };
     host.addEventListener("mousemove", keepSelection, true);
     host.addEventListener("mousedown", keepSelection, true);
+    // A finger's drag scrolls as a wheel does (`touchScroll.ts`).
+    // xterm takes a wheel only from the pointer, so this does what its wheel
+    // does in each mode (`wheelAction`).
+    const cellSize = () => {
+      const screen = host.querySelector<HTMLElement>(".xterm-screen");
+      const box = screen?.getBoundingClientRect();
+      return box && term.rows > 0 && term.cols > 0 ? { box, width: box.width / term.cols, height: box.height / term.rows } : null;
+    };
+    const stopTouchScroll = installTouchScroll(
+      host,
+      () => cellSize()?.height ?? 0,
+      (lines, point) => {
+        const cell = cellSize();
+        const at = cell
+          ? {
+              col: Math.min(term.cols - 1, Math.max(0, Math.floor((point.x - cell.box.left) / cell.width))),
+              row: Math.min(term.rows - 1, Math.max(0, Math.floor((point.y - cell.box.top) / cell.height))),
+            }
+          : { col: 0, row: 0 };
+        const action = wheelAction(
+          {
+            mouse: term.modes.mouseTrackingMode !== "none",
+            alternate: term.buffer.active.type === "alternate",
+            applicationCursor: term.modes.applicationCursorKeysMode,
+          },
+          lines,
+          at,
+        );
+        // A scroll is no typing: it never takes the terminal's size.
+        if ("scroll" in action) term.scrollLines(action.scroll);
+        else props.current.onData(action.send, false);
+      },
+    );
     const stopKeeping = () => {
       host.removeEventListener("mousemove", keepSelection, true);
       host.removeEventListener("mousedown", keepSelection, true);
@@ -467,6 +501,7 @@ export function TerminalSurface({
       disposed = true;
       cleanups.forEach((c) => c());
       stopKeeping();
+      stopTouchScroll();
       stopTyping();
       ro?.disconnect();
       dataDisp.dispose();

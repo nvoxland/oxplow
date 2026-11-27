@@ -470,9 +470,20 @@ arrows). So while the main pointer is coarse (`useCoarsePointer`,
   composes waits in the input until they send it. In the field Enter adds a
   line, Cmd/Ctrl+Enter inserts, Escape cancels.
 
-Locked by `touchKeys.test.ts`, `TerminalTouchBar.test.tsx` and the e2e
-`agent/terminal-touch.spec.ts` (a touch context: Up recalls history, Ctrl
-then c interrupts, Compose inserts without Enter; a mouse gets no bar).
+**A finger scrolls.** A one-finger drag over the terminal is whole lines of
+wheel (`terminal/touchScroll.ts`: `touchScrollStep` keeps the part of a
+line left over), and does what xterm does with a wheel in each mode
+(`wheelAction`), since xterm takes a wheel only from a real pointer: a
+shell scrolls its scrollback (`term.scrollLines`), an alternate screen
+with no mouse gets the arrows (in its cursor-key mode), and a program that
+took the mouse gets SGR wheel reports (`ESC [ < 64|65 ; col ; row M`, as
+Claude Code asks for) at the finger's cell. A scroll is not typing: it never
+takes the terminal's size. The page does not scroll under the drag.
+
+Locked by `touchKeys.test.ts`, `touchScroll.test.ts`,
+`TerminalTouchBar.test.tsx` and the e2e `agent/terminal-touch.spec.ts` (a
+touch context: Up recalls history, Ctrl then c interrupts, Compose inserts
+without Enter, a swipe scrolls a shell back; a mouse gets no bar).
 
 ## When a session ends or goes away
 
