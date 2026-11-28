@@ -49,6 +49,36 @@ The Devices page also lists the paired devices and which are connected:
 **Rename…** one, or **Remove** it (it must pair again). It works from the
 tablet too.
 
+## Several devices at once
+
+Every device sees the same streams, threads, agents, terminals and tasks.
+Each device keeps its own place: the stream and thread it shows, its tabs
+of each thread, its panel layout, its preferences and its recent pages. So
+the tablet can watch an agent's thread while the Mac edits in another.
+
+- **Terminals are shared.** The device that types into a terminal sets
+  its size. Another device shows it at that size, in a smaller font if it
+  has less room, with a **Sized for another device** chip; **Fit to this
+  device** takes the size over.
+- **One window per device.** A device has one window for each project.
+  Opening the project in a second browser tab moves it there: the first
+  tab says Oxplow is open in another tab, and **Use it here** takes it
+  back. Two browsers, or two addresses of the same Mac, count as two
+  devices.
+- **Continue from another device.** On the tablet layout, the ☰ menu's
+  **Continue from** lists the other devices' tabs of the thread you show,
+  and opens one here.
+- **Agents open pages where you are.** An agent shows a page on the device
+  you used last, or on the one you name ("show it on the iPad"). A device
+  that is away gets the tab when it comes back.
+
+On a tablet or phone, **View ▸ Tablet Layout** draws Oxplow for touch:
+the stream, thread and tabs on one line at the top, the page at full
+width, the panels in a tray at the bottom. **View ▸ Desktop Layout** goes
+back. On a touch screen a long press is a right-click, a terminal has a
+bar with the keys an on-screen keyboard lacks (Esc, Tab, Shift+Tab, Ctrl,
+the arrows), and the code editor has selection keys under it.
+
 ## Run Oxplow on a server
 
 On the server (an EC2 box, a homelab machine), with a project that is
