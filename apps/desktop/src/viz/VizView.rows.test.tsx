@@ -429,6 +429,24 @@ test("a link to a ref of any kind opens through the page's openRef", () => {
   ]);
 });
 
+// A page row's right-click is its menu, on its link too: the link opens
+// nothing then (a new tab would hide the page the menu is on).
+test("a right-click on a row's link opens the row's menu and nothing else", async () => {
+  const opened: unknown[] = [];
+  const nav = {
+    navigate: () => {},
+    openRef: (ref: string, how?: { newTab?: boolean }) => opened.push([ref, how?.newTab]),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <VizView run={runOf(grouped)} compact />
+    </PageNavigationContext.Provider>,
+  );
+  fireEvent.contextMenu(view.getByTestId("viz-row-2").querySelector("button")!);
+  await waitFor(() => view.getByTestId("menu-item-add-row-to-context"));
+  expect(opened).toEqual([]);
+});
+
 test("a highlighted column marks its param's value in the cell, as elements", () => {
   const run = {
     ...runOf({ columns: [{ key: "title", label: null, link: null, unit: null, highlight: "filter" }], params: [{ name: "filter", label: null, default: null, options: [] }] }),

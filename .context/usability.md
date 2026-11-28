@@ -625,7 +625,10 @@ supports the browser conventions: **Cmd/Ctrl-click or middle-click opens
 it in a new tab**, plain click navigates in place. The right-click menu
 carries the same pair (Open / Open in new tab) so the gesture is
 discoverable without knowing the modifier. Opening it outside oxplow
-is the menu's Open In ▸ (below).
+is the menu's Open In ▸ (below). A link inside a page's row leaves the
+right-click to the row: the row's menu opens and the link opens nothing
+(`RouteLink`'s `inRowMenu`), or a new tab would hide the page the menu
+is on.
 
 The rule that keeps this honest: every page-bearing link resolves
 through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call

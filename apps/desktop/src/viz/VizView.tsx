@@ -720,7 +720,8 @@ function RowsBody({
     const ref = c.link && raw !== null ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     const mine = ref ? badges.filter((b) => b.ref === linkTargetId(ref)) : [];
     const body = ref ? (
-      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} origin={origins.get(c.key)?.(row)} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
+      // Every cell is in a row (or a detail) whose right-click is its menu.
+      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} origin={origins.get(c.key)?.(row)} style={tone ? { ...linkStyle, color: tone } : linkStyle} inRowMenu>
         {text}
       </RouteLink>
     ) : (
@@ -2078,7 +2079,7 @@ function TimelineViz({
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>
             <div>
               {ref ? (
-                <RouteLink to={ref} style={linkStyle}>
+                <RouteLink to={ref} style={linkStyle} inRowMenu>
                   {e.label}
                 </RouteLink>
               ) : (

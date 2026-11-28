@@ -132,6 +132,9 @@ export interface RouteLinkProps {
   ariaLabel?: string;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
+  /** The link sits in a row whose right-click is its menu (a page's row):
+   *  the right-click is the row's, and the link opens nothing then. */
+  inRowMenu?: boolean;
 }
 
 /**
@@ -139,7 +142,8 @@ export interface RouteLinkProps {
  *  - Left-click → in-tab navigation (or new tab when `pinnedSlot`)
  *  - Cmd/Ctrl-click, middle-click → new tab
  *  - Right-click → today: also new tab (popover menu lives in
- *    Phase 1.5; this stub keeps the contract consistent)
+ *    Phase 1.5; this stub keeps the contract consistent), except in a
+ *    row with its own menu (`inRowMenu`): that menu opens instead
  *
  * Outside a `PageNavigationContext` provider, `onNavigate` MUST be
  * supplied — there's no current tab to navigate within.
@@ -157,6 +161,7 @@ export function RouteLink({
   ariaLabel,
   draggable,
   onDragStart,
+  inRowMenu = false,
 }: RouteLinkProps) {
   const { handlers } = useRouteDispatch(to, { onNavigate, pinnedSlot, origin });
   return (
@@ -169,7 +174,7 @@ export function RouteLink({
       onDragStart={onDragStart}
       onClick={handlers.onClick}
       onAuxClick={handlers.onAuxClick}
-      onContextMenu={handlers.onContextMenu}
+      onContextMenu={inRowMenu ? undefined : handlers.onContextMenu}
       className={className}
       style={style}
     >
