@@ -88,17 +88,21 @@ const BUNDLE_EXTENSIONS: &[&str] = &[
 
 /// Whether `ext` (lower case) is a program's.
 fn is_program_extension(ext: &str) -> bool {
-    if PROGRAM_EXTENSIONS.contains(&ext) {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        if let Ok(list) = std::env::var("PATHEXT") {
-            return list
-                .split(';')
-                .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(ext));
-        }
-    }
+    PROGRAM_EXTENSIONS.contains(&ext) || in_pathext(ext)
+}
+
+/// Whether Windows runs `ext` as a program (`PATHEXT`).
+#[cfg(windows)]
+fn in_pathext(ext: &str) -> bool {
+    std::env::var("PATHEXT").is_ok_and(|list| {
+        list.split(';')
+            .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(ext))
+    })
+}
+
+/// No `PATHEXT` off Windows.
+#[cfg(not(windows))]
+fn in_pathext(_ext: &str) -> bool {
     false
 }
 
