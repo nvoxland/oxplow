@@ -638,13 +638,15 @@ const badgeStyle: CSSProperties = {
   borderRadius: 999,
 };
 
-/** A path that, when too long, loses the middle of its folders and keeps the file name. */
+/** A path that, when too long, loses its folders first, then the end of its file name: never drawn past its box. */
 function FilePath({ path }: { path: string }) {
   const cut = path.lastIndexOf("/") + 1;
   return (
-    <span style={{ flex: 1, minWidth: 0, display: "flex" }} title={path}>
+    <span style={{ flex: 1, minWidth: 0, display: "flex", overflow: "hidden" }} title={path}>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{path.slice(0, cut)}</span>
-      <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{path.slice(cut)}</span>
+      {/* The folders go first; a name longer than the room is cut too,
+          never drawn over what follows it. */}
+      <span style={{ flexShrink: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path.slice(cut)}</span>
     </span>
   );
 }
