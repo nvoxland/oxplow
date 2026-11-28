@@ -1593,8 +1593,9 @@ The launcher does everything in one box:
   title, then body. Commands are the bus's offers (`commandOffers`,
   passed in as `offers`) that can run now (`searchableCommands`); the same
   offers feed the menu bar (`menuBar.ts`). A command hit whose offer
-  can't run here is left out. Each row shows its kind's icon and name
-  (`pageKindIconComponent` / `pageKindLabel`); a hit is a ref, opened
+  can't run here is left out. Each row leads with its kind's icon
+  (`pageKindIconComponent`) and ends in no kind word: a content hit's
+  kind name (`pageKindLabel`) is its icon's hover text; a hit is a ref, opened
   through the ref opener (`openSearchHit` → `openRef` →
   `tabs/refOpener.ts`), which may select a thread or switch stream. How
   hits become rows is a pure helper — `buildQuickOpenResults` in

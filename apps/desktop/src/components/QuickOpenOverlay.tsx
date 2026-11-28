@@ -429,7 +429,6 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     {result.entry.badge ? (
                       <span style={badgeStyle}>{result.entry.badge}</span>
                     ) : null}
-                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>page</span>
                   </button>
                 );
               }
@@ -457,7 +456,6 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     {result.entry.shortcut ? (
                       <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)", fontFamily: "ui-monospace, monospace" }}>{formatShortcut(result.entry.shortcut)}</span>
                     ) : null}
-                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>command</span>
                   </button>
                 );
               }
@@ -474,7 +472,8 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                       background: active ? "var(--accent-soft-bg)" : "transparent",
                     }}
                   >
-                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
+                    {/* The icon says what it is; its word is the hover text. */}
+                    <span title={pageKindLabel(shortResource(result.hit.resource))} style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
                       <PageKindIcon kind={shortResource(result.hit.resource)} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -491,7 +490,6 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                         ),
                       )}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
                   </button>
                 );
               }

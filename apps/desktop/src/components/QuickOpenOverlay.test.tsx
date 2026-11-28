@@ -169,6 +169,8 @@ test("↑/↓ and Enter work from the input, and the input names the row under t
   // Enter on the collapsed section opens it; the page row appears.
   fireEvent.keyDown(input, { key: "Enter" });
   expect(view.getByTestId("launcher-page-oxplow:oxplow/page?page=tasks")).toBeTruthy();
+  // Its icon says it is a page: no "page" word at its end.
+  expect(view.getByTestId("launcher-page-oxplow:oxplow/page?page=tasks").textContent).not.toMatch(/page$/);
   fireEvent.keyDown(input, { key: "ArrowDown" });
   fireEvent.keyDown(input, { key: "ArrowDown" });
   const active = input.getAttribute("aria-activedescendant");

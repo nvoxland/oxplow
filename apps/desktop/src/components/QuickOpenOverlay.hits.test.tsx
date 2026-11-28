@@ -41,7 +41,9 @@ const { QuickOpenOverlay } = await import("./QuickOpenOverlay.js");
 
 afterEach(cleanup);
 
-test("each hit row shows its kind's icon and label", async () => {
+// The icon says what a row is; its word is the icon's hover text, never a
+// label at the row's end.
+test("each hit row shows its kind's icon, named by its hover text", async () => {
   const view = render(
     <QuickOpenOverlay
       open
@@ -59,7 +61,8 @@ test("each hit row shows its kind's icon and label", async () => {
   for (const [kind, label] of KINDS) {
     const row = await waitFor(() => view.getByTestId(`launcher-hit-oxplow:oxplow/${kind}?id=x1`));
     expect(row.querySelector("svg"), `${kind} icon`).not.toBeNull();
-    expect(row.textContent, kind).toContain(`found it${label}`);
+    expect(row.querySelector(`[title="${label}"]`), `${kind} hover text`).not.toBeNull();
+    expect(row.textContent, kind).toMatch(/found it$/);
   }
 });
 
