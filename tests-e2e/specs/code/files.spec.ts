@@ -9,8 +9,8 @@ import { open, shown } from "../../support/ui.js";
 test("New File… from a file's menu opens the new file in the Editor", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
   await open(page, daemon, "oxplow:oxplow/page?page=files");
-  // A page row's menu is its ☰ ("Actions"); a right-click opens nothing.
-  await page.locator('[data-testid="viz-tree-row"]:visible').filter({ hasText: "emu.txt" }).getByRole("button", { name: "Actions" }).click();
+  // A tree row has no ☰: its menu opens on a right-click.
+  await shown(page).getByTestId("page-file").getByRole("button", { name: "emu.txt" }).filter({ visible: true }).click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-new-file").click();
   const field = page.getByTestId("viz-action-form-fields-path");
   await field.fill("kiwi.txt");
