@@ -17,7 +17,9 @@ An extension with an **external provider** (`providers:` — a program that
    check its `stat`, `read`, `list` and `write` through the examples).
    A `resources:` entry may add `searchable: <model>` (a model of yours
    with `uri`, `title`, `body`): its rows are then found by the launcher's
-   search and open on the resource's renderer.
+   search and open on the resource's renderer. Add a `name` column when
+   what a person types for a row isn't its title (the title is longer):
+   a query that is or starts the name ranks first.
    An effect's `on:` (and a collector's `on: [...]`) may
    name another extension's event type (`acme_pr.merged`): `check` warns,
    and the extension shows an error while no enabled extension registers
