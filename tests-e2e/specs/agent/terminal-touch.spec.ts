@@ -15,17 +15,15 @@ test("the touch bar sends the keys a touch keyboard lacks", async ({ browser, ba
     await terminal.click();
     const rows = page.locator(".xterm-rows");
 
-    // Up recalls the last line from the shell's history.
-    await page.keyboard.type("echo recalled-$((6*7))");
+    // Up sends the arrow's keys: `cat -v` shows them as ^[[A (whatever the
+    // shell: CI's /bin/sh keeps no line history to recall).
+    await page.keyboard.type("cat -v");
     await page.keyboard.press("Enter");
-    await expect(rows).toContainText("recalled-42");
     await page.getByTestId("terminal-key-up").tap();
     await page.keyboard.press("Enter");
-    await expect.poll(async () => ((await rows.textContent()) ?? "").split("recalled-42").length - 1).toBeGreaterThanOrEqual(2);
+    await expect(rows).toContainText("^[[A");
 
-    // Ctrl, then c, interrupts a running command.
-    await page.keyboard.type("sleep 30");
-    await page.keyboard.press("Enter");
+    // Ctrl, then c, interrupts the running command.
     await page.getByTestId("terminal-key-ctrl").tap();
     await expect(page.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "true");
     await page.keyboard.type("c");
