@@ -111,13 +111,18 @@ schemars = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 
 # DB
+# rusqlite, r2d2_sqlite and refinery move together. Held at 0.39: refinery 0.10
+# takes rusqlite <= 0.41 and r2d2_sqlite 0.37 needs 0.42, and from 0.41 the
+# hooks (authorizer, preupdate/commit hooks, busy handler) take `&mut
+# Connection`, which a read guard installed inside a borrowed transaction
+# (`ReadSession`, `Database::read`) can't give.
 rusqlite = { version = "0.39", features = ["bundled", "time", "uuid", "serde_json", "hooks", "preupdate_hook", "backup", "functions", "limits"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.34"
 refinery = { version = "0.9", features = ["rusqlite"] }
 
 # Filesystem
-notify = "8.2"
+notify = "9.0"
 tempfile = "3.27"
 ignore = "0.4"
 globset = "0.4"
@@ -135,7 +140,7 @@ bytes = "1.12"
 # HTTP / archive (LSP installer)
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 flate2 = "1.1"
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.9", default-features = false, features = ["deflate"] }
 tar = "0.4"
 sha2 = "0.11"
 hex = "0.4"
@@ -165,7 +170,7 @@ tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
-tree-sitter-c-sharp = "0.23"
+tree-sitter-c-sharp = "0.24"
 
 # Internal
 oxplow-domain = { path = "crates/oxplow-domain" }

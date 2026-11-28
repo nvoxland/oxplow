@@ -2146,9 +2146,9 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
-version = "0.19.2"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912"
+checksum = "0a2e16b9a584b602f1e0e5e22c30ca0906786088c27500653e432d086def8b53"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -3738,15 +3738,15 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.58.6"
+version = "0.63.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f622c574a29fb3034a0a90645afee194dfedc75fc124228801b6e77041075bd1"
+checksum = "b0802aebc749a4ef12e76aee083622b100249be0dc6d2103d84bbb2f7936a1ae"
 dependencies = [
  "ahash",
  "bytecount",
  "data-encoding",
  "email_address",
- "fancy-regex 0.19.2",
+ "fancy-regex 0.20.2",
  "fraction",
  "getrandom 0.3.4",
  "itoa",
@@ -3766,23 +3766,24 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.58.6"
+version = "0.63.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a968fffd387b2ab005bf00c1851f5d26e90df05b6f7ad609ed0d620033cca5e7"
+checksum = "ba1527289dfcb1400df61b5c591218e8e30031376671f611faecb5b9a1ff4987"
 dependencies = [
  "regex-syntax",
 ]
 
 [[package]]
 name = "jsonschema-value"
-version = "0.58.6"
+version = "0.63.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39b7670345e5ce87371339d13705dbb9276b7e3e934bbe1efa2c6734a1f65a96"
+checksum = "a95285ab129d630f01cf2f1345c28662116340fac1a35eb0795e5dbbf0ef990d"
 dependencies = [
  "ahash",
  "bytecount",
  "fraction",
  "getrandom 0.3.4",
+ "memchr",
  "num-cmp",
  "num-traits",
  "serde_json",
@@ -4351,9 +4352,9 @@ dependencies = [
 
 [[package]]
 name = "notify"
-version = "8.2.2"
+version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab"
+checksum = "5482d5bd11b91a337521980e5d52fe115bdccfb4c217099daaf0abd69159dc4e"
 dependencies = [
  "bitflags 2.13.2",
  "inotify",
@@ -4366,6 +4367,7 @@ dependencies = [
  "objc2-core-services",
  "walkdir",
  "windows-sys 0.61.2",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -4974,7 +4976,7 @@ dependencies = [
  "oxplow-script",
  "oxplow-session",
  "oxplow-unified-deps",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "proptest",
  "prost",
  "rand 0.10.4",
@@ -4990,7 +4992,7 @@ dependencies = [
  "similar",
  "specta",
  "specta-typescript",
- "syn 2.0.119",
+ "syn 3.0.10",
  "tempfile",
  "thiserror 2.0.21",
  "time",
@@ -5089,7 +5091,7 @@ dependencies = [
  "oxplow-provider-fake",
  "oxplow-runtime",
  "oxplow-unified-deps",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "prost",
  "reqwest",
  "rmcp",
@@ -5395,7 +5397,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
- "zip 8.6.0",
+ "zip",
 ]
 
 [[package]]
@@ -5429,7 +5431,7 @@ name = "oxplow-oauth-redirect"
 version = "0.9.0"
 dependencies = [
  "oxplow-unified-deps",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "reqwest",
  "tokio",
 ]
@@ -5441,7 +5443,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "oxplow-unified-deps",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "reqwest",
  "serde_json",
  "sha2 0.11.2",
@@ -5649,7 +5651,7 @@ dependencies = [
  "oxplow-rpc",
  "oxplow-session",
  "oxplow-unified-deps",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "serde",
  "serde_json",
  "similar",
@@ -5682,6 +5684,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "cc",
+ "constant_time_eq",
  "cranelift-bitset",
  "crc32fast",
  "crossbeam-utils",
@@ -5777,6 +5780,7 @@ dependencies = [
  "wasmtime-internal-core",
  "winnow 1.0.5",
  "zerocopy",
+ "zeroize",
 ]
 
 [[package]]
@@ -6635,9 +6639,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.58.6"
+version = "0.63.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "558f3855529c0a7e78a48e409fa653456e55f1b167eab4109c16a255b7727e3f"
+checksum = "858eb92e3a3c1d120695a04d5c6e8861915ee4394b8f77c90adbf686d6ddbf6e"
 dependencies = [
  "ahash",
  "fluent-uri 0.4.1",
@@ -8651,7 +8655,7 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.61.2",
- "zip 9.9.0",
+ "zip",
 ]
 
 [[package]]
@@ -9320,9 +9324,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-c-sharp"
-version = "0.23.5"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1aac67f1ad71de1d6d39708d34811081c26dfa495658de6c14c34200849357c"
+checksum = "54b3cdb7aeae9018e60908aa18937708de29338c83ecf3701de534b23d365c30"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -9486,12 +9490,6 @@ name = "typed-arena"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
-
-[[package]]
-name = "typed-path"
-version = "0.12.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54ec2755506471f54baf5e4bb5499d8e510cc1caf271270e778a736bd2d7336c"
 
 [[package]]
 name = "typed-path"
@@ -11090,34 +11088,22 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "8.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
-dependencies = [
- "crc32fast",
- "flate2",
- "indexmap 2.14.2",
- "memchr",
- "typed-path 0.12.4",
- "zopfli",
-]
-
-[[package]]
-name = "zip"
 version = "9.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07db37dec4a7c468df4723fba4cadb4822d1d0f10dbea367100b6a6881b2a9c9"
 dependencies = [
  "constant_time_eq",
  "crc32fast",
+ "flate2",
  "getrandom 0.4.3",
  "indexmap 2.14.2",
  "libc",
  "memchr",
  "nix 0.32.0",
- "typed-path 0.13.0",
+ "typed-path",
  "windows-sys 0.61.2",
  "zeroize",
+ "zopfli",
 ]
 
 [[package]]

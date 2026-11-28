@@ -23,6 +23,7 @@ bstr = { version = "1", default-features = false, features = ["std", "unicode"] 
 bumpalo = { version = "3", features = ["allocator-api2"] }
 byteorder = { version = "1" }
 bytes = { version = "1" }
+constant_time_eq = { version = "0.6" }
 cranelift-bitset = { version = "0.135", default-features = false, features = ["enable-serde"] }
 crc32fast = { version = "1" }
 crossbeam-utils = { version = "0.8" }
@@ -88,7 +89,7 @@ slab = { version = "0.4", default-features = false, features = ["std"] }
 smallvec = { version = "1", default-features = false, features = ["const_new", "serde", "union"] }
 specta = { version = "2.0.0-rc.25", features = ["derive", "function", "serde_json", "time"] }
 stable_deref_trait = { version = "1" }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 sync_wrapper = { version = "1", default-features = false, features = ["futures"] }
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"] }
 tokio = { version = "1", features = ["full", "test-util"] }
@@ -99,6 +100,7 @@ typenum = { version = "1", default-features = false, features = ["const-generics
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4", "v7"] }
 wasmtime-internal-core = { version = "48", default-features = false, features = ["serde", "std"] }
+zeroize = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 Inflector = { version = "0.11" }
@@ -111,6 +113,7 @@ bumpalo = { version = "3", features = ["allocator-api2"] }
 byteorder = { version = "1" }
 bytes = { version = "1" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+constant_time_eq = { version = "0.6" }
 cranelift-bitset = { version = "0.135", default-features = false, features = ["enable-serde"] }
 crc32fast = { version = "1" }
 crossbeam-utils = { version = "0.8" }
@@ -190,6 +193,7 @@ typenum = { version = "1", default-features = false, features = ["const-generics
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4", "v7"] }
 wasmtime-internal-core = { version = "48", default-features = false, features = ["serde", "std"] }
+zeroize = { version = "1", features = ["derive"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
@@ -234,7 +238,6 @@ nix = { version = "0.28", features = ["fs", "ioctl", "poll", "signal", "term"] }
 num = { version = "0.4" }
 rustix = { version = "1", features = ["event", "fs", "mm", "net", "param", "pipe", "process", "system", "time"] }
 slab = { version = "0.4" }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }

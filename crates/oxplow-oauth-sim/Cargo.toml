@@ -18,7 +18,7 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.8" }
 base64 = "0.23"
-parking_lot = "0.12"
+parking_lot = "0.13"
 sha2 = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

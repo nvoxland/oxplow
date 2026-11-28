@@ -223,11 +223,13 @@ fn register(
     if paths.is_empty() {
         return Ok(());
     }
-    let mut batch = watcher.paths_mut();
-    for (path, mode) in paths {
-        batch.add(path, *mode)?;
-    }
-    batch.commit()?;
+    let ops = paths
+        .iter()
+        .map(|(path, mode)| {
+            notify::PathOp::Watch(path.clone(), notify::WatchPathConfig::new(*mode))
+        })
+        .collect();
+    watcher.update_paths(ops).map_err(notify::Error::from)?;
     Ok(())
 }
 

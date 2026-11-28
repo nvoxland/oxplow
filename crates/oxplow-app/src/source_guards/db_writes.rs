@@ -202,7 +202,7 @@ fn collect(items: &[syn::Item], module: &str, out: &mut Vec<Function>) {
                 let syn::Type::Path(ty) = &*i.self_ty else {
                     continue;
                 };
-                let tr = i.trait_.as_ref().map(|(_, p, _)| last_ident(p));
+                let tr = i.trait_.as_ref().map(|(p, _)| last_ident(p));
                 for item in &i.items {
                     if let syn::ImplItem::Fn(f) = item {
                         out.push(Function {

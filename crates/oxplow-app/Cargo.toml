@@ -48,7 +48,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 # Extension configuration validates offline at runtime; also checks file schemas.
-jsonschema = { version = "0.58", default-features = false }
+jsonschema = { version = "0.63", default-features = false }
 serde_yaml = { workspace = true }
 csv = { workspace = true }
 sha2 = { workspace = true }
@@ -58,7 +58,7 @@ specta = { workspace = true }
 specta-typescript = { workspace = true }
 async-trait = { workspace = true }
 indexmap = "2.14"
-parking_lot = "0.12"
+parking_lot = "0.13"
 fs2 = "0.4"
 libc = { workspace = true }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
@@ -93,7 +93,7 @@ oxplow-oauth-sim = { workspace = true }
 proptest = "1"
 # the store-write guard reads oxplow-db's functions to tell which
 # write.
-syn = { version = "2", features = ["full", "visit"] }
+syn = { version = "3", features = ["full", "visit"] }
 
 # The profile_watch example logs the watch's own warnings.
 tracing-subscriber = { workspace = true }

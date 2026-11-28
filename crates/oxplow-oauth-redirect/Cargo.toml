@@ -13,7 +13,7 @@ publish = false
 # its own crate, so the core's crates hold no listener at all, and a
 # provider's test can sign in as the shell does without the shell.
 [dependencies]
-parking_lot = "0.12"
+parking_lot = "0.13"
 tokio = { workspace = true }
 oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
