@@ -65,9 +65,17 @@ test("a drag held near the rail's bottom scrolls it, to reach a drop target out 
   const first = (await sections(page))[0]!;
   const box = (await rail.boundingBox())!;
   await dragBy(page, first, async () => ({ x: box.x + box.width / 2, y: box.y + box.height - 6 }));
-  // Held there, the rail scrolls until the Remove zone is in view.
+  // Held there, the rail scrolls until the Remove zone is in view. It may
+  // scroll on a little: the zone is measured once two reads agree.
   const zone = page.getByTestId("rail-remove-zone");
   await expect(zone).toBeInViewport();
+  const scrolled: number[] = [];
+  await expect
+    .poll(async () => {
+      scrolled.push(await rail.evaluate((el) => el.scrollTop));
+      return scrolled.length > 1 && scrolled.at(-1) === scrolled.at(-2);
+    })
+    .toBe(true);
   // The pointer is still near the edge: a move over the zone drops there.
   const z = (await zone.boundingBox())!;
   await page.mouse.move(z.x + z.width / 2, z.y + z.height / 2, { steps: 3 });
