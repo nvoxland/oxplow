@@ -7,7 +7,6 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-oxplow-domain = { workspace = true }
 portable-pty = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }

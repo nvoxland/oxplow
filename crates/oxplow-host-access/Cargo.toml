@@ -13,7 +13,6 @@ description = "What the host and its daemons share: the host's settings, this ma
 # running host as its owner over `host.sock`. See .context/host.md.
 
 [dependencies]
-oxplow-config = { workspace = true }
 if-addrs = "0.15"
 serde = { workspace = true }
 serde_json = { workspace = true }

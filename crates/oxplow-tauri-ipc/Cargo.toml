@@ -15,7 +15,6 @@ oxplow-app = { workspace = true }
 oxplow-host = { workspace = true }
 oxplow-ai = { workspace = true }
 oxplow-rpc = { workspace = true }
-oxplow-sdk = { workspace = true }
 oxplow-config = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }

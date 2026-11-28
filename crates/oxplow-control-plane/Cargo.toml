@@ -22,7 +22,7 @@ http-body = "1"
 http-body-util = "0.1"
 bytes = { workspace = true }
 
-rmcp = { version = "3.4", features = [
+rmcp = { version = "3.12", features = [
     "server",
     "macros",
     "transport-streamable-http-server",
@@ -43,7 +43,7 @@ oxplow-config = { workspace = true }
 oxplow-harness-fake = { workspace = true }
 oxplow-provider-fake = { workspace = true }
 tempfile = { workspace = true }
-opentelemetry-proto = { version = "0.33.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "metrics"] }
 prost = "0.14"
 
 [lints]

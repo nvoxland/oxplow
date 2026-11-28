@@ -7,8 +7,6 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-oxplow-domain = { workspace = true }
-oxplow-db = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

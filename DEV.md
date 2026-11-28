@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Bun 1.4.2** and **Node 22.13.1** (frontend toolchain).
-- **Rust 1.98.1** — `mise.toml` pins the version (the workspace
+- **Rust 1.100.1** — `mise.toml` pins the version (the workspace
   `rust-version` floor matches); `rust-toolchain.toml` pins the channel
   and components. rustup installs the right version automatically.
 - **Platform Tauri deps**:

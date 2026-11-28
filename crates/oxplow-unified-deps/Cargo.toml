@@ -19,7 +19,6 @@ aho-corasick = { version = "1" }
 anyhow = { version = "1" }
 axum = { version = "0.8", features = ["ws"] }
 bit-set = { version = "0.8" }
-bit-vec = { version = "0.8" }
 bstr = { version = "1", default-features = false, features = ["std", "unicode"] }
 bumpalo = { version = "3", features = ["allocator-api2"] }
 byteorder = { version = "1" }
@@ -30,7 +29,8 @@ crossbeam-utils = { version = "0.8" }
 crypto-common = { version = "0.1", default-features = false, features = ["std"] }
 ctor = { version = "1" }
 deranged = { version = "0.5", features = ["serde"] }
-digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["mac", "std"] }
+digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["std"] }
+digest-a6292c17cd707f01 = { package = "digest", version = "0.11", features = ["alloc", "mac", "oid"] }
 either = { version = "1", features = ["use_std"] }
 erased-serde = { version = "0.4" }
 fastrand = { version = "2" }
@@ -45,8 +45,7 @@ futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3", default-features = false, features = ["std"] }
-getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
+getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17", features = ["serde"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16" }
 icu_properties = { version = "2" }
@@ -64,13 +63,10 @@ opentelemetry_sdk = { version = "0.33", default-features = false, features = ["l
 parking_lot = { version = "0.12", features = ["send_guard"] }
 percent-encoding = { version = "2" }
 postcard = { version = "1", features = ["use-crc", "use-std"] }
-ppv-lite86 = { version = "0.2", default-features = false, features = ["simd", "std"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 pulley-interpreter = { version = "48", default-features = false, features = ["disas", "interp", "std"] }
 quote = { version = "1" }
-rand-274715c4dabd11b0 = { package = "rand", version = "0.9" }
-rand-93f6ce9d446188ac = { package = "rand", version = "0.10" }
-rand_chacha = { version = "0.9", default-features = false, features = ["std"] }
+rand = { version = "0.10" }
 refinery-core = { version = "0.9", features = ["rusqlite", "toml"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
@@ -85,7 +81,7 @@ schemars-c38e5c1d305a1b54 = { package = "schemars", version = "0.8", features = 
 schemars-dff4ba8e3ae991db = { package = "schemars", version = "1", features = ["chrono04"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", features = ["alloc", "rc"] }
-serde_json = { version = "1", features = ["alloc", "arbitrary_precision", "float_roundtrip", "preserve_order", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "float_roundtrip", "preserve_order", "raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10" }
 simd-adler32 = { version = "0.3" }
 slab = { version = "0.4", default-features = false, features = ["std"] }
@@ -110,7 +106,6 @@ aho-corasick = { version = "1" }
 anyhow = { version = "1" }
 axum = { version = "0.8", features = ["ws"] }
 bit-set = { version = "0.8" }
-bit-vec = { version = "0.8" }
 bstr = { version = "1", default-features = false, features = ["std", "unicode"] }
 bumpalo = { version = "3", features = ["allocator-api2"] }
 byteorder = { version = "1" }
@@ -122,7 +117,8 @@ crossbeam-utils = { version = "0.8" }
 crypto-common = { version = "0.1", default-features = false, features = ["std"] }
 ctor = { version = "1" }
 deranged = { version = "0.5", features = ["serde"] }
-digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["mac", "std"] }
+digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["std"] }
+digest-a6292c17cd707f01 = { package = "digest", version = "0.11", features = ["alloc", "mac", "oid"] }
 either = { version = "1", features = ["use_std"] }
 erased-serde = { version = "0.4" }
 fastrand = { version = "2" }
@@ -137,8 +133,7 @@ futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3", default-features = false, features = ["std"] }
-getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
+getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17", features = ["serde"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16" }
 icu_properties = { version = "2" }
@@ -156,13 +151,10 @@ opentelemetry_sdk = { version = "0.33", default-features = false, features = ["l
 parking_lot = { version = "0.12", features = ["send_guard"] }
 percent-encoding = { version = "2" }
 postcard = { version = "1", features = ["use-crc", "use-std"] }
-ppv-lite86 = { version = "0.2", default-features = false, features = ["simd", "std"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 pulley-interpreter = { version = "48", default-features = false, features = ["disas", "interp", "std"] }
 quote = { version = "1" }
-rand-274715c4dabd11b0 = { package = "rand", version = "0.9" }
-rand-93f6ce9d446188ac = { package = "rand", version = "0.10" }
-rand_chacha = { version = "0.9", default-features = false, features = ["std"] }
+rand = { version = "0.10" }
 refinery-core = { version = "0.9", features = ["rusqlite", "toml"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
@@ -177,7 +169,7 @@ schemars-c38e5c1d305a1b54 = { package = "schemars", version = "0.8", features = 
 schemars-dff4ba8e3ae991db = { package = "schemars", version = "1", features = ["chrono04"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", features = ["alloc", "rc"] }
-serde_json = { version = "1", features = ["alloc", "arbitrary_precision", "float_roundtrip", "preserve_order", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "float_roundtrip", "preserve_order", "raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10" }
 simd-adler32 = { version = "0.3" }
 slab = { version = "0.4", default-features = false, features = ["std"] }
@@ -232,7 +224,6 @@ zerocopy = { version = "0.8", default-features = false, features = ["derive", "s
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytemuck = { version = "1", default-features = false, features = ["const_zeroed", "derive", "extern_crate_alloc", "min_const_generics", "must_cast", "nightly_stdsimd"] }
-digest-a6292c17cd707f01 = { package = "digest", version = "0.11", features = ["alloc", "mac", "oid"] }
 hyper = { version = "1", features = ["client", "http1", "http2", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
@@ -253,7 +244,6 @@ winnow = { version = "1" }
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytemuck = { version = "1", default-features = false, features = ["const_zeroed", "derive", "extern_crate_alloc", "min_const_generics", "must_cast", "nightly_stdsimd"] }
-digest-a6292c17cd707f01 = { package = "digest", version = "0.11", features = ["alloc", "mac", "oid"] }
 hyper = { version = "1", features = ["client", "http1", "http2", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }

@@ -18,7 +18,7 @@ tokio = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 oxplow-domain = { workspace = true }
 keyring = "4.2"
-keyring-core = "1.0"
+keyring-core = "1.1"
 oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 
 [dev-dependencies]

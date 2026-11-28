@@ -67,7 +67,7 @@ rayon = "1"
 uuid = { workspace = true }
 tempfile = { workspace = true }
 walkdir = "2.5"
-opentelemetry-proto = { version = "0.33.0", default-features = false, features = ["gen-tonic-messages", "metrics", "logs"] }
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "metrics", "logs"] }
 prost = "0.14"
 # The metric-ancestry oracle (metric_visibility.rs) asks git two questions —
 # ancestor-of and commit-time — directly via git2; oxplow-git wraps neither.

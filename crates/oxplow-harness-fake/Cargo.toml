@@ -13,7 +13,7 @@ oxplow-domain = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
-opentelemetry-proto = { version = "0.33.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "metrics"] }
 prost = "0.14"
 oxplow-unified-deps = { version = "0.1", path = "../oxplow-unified-deps" }
 

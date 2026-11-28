@@ -7,7 +7,6 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-oxplow-domain = { workspace = true }
 notify = { workspace = true }
 ignore = { workspace = true }
 tokio = { workspace = true }
