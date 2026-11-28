@@ -59,7 +59,7 @@ test("the context line opens the switcher; a thread's tap selects it and closes 
   fireEvent.click(view.getByTestId("tablet-context"));
   fireEvent.click(await view.findByTestId("switcher-thread-thr1"));
   expect(log).toEqual(["select str1 thr1"]);
-  await waitFor(() => expect(view.queryByTestId("switcher-thread-thr1")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("switcher-thread-thr1") === null).toBe(true));
 });
 
 test("a stream's tap switches to it", async () => {
@@ -78,7 +78,7 @@ test("New Thread from anywhere opens the switcher with the inline title field", 
   fireEvent.change(field, { target: { value: "Plan" } });
   fireEvent.submit(field.closest("form")!);
   await waitFor(() => expect(log).toEqual(["create str2 Plan"]));
-  await waitFor(() => expect(view.queryByTestId("switcher-new-thread-input-str2")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("switcher-new-thread-input-str2") === null).toBe(true));
 });
 
 // A blur with text keeps the field (a tap on the panel's × makes no thread);

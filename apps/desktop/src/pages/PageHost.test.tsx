@@ -107,7 +107,7 @@ test("a whole-page action presses on the run, asking first when its command does
   await waitFor(() => expect(calls).toEqual([["run-1", null, "archive", null, null, null, null, false]]));
   fireEvent.click(await findByTestId("page-action-confirm-run"));
   await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, null, true]));
-  await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
+  await waitFor(() => expect(queryByTestId("page-action-confirm") === null).toBe(true));
 });
 
 test("the description isn't in the body: About this page in the ☰ shows it with the facts Definition opens with", async () => {

@@ -59,7 +59,7 @@ test("Rollback… checks what was asked, and throws away what is checked, confir
   fireEvent.click(view.getByTestId("git-rollback-check-src/b.ts"));
   expect(view.getByTestId("git-rollback-run").textContent).toBe("Rollback 1 File");
   fireEvent.click(view.getByTestId("git-rollback-run"));
-  await waitFor(() => expect(view.queryByTestId("git-rollback-dialog")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("git-rollback-dialog") === null).toBe(true));
   expect(ran.find((r) => r.name === "oxplow.vcs.discard")).toEqual({
     name: "oxplow.vcs.discard",
     input: { stream: "str1", paths: ["src/a.ts"] },

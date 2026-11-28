@@ -133,6 +133,6 @@ test("the disk changing under a draft asks; Reload takes the disk's text", async
     await store.diskChanged("str1", "src/a.rs");
   });
   fireEvent.click(v.getByTestId("viz-editor-reload"));
-  await waitFor(() => expect(v.queryByTestId("viz-editor-conflict")).toBeNull());
+  await waitFor(() => expect(v.queryByTestId("viz-editor-conflict") === null).toBe(true));
   expect(models.get("src/a.rs")!.getValue()).toBe("theirs");
 });

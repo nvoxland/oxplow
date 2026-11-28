@@ -50,7 +50,7 @@ test("connecting shows the code to type on that computer and waits for it", asyn
   fireEvent.submit(screen.getByTestId("remote-host-address").closest("form")!);
   expect((await screen.findByTestId("remote-host-ask-code")).textContent).toBe("ABCD-EFGH");
   expect(screen.getByTestId("remote-host-ask").textContent).toContain("oxplow host pair ABCD-EFGH");
-  await waitFor(() => expect(screen.queryByTestId("remote-host-ask")).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId("remote-host-ask") === null).toBe(true));
   expect(calls.filter((c) => c !== "list")).toEqual([
     "ask server.ts.net:7400",
     "collect https://server.ts.net:7400 secret-1",

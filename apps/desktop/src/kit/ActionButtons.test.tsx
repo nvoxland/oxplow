@@ -82,6 +82,6 @@ test("a failed action shows its failure beside its button, recorded once", async
   expect(reports).toEqual(["Deploy"]);
   fail = false;
   fireEvent.click(view.getByTestId("action-deploy"));
-  await waitFor(() => expect(view.queryByTestId("action-error-deploy")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("action-error-deploy") === null).toBe(true));
   expect(reports).toEqual(["Deploy"]);
 });

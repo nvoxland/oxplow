@@ -178,7 +178,7 @@ test("a form action opens its form in a slideover and runs what the person fille
   expect(runs[0].input).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "New" });
   expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Old" });
   // Success closes it.
-  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("viz-action-form") === null).toBe(true));
 });
 
 test("an invalid field's message shows under it, and the form stays open", async () => {
@@ -226,7 +226,7 @@ test("a form action whose form is one text field opens a prompt strip, not a sli
   await waitFor(() => expect(runs).toHaveLength(1));
   expect(runs[0].input).toEqual({ title: "New" });
   expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Old" });
-  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("viz-action-form") === null).toBe(true));
 });
 
 // A form over something that exists submits with the page's own word for
@@ -244,7 +244,7 @@ test("Escape closes the strip and runs nothing", async () => {
   const view = render(<VizView run={run} onOpenPage={() => {}} />);
   await pressRetitle(view);
   fireEvent.keyDown(view.getByTestId("viz-action-form-fields-title"), { key: "Escape" });
-  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("viz-action-form") === null).toBe(true));
   expect(runs).toEqual([]);
 });
 
@@ -535,10 +535,10 @@ test("Cancel and Escape close the form and run nothing", async () => {
   const view = render(<VizView run={run} onOpenPage={() => {}} />);
   await pressRetitle(view);
   fireEvent.click(view.getByTestId("viz-action-form-fields-cancel"));
-  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("viz-action-form") === null).toBe(true));
   await pressRetitle(view);
   fireEvent.keyDown(view.getByTestId("viz-action-form-fields-title"), { key: "Escape" });
-  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("viz-action-form") === null).toBe(true));
   expect(runs).toEqual([]);
 });
 
@@ -622,7 +622,7 @@ test("an action `also` names is a button in the form, run on its row, and not in
   fireEvent.click(view.getByTestId("viz-action-form-also-remove"));
   await waitFor(() => expect(runs).toHaveLength(1));
   expect(runs[0]).toMatchObject({ action: "remove", row: { uri: "u1", title: "Old", removable: 1 }, confirmed: false });
-  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("viz-action-form") === null).toBe(true));
 });
 
 test("a form's `also` button shows only where its `when` offers it", async () => {

@@ -90,7 +90,7 @@ test("Escape adds nothing", async () => {
   act(() => void addToContext({ uri: "oxplow:oxplow/page?page=tasks" }));
   const field = await waitFor(() => view.getByTestId("context-note-field"));
   fireEvent.keyDown(field, { key: "Escape" });
-  await waitFor(() => expect(view.queryByTestId("context-add-card")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("context-add-card") === null).toBe(true));
   expect(ran).toEqual([]);
 });
 

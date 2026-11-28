@@ -550,7 +550,9 @@ in isolation. Rules, applied in `TerminalTabStrip.test.tsx`,
   act(settle)`) so anything pending has flushed before you look.
 - Absence is a boolean: `expect(queryByTestId("x") === null).toBe(true)`,
   inside `waitFor` too — there a failing `toBeNull()` serializes the tree
-  on every poll, which under load ran a menu test past bun's 5 s timeout.
+  on every poll, which under load ran a menu test past bun's 5 s timeout
+  (`apps/desktop/src/waitFor.guard.test.ts` refuses that form in a
+  `waitFor`).
   `expect(el).toBeNull()` on a present element serializes the whole
   happy-dom tree into the JUnit message — that is how
   `apps/desktop/test-report.xml` once reached 1.8 GB.

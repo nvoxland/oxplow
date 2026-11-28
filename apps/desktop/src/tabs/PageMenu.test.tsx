@@ -58,7 +58,7 @@ test("a page's ref gets its kind's commands at the menu's top level, run with th
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.estimate"));
   await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { uri: "oxplow:oxplow/task?id=W-1&provider=fake", points: 3 }]]));
   // Running one closes the menu.
-  await waitFor(() => expect(view.queryByTestId("menu-item-ref-command-tracker.item.estimate")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("menu-item-ref-command-tracker.item.estimate") === null).toBe(true));
 });
 
 test("a command the daemon says doesn't apply to the ref's row is not offered", async () => {
